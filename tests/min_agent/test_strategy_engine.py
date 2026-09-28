@@ -628,3 +628,107 @@ def test_the_sell_strategy_is_served_when_it_is_the_only_working_exit():
     # one working route - so it is the strategy that must be exercised.
     assert StrategySelector._supplies_capability(exit_spec, {"SELL"}, 767.25) is True
     assert StrategySelector._supplies_capability(stale, {"SELL"}, 767.25) is False
+
+
+def test_verified_positive_pnl_drives_the_promotion_and_is_recorded_as_the_reason():
+    """PnL has to be able to promote as well as retire, or it is only a veto and the
+    lifecycle is not evidence-driven in the direction that matters. Once probation
+    is complete, broker-verified realized PnL is what decides the outcome, and the
+    reason recorded in the journal says so with the figure."""
+    from min_agent.evaluator import PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+    from min_agent.models import StrategyResult
+    from min_agent.strategy_engine import StrategyLifecycleManager
+
+    strategy = StrategySpec(
+        strategy_id="winner", name="winner", kind="FIXED_SIZE", symbols=("SPY",),
+        parameters={"action": "BUY", "quantity": 1, "confidence": 0.8},
+        max_position_value=1000, rationale="t", lifecycle="PROBATION",
+        created_at=datetime.now(tz=timezone.utc),
+    )
+    result = StrategyResult(
+        strategy_id="winner",
+        evaluated_at=datetime.now(tz=timezone.utc),
+        cycles=5,                       # probation bar met
+        submitted_orders=5,
+        rejected_orders=0,
+        skipped_orders=0,
+        errors=0,
+        score=0.9,
+        trade_attempts=5,
+        strategy_fault_rejections=0,
+        realized_pnl=362.66,
+        pnl_evidence=PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
+    )
+
+    decisions = StrategyLifecycleManager().review([strategy], [result])
+
+    assert len(decisions) == 1
+    assert decisions[0].new_lifecycle == "ACTIVE"
+    assert "362.66" in decisions[0].reason
+    assert "broker-verified" in decisions[0].reason
+
+
+def test_pnl_does_not_shorten_probation():
+    """A single lucky trade must not promote anything. The cycle bar is still the
+    gate; PnL only decides the outcome once probation is complete."""
+    from min_agent.evaluator import PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+    from min_agent.models import StrategyResult
+    from min_agent.strategy_engine import StrategyLifecycleManager
+
+    strategy = StrategySpec(
+        strategy_id="lucky", name="lucky", kind="FIXED_SIZE", symbols=("SPY",),
+        parameters={"action": "BUY", "quantity": 1, "confidence": 0.8},
+        max_position_value=1000, rationale="t", lifecycle="PROBATION",
+        created_at=datetime.now(tz=timezone.utc),
+    )
+    result = StrategyResult(
+        strategy_id="lucky",
+        evaluated_at=datetime.now(tz=timezone.utc),
+        cycles=1,                       # one cycle short of the bar
+        submitted_orders=1,
+        rejected_orders=0,
+        skipped_orders=0,
+        errors=0,
+        score=0.9,
+        trade_attempts=1,
+        strategy_fault_rejections=0,
+        realized_pnl=5000.0,
+        pnl_evidence=PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
+    )
+
+    assert StrategyLifecycleManager().review([strategy], [result]) == []
+
+
+def test_no_closed_lot_does_not_block_promotion_forever():
+    """A strategy with nothing to close has no PnL to be judged on, so promotion
+    falls back to the operational metrics rather than leaving it in probation
+    indefinitely."""
+    from min_agent.evaluator import PNL_EVIDENCE_MISSING
+    from min_agent.models import StrategyResult
+    from min_agent.strategy_engine import StrategyLifecycleManager
+
+    strategy = StrategySpec(
+        strategy_id="no-lots", name="no-lots", kind="FIXED_SIZE", symbols=("SPY",),
+        parameters={"action": "BUY", "quantity": 1, "confidence": 0.8},
+        max_position_value=1000, rationale="t", lifecycle="PROBATION",
+        created_at=datetime.now(tz=timezone.utc),
+    )
+    result = StrategyResult(
+        strategy_id="no-lots",
+        evaluated_at=datetime.now(tz=timezone.utc),
+        cycles=5,
+        submitted_orders=5,
+        rejected_orders=0,
+        skipped_orders=0,
+        errors=0,
+        score=0.9,
+        trade_attempts=5,
+        strategy_fault_rejections=0,
+        pnl_evidence=PNL_EVIDENCE_MISSING,
+    )
+
+    decisions = StrategyLifecycleManager().review([strategy], [result])
+
+    assert len(decisions) == 1
+    assert decisions[0].new_lifecycle == "ACTIVE"
+    assert "362" not in decisions[0].reason

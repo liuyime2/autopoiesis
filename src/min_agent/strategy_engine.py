@@ -132,6 +132,26 @@ class StrategyLifecycleManager:
         if strategy.lifecycle == "PROBATION" and result.cycles >= self.min_active_cycles:
             if self._is_degenerate_no_exploration(strategy, result):
                 return StrategyLifecycleDecision(strategy, "PAUSED", "probation produced no exploration evidence")
+            # PnL has to be able to *promote* as well as retire, or it is only a
+            # veto and the lifecycle is not evidence-driven in the direction that
+            # matters. Probation is still earned by cycles - a single lucky trade
+            # does not shorten it - but once the cycle bar is met, broker-verified
+            # realized PnL is what decides the outcome, and the journal records
+            # which. Without a closed lot there is no PnL to judge on, so
+            # promotion falls back to the operational metrics rather than blocking
+            # a strategy that may simply have nothing to close.
+            if (
+                result.pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+                and result.realized_pnl is not None
+            ):
+                return StrategyLifecycleDecision(
+                    strategy,
+                    "ACTIVE",
+                    (
+                        f"probation completed on {result.cycles} cycles with "
+                        f"broker-verified realized PnL {result.realized_pnl:+.2f}"
+                    ),
+                )
             return StrategyLifecycleDecision(strategy, "ACTIVE", "probation completed with acceptable operational metrics")
         # A promoted strategy that has stopped acting is just as stuck as one
         # that never started. This used to be checked only during PROBATION.
