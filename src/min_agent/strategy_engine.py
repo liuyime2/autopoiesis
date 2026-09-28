@@ -179,6 +179,19 @@ class StrategySelector:
         tradable = [strategy for strategy in eligible if strategy.kind != "HOLD_BASELINE" and strategy.lifecycle != "BASELINE"]
         probation = [strategy for strategy in tradable if self._needs_probation(strategy, result_by_id.get(strategy.strategy_id))]
         if probation:
+            # Fair rotation, but a strategy that supplies a capability the library
+            # otherwise lacks is not an interchangeable peer. Curriculum builds a
+            # SELL strategy precisely because the library could not sell, and then
+            # a strict oldest-first queue defers exercising it behind five
+            # near-duplicate BUY strategies - three probation cycles each, about
+            # 105 minutes at the shipped 5-minute interval. A capability the
+            # library is otherwise missing has no other route to being tried, so it
+            # is served first, and only then does the queue return to oldest-first.
+            unexercised = self._uncovered_capabilities(tradable)
+            if unexercised:
+                for strategy in sorted(probation, key=lambda s: (s.created_at, s.strategy_id)):
+                    if self._supplies_capability(strategy, unexercised):
+                        return strategy
             return sorted(probation, key=lambda strategy: (strategy.created_at, strategy.strategy_id))[0]
 
         candidates = tradable or eligible
@@ -223,6 +236,38 @@ class StrategySelector:
         if not buys:
             return None
         return min(buys, key=lambda s: (0 if s.kind == "FIXED_SIZE" else 1, _probe_quantity(s), s.created_at, s.strategy_id))
+
+    @staticmethod
+    def _declared_actions(strategy: StrategySpec) -> set[str]:
+        """The actions a strategy can express, from its own declaration.
+
+        A TREND_FOLLOW takes its side from price, so it can cover either.
+        HOLD_BASELINE covers nothing: holding is not a capability.
+        """
+        if strategy.kind == "HOLD_BASELINE":
+            return set()
+        if strategy.kind == "TREND_FOLLOW":
+            return {"BUY", "SELL"}
+        action = str(strategy.parameters.get("action", "")).upper()
+        return {action} if action in {"BUY", "SELL"} else set()
+
+    @classmethod
+    def _uncovered_capabilities(cls, strategies: list[StrategySpec]) -> set[str]:
+        """Actions the whole library expresses exactly once, or not at all.
+
+        A capability covered by several strategies has routes to being tried. One
+        covered by a single strategy - or by none - does not, and that is the
+        strategy the queue was about to keep deferring.
+        """
+        counts: dict[str, int] = {"BUY": 0, "SELL": 0}
+        for strategy in strategies:
+            for action in cls._declared_actions(strategy):
+                counts[action] = counts.get(action, 0) + 1
+        return {action for action, count in counts.items() if count <= 1}
+
+    @classmethod
+    def _supplies_capability(cls, strategy: StrategySpec, uncovered: set[str]) -> bool:
+        return bool(cls._declared_actions(strategy) & uncovered)
 
     def _needs_probation(self, strategy: StrategySpec, result: StrategyResult | None) -> bool:
         if strategy.lifecycle != "PROBATION":

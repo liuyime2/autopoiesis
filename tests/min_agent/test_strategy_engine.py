@@ -501,3 +501,73 @@ def test_verified_positive_pnl_alone_does_not_promote():
     )
 
     assert StrategyLifecycleManager().review([strategy], [result]) == []
+
+
+def test_a_strategy_supplying_a_missing_capability_is_served_before_near_duplicates():
+    """Curriculum built a SELL strategy precisely because the library could not
+    sell, and then a strict oldest-first probation queue deferred exercising it
+    behind five near-duplicate BUY strategies - three probation cycles each, about
+    105 minutes at the shipped 5-minute interval. A capability the library is
+    otherwise missing has no other route to being tried.
+    """
+    from min_agent.strategy_engine import StrategySelector
+
+    def spec(sid, action, kind="FIXED_SIZE", created="2026-06-15T00:00:00+00:00"):
+        return StrategySpec(
+            strategy_id=sid, name=sid, kind=kind, symbols=("SPY",),
+            parameters={"action": action, "quantity": 1, "confidence": 0.7} if action else {},
+            max_position_value=1000, enabled=True, lifecycle="PROBATION",
+            created_at=datetime.fromisoformat(created), rationale="t",
+        )
+
+    # Five BUY strategies admitted long before the SELL one.
+    strategies = [spec(f"buy-{i}", "BUY") for i in range(5)]
+    strategies.append(spec("sell-1", "SELL", created="2026-09-28T18:15:18+00:00"))
+
+    selected = StrategySelector().select(strategies, [])
+
+    assert selected is not None
+    assert selected.strategy_id == "sell-1", "the only route to a SELL was deferred"
+
+
+def test_with_every_capability_covered_the_queue_stays_oldest_first():
+    from min_agent.strategy_engine import StrategySelector
+
+    def spec(sid, action, created):
+        return StrategySpec(
+            strategy_id=sid, name=sid, kind="FIXED_SIZE", symbols=("SPY",),
+            parameters={"action": action, "quantity": 1, "confidence": 0.7},
+            max_position_value=1000, enabled=True, lifecycle="PROBATION",
+            created_at=datetime.fromisoformat(created), rationale="t",
+        )
+
+    # Both BUY and SELL have two routes each, so no strategy is the sole holder of
+    # a capability and the queue is untouched.
+    strategies = [
+        spec("old-buy", "BUY", "2026-06-15T00:00:00+00:00"),
+        spec("old-sell", "SELL", "2026-06-16T00:00:00+00:00"),
+        spec("new-buy", "BUY", "2026-09-28T18:00:00+00:00"),
+        spec("new-sell", "SELL", "2026-09-28T18:05:00+00:00"),
+    ]
+
+    assert StrategySelector().select(strategies, []).strategy_id == "old-buy"
+
+
+def test_a_hold_baseline_supplies_no_capability():
+    from min_agent.strategy_engine import StrategySelector
+
+    baseline = StrategySpec(
+        strategy_id="baseline", name="b", kind="HOLD_BASELINE", symbols=("SPY",),
+        parameters={}, max_position_value=1000, enabled=True, lifecycle="PROBATION",
+        created_at=datetime.fromisoformat("2026-06-10T00:00:00+00:00"), rationale="t",
+    )
+    buy = StrategySpec(
+        strategy_id="only-buy", name="b", kind="FIXED_SIZE", symbols=("SPY",),
+        parameters={"action": "BUY", "quantity": 1, "confidence": 0.7},
+        max_position_value=1000, enabled=True, lifecycle="PROBATION",
+        created_at=datetime.fromisoformat("2026-09-28T18:00:00+00:00"), rationale="t",
+    )
+
+    assert StrategySelector._declared_actions(baseline) == set()
+    # SELL is uncovered and the baseline cannot supply it, so the BUY is served.
+    assert StrategySelector._supplies_capability(buy, {"SELL"}) is False
