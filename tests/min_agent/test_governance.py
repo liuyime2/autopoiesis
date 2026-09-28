@@ -117,7 +117,50 @@ def test_auto_reviewer_uses_real_liveness_not_the_status_string():
 
 def test_ops_scripts_use_an_absolute_conda_path():
     """`conda` is not on PATH here; bare `conda` silently produced exit 0."""
-    for script in OPS_SCRIPTS + ("monitor.sh", "observe.sh", "check-market-open.sh", "run_forever.sh"):
+    for script in OPS_SCRIPTS + ("monitor.sh", "observe.sh", "check-market-open.sh", "run_forever.sh", "minictrl"):
         text = _source(script)
         bare = re.findall(r"(?<![/\w-])conda run", text)
         assert not bare, f"{script} invokes bare `conda run` {len(bare)} time(s); use CONDA_BIN"
+
+
+def test_minictrl_propagates_real_exit_codes():
+    """The bug this project spent a review cycle hiding: `set -e` without
+    `pipefail` means a `| tee` pipeline reports tee's status, so a missing
+    interpreter or an unreachable broker printed a green banner and exited 0."""
+    text = _source("minictrl")
+    assert "set -uo pipefail" in text
+    assert "esac" in text
+    # No `|| true` or `|| echo` swallowing a subcommand's status.
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("agent ") or stripped.startswith("exec "):
+            assert "|| true" not in stripped, f"exit code swallowed: {stripped}"
+            assert "|| echo" not in stripped, f"exit code swallowed: {stripped}"
+
+
+def test_every_ops_shell_script_uses_pipefail():
+    """`set -e` alone lets a `| tee` pipeline report success."""
+    import glob
+
+    for path in sorted(glob.glob("*.sh")) + ["minictrl"]:
+        text = _source(path)
+        assert "pipefail" in text, f"{path} does not enable pipefail"
+
+
+def test_the_service_unit_bounds_its_restarts():
+    text = _source("tools/min-agent.service.in")
+    assert "StartLimitBurst=" in text
+    assert "StartLimitIntervalSec=" in text
+    assert "Restart=always" in text
+    # Credentials must never be baked into a unit file.
+    for secret in ("ALPACA_API_KEY=", "ALPACA_SECRET_KEY="):
+        assert secret not in text, f"{secret} must come from an EnvironmentFile, not the unit"
+
+
+def test_minictrl_and_doctor_exist_for_fast_iteration():
+    import os
+
+    assert os.access("minictrl", os.X_OK), "minictrl must be executable"
+    text = _source("src/min_agent/cli.py")
+    assert '"--doctor"' in text
+    assert "run_doctor" in text

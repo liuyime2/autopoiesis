@@ -50,9 +50,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--evidence-report", action="store_true", help="Report broker-backed PnL evidence from journal and latest ingest.")
     parser.add_argument("--verify-profit-target", action="store_true", help="Verify the 10% daily paper-profit target using broker evidence only.")
     parser.add_argument("--max-cycles", type=int, default=None, help="Optional controlled daemon cycle limit for smoke tests.")
+    parser.add_argument("--doctor", action="store_true", help="Check the whole system and exit non-zero on any fault.")
+    parser.add_argument("--skip-broker", action="store_true", help="With --doctor, do not contact the broker.")
     args = parser.parse_args(argv)
 
     config = AgentConfig.from_env()
+    if args.doctor:
+        return _doctor(config, skip_broker=args.skip_broker)
     if args.check_env:
         return _check_env(config)
     if args.once:
@@ -76,6 +80,16 @@ def main(argv: list[str] | None = None) -> int:
 
     parser.print_help()
     return 2
+
+
+def _doctor(config: AgentConfig, *, skip_broker: bool = False) -> int:
+    from min_agent.doctor import build_client, run_doctor
+
+    report = run_doctor(config, client=build_client(config), skip_broker=skip_broker)
+    print(report.render())
+    print()
+    print(json.dumps(report.to_dict(), indent=2, sort_keys=True))
+    return report.exit_code
 
 
 def _check_env(config: AgentConfig) -> int:

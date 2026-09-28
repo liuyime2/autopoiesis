@@ -32,7 +32,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790606828082,
+      "observedAt": 1790607222258,
       "lastRequestTokens": 256072,
       "lastInputTokens": 255604
     }
@@ -64,7 +64,7 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 43,
+  "progressRevision": 47,
   "observedProgressRevision": 42,
   "progressFingerprints": [
     "shell:b9b4f44e7752e63facec64bdbc0ee8e6fcf0da7ffe5fcf0ae88310a924a1a1f4",
@@ -109,7 +109,11 @@
     "file:src/min_agent/curriculum.py:3dcdfa7f21a3c83c7680122a863d28d65172d5776f629e37bb6cad521683abb5",
     "file:src/min_agent/daemon.py:89335ceacd924e870b260a91f0f497f4c346add7177ab307e2612bbb056d2134",
     "file:src/min_agent/cli.py:39404bec0f329cc2368a14f2e1414915d1ac8b2a56b0f787aa7b52be262667dc",
-    "file:src/min_agent/strategy_admission.py:46c561cdba78a2b2bdc0bba42b1b866ac0d00005eeb21fd4c84bb38908022d0b"
+    "file:src/min_agent/strategy_admission.py:46c561cdba78a2b2bdc0bba42b1b866ac0d00005eeb21fd4c84bb38908022d0b",
+    "shell-worktree:95298ecfda3de57813ba72782f489d3ca7490d389b113bb2e0c5ab78586908c3",
+    "shell-worktree:994e687eb3dd097ca5fa354c47dad3b0b88ec6c7b7d86020636ac836c4454156",
+    "shell-worktree:e139907e8881deaa2c5cb235dfb900aaffc52b2834ffc5190894d2e64068032b",
+    "shell-worktree:e492c194ea4e4254d490d88c43e9ebacd0f8e8fa22abf8a020b346384f23c229"
   ],
   "stalledTurns": 0,
   "progressNotes": [
@@ -342,11 +346,31 @@
       "time": 1790606558808,
       "summary": "[host:tool:edit] Project file content changed: src/min_agent/strategy_admission.py",
       "next": ""
+    },
+    {
+      "time": 1790606841825,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790607012739,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790607170542,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790607174484,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 307,
+  "storageGeneration": 329,
   "createdAt": 1790603839704,
-  "updatedAt": 1790606828082,
+  "updatedAt": 1790607222258,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:54700db50c7d2c257fa92bb001f4672c86f1358cd2fb58323f81521d548793f2",

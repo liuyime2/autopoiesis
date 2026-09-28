@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# minictrl - the single command for operating the paper-trading agent.
+#
+#   minictrl doctor              check everything, non-zero on any fault
+#   minictrl once                run one cycle
+#   minictrl loop --cycles 5     run a bounded loop (fast iteration)
+#   minictrl daemon               run the daemon in the foreground
+#   minictrl install-service     install the systemd --user unit
+#   minictrl service status|start|stop|logs
+#   minictrl status|stop|reconcile|evidence|report|profit|test
+#
+# Every subcommand propagates its real exit code. The previous scripts did not:
+# `set -e` without `pipefail` meant a `| tee` pipeline reported tee's status, so
+# a missing interpreter or an unreachable broker printed a green banner and
+# exited 0. That is how auto-fix.log and market-check.log came to contain a
+# header and a footer with nothing in between, stamped "success".
+set -uo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+cd "$ROOT_DIR" || exit 2
+
+CONDA_BIN="${CONDA_BIN:-/home/liuyime2/miniconda3/bin/conda}"
+if [ ! -x "$CONDA_BIN" ]; then
+  echo "FATAL: conda not found at $CONDA_BIN. Set CONDA_BIN." >&2
+  exit 2
+fi
+
+export PYTHONPATH="$ROOT_DIR/src:${PYTHONPATH:-}"
+export MIN_AGENT_MODE="${MIN_AGENT_MODE:-paper}"
+export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
+export APCA_API_BASE_URL="https://paper-api.alpaca.markets"
+export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
+export MIN_AGENT_MODEL="${MIN_AGENT_MODEL:-deepseek-r1:8b}"
+export MIN_AGENT_CURRICULUM_ENABLED="${MIN_AGENT_CURRICULUM_ENABLED:-true}"
+
+SERVICE_NAME="min-agent.service"
+
+agent() {
+  timeout "${MIN_AGENT_TIMEOUT:-180}" "$CONDA_BIN" run --no-capture-output -n llm python -m min_agent.cli "$@"
+}
+
+usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
+
+cmd="${1:-}"
+[ $# -gt 0 ] && shift
+
+case "$cmd" in
+  doctor)          agent --doctor "$@" ;;
+  once)            agent --once "$@" ;;
+  loop)            agent --daemon --max-cycles "${MIN_AGENT_CYCLES:-5}" "$@" ;;
+  daemon)          exec "$CONDA_BIN" run --no-capture-output -n llm python -m min_agent.cli --daemon ;;
+  status)          agent --status ;;
+  stop)            agent --stop ;;
+  reconcile)       agent --reconcile ;;
+  evidence)        agent --ingest-evidence ;;
+  report)          agent --evidence-report ;;
+  profit)          agent --verify-profit-target ;;
+  check-env)       agent --check-env ;;
+  test)            "$CONDA_BIN" run --no-capture-output -n llm python -m pytest tests/min_agent -q "$@" ;;
+
+  install-service)
+    unit="$HOME/.config/systemd/user/$SERVICE_NAME"
+    mkdir -p "$HOME/.config/systemd/user"
+    sed -e "s|@ROOT@|$ROOT_DIR|g" -e "s|@CONDA@|$CONDA_BIN|g" \
+        "$ROOT_DIR/tools/min-agent.service.in" > "$unit"
+    systemctl --user daemon-reload
+    echo "wrote $unit"
+    echo "enable with: minictrl service enable"
+    ;;
+
+  service)
+    sub="${1:-status}"
+    systemctl --user "$sub" "$SERVICE_NAME"
+    ;;
+
+  logs)
+    journalctl --user -u "$SERVICE_NAME" -f "${@:2}"
+    ;;
+
+  ""|-h|--help|help) usage ;;
+
+  *)
+    echo "unknown command: $cmd" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
