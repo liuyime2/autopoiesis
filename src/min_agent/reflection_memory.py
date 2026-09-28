@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,8 +12,13 @@ class ReflectionMemory:
     def __init__(self, path: Path | str):
         self.path = Path(path)
 
-    def reflect(self, records: list[CycleRecord], evidence: BrokerEvidenceBatch | None = None) -> ReflectionRecord:
-        evaluation = DeterministicEvaluator().evaluate(records, evidence=evidence)
+    def reflect(
+        self,
+        records: list[CycleRecord],
+        evidence: BrokerEvidenceBatch | None = None,
+        fills: Mapping[str, float] | None = None,
+    ) -> ReflectionRecord:
+        evaluation = DeterministicEvaluator().evaluate(records, evidence=evidence, fills=fills)
         strategy_metrics = {
             sid: ev.model_dump(mode="json") for sid, ev in evaluation.strategy_metrics.items()
         }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -45,7 +46,12 @@ SYSTEM_REJECTION_REASONS = frozenset({
 
 
 class DeterministicEvaluator:
-    def evaluate(self, records: list[CycleRecord], evidence: BrokerEvidenceBatch | None = None) -> EvaluationReport:
+    def evaluate(
+        self,
+        records: list[CycleRecord],
+        evidence: BrokerEvidenceBatch | None = None,
+        fills: Mapping[str, float] | None = None,
+    ) -> EvaluationReport:
         buckets: dict[str, _StrategyBucket] = {}
         guardian_rejections: dict[str, int] = {}
         action_counts = {"BUY": 0, "SELL": 0, "HOLD": 0}
@@ -73,7 +79,11 @@ class DeterministicEvaluator:
             action_counts[action] = action_counts.get(action, 0) + 1
             data_sources[record.snapshot.source] = data_sources.get(record.snapshot.source, 0) + 1
             intended_notional += notional
-            filled_quantity += record.execution.filled_quantity
+            # A market order's submit response always reports filled_qty 0.
+            # Prefer the broker-confirmed fill when the FillReconciler has
+            # resolved it, so fill accounting is real rather than zero.
+            resolved_fill = _resolved_fill(record, fills)
+            filled_quantity += resolved_fill
             if record.decision.quantity > 0:
                 order_quantity += record.decision.quantity
 
@@ -102,7 +112,7 @@ class DeterministicEvaluator:
 
             if strategy_id:
                 bucket = buckets.setdefault(strategy_id, _StrategyBucket(strategy_id=strategy_id))
-                bucket.add(record, notional)
+                bucket.add(record, notional, resolved_fill=resolved_fill)
 
         market_closed_cycles = len(records) - market_open_cycles
         first_equity = records[0].snapshot.account.equity if records else None
@@ -167,11 +177,13 @@ class _StrategyBucket:
         self.realized_pnl: float | None = None
         self.fees: float | None = None
 
-    def add(self, record: CycleRecord, notional: float) -> None:
+    def add(self, record: CycleRecord, notional: float, *, resolved_fill: float | None = None) -> None:
         self.cycles += 1
         self.action_counts[record.decision.action] = self.action_counts.get(record.decision.action, 0) + 1
         self.intended_notional += notional
-        self.filled_quantity += record.execution.filled_quantity
+        self.filled_quantity += (
+            resolved_fill if resolved_fill is not None else record.execution.filled_quantity
+        )
         if record.decision.quantity > 0:
             self.order_quantity += record.decision.quantity
 
@@ -500,6 +512,15 @@ def _ratio(numerator: float, denominator: float) -> float | None:
     if denominator <= 0:
         return None
     return numerator / denominator
+
+
+def _resolved_fill(record: CycleRecord, fills: Mapping[str, float] | None) -> float:
+    if not fills:
+        return record.execution.filled_quantity
+    coid = record.execution.client_order_id
+    if not coid or coid not in fills:
+        return record.execution.filled_quantity
+    return max(record.execution.filled_quantity, float(fills[coid]))
 
 
 def _score(

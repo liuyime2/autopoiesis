@@ -83,7 +83,7 @@ class FailingLoop:
 
 
 class FailingReflectionMemory(ReflectionMemory):
-    def reflect(self, records, evidence=None):
+    def reflect(self, records, evidence=None, fills=None):
         raise RuntimeError("reflection boom")
 
 

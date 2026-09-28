@@ -12,6 +12,7 @@ from uuid import uuid4
 from min_agent.config import AgentConfig
 from min_agent.curriculum import StructuredCurriculumAgent
 from min_agent.evaluator import DeterministicEvaluator, PNL_EVIDENCE_ACCOUNT_VERIFIED, PNL_EVIDENCE_MISSING, PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+from min_agent.fill_reconciler import FILL_EVENT, FillReconciler
 from min_agent.health import HealthMonitor
 from min_agent.journal import JsonlJournal
 from min_agent.knowledge_admission import KnowledgeAdmission
@@ -36,6 +37,7 @@ class AgentDaemon:
         now: Callable[[], datetime] | None = None,
         scheduler=None,
         startup_reconciler=None,
+        fill_reconciler: FillReconciler | None = None,
         strategy_library: StrategyLibrary | None = None,
         reflection_memory: ReflectionMemory | None = None,
         curriculum_agent: StructuredCurriculumAgent | None = None,
@@ -54,6 +56,7 @@ class AgentDaemon:
         self.now = now or (lambda: datetime.now(tz=timezone.utc))
         self.scheduler = scheduler
         self.startup_reconciler = startup_reconciler
+        self.fill_reconciler = fill_reconciler
         self.strategy_library = strategy_library
         self.reflection_memory = reflection_memory
         self.curriculum_agent = curriculum_agent
@@ -195,7 +198,7 @@ class AgentDaemon:
     def _reflect(self, *, evidence: BrokerEvidenceBatch | None = None) -> None:
         try:
             recent = self.journal.last_n(self.config.reflection_window)
-            reflection = self.reflection_memory.reflect(recent, evidence=evidence)
+            reflection = self.reflection_memory.reflect(recent, evidence=evidence, fills=self._confirmed_fills())
             self.reflection_memory.save(reflection)
             self._append_event(
                 "REFLECTION_GENERATED",
@@ -288,6 +291,7 @@ class AgentDaemon:
     def _maintenance(self) -> None:
         if not self._due(self.last_maintenance_at, self.config.maintenance_interval_seconds):
             return
+        self._resolve_pending_fills()
         evidence = self._latest_evidence_batch()
         if self._due(self.last_evidence_at, self.config.evidence_interval_seconds):
             evidence = self._ingest_broker_evidence()
@@ -300,6 +304,52 @@ class AgentDaemon:
             self._curriculum_proposal()
         self._manage_strategy_lifecycle()
         self.last_maintenance_at = self.now()
+
+    def _resolve_pending_fills(self) -> int:
+        """Poll the broker for fills of orders this agent submitted.
+
+        A market order's submit response reports filled_qty 0, and nothing used
+        to re-poll, so filled orders were recorded as filled_quantity 0.0. Every
+        downstream number - fill_quantity_ratio, per-strategy realized PnL, and
+        therefore the score the selector optimises - was computed against fills
+        that were known to have happened but were invisible.
+        """
+        if self.fill_reconciler is None or self.journal is None:
+            return 0
+        try:
+            confirmations = self.fill_reconciler.resolve()
+        except Exception as exc:
+            self._append_event(
+                FILL_EVENT,
+                status="FAILED",
+                message=f"fill reconciliation failed: {exc}",
+                payload={"error_type": type(exc).__name__, "error": str(exc)},
+            )
+            return 0
+        for confirmation in confirmations:
+            self._append_event(
+                FILL_EVENT,
+                status="SUCCESS",
+                message=(
+                    f"{confirmation.pending.symbol} {confirmation.pending.side} "
+                    f"{confirmation.filled_quantity} @ {confirmation.filled_avg_price} "
+                    f"({confirmation.broker_status})"
+                ),
+                strategy_id=confirmation.pending.strategy_id,
+                payload=confirmation.payload(),
+            )
+        return len(confirmations)
+
+    def _confirmed_fills(self) -> dict[str, float]:
+        if self.journal is None:
+            return {}
+        fills: dict[str, float] = {}
+        for event in self.journal.read_events(FILL_EVENT):
+            coid = event.payload.get("client_order_id")
+            qty = event.payload.get("filled_quantity")
+            if isinstance(coid, str) and isinstance(qty, (int, float)) and qty > 0:
+                fills[coid] = max(fills.get(coid, 0.0), float(qty))
+        return fills
 
     def _ingest_broker_evidence(self) -> BrokerEvidenceBatch | None:
         if self.broker_evidence_provider is None:
@@ -326,7 +376,9 @@ class AgentDaemon:
             return None
 
     def _record_pnl_evidence(self, evidence: BrokerEvidenceBatch | None) -> None:
-        report = DeterministicEvaluator().evaluate(self.journal.read_all(), evidence=evidence)
+        report = DeterministicEvaluator().evaluate(
+            self.journal.read_all(), evidence=evidence, fills=self._confirmed_fills()
+        )
         success = report.pnl_evidence != PNL_EVIDENCE_MISSING
         self._append_event(
             "PNL_EVIDENCE_RECORDED" if success else "PNL_EVIDENCE_FAILED",
@@ -336,7 +388,9 @@ class AgentDaemon:
         )
 
     def _verify_profit_target(self, evidence: BrokerEvidenceBatch | None) -> None:
-        report = DeterministicEvaluator().evaluate(self.journal.read_all(), evidence=evidence)
+        report = DeterministicEvaluator().evaluate(
+            self.journal.read_all(), evidence=evidence, fills=self._confirmed_fills()
+        )
         pnl = report.pnl
         status = "unproven"
         satisfied = False

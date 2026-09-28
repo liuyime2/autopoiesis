@@ -27,6 +27,7 @@ from min_agent.knowledge_library import KnowledgeLibrary
 from min_agent.llm_decision import OllamaDecisionEngine
 from min_agent.loop import TradingLoop
 from min_agent.models import BrokerEvidenceBatch, JournalEvent
+from min_agent.fill_reconciler import FillReconciler
 from min_agent.order_reconciler import OrderReconciler
 from min_agent.curriculum import StructuredCurriculumAgent
 from min_agent.policy_engine import PolicyEngine
@@ -212,6 +213,7 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         lifecycle_manager=StrategyLifecycleManager(),
         knowledge_admission=KnowledgeAdmission(knowledge_library=knowledge_library),
         startup_reconciler=OrderReconciler(client=client, journal=journal),
+        fill_reconciler=FillReconciler(client=client, journal=journal),
         scheduler=MarketScheduler(clock_provider=client.get_clock),
         reflect_every=config.reflect_every,
         curriculum_every=config.curriculum_every,
