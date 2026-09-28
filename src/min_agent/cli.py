@@ -24,7 +24,7 @@ from min_agent.evaluator import DeterministicEvaluator, PNL_EVIDENCE_ACCOUNT_VER
 from min_agent.journal import JsonlJournal
 from min_agent.knowledge_admission import KnowledgeAdmission
 from min_agent.knowledge_library import KnowledgeLibrary
-from min_agent.llm_decision import OllamaDecisionEngine
+from min_agent.llm_decision import HybridDecisionEngine, OllamaDecisionEngine
 from min_agent.loop import TradingLoop
 from min_agent.models import BrokerEvidenceBatch, JournalEvent
 from min_agent.fill_reconciler import FillReconciler
@@ -191,9 +191,22 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         reflection_memory=reflection_memory,
         knowledge_library=knowledge_library,
     )
+    # The LLM proposes; the policy engine is the disclosed fallback. Guardian
+    # reviews whatever comes out either way. Previously the daemon injected
+    # policy_engine alone, so OllamaDecisionEngine.decide was unreachable
+    # outside --once: every trade decision was a static JSON lookup.
+    decision_engine = HybridDecisionEngine(
+        llm=OllamaDecisionEngine(
+            base_url=config.ollama_base_url,
+            model=config.model,
+            gpu_devices=config.gpu_devices,
+        ),
+        policy_engine=policy_engine,
+        lessons=policy_engine.relevant_lessons,
+    )
     loop = TradingLoop(
         data_gateway=AlpacaDataGateway(client=client),
-        decision_engine=policy_engine,
+        decision_engine=decision_engine,
         guardian=guardian,
         executor=AlpacaPaperExecutor(client=client, base_url=config.alpaca_base_url),
         journal=journal,
@@ -206,9 +219,14 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         journal=journal,
         strategy_library=strategy_library,
         reflection_memory=reflection_memory,
-        curriculum_agent=StructuredCurriculumAgent(transport=_ollama_curriculum_transport(config))
-        if config.curriculum_enabled
-        else None,
+        curriculum_agent=(
+            StructuredCurriculumAgent(
+                transport=_ollama_curriculum_transport(config),
+                state_path=config.journal_path.parent / "curriculum_state.json",
+            )
+            if config.curriculum_enabled
+            else None
+        ),
         strategy_admission=StrategyAdmission(guardian=guardian, strategy_library=strategy_library),
         broker_evidence_provider=BrokerEvidenceProvider(client=client),
         lifecycle_manager=StrategyLifecycleManager(),
@@ -231,23 +249,34 @@ def _ollama_curriculum_transport(config: AgentConfig):
     model = config.model
 
     def transport(context):
+        # Every number the model can copy must come from the real context. This
+        # prompt previously hard-coded a created_at of 2026-06-10 and worked
+        # example TREND_FOLLOW parameters anchored to a 100-dollar reference
+        # price; the model copied the example and nine admitted strategies were
+        # created anchored at {100,120,150,170,180,200} against a ~$744 SPY, so
+        # every one of them was permanently degenerate. See the prompt-source
+        # test in tests/min_agent/test_llm_provenance.py.
+        today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         prompt = (
             "You are the autonomous curriculum agent for a paper-only Quant-Voyager. "
             "Return exactly one JSON object and no prose. The object must match this shape: "
-            "{\"task_id\":\"unique-task-id\",\"task_type\":\"STRATEGY_SPEC\",\"summary\":\"...\","
-            "\"strategy_spec\":{\"strategy_id\":\"unique-strategy-id\",\"name\":\"...\",\"kind\":\"HOLD_BASELINE|FIXED_SIZE|TREND_FOLLOW\","
-            "\"symbols\":[\"SPY\"],\"parameters\":{},\"max_position_value\":1.0,\"enabled\":true,"
-            "\"created_at\":\"2026-06-10T00:00:00Z\",\"rationale\":\"...\"},"
+            "{\"task_id\":\"<a unique id you choose>\",\"task_type\":\"STRATEGY_SPEC\",\"summary\":\"...\","
+            "\"strategy_spec\":{\"strategy_id\":\"<a unique id you choose>\",\"name\":\"...\","
+            "\"kind\":\"HOLD_BASELINE|FIXED_SIZE|TREND_FOLLOW\","
+            "\"symbols\":[\"<a symbol from the context>\"],\"parameters\":{},"
+            "\"max_position_value\":<a number at or below the context risk limit>,"
+            "\"enabled\":true,\"created_at\":\"" + today + "\",\"rationale\":\"...\"},"
             "\"parameters\":{},\"rationale\":\"...\"}. For EVALUATE tasks set strategy_spec to null. "
             "Allowed strategy parameters are strict: HOLD_BASELINE uses {}, FIXED_SIZE requires exactly "
             "{\"action\":\"BUY|SELL|HOLD\",\"quantity\":integer,\"confidence\":0.0_to_1.0}, and TREND_FOLLOW requires exactly "
             "{\"reference_price\":positive_number,\"threshold_pct\":0.0_to_0.20,\"quantity\":positive_integer,\"confidence\":0.0_to_1.0}. "
-            "Examples: tiny FIXED_SIZE parameters {\"action\":\"BUY\",\"quantity\":1,\"confidence\":0.6}; "
-            "TREND_FOLLOW parameters {\"reference_price\":100.0,\"threshold_pct\":0.02,\"quantity\":1,\"confidence\":0.55}. "
+            "reference_price MUST be taken from the current market price in the context for that symbol. "
+            "Do not reuse a number from this instruction as a price. "
+            "max_position_value MUST be at or below risk_limits.max_position_value in the context. "
+            "Start small: for FIXED_SIZE use quantity 1 and confidence at or near 0.6. "
             "Unknown parameters such as fixed_size, holding_period, target_daily_return_pct, lookback, code, script, or shell will be rejected. "
             "Follow progression: first HOLD_BASELINE, then tiny FIXED_SIZE, then only after evidence/evaluation TREND_FOLLOW. "
-            "Use unique task_id and strategy_id values that do not duplicate current strategy IDs in the context; "
-            "the placeholder strings unique-task-id and unique-strategy-id are examples only and must not be returned. "
+            "Choose task_id and strategy_id values that do not duplicate the current strategy IDs in the context. "
             "Do not propose Python code, shell commands, live trading, web-search claims, or changes to Guardian hard limits. Context: "
             f"{json.dumps(context, sort_keys=True)}"
         )

@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790605642049,
-      "lastRequestTokens": 154066,
-      "lastInputTokens": 153852
+      "observedAt": 1790606828082,
+      "lastRequestTokens": 256072,
+      "lastInputTokens": 255604
     }
   },
   "runtimeFingerprint": {
@@ -43,14 +43,18 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 3,
-    "tokens": 63346,
+    "turns": 7,
+    "tokens": 68035,
     "cost": 0,
-    "runtimeMs": 30310,
+    "runtimeMs": 51979,
     "seenMessageIDs": [
       "msg_0e84e4a64001WOfiNtqsqc3Gtz",
       "msg_0e851cf9c001x0WTKxhfBTZwDP",
-      "msg_0e85a950b0010UUyDtDemTJnKd"
+      "msg_0e85a950b0010UUyDtDemTJnKd",
+      "msg_0e86a804b001V2rh62gJq5Tmea",
+      "msg_0e870a975001Ym71vecYNhgcxz",
+      "msg_0e8764db1001PqbuySlQl6zxc4",
+      "msg_0e877b4e00015155xUzCvMElNG"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -60,8 +64,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 34,
-  "observedProgressRevision": 19,
+  "progressRevision": 43,
+  "observedProgressRevision": 42,
   "progressFingerprints": [
     "shell:b9b4f44e7752e63facec64bdbc0ee8e6fcf0da7ffe5fcf0ae88310a924a1a1f4",
     "shell:223f6fdcc7c7b98bc06f796b532475229266e362ad32092e7bea22119ad6ec54",
@@ -96,7 +100,16 @@
     "shell-worktree:f89752af767b89f5ff6d45447a55680388cb3c3e7262a45b0a5ae59b8af66c3d",
     "shell-worktree:9e6b997be2de49039727395ac7aa8d392817fdc741e260677045b500c50c1fb7",
     "shell-worktree:a433c0c052490c140afd16a5f976cc191570f332999127bf8cde1b3542c8df77",
-    "shell-worktree:22b34591d9b6d7f7cbe15cd5eb2b6710a7c358b8c8918d6fa05c7edd6d8bc5ef"
+    "shell-worktree:22b34591d9b6d7f7cbe15cd5eb2b6710a7c358b8c8918d6fa05c7edd6d8bc5ef",
+    "shell-worktree:faf878d4b99d2123b746925d2d4fbc2b86d6a21507b3e95708238d6728a93013",
+    "file:src/min_agent/models.py:94039b53ede89fccc95f5dc0e240aa605ce14d23d8d21dd6be99ae33fa652693",
+    "file:src/min_agent/llm_decision.py:c4b85f6a854d645031f98b65753fba5441128d75ec00aab44b0c90296d521093",
+    "file:src/min_agent/llm_decision.py:71d13c9bd843d093b5981f9e0136aeac6720830db87c79792b39506b8d56853f",
+    "shell-worktree:d3f7069acd6d6aff40bff8bb0726cf2f42058431e332f158ef5758f74c474097",
+    "file:src/min_agent/curriculum.py:3dcdfa7f21a3c83c7680122a863d28d65172d5776f629e37bb6cad521683abb5",
+    "file:src/min_agent/daemon.py:89335ceacd924e870b260a91f0f497f4c346add7177ab307e2612bbb056d2134",
+    "file:src/min_agent/cli.py:39404bec0f329cc2368a14f2e1414915d1ac8b2a56b0f787aa7b52be262667dc",
+    "file:src/min_agent/strategy_admission.py:46c561cdba78a2b2bdc0bba42b1b866ac0d00005eeb21fd4c84bb38908022d0b"
   ],
   "stalledTurns": 0,
   "progressNotes": [
@@ -279,11 +292,61 @@
       "time": 1790605466727,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790605652571,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790605676069,
+      "summary": "Phases 0-3 complete. 282 tests passing (from 175). Commits: 4092bc4 baseline, 36395cd plan, 79967c1 phase 0, a24396b phase 1, 991c0f2 phase 2, 16dc28c phase 3a, 637b463 phase 3b/3c.\n\nPHASE 2 (991c0f2) - THE LATCH IS BROKEN, PROVEN ON REAL DATA\nThe reward function paid the maximum score for doing nothing and the selector was a deterministic argmax on it, so the system evolved toward HOLD and locked itself there. 800 of 851 recorded cycles were HOLD. _score is now reliability gated by exploration: operational * (0.25 + 0.75 * trade_attempts/cycles). Inaction is capped at 25% of reliability so it can never be the argmax while any candidate trades - structural, not a special case.\n\nReplayed through the real evaluator on the real 851 journal cycles, then through the real selector on the real strategy library:\n    before: trend-follow-sell-001 (36 HOLD, 0 attempts) score 1.000  <- argmax winner\n    after:  trend-follow-sell-001 (36 HOLD, 0 attempts) score 0.225\n            fixed-size-buy-001    ( 7 attempts)         score 0.900  <- argmax winner\n            tiny-fixed-size-001   (15 attempts)         score 0.900\n\nTwo real design flaws in my own first attempt, caught by the new tests:\n- PnL was additive +/-0.1/0.2 saturating at 1.0, so broker-verified profit could not outrank mere reliability and the PnL signal was discarded at the ceiling. PnL now reserves headroom multiplicatively: no evidence scores score*(1-bonus), verified profit reaches 1.0, verified loss falls below unverified reliability.\n- A TREND_FOLLOW spec has no 'action' key so it was eligible as a 'buy' probe even though its direction is implied by price vs reference_price and may be a SELL. Probes now prefer explicit FIXED_SIZE buys and never short.\n\nAlso: SYSTEM_REJECTION_REASONS stops Guardian's correct refusals (market closed, daily trade limit) being charged to the strategy - the root of the retire-then-reenable ping-pong that got fixed-size-sell-001 RETIRED for 'severe operational failure rate 1.00' when every order was correctly blocked. A result not carrying the split is read conservatively as 'all rejections are the strategy's fault'. The degenerate guard no longer exempts kind != FIXED_SIZE nor requires lifecycle == PROBATION, and now also catches promoted strategies that stop acting. An exploration floor makes a fresh install probe (smallest explicit FIXED_SIZE buy) instead of HOLDing forever.\n\nThree existing tests were regression locks ON the defect and were inverted rather than worked around: test_lifecycle_manager_promotes_hold_only_trend_after_evidence_cycles asserted a HOLD-only TREND_FOLLOW is PROMOTED; test_evaluator_keeps_per_strategy_metrics_independent asserted a pure-HOLD strategy scores 1.0; a third fixture was named 'after_successful_exposure' while reporting submitted_orders=0.\n\nPHASE 3a (16dc28c) - FILL FEEDBACK, the blocker for the success criterion\nMeasured on the recorded journal: 23 SUBMITTED orders, 23 with a resolvable client_order_id, 0 with any recorded fill. New FillReconciler polls get_order_by_client_order_id (verified present on alpaca-trade-api 3.2.0), reports fills plus terminal no-fill states, returns nothing on broker outage rather than inventing a fill. The daemon journals ORDER_FILL_CONFIRMED; the evaluator prefers it over the submit response's zero. Fills alone are still not PnL - the evaluator keeps reporting pnl_evidence as missing until closed-lot broker evidence exists, and a test pins that so a fill can never be mistaken for a verified result.\n\nPHASE 3b/3c (637b463) - DURABILITY + KNOWLEDGE READ PATH\nNew atomicio module (atomic write via tmp+fsync+os.replace, fcntl lock with timeout). All nine write sites now go through it, including the pidfile - a torn pid write can leave '2590' pointing --stop at an unrelated live process. Measured on the real 16.9MB journal: read_all 0.73s -> 0.040s, last_n(50) 0.71s -> 0.045s. Added size-capped rotation, fsync per append, and last_dropped_lines/last_dropped_samples so torn lines are counted rather than vanishing in silence. TradeCounter now uses a targeted streaming scan instead of read_all() every cycle - count_submitted_on(2026-06-18)=10, exactly the max_trades_per_day where the journal shows rejections.\n\nKnowledgeLibrary.load/list had zero call sites, so the library was write-only. PolicyEngine now consults accepted lessons and records them on the decision rationale. Writing that path surfaced a bug in the same commit: it read KnowledgeArtifact.title, which does not exist - the AttributeError fired inside decide_snapshot where TradingLoop's fail-closed handler turns every cycle into HOLD, the exact symptom the change was meant to fix. Pinned by a test.\n\nVERIFIED THIS TURN\n--check-env exits 1 naming the missing Alpaca credentials and unreachable ollama. --daemon refuses without credentials rather than crashing.\n\nSTILL OPEN\nD7: the LLM still makes zero trade decisions. cli.py:189 injects PolicyEngine, so every decision is a static JSON lookup; OllamaDecisionEngine.decide is dead in daemon mode. curriculum._fallback_task still silently substitutes a hard-coded strategy that daemon.py journals as SUCCESS, and the prompt still hard-codes created_at and reference_price 100.0 - the LLM copied that example into 9 admitted strategies against a ~$735 SPY.\nD9/D10: no supervisor, no doctor command, and the root docs (LEARNING_STATUS.md, learning_daemon_summary.md, findings.md, progress.md, task_plan.md) still describe the system as running.\nPhase 6 needs ALPACA_API_KEY/ALPACA_SECRET_KEY, absent from the environment and from every .env in the tree.",
+      "next": "Phase 4: put the LLM in the trade decision path with disclosed provenance. Currently cli.py:189 injects PolicyEngine, so every trade decision is a static JSON lookup and OllamaDecisionEngine.decide is dead in daemon mode. Also must remove the hardcoded prompt values at cli.py:232 (created_at 2026-06-10) and :238 (reference_price 100.0) which the LLM copied into 9 admitted strategies against a ~$735 SPY, and make curriculum._fallback_task disclose itself via CurriculumTask.source instead of being journaled as SUCCESS by daemon.py:249-262. Then Phase 5 (doctor + minictrl + systemd + rewrite the root docs that still claim the system is running) and Phase 6 (end-to-end proof, needs Alpaca paper credentials)."
+    },
+    {
+      "time": 1790605721880,
+      "summary": "[host:tool:edit] Project file content changed: src/min_agent/models.py",
+      "next": ""
+    },
+    {
+      "time": 1790605737441,
+      "summary": "[host:tool:write] Project file content changed: src/min_agent/llm_decision.py",
+      "next": ""
+    },
+    {
+      "time": 1790605742782,
+      "summary": "[host:tool:edit] Project file content changed: src/min_agent/llm_decision.py",
+      "next": ""
+    },
+    {
+      "time": 1790606091511,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790606101065,
+      "summary": "[host:tool:edit] Project file content changed: src/min_agent/curriculum.py",
+      "next": ""
+    },
+    {
+      "time": 1790606110208,
+      "summary": "[host:tool:edit] Project file content changed: src/min_agent/daemon.py",
+      "next": ""
+    },
+    {
+      "time": 1790606481439,
+      "summary": "[host:tool:edit] Project file content changed: src/min_agent/cli.py",
+      "next": ""
+    },
+    {
+      "time": 1790606558808,
+      "summary": "[host:tool:edit] Project file content changed: src/min_agent/strategy_admission.py",
+      "next": ""
     }
   ],
-  "storageGeneration": 224,
+  "storageGeneration": 307,
   "createdAt": 1790603839704,
-  "updatedAt": 1790605642049,
+  "updatedAt": 1790606828082,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:54700db50c7d2c257fa92bb001f4672c86f1358cd2fb58323f81521d548793f2",
@@ -379,5 +442,6 @@
         "order": 11
       }
     ]
-  }
+  },
+  "stopReason": "Recovering from provider_retry infrastructure failure; automatic retry scheduled. OpenCode reported session.status=retry for an active Goal turn."
 }

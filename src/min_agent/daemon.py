@@ -256,14 +256,21 @@ class AgentDaemon:
                     guardian_max_position_value=self.config.max_position_value,
                 )
             strategy_id = task.strategy_spec.strategy_id if task.strategy_spec is not None else None
+            # A fallback task is a hard-coded constant, not model output. It is
+            # recorded as SKIPPED so the journal distinguishes the two: 30 of
+            # the 168 recorded CURRICULUM_PROPOSED events were fallbacks
+            # journalled as SUCCESS, which made them indistinguishable from real
+            # proposals.
+            from_model = task.source == "llm"
             self._append_event(
                 "CURRICULUM_PROPOSED",
-                status="SUCCESS",
-                message=task.summary,
+                status="SUCCESS" if from_model else "SKIPPED",
+                message=task.summary if from_model else f"deterministic fallback (not LLM output): {task.summary}",
                 strategy_id=strategy_id,
                 task_id=task.task_id,
                 payload={
                     "task_type": task.task_type,
+                    "source": task.source,
                     "rationale": task.rationale,
                     "parameters": task.parameters,
                     "strategy_id": strategy_id,
@@ -271,6 +278,9 @@ class AgentDaemon:
                 },
             )
             if task.task_type == "STRATEGY_SPEC" and task.strategy_spec and self.strategy_admission is not None:
+                # Give admission the real prices so a TREND_FOLLOW anchored to
+                # a fabricated level is rejected instead of entering the library.
+                self.strategy_admission.set_market_prices(self._last_known_prices())
                 result = self.strategy_admission.admit(task.strategy_spec)
                 self._append_event(
                     "STRATEGY_ADMISSION_REVIEWED",
@@ -305,6 +315,20 @@ class AgentDaemon:
             self._curriculum_proposal()
         self._manage_strategy_lifecycle()
         self.last_maintenance_at = self.now()
+
+    def _last_known_prices(self) -> dict[str, float]:
+        """Real last prices from the journal, newest cycle wins.
+
+        Used to validate a proposed reference_price against the market. Reading
+        the journal rather than calling the broker keeps admission cheap and
+        works even when the broker window is closed.
+        """
+        prices: dict[str, float] = {}
+        if self.journal is None:
+            return prices
+        for record in self.journal.last_n(self.config.reflection_window):
+            prices[record.snapshot.symbol] = record.snapshot.last_price
+        return prices
 
     def _resolve_pending_fills(self) -> int:
         """Poll the broker for fills of orders this agent submitted.

@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
+from min_agent.atomicio import read_json, write_json_atomic
 from min_agent.models import CurriculumTask, ReflectionRecord, STRATEGY_PARAMETER_SCHEMAS, StrategySpec
 
 CurriculumTransport = Callable[[dict[str, Any]], str]
@@ -49,12 +51,22 @@ def _validate_curriculum_payload(payload: dict[str, Any], *, now: Callable[[], d
 
 
 class StructuredCurriculumAgent:
-    def __init__(self, *, transport: CurriculumTransport | None = None):
+    def __init__(
+        self,
+        *,
+        transport: CurriculumTransport | None = None,
+        state_path: Path | str | None = None,
+        breakout_threshold: int = 3,
+    ):
         self.transport = transport
-        # Track consecutive EVALUATE fallbacks to break dead loops. Reset whenever
-        # a STRATEGY_SPEC is generated. When count >= 3 with no_exploration=true,
-        # fallback proposes a fresh strategy instead of another EVALUATE.
-        self._consecutive_evaluate_count: int = 0
+        # Tracks consecutive EVALUATE fallbacks so a dead loop can be broken.
+        # This used to be plain instance state, which meant every daemon restart
+        # reset it to zero. Combined with run_forever.sh restarting on every
+        # broker blip, the count could never reach the threshold and the
+        # breakout was unreachable. Persisted next to the journal instead.
+        self.state_path = Path(state_path) if state_path else None
+        self.breakout_threshold = breakout_threshold
+        self._consecutive_evaluate_count: int = self._load_count()
 
     def propose(
         self,
@@ -134,7 +146,7 @@ class StructuredCurriculumAgent:
                 guardian_max_position_value=guardian_max_position_value,
             )
         if task.task_type == "STRATEGY_SPEC" and task.strategy_spec is not None:
-            self._consecutive_evaluate_count = 0
+            self._set_count(0)
         return task
 
     def _fallback_task(
@@ -156,8 +168,9 @@ class StructuredCurriculumAgent:
                 created_at=datetime.now(tz=timezone.utc),
                 rationale="safe fallback strategy when no validated strategy exists",
             )
-            self._consecutive_evaluate_count = 0
+            self._set_count(0)
             return CurriculumTask(
+                source="fallback",
                 task_id="fallback-hold-baseline",
                 task_type="STRATEGY_SPEC",
                 summary="create a safe hold baseline",
@@ -179,8 +192,9 @@ class StructuredCurriculumAgent:
                 created_at=datetime.now(tz=timezone.utc),
                 rationale="baseline exists; propose the smallest executable trading skill for Guardian review",
             )
-            self._consecutive_evaluate_count = 0
+            self._set_count(0)
             return CurriculumTask(
+                source="fallback",
                 task_id="fallback-tiny-fixed-size",
                 task_type="STRATEGY_SPEC",
                 summary="create a tiny executable fixed-size skill",
@@ -189,11 +203,17 @@ class StructuredCurriculumAgent:
             )
 
         if recent_exploration_summary and recent_exploration_summary.get("no_exploration"):
-            # Break out of EVALUATE dead-loop: after 3 consecutive EVALUATEs with
-            # no exploration progress, propose a distinct small trading skill so
-            # admission/Guardian can actually react to new behavior. Real journal
-            # evidence (no SELLs, all HOLDs) shows EVALUATE alone is insufficient.
-            if self._consecutive_evaluate_count >= 3:
+            # Break out of the EVALUATE dead-loop: after `breakout_threshold`
+            # consecutive EVALUATEs with no exploration progress, the next task is
+            # a distinct small trading skill so admission/Guardian can react to
+            # new behaviour. Real journal evidence (no SELLs, all HOLDs) shows
+            # EVALUATE alone is insufficient.
+            #
+            # Checked before counting, so three EVALUATEs are emitted and the
+            # fourth breaks out. The count used to live in process memory, which
+            # is why this was unreachable in practice: run_forever.sh restarted
+            # the daemon on every broker blip and reset it to zero each time.
+            if self._consecutive_evaluate_count >= self.breakout_threshold:
                 existing_ids = {strategy.strategy_id for strategy in current_strategies}
                 attempt = self._consecutive_evaluate_count
                 strategy_id = f"fallback-breakout-fixed-size-{attempt:02d}"
@@ -211,16 +231,21 @@ class StructuredCurriculumAgent:
                     created_at=datetime.now(tz=timezone.utc),
                     rationale="repeated EVALUATE with no exploration; propose a distinct small skill so Guardian/admission can react to new behavior",
                 )
-                self._consecutive_evaluate_count = 0
+                self._set_count(0)
                 return CurriculumTask(
+                    source="fallback",
                     task_id=strategy_id,
                     task_type="STRATEGY_SPEC",
                     summary="break out of EVALUATE dead-loop with a distinct small executable skill",
                     strategy_spec=spec,
-                    rationale=f"{self.__class__.__name__} observed {attempt} consecutive EVALUATE fallbacks while no_exploration remained true",
+                    rationale=(
+                        f"{self.__class__.__name__} observed {attempt} consecutive EVALUATE fallbacks "
+                        "while no_exploration remained true"
+                    ),
                 )
-            self._consecutive_evaluate_count += 1
+            self._increment()
             return CurriculumTask(
+                source="fallback",
                 task_id="evaluate-no-exploration",
                 task_type="EVALUATE",
                 summary="evaluate no-exploration window before creating another strategy",
@@ -228,11 +253,42 @@ class StructuredCurriculumAgent:
                 rationale="recent real journal evidence shows no exploration; wait for transport/admission to propose a distinct safe strategy",
             )
 
-        self._consecutive_evaluate_count += 1
+        self._increment()
         return CurriculumTask(
             task_id="evaluate-recent-performance",
             task_type="EVALUATE",
             summary="evaluate recent strategy outcomes before changing behavior",
             parameters={"window_cycles": reflection.window_cycles},
             rationale="use measured paper outcomes before creating or selecting new strategies",
+            source="fallback",
         )
+
+    # --- persisted counters -------------------------------------------------
+
+    def _load_count(self) -> int:
+        if self.state_path is None:
+            return 0
+        data = read_json(self.state_path)
+        if isinstance(data, dict):
+            value = data.get("consecutive_evaluate_count")
+            if isinstance(value, int) and value >= 0:
+                return value
+        return 0
+
+    def _set_count(self, value: int) -> None:
+        self._consecutive_evaluate_count = value
+        if self.state_path is None:
+            return
+        try:
+            write_json_atomic(
+                self.state_path, {"consecutive_evaluate_count": value, "updated_at": _now_iso()}
+            )
+        except OSError:
+            pass
+
+    def _increment(self) -> None:
+        self._set_count(self._consecutive_evaluate_count + 1)
+
+
+def _now_iso() -> str:
+    return datetime.now(tz=timezone.utc).isoformat()

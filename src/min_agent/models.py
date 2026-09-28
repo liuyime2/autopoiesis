@@ -7,10 +7,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 Action = Literal["BUY", "SELL", "HOLD"]
+DecisionSource = Literal["llm", "fallback_policy_engine", "policy_engine", "baseline"]
 AttributionStatus = Literal["LINKED", "UNLINKED"]
 StrategyKind = Literal["HOLD_BASELINE", "TREND_FOLLOW", "FIXED_SIZE"]
 StrategyLifecycle = Literal["PROBATION", "ACTIVE", "PAUSED", "RETIRED", "BASELINE"]
 CurriculumTaskType = Literal["STRATEGY_SPEC", "OPTIMIZE", "EVALUATE"]
+CurriculumTaskSource = Literal["llm", "fallback"]
 DaemonStatus = Literal["STARTING", "RUNNING", "BACKING_OFF", "STOPPING", "STOPPED", "ERROR"]
 JournalEventType = Literal[
     "REFLECTION_GENERATED",
@@ -593,6 +595,15 @@ class CurriculumTask(BaseModel):
     strategy_spec: StrategySpec | None = None
     parameters: dict[str, StrategyParameter] = Field(default_factory=dict)
     rationale: str = Field(min_length=1)
+    source: CurriculumTaskSource = "llm"
+    """Who produced this task.
+
+    The curriculum caught every LLM failure and returned a hard-coded
+    `_fallback_task`, which the daemon then journaled as status="SUCCESS". 30 of
+    the 168 recorded CURRICULUM_PROPOSED events were such constants, and the
+    journal could not tell them apart from real model output. Fallbacks now
+    declare themselves.
+    """
 
     @field_validator("task_type", mode="before")
     @classmethod
@@ -666,6 +677,15 @@ class TradeDecision(BaseModel):
     confidence: float = Field(ge=0, le=1)
     rationale: str = Field(min_length=1)
     strategy_id: str | None = None
+    decision_source: DecisionSource = "baseline"
+    """Who produced this decision.
+
+    The daemon used to run PolicyEngine only, so every trade decision was a
+    static JSON lookup while the LLM was invoked solely for curriculum. And when
+    the curriculum LLM failed, a hard-coded `_fallback_task` was journaled as
+    status="SUCCESS", so the journal could not tell model output from a
+    constant. This field makes provenance auditable per decision.
+    """
 
     @field_validator("symbol")
     @classmethod
