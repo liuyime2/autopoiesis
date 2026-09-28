@@ -328,15 +328,49 @@ def _pnl_evidence(
     unlinked_fill_count = 0
 
     # One ordered stream: journal-confirmed earlier fills first, then the fresh
-    # batch, de-duplicated by activity id so a fill in both is applied once.
+    # batch, de-duplicated so a fill present in both is applied once.
+    #
+    # De-duplication cannot key on activity_id. The journal records one entry per
+    # order, keyed by its own client_order_id, while the broker reports an order
+    # that filled in pieces as several activities under its own ids - a real 52
+    # share SELL appears as a single journal entry and as two broker activities of
+    # 16 and 36. Keying on activity_id matched none of them, the SELL was applied
+    # twice, and the ledger reported 81 unmatched shares against 23 real lots.
+    #
+    # The order is the common identity: quantity is summed per order and the
+    # broker's own prices win, so a split fill is one economic event. When the
+    # broker is silent the journal's price stands.
+    # For each order the broker covers, the broker's own activities are the
+    # truth and the journal's one-line summary is discarded - they are two views of
+    # the same fill, not two fills. Summing them instead would double the
+    # quantity. Orders the broker does not cover keep their journal entry, which
+    # is the whole point of seeding from the journal.
+    broker_by_order: dict[str, list[BrokerFillActivity]] = {}
+    for activity in fill_candidates:
+        broker_by_order.setdefault(_order_key(activity), []).append(activity)
+
     stream: dict[str, BrokerFillActivity] = {}
-    for activity in (*seeded_fills, *fill_candidates):
-        stream.setdefault(activity.activity_id, activity)
+    for activity in seeded_fills:
+        stream.setdefault(_order_key(activity), activity)
+    for key, activities in broker_by_order.items():
+        quantity = sum(item.quantity for item in activities)
+        # A split fill can straddle two prices, so the volume-weighted average is
+        # the only honest single price for the order.
+        price = sum(item.price * item.quantity for item in activities) / quantity
+        first = activities[0]
+        stream[key] = first.model_copy(
+            update={
+                "quantity": quantity,
+                "price": price,
+                "transaction_time": min(item.transaction_time for item in activities),
+                "source": _join_sources(item.source for item in activities),
+            }
+        )
 
     for activity in sorted(stream.values(), key=lambda item: item.transaction_time):
         strategy_id = _activity_strategy(activity, order_to_strategy)
         status = "LINKED" if strategy_id else "UNLINKED"
-        in_window = any(activity.activity_id == item.activity_id for item in fill_candidates)
+        in_window = any(_order_key(activity) == _order_key(item) for item in fill_candidates)
         fill_attributions.append(
             _fill_attribution(
                 activity,
@@ -443,6 +477,25 @@ def _order_strategy_map(records: list[CycleRecord]) -> dict[str, str]:
         if record.execution.client_order_id:
             mapping[record.execution.client_order_id] = strategy_id
     return mapping
+
+
+def _join_sources(sources) -> str:
+    """Combine several fill sources into one honest label, order-stable."""
+    seen: list[str] = []
+    for source in sources:
+        for part in str(source).split("+"):
+            if part not in seen:
+                seen.append(part)
+    return "+".join(seen)
+
+
+def _order_key(activity: BrokerFillActivity) -> str:
+    """The identity of the *order* behind a fill, across broker and journal.
+
+    An order that filled in pieces is one economic event, so lot matching and
+    de-duplication both have to work at order granularity rather than per activity.
+    """
+    return activity.order_id or activity.client_order_id or activity.activity_id
 
 
 def _activity_strategy(activity: BrokerFillActivity, order_to_strategy: dict[str, str]) -> str | None:

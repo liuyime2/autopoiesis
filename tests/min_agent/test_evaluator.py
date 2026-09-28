@@ -568,3 +568,107 @@ def test_verified_pnl_reaches_the_metrics_layer_without_cycles_in_the_window():
     assert metrics["opener"].realized_pnl == 100.0
     assert metrics["opener"].cycles == 0
     assert metrics["opener"].pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+
+
+def test_a_split_fill_reported_as_several_activities_is_one_order():
+    """One 52-share market order appears in the journal as a single entry keyed by
+    the client_order_id the agent generated, and in the broker feed as two
+    activities of 16 and 36 under its own execution ids. Keyed on activity_id the
+    two sources never matched, the SELL was applied twice, and the ledger reported
+    81 unmatched shares against 23 real lots.
+
+    The order is the common identity, so the broker's activities are summed into
+    one fill at the volume-weighted price and the journal's summary is discarded
+    rather than added.
+    """
+    from min_agent.evaluator import _order_key
+
+    opened = make_record(cycle_id="buy", action="BUY", quantity=23, strategy_id="opener")
+    sold = make_record(cycle_id="sell", action="SELL", quantity=52, strategy_id="closer")
+
+    journal_view = BrokerFillActivity(
+        activity_id="min-agent-coid", order_id="oid-sell", client_order_id="min-agent-coid",
+        symbol="SPY", side="SELL", quantity=52, price=766.57,
+        transaction_time=datetime(2026, 9, 28, 15, 1, 4, tzinfo=timezone.utc),
+    )
+    broker_view = (
+        BrokerFillActivity(
+            activity_id="2026...::aaa", order_id="oid-sell", symbol="SPY", side="SELL",
+            quantity=16, price=766.57,
+            transaction_time=datetime(2026, 9, 28, 19, 1, 14, tzinfo=timezone.utc),
+        ),
+        BrokerFillActivity(
+            activity_id="2026...::bbb", order_id="oid-sell", symbol="SPY", side="SELL",
+            quantity=36, price=766.57,
+            transaction_time=datetime(2026, 9, 28, 19, 1, 14, tzinfo=timezone.utc),
+        ),
+    )
+    assert _order_key(journal_view) == _order_key(broker_view[0]), (
+        "both views of one order must resolve to the same key"
+    )
+    assert _order_key(broker_view[0]) == _order_key(broker_view[1])
+
+    seeded = (journal_view,) + tuple(
+        BrokerFillActivity(
+            activity_id=f"min-agent-buy-{i}", order_id=f"oid-buy-{i}",
+            client_order_id=f"min-agent-buy-{i}", symbol="SPY", side="BUY",
+            quantity=1, price=742.03, strategy_id="opener",
+            transaction_time=datetime(2026, 6, 11, 14, 30, tzinfo=timezone.utc),
+        )
+        for i in range(23)
+    )
+    evidence = BrokerEvidenceBatch(
+        generated_at=datetime.now(tz=timezone.utc),
+        window_start=datetime(2026, 9, 28, tzinfo=timezone.utc),
+        window_end=datetime(2026, 9, 29, tzinfo=timezone.utc),
+        activities=broker_view,
+    )
+
+    report = DeterministicEvaluator().evaluate(
+        [opened, sold], evidence=evidence, seeded_fills=seeded
+    )
+
+    # 23 agent lots close; 52 - 23 = 29 shares were never the agent's.
+    assert report.pnl.closed_lot_count == 23
+    assert report.pnl.unmatched_sell_quantity == {"closer": 29.0}
+    assert report.pnl.strategy_realized_pnl["opener"] == pytest.approx(
+        (766.57 - 742.03) * 23, abs=0.01
+    )
+    sells = [a for a in report.pnl.fill_attributions if a.side == "SELL"]
+    assert len(sells) == 1, "one order is one attribution, however the broker split it"
+
+
+def test_a_split_fill_at_two_prices_is_volume_weighted():
+    opened = make_record(cycle_id="buy", action="BUY", quantity=2, strategy_id="opener")
+    sold = make_record(cycle_id="sell", action="SELL", quantity=2, strategy_id="closer")
+    evidence = BrokerEvidenceBatch(
+        generated_at=datetime.now(tz=timezone.utc),
+        window_start=datetime(2026, 9, 28, tzinfo=timezone.utc),
+        window_end=datetime(2026, 9, 29, tzinfo=timezone.utc),
+        activities=(
+            BrokerFillActivity(
+                activity_id="p1", order_id="oid-sell", symbol="SPY", side="SELL",
+                quantity=1, price=100.0,
+                transaction_time=datetime(2026, 9, 28, 19, 0, tzinfo=timezone.utc),
+            ),
+            BrokerFillActivity(
+                activity_id="p2", order_id="oid-sell", symbol="SPY", side="SELL",
+                quantity=1, price=200.0,
+                transaction_time=datetime(2026, 9, 28, 19, 0, 1, tzinfo=timezone.utc),
+            ),
+        ),
+    )
+    seeded = (
+        BrokerFillActivity(
+            activity_id="min-agent-buy", order_id="oid-buy", client_order_id="min-agent-buy",
+            symbol="SPY", side="BUY", quantity=2, price=50.0, strategy_id="opener",
+            transaction_time=datetime(2026, 6, 11, 14, 30, tzinfo=timezone.utc),
+        ),
+    )
+
+    report = DeterministicEvaluator().evaluate(
+        [opened, sold], evidence=evidence, seeded_fills=seeded
+    )
+
+    # Volume-weighted: (1*100 + 1*200) / 2 = 150, so (150 - 50) * 2 = 200.
+    assert report.pnl.strategy_realized_pnl["opener"] == pytest.approx(200.0, abs=0.01)
