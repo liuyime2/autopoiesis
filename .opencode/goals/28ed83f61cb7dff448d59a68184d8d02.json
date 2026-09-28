@@ -32,7 +32,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790607336591,
+      "observedAt": 1790607437231,
       "lastRequestTokens": 256072,
       "lastInputTokens": 255604
     }
@@ -64,7 +64,7 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 49,
+  "progressRevision": 50,
   "observedProgressRevision": 42,
   "progressFingerprints": [
     "shell:b9b4f44e7752e63facec64bdbc0ee8e6fcf0da7ffe5fcf0ae88310a924a1a1f4",
@@ -115,15 +115,11 @@
     "shell-worktree:e139907e8881deaa2c5cb235dfb900aaffc52b2834ffc5190894d2e64068032b",
     "shell-worktree:e492c194ea4e4254d490d88c43e9ebacd0f8e8fa22abf8a020b346384f23c229",
     "shell-worktree:3a87bfa97ef02b46624c416f13843047ab1006621434316e31e74d14de3be972",
-    "shell-worktree:4398aa13042ac75f769a6b8f8ba9c12f3795a9dc46cf5ba7e8d577033a34cc79"
+    "shell-worktree:4398aa13042ac75f769a6b8f8ba9c12f3795a9dc46cf5ba7e8d577033a34cc79",
+    "shell-worktree:9b76a6eae6b5f187da90a83517fc981f06875678d460833af0b52fa67413be84"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790603865655,
-      "summary": "[host:tool:bash] Goal-owned shell command completed outside a detectable Git worktree.",
-      "next": ""
-    },
     {
       "time": 1790603869280,
       "summary": "[host:tool:bash] Goal-owned shell command completed outside a detectable Git worktree.",
@@ -368,11 +364,16 @@
       "time": 1790607336260,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790607349167,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 340,
+  "storageGeneration": 348,
   "createdAt": 1790603839704,
-  "updatedAt": 1790607336591,
+  "updatedAt": 1790607437231,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:54700db50c7d2c257fa92bb001f4672c86f1358cd2fb58323f81521d548793f2",

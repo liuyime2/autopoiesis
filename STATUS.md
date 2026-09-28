@@ -12,12 +12,13 @@ all of which described the system as running when it had been dead for 97 days.
 ./minictrl doctor
 ```
 
-At the time of writing it reports three blocking problems and four warnings:
+Ollama has since been started on `:11434` serving `deepseek-r1:8b`, and the
+LLM paths were verified live against the real model (see below). It currently
+reports two blocking problems:
 
 | Check | State |
 |---|---|
-| alpaca credentials | **FAIL** — `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` are absent from the environment and from every `.env` in the tree |
-| ollama | **FAIL** — nothing listening on `127.0.0.1:11434` |
+| alpaca credentials | **FAIL** — `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` are absent from the environment and from every `.env` in the tree. The paper API itself is reachable (`GET /v2/clock` → HTTP 401, i.e. only the credential is missing) |
 | daemon | **FAIL** — `heartbeat.json` claims `RUNNING`, but pid 2590767 is dead and the heartbeat is 97 days stale |
 | proof: filled>0 | **WARN** — 23 orders were submitted, 0 fills were ever recorded |
 | proof: per-strategy pnl | **WARN** — empty; needs broker closed-lot evidence |
@@ -56,13 +57,34 @@ All fifteen are fixed. 317 tests pass, up from 175.
 
 ## What is still required
 
-1. **Alpaca paper credentials.** `export ALPACA_API_KEY=... ALPACA_SECRET_KEY=...`
-   Nothing can be proven end to end without them.
-2. **A reachable Ollama serving `deepseek-r1:8b`.** Note the port: `ollama.log`
-   from the last recorded run shows it serving on **:11435** with
-   `CUDA_VISIBLE_DEVICES=3`, while `run_forever.sh` configured **:11434** and
-   GPU 0. Reconcile that before trusting the curriculum agent.
-3. **A supervised run.** `./minictrl install-service && ./minictrl service enable --now`.
+1. **Alpaca paper credentials** — the one thing that cannot be done without
+   you:
+
+   ```bash
+   export ALPACA_API_KEY="..." ALPACA_SECRET_KEY="..."
+   ./minictrl doctor        # credentials check flips to PASS
+   ./minictrl once          # one real paper cycle
+   ./minictrl loop          # bounded run
+   ./minictrl install-service && ./minictrl service enable --now
+   ```
+
+2. ~~A reachable Ollama~~ — **done.** The port mismatch recorded in
+   `ollama.log` (`:11435`, `CUDA_VISIBLE_DEVICES=3`) is resolved: Ollama now
+   serves on `127.0.0.1:11434` with `deepseek-r1:8b` on GPU 0. Both LLM paths
+   were then verified against the real model:
+
+   - trade decision, 8.4 s, valid JSON, `decision_source: "llm"`, grounded in
+     the supplied context (`"No positions, no open orders... Holding position."`)
+   - curriculum proposal, 2.5 s, parsed to a valid `CurriculumTask` with
+     `source: "llm"`
+
+   Start it again after a reboot with:
+
+   ```bash
+   OLLAMA_MODELS=/localscratch/liuyime2/ollama_local/models \
+   OLLAMA_HOST=127.0.0.1:11434 CUDA_VISIBLE_DEVICES=0 \
+     /localscratch/liuyime2/ollama_local/bin/ollama serve
+   ```
 
 ## The only success criterion
 
