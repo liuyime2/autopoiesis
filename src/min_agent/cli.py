@@ -59,8 +59,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.daemon:
         return _run_daemon(config, max_cycles=args.max_cycles)
     if args.status:
-        print(HealthMonitor(config.heartbeat_path).status_json())
-        return 0
+        monitor = HealthMonitor(config.heartbeat_path, stale_after_seconds=config.stale_after_seconds)
+        print(monitor.status_json())
+        return 0 if monitor.is_live() else 1
     if args.stop:
         return _stop_daemon(config)
     if args.reconcile:
@@ -144,6 +145,9 @@ def _run_once(config: AgentConfig) -> int:
         trade_counter=TradeCounter(journal=JsonlJournal(config.journal_path)),
     )
     record = loop.run_once(config.symbols[0])
+    if record is None:
+        print(json.dumps({"error": "broker data unavailable; see journal CYCLE_FAILED event"}, sort_keys=True))
+        return 1
     print(record.model_dump_json(indent=2))
     return 0
 
@@ -179,6 +183,7 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         max_position_value=config.max_position_value,
         max_daily_loss=config.max_daily_loss,
         max_trades_per_day=config.max_trades_per_day,
+        max_total_exposure=config.max_total_exposure,
     )
     policy_engine = PolicyEngine(
         strategy_library=strategy_library,

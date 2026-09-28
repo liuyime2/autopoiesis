@@ -1,35 +1,70 @@
 #!/bin/bash
-# 监控脚本 - 运行完整的监控序列
-set -e
+# Read-only monitoring sweep over the min_agent CLI.
+#
+# `conda` is not on PATH in this environment (~/.bashrc is a single newline), so
+# every script here used bare `conda`. Combined with `set -e` (not
+# `pipefail`) and a `| tee` pipeline, a missing interpreter produced
+# `command not found` on stderr, `tee` swallowed it, the step "succeeded", and
+# the script printed a green banner. That is how `auto-fix.log` and
+# `market-check.log` ended up containing a banner and a footer with nothing in
+# between, while reporting success.
+set -uo pipefail
 
-cd /localscratch/liuyime2/QuantGroup
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR" || exit 2
+
+CONDA_BIN="${CONDA_BIN:-/home/liuyime2/miniconda3/bin/conda}"
+if [ ! -x "$CONDA_BIN" ]; then
+  echo "FATAL: conda not found at $CONDA_BIN (set CONDA_BIN)" >&2
+  exit 2
+fi
+
+export PYTHONPATH="$ROOT_DIR/src:${PYTHONPATH:-}"
+export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
+export APCA_API_BASE_URL="https://paper-api.alpaca.markets"
+
+agent() {
+  timeout 180 "$CONDA_BIN" run --no-capture-output -n llm python -m min_agent.cli "$@"
+}
+
+FAILED=0
 
 echo "========================================"
-echo "📊 Quant Voyager 监控运行"
+echo "Quant Voyager monitoring sweep (read-only)"
 echo "========================================"
 date
 
-echo ""
-echo "[1/5] 检查 Daemon 状态..."
-PYTHONPATH=src ALPACA_BASE_URL=https://paper-api.alpaca.markets conda run -n llm python -m min_agent.cli --status 2>&1 || echo "Daemon 检查完成"
+run_step() {
+  local label="$1"
+  shift
+  echo
+  echo "--- $label ---"
+  # `local rc=$?` would report local's own status, not the step's. Assign on the
+  # right of `||` instead, where $? is still the command's.
+  local rc=0
+  "$@" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "!! $label FAILED (rc=$rc)"
+    FAILED=$((FAILED + 1))
+  fi
+  return "$rc"
+}
 
-echo ""
-echo "[2/5] Broker 同步检查..."
-PYTHONPATH=src ALPACA_BASE_URL=https://paper-api.alpaca.markets conda run -n llm python -m min_agent.cli --reconcile 2>&1 || echo "同步检查完成"
+# --status now exits non-zero when the daemon is dead or its heartbeat is stale.
+# That is the signal we want, so do not swallow it.
+run_step "daemon liveness" agent --status
+run_step "broker reconciliation" agent --reconcile
+run_step "broker evidence ingest" agent --ingest-evidence
+run_step "evidence report" agent --evidence-report
+run_step "profit target" agent --verify-profit-target
 
-echo ""
-echo "[3/5] 更新 Broker 证据..."
-PYTHONPATH=src ALPACA_BASE_URL=https://paper-api.alpaca.markets conda run -n llm python -m min_agent.cli --ingest-evidence 2>&1 || echo "证据更新完成"
-
-echo ""
-echo "[4/5] 生成证据报告..."
-PYTHONPATH=src ALPACA_BASE_URL=https://paper-api.alpaca.markets conda run -n llm python -m min_agent.cli --evidence-report 2>&1 || echo "报告生成完成"
-
-echo ""
-echo "[5/5] 详细分析..."
-PYTHONPATH=src conda run -n llm python monitor.py 2>&1 || echo "分析完成"
-
-echo ""
+echo
 echo "========================================"
-echo "✅ 监控完成"
+if [ "$FAILED" -eq 0 ]; then
+  echo "OK: all ${#} checks reported healthy"
+else
+  echo "DRIFT: $FAILED check(s) reported a fault - see above"
+fi
 echo "========================================"
+
+exit "$FAILED"

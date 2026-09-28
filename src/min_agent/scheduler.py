@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 class MarketScheduler:
     def __init__(self, *, clock_provider=None):
         self.clock_provider = clock_provider
+        self.last_error: str | None = None
 
     def market_is_open(self) -> bool:
         clock = self._clock()
@@ -31,7 +32,17 @@ class MarketScheduler:
     def _clock(self):
         if self.clock_provider is None:
             return None
-        return self.clock_provider()
+        try:
+            clock = self.clock_provider()
+        except Exception as exc:
+            # Fail closed: a clock we cannot read means the market is not known
+            # to be open, so no order is placed. Propagating this instead is
+            # what turned a single Alpaca ConnectTimeout into a daemon that
+            # died and was restarted every 30 seconds by run_forever.sh.
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return None
+        self.last_error = None
+        return clock
 
 
 def _seconds_until(value, default: int) -> int:

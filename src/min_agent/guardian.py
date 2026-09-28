@@ -55,6 +55,9 @@ class Guardian:
         if decision.action == "HOLD":
             return GuardianResult(approved=True, reason="approved")
 
+        if not snapshot.account.day_start_equity_known:
+            return GuardianResult(approved=False, reason="account day-start equity unavailable")
+
         if not snapshot.market_open:
             return GuardianResult(approved=False, reason="market is closed")
 

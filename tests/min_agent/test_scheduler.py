@@ -39,3 +39,43 @@ def test_scheduler_caps_sleep_at_max_sleep():
     scheduler = MarketScheduler(clock_provider=lambda: Clock(True, next_close=next_close))
 
     assert scheduler.sleep_seconds(default_interval=30, max_sleep=60) == 60
+
+
+def test_scheduler_fails_closed_when_the_clock_raises():
+    """A ConnectTimeout here used to kill the daemon; run_forever.sh then
+    restarted it every 30 seconds forever."""
+    def boom():
+        raise ConnectionError("ConnectTimeout to paper-api.alpaca.markets")
+
+    scheduler = MarketScheduler(clock_provider=boom)
+
+    assert scheduler.should_trade_now() is False
+    assert "ConnectTimeout" in scheduler.last_error
+
+
+def test_scheduler_fails_closed_for_every_clock_read():
+    def boom():
+        raise TimeoutError("read timed out")
+
+    scheduler = MarketScheduler(clock_provider=boom)
+
+    assert scheduler.market_is_open() is False
+    assert scheduler.seconds_until_next_open(30) == 30
+    assert scheduler.seconds_until_next_close(30) == 30
+    assert scheduler.sleep_seconds(default_interval=30, max_sleep=300) >= 1
+
+
+def test_scheduler_clears_last_error_on_a_successful_read():
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ConnectionError("transient")
+        return Clock(True)
+
+    scheduler = MarketScheduler(clock_provider=flaky)
+
+    assert scheduler.should_trade_now() is False
+    assert scheduler.should_trade_now() is True
+    assert scheduler.last_error is None

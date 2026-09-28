@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import uuid4
 
-from min_agent.models import CycleRecord, TradeDecision
+from min_agent.models import CycleRecord, JournalEvent, TradeDecision
 
 
 class TradingLoop:
@@ -15,17 +16,25 @@ class TradingLoop:
         self.mode = mode
         self.trade_counter = trade_counter
 
-    def run_once(self, symbol: str) -> CycleRecord:
+    def run_once(self, symbol: str) -> CycleRecord | None:
         cycle_id = str(uuid4())
-        snapshot = self.data_gateway.snapshot(symbol)
-        error = None
+        try:
+            snapshot = self.data_gateway.snapshot(symbol)
+        except Exception as exc:
+            # A cycle with no broker snapshot cannot produce a CycleRecord, and
+            # inventing one would be fabricated data (AGENTS.md 2). Journal the
+            # failure as an event instead so the evaluator, reflector and
+            # curriculum can see that it happened at all.
+            self._journal_cycle_failure(cycle_id, symbol, exc)
+            return None
+        errors: list[str] = []
         try:
             if hasattr(self.decision_engine, "decide_snapshot"):
                 decision = self.decision_engine.decide_snapshot(snapshot)
             else:
                 decision = self.decision_engine.decide(self._decision_context(snapshot))
         except Exception as exc:
-            error = f"decision_error: {exc}"
+            errors.append(f"decision_error: {exc}")
             decision = TradeDecision(
                 symbol=snapshot.symbol,
                 action="HOLD",
@@ -38,7 +47,7 @@ class TradingLoop:
             try:
                 trades_today = self.trade_counter.trades_today()
             except Exception as exc:
-                error = f"trade_counter_error: {exc}"
+                errors.append(f"trade_counter_error: {exc}")
                 decision = TradeDecision(
                     symbol=snapshot.symbol,
                     action="HOLD",
@@ -56,10 +65,30 @@ class TradingLoop:
             guardian=guardian_result,
             execution=execution,
             strategy_id=decision.strategy_id,
-            error=error,
+            error="; ".join(errors) or None,
         )
         self.journal.append(record)
         return record
+
+    def _journal_cycle_failure(self, cycle_id: str, symbol: str, exc: Exception) -> None:
+        event = JournalEvent(
+            event_id=str(uuid4()),
+            event_type="CYCLE_FAILED",
+            timestamp=datetime.now(tz=timezone.utc),
+            status="FAILED",
+            message=f"{type(exc).__name__}: {exc}",
+            cycle_id=cycle_id,
+            payload={
+                "symbol": symbol.upper(),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "paper_only": True,
+            },
+        )
+        try:
+            self.journal.append_event(event)
+        except Exception:
+            pass
 
     def _decision_context(self, snapshot) -> dict:
         return {

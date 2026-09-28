@@ -27,6 +27,8 @@ JournalEventType = Literal[
     "STRATEGY_LIFECYCLE_UPDATED",
     "KNOWLEDGE_ARTIFACT_PROPOSED",
     "KNOWLEDGE_ARTIFACT_ADMISSION_REVIEWED",
+    "CYCLE_FAILED",
+    "ORDER_FILL_CONFIRMED",
 ]
 JournalEventStatus = Literal["SUCCESS", "FAILED", "ACCEPTED", "REJECTED", "SKIPPED"]
 StrategyParameter = str | int | float | bool
@@ -95,6 +97,14 @@ class AccountSnapshot(BaseModel):
     buying_power: float
     portfolio_value: float = Field(ge=0)
     daily_loss: float = Field(ge=0)
+    day_start_equity_known: bool = True
+    """False when the broker did not report a day-start equity.
+
+    The gateway sets this explicitly. It defaults to True only so that
+    hand-built snapshots stay valid; the daily-loss kill switch must never be
+    silently disabled by a missing field, so Guardian fails closed on BUY
+    when this is False instead of trusting a fabricated loss of 0.0.
+    """
 
 
 class PositionSnapshot(BaseModel):

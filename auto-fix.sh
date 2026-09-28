@@ -1,86 +1,124 @@
 #!/bin/bash
-# 自动修复脚本：用 Python 处理 JSON，避免 sed-on-JSON / bc 等脆弱操作
-set -e
+# Detect-and-report for core strategy-file drift.
+#
+# This script deliberately has NO repair capability.
+#
+# It used to rewrite strategy JSON files to force `enabled=true`, force
+# `lifecycle="PROBATION"`, and RAISE `max_position_value` to a hard-coded 5000.0.
+# Every one of those is forbidden by AGENTS.md section 6:
+#
+#   - raising a risk limit automatically weakens a hard risk control;
+#   - forcing `lifecycle` overrode a StrategyLifecycleManager decision made
+#     from real evidence;
+#   - both bypassed StrategyAdmission and Guardian.review_strategy entirely.
+#
+# It also reported `fixed-size-sell-001` as "normal" while that file was
+# `enabled=true, lifecycle=RETIRED` and therefore unselectable, because it only
+# ever checked `enabled`.
+#
+# Risk-limit and lifecycle changes must flow through Guardian + StrategyAdmission
+# as an explicit, journaled operation. This script only observes.
+#
+# Exit codes: 0 = healthy, 1 = drift detected, 2 = could not check.
+set -uo pipefail
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 2
 LOG_FILE="auto-fix.log"
+
+CONDA_BIN="${CONDA_BIN:-/home/liuyime2/miniconda3/bin/conda}"
+if [ ! -x "$CONDA_BIN" ]; then
+  echo "FATAL: conda not found at $CONDA_BIN (set CONDA_BIN)" | tee -a "$LOG_FILE"
+  exit 2
+fi
 
 {
   echo "========================================"
-  echo "🔧 Quant Voyager 自动修复"
+  echo "QuantVoyager strategy drift check (read-only)"
   echo "========================================"
   date
   echo
 } | tee -a "$LOG_FILE"
 
-# 用 Python 完成所有 JSON 检查与修复，返回 1 = 实际改动过文件
-PYTHONPATH=src conda run --no-capture-output -n llm python - <<'PY' | tee -a "$LOG_FILE"
-import json, os, sys
+PYTHONPATH=src "$CONDA_BIN" run --no-capture-output -n llm python - <<'PY' 2>&1 | tee -a "$LOG_FILE"
+import json
+import sys
 from pathlib import Path
 
 CORE = ["fixed-size-buy-001", "fixed-size-sell-001",
         "trend-follow-buy-001", "trend-follow-sell-001"]
 STRAT_DIR = Path("runtime/min_agent/strategies")
-PID_FILE  = Path("runtime/min_agent/daemon.pid")
+PID_FILE = Path("runtime/min_agent/daemon.pid")
 
-fixed = 0
+problems = 0
 
-print("[1/3] 检查策略文件 (enabled / lifecycle / max_position_value)...")
+print("[1/2] Core strategy files (read-only)...")
+if not STRAT_DIR.is_dir():
+    print(f"  ERROR: {STRAT_DIR} does not exist")
+    sys.exit(2)
 for name in CORE:
-    p = STRAT_DIR / f"{name}.json"
-    if not p.exists():
-        print(f"  ⚠️ {name} 不存在")
+    path = STRAT_DIR / f"{name}.json"
+    if not path.exists():
+        print(f"  DRIFT {name}: file missing")
+        problems += 1
         continue
-    data = json.loads(p.read_text())
-    changed = False
-    if not data.get("enabled", False):
-        data["enabled"] = True
-        data["lifecycle"] = "PROBATION"
-        changed = True
-        print(f"  ✅ 启用 {name}")
-    if data.get("max_position_value", 0) < 1000:
-        data["max_position_value"] = 5000.0
-        changed = True
-        print(f"  ✅ 提升 {name} max_position_value -> 5000.0")
-    if changed:
-        p.write_text(json.dumps(data, indent=2))
-        fixed += 1
+    try:
+        data = json.loads(path.read_text())
+    except Exception as exc:
+        print(f"  DRIFT {name}: unreadable ({exc})")
+        problems += 1
+        continue
+    enabled = data.get("enabled", False)
+    lifecycle = data.get("lifecycle", "<unset>")
+    max_pos = data.get("max_position_value")
+    selectable = bool(enabled) and lifecycle not in {"PAUSED", "RETIRED"}
+    if not selectable:
+        print(f"  DRIFT {name}: enabled={enabled} lifecycle={lifecycle} -> unselectable")
+        problems += 1
     else:
-        print(f"  ✓ {name} 正常")
+        print(f"  ok    {name}: enabled={enabled} lifecycle={lifecycle} max_position_value={max_pos}")
 
-print("\n[2/3] 检查守护进程 PID 文件...")
+print("\n[2/2] Daemon pidfile...")
 if PID_FILE.exists():
     try:
         pid = int(PID_FILE.read_text().strip())
-        os.kill(pid, 0)
-        print(f"  ✓ 守护进程运行中 (PID {pid})")
-    except (ValueError, ProcessLookupError, PermissionError):
-        PID_FILE.unlink(missing_ok=True)
-        fixed += 1
-        print(f"  ✅ 清理 stale PID 文件")
+    except ValueError:
+        print(f"  DRIFT pidfile is not an integer: {PID_FILE.read_text().strip()!r}")
+        problems += 1
+    else:
+        try:
+            import os
+
+            os.kill(pid, 0)
+            print(f"  ok    daemon pid {pid} is running")
+        except ProcessLookupError:
+            print(f"  DRIFT stale pidfile: pid {pid} is not running")
+            problems += 1
+        except PermissionError:
+            print(f"  ok    daemon pid {pid} exists (not signalable)")
+        except Exception as exc:
+            print(f"  DRIFT pid probe failed: {exc}")
+            problems += 1
 else:
-    print("  ℹ️ 守护进程未运行")
+    print("  info  daemon not running (no pidfile)")
 
-print(f"\n[3/3] 修复总数: {fixed}")
-sys.exit(0 if fixed == 0 else 1)
+print(f"\ndrift_count: {problems}")
+print("NOTE: this script no longer repairs anything by design (AGENTS.md 6).")
+print("      To change a risk limit or a lifecycle state, use StrategyAdmission")
+print("      via the curriculum path so the change is journaled and Guardian-reviewed.")
+sys.exit(1 if problems else 0)
 PY
-PY_RC=${PIPESTATUS[0]}
-
-# 仅在实际改动过文件时跑一次回归测试 (~30s)
-if [ "$PY_RC" -eq 1 ]; then
-  {
-    echo
-    echo "[verify] 跑 pytest 验证修复..."
-  } | tee -a "$LOG_FILE"
-  PYTHONPATH=src conda run -n llm python -m pytest tests/min_agent -q -x --tb=short 2>&1 | tee -a "$LOG_FILE"
-fi
+RC=${PIPESTATUS[0]}
 
 {
   echo
   echo "========================================"
-  if [ "$PY_RC" -eq 1 ]; then echo "✅ 自动修复完成 (有改动)"; else echo "✅ 自动修复完成 (无需修复)"; fi
+  case "$RC" in
+    0) echo "OK: no drift detected" ;;
+    1) echo "DRIFT DETECTED: $RC issue(s) - see above. Not auto-repaired by design." ;;
+    *) echo "CHECK FAILED (rc=$RC): could not verify state" ;;
+  esac
   echo "========================================"
   echo
 } | tee -a "$LOG_FILE"
 
-exit 0
+exit "$RC"

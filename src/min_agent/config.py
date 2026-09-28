@@ -19,6 +19,8 @@ class AgentConfig:
     journal_path: Path
     max_position_value: float
     max_daily_loss: float
+    max_total_exposure: float = 0.0
+    stale_after_seconds: int = 900
 
     # Daemon settings
     daemon_interval_seconds: int = 300
@@ -46,6 +48,8 @@ class AgentConfig:
         if mode == "live":
             raise ValueError("live mode is not allowed in phase 1")
 
+        max_position_value = _positive_float("MIN_AGENT_MAX_POSITION_VALUE", 5000.0)
+
         return cls(
             mode=mode,
             symbols=symbols,
@@ -59,8 +63,10 @@ class AgentConfig:
             model=os.getenv("MIN_AGENT_MODEL", "deepseek-r1:8b"),
             gpu_devices=os.getenv("MIN_AGENT_GPU_DEVICES", "0"),
             journal_path=Path(os.getenv("MIN_AGENT_JOURNAL", "runtime/min_agent/journal.jsonl")),
-            max_position_value=float(os.getenv("MIN_AGENT_MAX_POSITION_VALUE", "5000")),
-            max_daily_loss=float(os.getenv("MIN_AGENT_MAX_DAILY_LOSS", "500")),
+            max_position_value=max_position_value,
+            max_daily_loss=_positive_float("MIN_AGENT_MAX_DAILY_LOSS", 500.0),
+            max_total_exposure=_positive_float("MIN_AGENT_MAX_TOTAL_EXPOSURE", max_position_value * 4.0),
+            stale_after_seconds=_positive_int("MIN_AGENT_STALE_AFTER_SECONDS", 900),
             daemon_interval_seconds=_positive_int("MIN_AGENT_DAEMON_INTERVAL_SECONDS", 300),
             max_trades_per_day=_positive_int("MIN_AGENT_MAX_TRADES_PER_DAY", 10),
             max_daily_cycles=_positive_int("MIN_AGENT_MAX_DAILY_CYCLES", 288),

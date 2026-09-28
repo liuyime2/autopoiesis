@@ -132,6 +132,12 @@ class AgentDaemon:
             record = self.loop.run_once(symbol)
             self.cycle_count += 1
             self.daily_cycle_count += 1
+            if record is None:
+                # run_once already journaled CYCLE_FAILED; there is no snapshot
+                # to report on, so do not invent a last_cycle_id.
+                self.error_count += 1
+                self._heartbeat("BACKING_OFF", f"broker data unavailable for {symbol}")
+                return
             self.last_cycle_id = record.cycle_id
             self._post_cycle()
             self._heartbeat("RUNNING", f"completed cycle for {symbol}")

@@ -1,8 +1,24 @@
 #!/bin/bash
-set -euo pipefail
+# Foreground supervisor for the min_agent paper daemon.
+#
+# Prefer a real service manager (`systemd --user`, see
+# docs/superpowers/specs/2026-09-28-min-agent-runbook.md). This wrapper exists
+# for interactive use and adds the two things the original version lacked:
+#
+#   - crash-loop detection. A broker blip used to kill the daemon every 30s
+#     forever, appending ~2,880 log lines a day with no signal that anything was
+#     wrong, while heartbeat.json kept claiming "RUNNING".
+#   - a real interpreter path. `conda` is not on PATH here.
+set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$ROOT_DIR"
+cd "$ROOT_DIR" || exit 2
+
+CONDA_BIN="${CONDA_BIN:-/home/liuyime2/miniconda3/bin/conda}"
+if [ ! -x "$CONDA_BIN" ]; then
+  echo "FATAL: conda not found at $CONDA_BIN (set CONDA_BIN)" >&2
+  exit 2
+fi
 
 export PYTHONPATH="$ROOT_DIR/src:${PYTHONPATH:-}"
 export MIN_AGENT_MODE="${MIN_AGENT_MODE:-paper}"
@@ -18,14 +34,44 @@ export MIN_AGENT_EVIDENCE_INTERVAL_SECONDS="${MIN_AGENT_EVIDENCE_INTERVAL_SECOND
 export MIN_AGENT_REFLECTION_INTERVAL_SECONDS="${MIN_AGENT_REFLECTION_INTERVAL_SECONDS:-1800}"
 export MIN_AGENT_CURRICULUM_INTERVAL_SECONDS="${MIN_AGENT_CURRICULUM_INTERVAL_SECONDS:-3600}"
 
-mkdir -p runtime/min_agent
+RESTART_DELAY_SECONDS="${RESTART_DELAY_SECONDS:-30}"
+MAX_FAST_RESTARTS="${MAX_FAST_RESTARTS:-5}"
+FAST_EXIT_WINDOW_SECONDS="${FAST_EXIT_WINDOW_SECONDS:-300}"
+CRASH_LOOP_EXIT_CODE=75
 
-echo "Starting min_agent 24x7 paper daemon in conda env: llm"
-echo "Logs: runtime/min_agent/daemon.log"
+mkdir -p runtime/min_agent
+LOG=runtime/min_agent/daemon.log
+
+echo "Starting min_agent paper daemon (conda env: llm)"
+echo "Logs: $LOG"
+
+fast_restarts=0
 
 while true; do
-    echo "[$(date --iso-8601=seconds)] starting min_agent daemon" | tee -a runtime/min_agent/daemon.log
-    conda run -n llm python -m min_agent.cli --daemon >> runtime/min_agent/daemon.log 2>&1 || true
-    echo "[$(date --iso-8601=seconds)] daemon exited; restarting in 30 seconds" | tee -a runtime/min_agent/daemon.log
-    sleep 30
+  started_at=$(date +%s)
+  echo "[$(date --iso-8601=seconds)] starting min_agent daemon" | tee -a "$LOG"
+
+  "$CONDA_BIN" run --no-capture-output -n llm python -m min_agent.cli --daemon >> "$LOG" 2>&1
+  rc=$?
+  ended_at=$(date +%s)
+  uptime=$((ended_at - started_at))
+
+  echo "[$(date --iso-8601=seconds)] daemon exited rc=$rc after ${uptime}s" | tee -a "$LOG"
+
+  if [ "$uptime" -lt "$FAST_EXIT_WINDOW_SECONDS" ]; then
+    fast_restarts=$((fast_restarts + 1))
+    echo "[$(date --iso-8601=seconds)] fast exit #$fast_restarts (under ${FAST_EXIT_WINDOW_SECONDS}s)" | tee -a "$LOG"
+    if [ "$fast_restarts" -ge "$MAX_FAST_RESTARTS" ]; then
+      echo "CRASH LOOP: $fast_restarts restarts within ${FAST_EXIT_WINDOW_SECONDS}s each." | tee -a "$LOG"
+      echo "Refusing to restart again. Diagnose before relaunching:" | tee -a "$LOG"
+      echo "  tail -n 60 $LOG" | tee -a "$LOG"
+      echo "  PYTHONPATH=src $CONDA_BIN run -n llm python -m min_agent.cli --check-env" | tee -a "$LOG"
+      exit "$CRASH_LOOP_EXIT_CODE"
+    fi
+  else
+    fast_restarts=0
+  fi
+
+  echo "[$(date --iso-8601=seconds)] restarting in ${RESTART_DELAY_SECONDS}s" | tee -a "$LOG"
+  sleep "$RESTART_DELAY_SECONDS"
 done

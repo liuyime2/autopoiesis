@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from min_agent.data_gateway import BrokerDataUnavailable
 from min_agent.loop import TradingLoop
 from min_agent.models import (
     AccountSnapshot,
@@ -216,3 +217,99 @@ def test_trading_loop_fail_closes_on_trade_counter_error():
 
     assert record.decision.action == "HOLD"
     assert "trade_counter_error" in record.error
+
+
+class BrokerOutageDataGateway:
+    def snapshot(self, symbol):
+        raise BrokerDataUnavailable("could not read broker positions: ConnectTimeout")
+
+
+class EventCapturingJournal(FakeJournal):
+    def __init__(self):
+        super().__init__()
+        self.events = []
+
+    def append_event(self, event):
+        self.events.append(event)
+
+
+def test_broker_outage_is_journaled_instead_of_being_invisible():
+    """The gateway used to be called outside the try-block, so a broker outage
+    incremented an error counter and journaled nothing at all."""
+    journal = EventCapturingJournal()
+    loop = TradingLoop(
+        data_gateway=BrokerOutageDataGateway(),
+        decision_engine=FakeDecisionEngine(),
+        guardian=FakeGuardian(),
+        executor=FakeExecutor(),
+        journal=journal,
+        mode="paper",
+    )
+
+    record = loop.run_once("SPY")
+
+    assert record is None
+    assert journal.records == []
+    assert len(journal.events) == 1
+    event = journal.events[0]
+    assert event.event_type == "CYCLE_FAILED"
+    assert event.status == "FAILED"
+    assert event.payload["symbol"] == "SPY"
+    assert event.payload["error_type"] == "BrokerDataUnavailable"
+    assert event.payload["paper_only"] is True
+
+
+def test_broker_outage_does_not_invent_a_snapshot():
+    """A CycleRecord requires a DataSnapshot. Synthesising one to record the
+    failure would be fabricated market data (AGENTS.md 2)."""
+    journal = EventCapturingJournal()
+    loop = TradingLoop(
+        data_gateway=BrokerOutageDataGateway(),
+        decision_engine=FakeDecisionEngine(),
+        guardian=FakeGuardian(),
+        executor=FakeExecutor(),
+        journal=journal,
+        mode="paper",
+    )
+
+    assert loop.run_once("SPY") is None
+    assert journal.events[0].payload.get("last_price") is None
+    assert journal.events[0].payload.get("equity") is None
+
+
+def test_decision_and_trade_counter_errors_both_survive_in_the_record():
+    class BothFail:
+        def decide(self, context):
+            raise ValueError("decision blew up")
+
+        def trades_today(self):
+            raise RuntimeError("counter blew up")
+
+    journal = FakeJournal()
+    loop = TradingLoop(
+        data_gateway=FakeDataGateway(),
+        decision_engine=BothFail(),
+        guardian=FakeGuardian(),
+        executor=FakeExecutor(),
+        journal=journal,
+        mode="paper",
+        trade_counter=BothFail(),
+    )
+
+    record = loop.run_once("SPY")
+
+    assert "decision_error" in record.error
+    assert "trade_counter_error" in record.error
+
+
+def test_successful_cycle_has_no_error_field():
+    loop = TradingLoop(
+        data_gateway=FakeDataGateway(),
+        decision_engine=FakeDecisionEngine(),
+        guardian=FakeGuardian(),
+        executor=FakeExecutor(),
+        journal=FakeJournal(),
+        mode="paper",
+    )
+
+    assert loop.run_once("SPY").error is None

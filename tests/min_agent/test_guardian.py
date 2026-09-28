@@ -243,3 +243,87 @@ def test_guardian_review_strategy_rejects_over_hard_position_limit():
 
     assert result.approved is False
     assert "hard limit" in result.reason
+
+
+def test_total_exposure_cap_blocks_a_buy_that_would_breach_it():
+    """There was no aggregate exposure control at all: max_total_exposure was
+    never passed by the CLI, and guardian.py only ever summed an always-empty
+    position book."""
+    guardian = Guardian(
+        allowlist={"SPY"},
+        max_position_value=5_000,
+        max_daily_loss=500,
+        max_total_exposure=8_000,
+    )
+    held = (PositionSnapshot(symbol="QQQ", quantity=10, market_value=7_000),)
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=5, confidence=0.9, rationale="probe")
+
+    result = guardian.review(decision, snapshot(last_price=500, positions=held))
+
+    assert result.approved is False
+    assert result.reason == "total exposure exceeds hard limit"
+
+
+def test_total_exposure_cap_allows_a_buy_that_stays_under_it():
+    guardian = Guardian(
+        allowlist={"SPY"},
+        max_position_value=5_000,
+        max_daily_loss=500,
+        max_total_exposure=8_000,
+    )
+    held = (PositionSnapshot(symbol="QQQ", quantity=10, market_value=3_000),)
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=5, confidence=0.9, rationale="probe")
+
+    assert guardian.review(decision, snapshot(last_price=500, positions=held)).approved is True
+
+
+def test_per_order_cap_does_not_bound_aggregate_exposure_without_the_total_cap():
+    """Documents why max_total_exposure must be configured: each BUY is under the
+    per-order cap, so only the aggregate cap stops unbounded accumulation."""
+    guardian = Guardian(
+        allowlist={"SPY"},
+        max_position_value=5_000,
+        max_daily_loss=500,
+        max_total_exposure=None,
+    )
+    held = (PositionSnapshot(symbol="SPY", quantity=40, market_value=20_000),)
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=5, confidence=0.9, rationale="probe")
+
+    assert guardian.review(decision, snapshot(last_price=500, positions=held)).approved is True
+
+
+def test_sell_is_permitted_once_the_position_book_is_read():
+    held = (PositionSnapshot(symbol="SPY", quantity=10, market_value=5_000),)
+    guardian = Guardian(allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500)
+    decision = TradeDecision(symbol="SPY", action="SELL", quantity=4, confidence=0.9, rationale="exit")
+
+    assert guardian.review(decision, snapshot(last_price=500, positions=held)).approved is True
+
+
+def test_unmeasured_day_start_equity_fails_closed_on_buy():
+    """The old fallback computed equity - portfolio_value, always 0.0, which
+    silently disabled the daily-loss kill switch."""
+    guardian = Guardian(allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500)
+    unmeasured = snapshot(last_price=500).model_copy(
+        update={
+            "account": snapshot(last_price=500).account.model_copy(
+                update={"daily_loss": 0.0, "day_start_equity_known": False}
+            )
+        }
+    )
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=1, confidence=0.9, rationale="probe")
+
+    result = guardian.review(decision, unmeasured)
+
+    assert result.approved is False
+    assert result.reason == "account day-start equity unavailable"
+
+
+def test_unmeasured_day_start_equity_still_permits_hold():
+    guardian = Guardian(allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500)
+    unmeasured = snapshot().model_copy(
+        update={"account": snapshot().account.model_copy(update={"day_start_equity_known": False})}
+    )
+    decision = TradeDecision(symbol="SPY", action="HOLD", quantity=0, confidence=0.0, rationale="wait")
+
+    assert guardian.review(decision, unmeasured).approved is True
