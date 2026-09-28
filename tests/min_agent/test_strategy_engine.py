@@ -571,3 +571,60 @@ def test_a_hold_baseline_supplies_no_capability():
     assert StrategySelector._declared_actions(baseline) == set()
     # SELL is uncovered and the baseline cannot supply it, so the BUY is served.
     assert StrategySelector._supplies_capability(buy, {"SELL"}) is False
+
+
+def test_coverage_is_evaluated_at_the_real_price_not_on_paper():
+    """A TREND_FOLLOW nominally covers both sides but only emits the one its
+    reference price points at. Counting the live one as an exit is what let the
+    library report SELL as covered while being unable to sell - the same
+    nominal-versus-executable error already fixed in the curriculum."""
+    from min_agent.strategy_engine import StrategySelector
+
+    stale = StrategySpec(
+        strategy_id="trend-follow-buy-001", name="tf", kind="TREND_FOLLOW", symbols=("SPY",),
+        parameters={"threshold_pct": 0.01, "confidence": 0.55, "quantity": 1,
+                    "reference_price": 735.0057},
+        max_position_value=5000, enabled=True, lifecycle="ACTIVE",
+        created_at=datetime.fromisoformat("2026-06-18T03:21:34+00:00"), rationale="t",
+    )
+
+    buy = StrategySpec(
+        strategy_id="fixed-size-buy-001", name="b", kind="FIXED_SIZE", symbols=("SPY",),
+        parameters={"action": "BUY", "quantity": 1, "confidence": 0.7},
+        max_position_value=1000, enabled=True, lifecycle="ACTIVE",
+        created_at=datetime.fromisoformat("2026-06-18T03:21:34+00:00"), rationale="t",
+    )
+    # Nominally the stale trend follower is a route to a SELL...
+    assert StrategySelector._declared_actions(stale) == {"BUY", "SELL"}
+    assert StrategySelector._uncovered_capabilities([stale, buy]) == {"SELL"}
+    # ...but at the real price it only ever buys, so that route does not exist in
+    # this regime and SELL stays uncovered for a different, executable reason.
+    assert StrategySelector._declared_actions(stale, 767.25) == {"BUY"}
+    assert StrategySelector._uncovered_capabilities([stale, buy], 767.25) == {"SELL"}
+    # Below its reference it really does sell, and the difference shows up in what
+    # it declares - which is what the selector acts on.
+    assert StrategySelector._declared_actions(stale, 700.0) == {"SELL"}
+
+
+def test_the_sell_strategy_is_served_when_it_is_the_only_working_exit():
+    from min_agent.strategy_engine import StrategySelector
+
+    stale = StrategySpec(
+        strategy_id="trend-follow-buy-001", name="tf", kind="TREND_FOLLOW", symbols=("SPY",),
+        parameters={"threshold_pct": 0.01, "confidence": 0.55, "quantity": 1,
+                    "reference_price": 735.0057},
+        max_position_value=5000, enabled=True, lifecycle="ACTIVE",
+        created_at=datetime.fromisoformat("2026-06-18T03:21:34+00:00"), rationale="t",
+    )
+    exit_spec = StrategySpec(
+        strategy_id="trend-follow-sell-002", name="exit", kind="TREND_FOLLOW", symbols=("SPY",),
+        parameters={"threshold_pct": 0.01, "confidence": 0.6, "quantity": 1,
+                    "reference_price": 780.0},
+        max_position_value=5000, enabled=True, lifecycle="PROBATION",
+        created_at=datetime.fromisoformat("2026-09-28T18:15:18+00:00"), rationale="t",
+    )
+
+    # At 767 the stale trend follower buys, the new one sells, and SELL has exactly
+    # one working route - so it is the strategy that must be exercised.
+    assert StrategySelector._supplies_capability(exit_spec, {"SELL"}, 767.25) is True
+    assert StrategySelector._supplies_capability(stale, {"SELL"}, 767.25) is False

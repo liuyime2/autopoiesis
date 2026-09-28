@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from min_agent.atomicio import file_lock, write_text_atomic
@@ -166,7 +167,12 @@ class StrategySelector:
         self.min_probation_submitted_orders = min_probation_submitted_orders
         self.exploration_floor_cycles = exploration_floor_cycles
 
-    def select(self, strategies: list[StrategySpec], results: list[StrategyResult] | None = None) -> StrategySpec | None:
+    def select(
+        self,
+        strategies: list[StrategySpec],
+        results: list[StrategyResult] | None = None,
+        last_price: float | None = None,
+    ) -> StrategySpec | None:
         eligible = [
             strategy
             for strategy in strategies
@@ -187,10 +193,10 @@ class StrategySelector:
             # 105 minutes at the shipped 5-minute interval. A capability the
             # library is otherwise missing has no other route to being tried, so it
             # is served first, and only then does the queue return to oldest-first.
-            unexercised = self._uncovered_capabilities(tradable)
+            unexercised = self._uncovered_capabilities(tradable, last_price)
             if unexercised:
                 for strategy in sorted(probation, key=lambda s: (s.created_at, s.strategy_id)):
-                    if self._supplies_capability(strategy, unexercised):
+                    if self._supplies_capability(strategy, unexercised, last_price):
                         return strategy
             return sorted(probation, key=lambda strategy: (strategy.created_at, strategy.strategy_id))[0]
 
@@ -238,36 +244,48 @@ class StrategySelector:
         return min(buys, key=lambda s: (0 if s.kind == "FIXED_SIZE" else 1, _probe_quantity(s), s.created_at, s.strategy_id))
 
     @staticmethod
-    def _declared_actions(strategy: StrategySpec) -> set[str]:
-        """The actions a strategy can express, from its own declaration.
+    def _declared_actions(strategy: StrategySpec, last_price: float | None = None) -> set[str]:
+        """The actions a strategy can express.
 
-        A TREND_FOLLOW takes its side from price, so it can cover either.
-        HOLD_BASELINE covers nothing: holding is not a capability.
+        With a real price, coverage is what the strategy would actually emit right
+        now. A TREND_FOLLOW derives its side from price, so it covers both actions
+        only in the abstract: the live one is anchored to a June reference of 735.01
+        and SPY trades at 767, so it emits BUY and would keep emitting BUY while
+        price stays above 727.6. Counting it as an exit is what let the library
+        report SELL as covered while being unable to sell - the same
+        nominal-versus-executable error already fixed in the curriculum.
         """
         if strategy.kind == "HOLD_BASELINE":
             return set()
         if strategy.kind == "TREND_FOLLOW":
-            return {"BUY", "SELL"}
+            if last_price is None:
+                return {"BUY", "SELL"}
+            produced = _produced_action(strategy, last_price)
+            return {produced} if produced else set()
         action = str(strategy.parameters.get("action", "")).upper()
         return {action} if action in {"BUY", "SELL"} else set()
 
     @classmethod
-    def _uncovered_capabilities(cls, strategies: list[StrategySpec]) -> set[str]:
+    def _uncovered_capabilities(
+        cls, strategies: list[StrategySpec], last_price: float | None = None
+    ) -> set[str]:
         """Actions the whole library expresses exactly once, or not at all.
 
-        A capability covered by several strategies has routes to being tried. One
-        covered by a single strategy - or by none - does not, and that is the
-        strategy the queue was about to keep deferring.
+        A capability with several routes has other chances to be tried. One with a
+        single route - or none - does not, and that is the strategy the queue was
+        about to keep deferring.
         """
         counts: dict[str, int] = {"BUY": 0, "SELL": 0}
         for strategy in strategies:
-            for action in cls._declared_actions(strategy):
+            for action in cls._declared_actions(strategy, last_price):
                 counts[action] = counts.get(action, 0) + 1
         return {action for action, count in counts.items() if count <= 1}
 
     @classmethod
-    def _supplies_capability(cls, strategy: StrategySpec, uncovered: set[str]) -> bool:
-        return bool(cls._declared_actions(strategy) & uncovered)
+    def _supplies_capability(
+        cls, strategy: StrategySpec, uncovered: set[str], last_price: float | None = None
+    ) -> bool:
+        return bool(cls._declared_actions(strategy, last_price) & uncovered)
 
     def _needs_probation(self, strategy: StrategySpec, result: StrategyResult | None) -> bool:
         if strategy.lifecycle != "PROBATION":
@@ -365,3 +383,30 @@ def _probe_quantity(strategy: StrategySpec) -> int:
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             return max(1, int(value))
     return 1
+
+
+def _produced_action(strategy: StrategySpec, last_price: float) -> str | None:
+    """The action this strategy would emit at `last_price`, or None if it holds.
+
+    Only the strategy's own sizing and threshold logic is consulted. Guardian is
+    not simulated: it stays authoritative at execution time, and the selector is
+    deciding what to exercise, not what would be approved.
+    """
+    from min_agent.models import AccountSnapshot, DataSnapshot
+
+    try:
+        symbol = strategy.symbols[0]
+        snapshot = DataSnapshot(
+            symbol=symbol,
+            timestamp=datetime.now(tz=timezone.utc),
+            market_open=True,
+            last_price=last_price,
+            source="selector_capability_probe",
+            account=AccountSnapshot(
+                equity=0.0, cash=0.0, buying_power=0.0, portfolio_value=0.0, daily_loss=0.0
+            ),
+        )
+        decision = StrategyExecutor().decide(strategy, snapshot)
+    except Exception:
+        return None
+    return decision.action if decision.action in {"BUY", "SELL"} else None

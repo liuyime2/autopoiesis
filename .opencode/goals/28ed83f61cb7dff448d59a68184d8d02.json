@@ -32,7 +32,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790621683690,
+      "observedAt": 1790621983884,
       "lastRequestTokens": 123572,
       "lastInputTokens": 123153
     }
@@ -74,12 +74,9 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 130,
+  "progressRevision": 133,
   "observedProgressRevision": 103,
   "progressFingerprints": [
-    "shell:a23b2ff7b23550223d09bd4b103201455fcb0eb4bf0f2d285167601caf1de4b1",
-    "shell:2e7f84ac7db89880fadd597fda32f485bae93805b137e5ebb1c43b296e765310",
-    "shell:5c7d21f2e83df3fb8af283ed9fb7654147d2352203a2c62cea62f47c3719208c",
     "shell:2c6cc2c635b7f22ddababdb9637c04ef19663be77c0460d0cc4c8633257023e3",
     "shell:6948a2fa34e8515a408393e6088991e86eb046c24f5cc1e6e449c0d28f00ded9",
     "shell:d38efb28ba13c4bd6881a3bfe01c1f8d847cf143afce7f0af03a28c92523c08d",
@@ -204,25 +201,13 @@
     "shell-worktree:e467d3bc2295d3debc90057291cbcaf681439d0b047063724e999fecb32896df",
     "shell-worktree:1cce373d819d539c08e32d0c42915d0152e0c1800eaf6cff5b1f0e1e33f7aee7",
     "shell-worktree:c787f8c4415ab1b601c126b23ae74dcfd31aa7cf5bbfbe958cced0a189a31104",
-    "shell-worktree:daae7075828de58291a6d9642d5c8cad40fc0de658297e8745d1eb76baf6e87c"
+    "shell-worktree:daae7075828de58291a6d9642d5c8cad40fc0de658297e8745d1eb76baf6e87c",
+    "shell-worktree:3b3723eb866eed937ec2381b83c75a1099b389bdbf8a305995c81d2a8a92513d",
+    "shell-worktree:c919e374ec75b086d1c0cd278e5e747d65b7ea8b32e100bebf1f6c8129a3dce7",
+    "shell-worktree:0491f9e3d6d5b0314eadd2f4713efcf45f114606a91f4691c53f3513eb61b7cb"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790615404631,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790615417726,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790615476992,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790615506484,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -457,11 +442,26 @@
       "time": 1790621621304,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790621688988,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790621777431,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790621902958,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 1139,
+  "storageGeneration": 1166,
   "createdAt": 1790603839704,
-  "updatedAt": 1790621683690,
+  "updatedAt": 1790621983884,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:74578f8684f4a8634c2d684d2edeb15ac210e5081552d64bab0cc091cc564445",

@@ -169,6 +169,13 @@ class HybridDecisionEngine:
             selected = self.policy_engine.selector.select(
                 self.policy_engine.strategy_library.list(),
                 self._results(),
+                # Coverage is evaluated at the real price, not on paper. A
+                # TREND_FOLLOW nominally covers both sides but only emits the one
+                # its reference price points at, and the live one is anchored to a
+                # June reference of 735.01 while SPY trades at 767 - so counting it
+                # as an exit let the library report SELL as covered while being
+                # unable to sell.
+                snapshot.last_price,
             )
             if selected is not None:
                 strategy_id = selected.strategy_id
