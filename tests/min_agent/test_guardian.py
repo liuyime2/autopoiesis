@@ -327,3 +327,60 @@ def test_unmeasured_day_start_equity_still_permits_hold():
     decision = TradeDecision(symbol="SPY", action="HOLD", quantity=0, confidence=0.0, rationale="wait")
 
     assert guardian.review(decision, unmeasured).approved is True
+
+
+def test_daily_loss_limit_gates_orders_but_not_a_hold():
+    """The daily-loss check used to sit above the HOLD branch, so a deliberate
+    no-op was journalled as a risk REJECTION instead of a hold. It made the audit
+    trail read as if the agent had been stopped by the risk system when in fact
+    it had chosen not to trade."""
+    guardian = Guardian(allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500)
+    breached = snapshot(daily_loss=600)
+
+    hold = TradeDecision(symbol="SPY", action="HOLD", quantity=0, confidence=0.0, rationale="no edge")
+    assert guardian.review(hold, breached).approved is True
+
+    buy = TradeDecision(symbol="SPY", action="BUY", quantity=1, confidence=0.9, rationale="probe")
+    assert guardian.review(buy, breached).reason == "daily loss limit reached"
+
+    sell = TradeDecision(symbol="SPY", action="SELL", quantity=1, confidence=0.9, rationale="exit")
+    assert guardian.review(sell, breached).reason == "daily loss limit reached"
+
+
+def test_a_hold_is_skipped_not_rejected_after_the_daily_loss_limit_is_hit(tmp_path):
+    """End to end through the loop: the journal should say SKIPPED for a hold."""
+    from min_agent.executor import AlpacaPaperExecutor
+    from min_agent.journal import JsonlJournal
+    from min_agent.loop import TradingLoop
+    from min_agent.models import AccountSnapshot, DataSnapshot
+
+    class Broker:
+        def submit_order(self, **kwargs):  # pragma: no cover - must not be reached
+            raise AssertionError("a HOLD must never reach the broker")
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl", lock=False)
+    loop = TradingLoop(
+        data_gateway=object(),
+        decision_engine=type("E", (), {"decide": lambda self, ctx: _hold(ctx["symbol"])})(),
+        guardian=Guardian(allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500),
+        executor=AlpacaPaperExecutor(client=Broker(), base_url="https://paper-api.alpaca.markets"),
+        journal=journal,
+        mode="paper",
+    )
+    loop.data_gateway = type("G", (), {"snapshot": staticmethod(lambda s: DataSnapshot(
+        symbol=s, timestamp=datetime.now(timezone.utc), market_open=True, last_price=500.0, source="alpaca",
+        account=AccountSnapshot(equity=100_000, cash=100_000, buying_power=100_000,
+                                portfolio_value=100_000, daily_loss=600),
+    ))})()
+
+    record = loop.run_once("SPY")
+
+    assert record.decision.action == "HOLD"
+    assert record.guardian.approved is True
+    assert record.execution.status == "SKIPPED"
+
+
+def _hold(symbol):
+    from min_agent.models import TradeDecision
+
+    return TradeDecision(symbol=symbol, action="HOLD", quantity=0, confidence=0.0, rationale="no edge")

@@ -49,11 +49,16 @@ class Guardian:
         if self._is_stale(snapshot, now=now):
             return GuardianResult(approved=False, reason="data snapshot is stale")
 
-        if snapshot.account.daily_loss >= self.max_daily_loss:
-            return GuardianResult(approved=False, reason="daily loss limit reached")
-
         if decision.action == "HOLD":
             return GuardianResult(approved=True, reason="approved")
+
+        # Every remaining check gates an actual order. The daily-loss limit used
+        # to sit above the HOLD branch, so a deliberate no-op was journalled as
+        # a risk REJECTION rather than a hold - misleading in the audit trail,
+        # even though the reason is in SYSTEM_REJECTION_REASONS and so was never
+        # charged against the strategy.
+        if snapshot.account.daily_loss >= self.max_daily_loss:
+            return GuardianResult(approved=False, reason="daily loss limit reached")
 
         if not snapshot.account.day_start_equity_known:
             return GuardianResult(approved=False, reason="account day-start equity unavailable")

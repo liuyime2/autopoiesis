@@ -197,16 +197,69 @@ def test_doctor_writes_a_bounded_history(config, monkeypatch):
     assert "strategy library" in json.loads(lines[0])["failures"]
 
 
-def test_quiet_mode_is_one_line(config, capsys):
+def test_quiet_mode_is_one_line(monkeypatch, tmp_path, capsys):
+    """Assert the *contract*, not an ambient value.
+
+    main() reads AgentConfig.from_env(), so this test is driven by the real
+    environment and the real runtime directory. It previously asserted rc == 1,
+    which was true only while no credentials were exported - so it passed in
+    June and failed the moment real credentials arrived. Both halves were
+    wrong: it did not control its inputs, and it hardcoded a value that the
+    surrounding system legitimately changes.
+    """
+    import os
+
     from min_agent.cli import main
+
+    for key in list(os.environ):
+        if key.startswith(("ALPACA", "APCA", "MIN_AGENT", "OLLAMA")):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("MIN_AGENT_JOURNAL", str(tmp_path / "journal.jsonl"))
+    monkeypatch.setenv("MIN_AGENT_HEARTBEAT", str(tmp_path / "heartbeat.json"))
+    monkeypatch.setenv("MIN_AGENT_STRATEGY_DIR", str(tmp_path / "strategies"))
+    monkeypatch.setenv("MIN_AGENT_KNOWLEDGE_DIR", str(tmp_path / "knowledge"))
+    monkeypatch.setenv("MIN_AGENT_PIDFILE", str(tmp_path / "daemon.pid"))
 
     rc = main(["--doctor", "--quiet", "--skip-broker"])
     out = capsys.readouterr().out.strip()
 
+    assert len(out.splitlines()) == 1, f"quiet mode must emit one line, got {out!r}"
+    assert out.startswith("ok=")
+    assert " exit=" in out
+    assert "failures=[" in out and "warnings=[" in out and "checks=" in out
+    # With no credentials, no strategies and no ollama, it must fail - and say so.
     assert rc == 1
-    assert len(out.splitlines()) == 1
-    assert out.startswith("ok=False exit=1")
-    assert "failures=[" in out
+    assert "alpaca credentials" in out
+    # And it must have recorded that reading durably.
+    assert (tmp_path / "doctor-history.jsonl").exists()
+
+
+def test_quiet_mode_exit_code_matches_the_reported_result(monkeypatch, tmp_path, capsys):
+    """The exit code and the printed verdict must not disagree - that mismatch is
+    the exact bug this whole refactor was about."""
+    import os
+
+    from min_agent.cli import main
+
+    for key in list(os.environ):
+        if key.startswith(("ALPACA", "APCA", "MIN_AGENT", "OLLAMA")):
+            monkeypatch.delenv(key, raising=False)
+    for name, value in (
+        ("MIN_AGENT_JOURNAL", "journal.jsonl"),
+        ("MIN_AGENT_HEARTBEAT", "heartbeat.json"),
+        ("MIN_AGENT_STRATEGY_DIR", "strategies"),
+        ("MIN_AGENT_KNOWLEDGE_DIR", "knowledge"),
+        ("MIN_AGENT_PIDFILE", "daemon.pid"),
+    ):
+        monkeypatch.setenv(name, str(tmp_path / value))
+
+    rc = main(["--doctor", "--quiet", "--skip-broker"])
+    out = capsys.readouterr().out.strip()
+
+    reported_ok = out.split()[0] == "ok=True"
+    reported_exit = int(out.split("exit=")[1].split()[0])
+    assert reported_exit == rc
+    assert reported_exit == (0 if reported_ok else 1)
 
 
 def test_doctor_fails_when_no_strategy_is_selectable(config):

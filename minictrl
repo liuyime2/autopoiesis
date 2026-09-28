@@ -135,13 +135,34 @@ case "$cmd" in
     render tools/min-agent.service.in  "$SERVICE_NAME"
     render tools/watchdog.service.in   quant-watchdog.service
     cp "$ROOT_DIR/tools/watchdog.timer" "$RUN_UNITS/quant-watchdog.timer"
+    # A transient unit with the same name shadows the file unit and, once it is
+    # gone, the manager keeps reporting "Unit not found" for the file unit too.
+    # Clear any transient record before reloading.
+    for u in ollama.service "$SERVICE_NAME" quant-watchdog.service; do
+      systemctl --user stop "$u" 2>/dev/null
+      systemctl --user reset-failed "$u" 2>/dev/null
+    done
     systemctl --user daemon-reload
+    # `enable` is deliberately NOT used. It creates a symlink under
+    # $HOME/.config/systemd/user/default.target.wants/, and /home is at user
+    # quota on this host, so it always fails. It is also meaningless for units
+    # living in /run, which is tmpfs. Start them, and say plainly that they are
+    # not reboot-persistent.
     for u in ollama.service "$SERVICE_NAME" quant-watchdog.timer; do
-      if systemctl --user list-unit-files 2>/dev/null | grep -q "^$u "; then
-        systemctl --user enable --now "$u" >/dev/null 2>&1 && echo "  started $u" \
-          || echo "  FAILED to start $u" >&2
+      if ! systemctl --user list-unit-files 2>/dev/null | grep -q "^$u "; then
+        echo "  $u is not visible to the manager" >&2
+        continue
+      fi
+      if systemctl --user start "$u" 2>/dev/null; then
+        sleep 1
+        state="$(systemctl --user is-active "$u" 2>&1)"
+        if [ "$state" = "active" ]; then
+          echo "  started $u"
+        else
+          echo "  $u start returned 0 but is $state" >&2
+        fi
       else
-        echo "  $u still not visible to the manager" >&2
+        echo "  FAILED to start $u" >&2
       fi
     done
     echo
