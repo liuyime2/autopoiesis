@@ -147,21 +147,17 @@ back empty. Verified against the live API before changing anything.
 3. **Reboot-persistent units.** The systemd units are installed under
    `/run/user/$UID/systemd/user` and do not survive a reboot, because `$HOME` is
    out of quota and the user manager cannot create `~/.config/systemd/user`.
-   Freeing a few MB fixes it: `./minictrl install-service` then works.
+   Freeing a few MB fixes it:
+
+   ```bash
    ./minictrl install-service && ./minictrl service enable --now
    ```
 
-2. ~~A reachable Ollama~~ — **done.** The port mismatch recorded in
-   `ollama.log` (`:11435`, `CUDA_VISIBLE_DEVICES=3`) is resolved: Ollama now
-   serves on `127.0.0.1:11434` with `deepseek-r1:8b` on GPU 0. Both LLM paths
-   were then verified against the real model:
-
-   - trade decision, 8.4 s, valid JSON, `decision_source: "llm"`, grounded in
-     the supplied context (`"No positions, no open orders... Holding position."`)
-   - curriculum proposal, 2.5 s, parsed to a valid `CurriculumTask` with
-     `source: "llm"`
-
-   Start it again after a reboot with:
+4. **Ollama after a reboot** — the port mismatch recorded in `ollama.log`
+   (`:11435`, `CUDA_VISIBLE_DEVICES=3`) is resolved; it serves on
+   `127.0.0.1:11434` with `deepseek-r1:8b` on GPU 0, verified against the real
+   model on both paths. It is not reboot-persistent either, and the watchdog unit
+   will not bring it back if `$HOME` is still out of quota:
 
    ```bash
    OLLAMA_MODELS=/localscratch/liuyime2/ollama_local/models \

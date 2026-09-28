@@ -32,7 +32,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790620837079,
+      "observedAt": 1790620931054,
       "lastRequestTokens": 123572,
       "lastInputTokens": 123153
     }
@@ -74,7 +74,7 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 125,
+  "progressRevision": 127,
   "observedProgressRevision": 103,
   "progressFingerprints": [
     "shell:b9b4f44e7752e63facec64bdbc0ee8e6fcf0da7ffe5fcf0ae88310a924a1a1f4",
@@ -201,25 +201,12 @@
     "shell-worktree:fc6657d44fdba0fe1a3bc7dbc56a6c9d12eb4b5ec278f2b78956afafba79fc73",
     "shell-worktree:2aef8fe4e753dcf1c5020b64be7c82d21284b662fa30e1aa3f39030eef55f4d1",
     "shell-worktree:0941ffa59b14452cf37a50a67e662dfc0853a098e01396a764fd3978a331cfda",
-    "shell-worktree:2786a6f51dad3d893919fa6b9577f93b2e1dc75162545728e309c34495e45536"
+    "shell-worktree:2786a6f51dad3d893919fa6b9577f93b2e1dc75162545728e309c34495e45536",
+    "shell-worktree:e0b33943c8ffb650c4a1c4050eb52b0590475193c550912422f3a778620f0030",
+    "shell-worktree:e467d3bc2295d3debc90057291cbcaf681439d0b047063724e999fecb32896df"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790614126975,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790614487132,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790614931296,
-      "summary": "Two-phase LLM curriculum shipped (0708824, 350 passed, audit 91/91). Live proof: the self-evolution loop proposed fixed-size-probe-0001 with source=llm, admission rejected a fabricated 100.0 reference price 87% from real SPY, retry accepted → strategy selectable in PROBATION. Curriculum had been on deterministic fallback for the whole audit; root cause was ollama's decoder ignoring const/additionalProperties inside oneOf, not prompt quality.",
-      "next": "Fix the five defects the SELL→closed-lot audit found: (1) per-strategy lot ledger cannot close a lot opened by another strategy, so per-strategy PnL is structurally unreachable; (2) 24h PnL evidence window cannot match a lot opened in June; (3) verified PnL dropped at evaluator.py:131 when the strategy has no cycles in the reflection window; (4) strategy_engine.py:237 applies the new-exposure cap to SELL, converting/truncating exits; (5) guardian min_confidence=0.5 is admission-blind, so a low-confidence SELL is unexecutable forever."
-    },
     {
       "time": 1790615009265,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -454,11 +441,26 @@
       "time": 1790620836095,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790620837879,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790620842055,
+      "summary": "Goal substantially achieved and the system now runs end to end. 384 tests pass, audit 91/91, doctor 0 failures. The self-evolution loop is live: 222 curriculum proposals with source=llm, the model closed its own capability gap (proposed fixed-size-sell-002 with action=SELL, daemon admitted trend-follow-sell-002, uncovered_actions_now became []). Broker evidence ingestion now returns SUCCESS with real portfolio history. Ten defects fixed beyond the original 15, all on the SELL -> closed-lot -> per-strategy-PnL path, each with a regression test. STATUS.md rewritten to the true state. Two of four success criteria remain unmet and are honestly documented: per-strategy PnL is empty because no lot has ever been closed, and every BUY is structurally impossible while the account holds ~$76k against an untouched $20k cap.",
+      "next": "Remaining work needs market hours and a model decision, not another code fix. The selector serves probation oldest-first so the new SELL strategy is ~90 minutes behind five BUY strategies in the queue; once it is selected, whether the model sells is its own call and must not be prompted. If a closed lot forms, the account-level lot ledger will produce per-strategy PnL and the PnL-driven lifecycle transition becomes observable. Also outstanding: user action to rotate the Alpaca paper key pair (pasted into the session) and free a few MB of $HOME quota so minictrl install-service becomes reboot-persistent."
+    },
+    {
+      "time": 1790620914198,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 1078,
+  "storageGeneration": 1101,
   "createdAt": 1790603839704,
-  "updatedAt": 1790620837079,
+  "updatedAt": 1790620931054,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:74578f8684f4a8634c2d684d2edeb15ac210e5081552d64bab0cc091cc564445",
