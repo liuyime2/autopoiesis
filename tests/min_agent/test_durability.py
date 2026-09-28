@@ -460,3 +460,101 @@ def test_only_accepted_lessons_are_consulted(tmp_path):
     decision = PolicyEngine(strategy_library=library, knowledge_library=knowledge).decide_snapshot(_snapshot())
 
     assert "lessons:" not in decision.rationale
+
+
+def test_a_reader_never_sees_a_half_written_append(tmp_path):
+    """Appends held an exclusive lock but readers took none, so a scan running
+    while the daemon was mid-append could observe a partial line and count it as
+    corruption. This showed up as an intermittent test failure only when the
+    daemon was live."""
+    journal = JsonlJournal(tmp_path / "j.jsonl", lock=True)
+    journal.append(_record("seed"))  # so the first read is never empty
+    stop = threading.Event()
+    torn = []
+    counter = [0]
+
+    def writer():
+        while not stop.is_set():
+            counter[0] += 1
+            journal.append(_record(f"c{counter[0]}"))
+
+    thread = threading.Thread(target=writer, daemon=True)
+    thread.start()
+    try:
+        for _ in range(30):
+            records = journal.read_all()
+            if journal.last_dropped_lines:
+                torn.append(journal.last_dropped_lines)
+            assert records
+    finally:
+        stop.set()
+        thread.join(timeout=5)
+
+    assert counter[0] > 0, "the writer never ran, so the test proved nothing"
+    assert torn == [], f"reader observed a torn append {len(torn)} time(s)"
+
+
+def test_a_reader_waits_for_the_writer_then_succeeds(tmp_path):
+    """A reader must block while an appender holds the lock rather than read a
+    half-written file, and must not give up on its own default timeout."""
+    import time
+
+    journal = JsonlJournal(tmp_path / "j.jsonl", lock=True)
+    journal.append(_record("c1"))
+    lock_path = journal.path.with_suffix(journal.path.suffix + ".lock")
+    result = {}
+
+    from min_agent.atomicio import file_lock
+
+    def reader():
+        started = time.perf_counter()
+        try:
+            result["n"] = len(journal.read_all())
+        except Exception as exc:
+            result["error"] = exc
+        result["waited"] = time.perf_counter() - started
+
+    with file_lock(lock_path, exclusive=True, timeout=5.0):
+        thread = threading.Thread(target=reader, daemon=True)
+        thread.start()
+        time.sleep(0.4)
+        held = thread.is_alive()
+    thread.join(timeout=10)
+
+    assert held, "the reader should still be blocked while the writer holds the lock"
+    assert "error" not in result, f"reader gave up instead of waiting: {result.get('error')!r}"
+    assert result["n"] == 1
+    assert result["waited"] >= 0.4
+
+
+def test_a_reader_gives_up_after_its_own_timeout(tmp_path):
+    """If the writer is wedged, a reader must eventually raise rather than hang
+    a cycle forever."""
+    import time
+
+    journal = JsonlJournal(tmp_path / "j.jsonl", lock=True)
+    journal.append(_record("c1"))
+    journal._read_lock  # shared by design
+    from min_agent.atomicio import file_lock
+
+    lock_path = journal.path.with_suffix(journal.path.suffix + ".lock")
+    outcome = {}
+
+    def reader():
+        from contextlib import nullcontext
+
+        # Bypass the default 10s with a 0.2s budget, as a caller with a short
+        # deadline would.
+        try:
+            with file_lock(lock_path, exclusive=False, timeout=0.2):
+                outcome["acquired"] = True
+        except TimeoutError as exc:
+            outcome["error"] = exc
+
+    with file_lock(lock_path, exclusive=True, timeout=5.0):
+        thread = threading.Thread(target=reader, daemon=True)
+        thread.start()
+        thread.join(timeout=5)
+
+    assert outcome.get("acquired") is None
+    assert isinstance(outcome.get("error"), TimeoutError)

@@ -34,6 +34,10 @@ export MIN_AGENT_MODEL="${MIN_AGENT_MODEL:-deepseek-r1:8b}"
 export MIN_AGENT_CURRICULUM_ENABLED="${MIN_AGENT_CURRICULUM_ENABLED:-true}"
 
 SERVICE_NAME="min-agent.service"
+ENVBIN="${MIN_AGENT_ENVBIN:-/localscratch/liuyime2/conda_env/llm/bin}"
+PYTHON_BIN="$ENVBIN/python"
+# Credentials live outside the working tree so git can never see them.
+ENV_FILE="${MIN_AGENT_ENV_FILE:-$XDG_CONFIG_HOME/min-agent/env}"
 
 agent() {
   timeout "${MIN_AGENT_TIMEOUT:-180}" "$CONDA_BIN" run --no-capture-output -n llm python -m min_agent.cli "$@"
@@ -60,13 +64,99 @@ case "$cmd" in
   audit)           "$CONDA_BIN" run --no-capture-output -n llm python tools/audit_defects.py ;;
 
   install-service)
-    unit="$HOME/.config/systemd/user/$SERVICE_NAME"
-    mkdir -p "$HOME/.config/systemd/user"
-    sed -e "s|@ROOT@|$ROOT_DIR|g" -e "s|@CONDA@|$CONDA_BIN|g" \
-        "$ROOT_DIR/tools/min-agent.service.in" > "$unit"
+    # The systemd user manager resolves unit paths from ITS OWN start-time
+    # environment, not this shell's. On this host it has no XDG_CONFIG_HOME, so
+    # it only searches $HOME/.config/systemd/user - and /home is at user quota,
+    # so that directory cannot be created. Detect that instead of silently
+    # writing somewhere the manager will never read.
+    unit_dir="$("$ROOT_DIR/tools/systemd_unit_dir.sh")" || exit 2
+    mkdir -p "$unit_dir" || { echo "FATAL: cannot create $unit_dir" >&2; exit 2; }
+    render() {
+      sed -e "s|@ROOT@|$ROOT_DIR|g" \
+          -e "s|@PYTHON@|$PYTHON_BIN|g" \
+          -e "s|@ENVBIN@|$ENVBIN|g" \
+          -e "s|@ENVFILE@|$ENV_FILE|g" \
+          "$1" > "$unit_dir/$2"
+    }
+    render "$ROOT_DIR/tools/min-agent.service.in"  "$SERVICE_NAME"
+    render "$ROOT_DIR/tools/ollama.service.in"     "ollama.service"
+    render "$ROOT_DIR/tools/watchdog.service.in"  "quant-watchdog.service"
+    cp "$ROOT_DIR/tools/watchdog.timer" "$unit_dir/quant-watchdog.timer"
+    systemd-analyze verify "$unit_dir/$SERVICE_NAME" "$unit_dir/ollama.service" \
+        "$unit_dir/quant-watchdog.service" 2>&1 | grep -viE "not found|canonical" | head -5
     systemctl --user daemon-reload
-    echo "wrote $unit"
-    echo "enable with: minictrl service enable"
+    echo "wrote 4 unit files to $unit_dir"
+
+    # Verify the manager can actually SEE them before claiming success. The
+    # manager resolves unit paths from its own start-time environment, so a
+    # directory that is merely writable is not enough. Claiming "enabled" after
+    # a failed enable is the same false-success bug that let auto-fix.sh report a
+    # dead strategy as healthy.
+    failed=0
+    for u in "$SERVICE_NAME" ollama.service quant-watchdog.timer; do
+      if systemctl --user enable "$u" 2>/dev/null; then
+        echo "  enabled $u"
+      else
+        echo "  NOT enabled $u - the manager did not pick it up" >&2
+        failed=$((failed + 1))
+      fi
+    done
+    if [ "$failed" -ne 0 ]; then
+      echo >&2
+      echo "Unit files are written but the systemd user manager cannot see them." >&2
+      echo "It searches \$HOME/.config/systemd/user unless it was started with" >&2
+      echo "XDG_CONFIG_HOME set; /home is at user quota so that path cannot exist." >&2
+      echo "The daemon and watchdog still work as transient units:" >&2
+      echo "  ./minictrl install-transient" >&2
+      echo "For permanent enablement, free a few MB under \$HOME and re-run this." >&2
+      exit 1
+    fi
+    echo "all enabled. start with: minictrl service start"
+    ;;
+
+  install-transient)
+    # The systemd user manager will not see units in $XDG_CONFIG_HOME (it
+    # resolves paths from its own start-time environment, and /home is at user
+    # quota so $HOME/.config/systemd/user cannot exist). It DOES search
+    # /run/user/$UID/systemd/user, which is writable. Install the rendered unit
+    # files there and start them, so the unit file stays the single source of
+    # truth instead of its properties being duplicated onto a command line.
+    # Not persistent across a manager restart or a reboot; see the note below.
+    RUN_UNITS="/run/user/$(id -u)/systemd/user"
+    [ -d "$RUN_UNITS" ] || { echo "FATAL: $RUN_UNITS does not exist" >&2; exit 2; }
+    render() {
+      sed -e "s|@ROOT@|$ROOT_DIR|g" \
+          -e "s|@PYTHON@|$PYTHON_BIN|g" \
+          -e "s|@ENVBIN@|$ENVBIN|g" \
+          -e "s|@ENVFILE@|$ENV_FILE|g" \
+          "$ROOT_DIR/$1" > "$RUN_UNITS/$2"
+    }
+    render tools/ollama.service.in     ollama.service
+    render tools/min-agent.service.in  "$SERVICE_NAME"
+    render tools/watchdog.service.in   quant-watchdog.service
+    cp "$ROOT_DIR/tools/watchdog.timer" "$RUN_UNITS/quant-watchdog.timer"
+    systemctl --user daemon-reload
+    for u in ollama.service "$SERVICE_NAME" quant-watchdog.timer; do
+      if systemctl --user list-unit-files 2>/dev/null | grep -q "^$u "; then
+        systemctl --user enable --now "$u" >/dev/null 2>&1 && echo "  started $u" \
+          || echo "  FAILED to start $u" >&2
+      else
+        echo "  $u still not visible to the manager" >&2
+      fi
+    done
+    echo
+    echo "These live in /run, so they are lost on reboot or a manager restart."
+    echo "For permanent enablement, free a few MB under \$HOME so that"
+    echo "\$HOME/.config/systemd/user can be created, then: minictrl install-service"
+    ;;
+
+  service-status)
+    for u in ollama.service "$SERVICE_NAME" quant-watchdog.timer; do
+      printf '  %-26s active=%-10s enabled=%-10s restarts=%s\n' "$u" \
+        "$(systemctl --user is-active "$u" 2>&1)" \
+        "$(systemctl --user is-enabled "$u" 2>&1)" \
+        "$(systemctl --user show "$u" -p NRestarts --value 2>/dev/null)"
+    done
     ;;
 
   service)
