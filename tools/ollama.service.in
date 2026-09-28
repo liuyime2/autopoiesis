@@ -20,6 +20,13 @@ ExecStart=/localscratch/liuyime2/ollama_local/bin/ollama serve
 Environment=OLLAMA_MODELS=/localscratch/liuyime2/ollama_local/models
 Environment=OLLAMA_HOST=127.0.0.1:11434
 Environment=CUDA_VISIBLE_DEVICES=0
+# From 0.13 the build auto-detects Vulkan as well as CUDA, and will shard one
+# model across all ten GPUs over PCIe instead of using CUDA on a single device:
+# deepseek-r1:8b went from 2.3s to 254s per call, and the journal shows a
+# five-minute curriculum call. Off, so the pin above is what actually runs.
+# OLLAMA_LLM_LIBRARY=cuda is NOT set: naming a library made this build fall
+# back to CPU entirely.
+Environment=OLLAMA_VULKAN=0
 
 Environment=OLLAMA_KEEP_ALIVE=30m
 Environment=OLLAMA_MAX_LOADED_MODELS=2

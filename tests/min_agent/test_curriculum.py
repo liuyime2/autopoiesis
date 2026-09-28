@@ -1,4 +1,5 @@
 import json
+import pytest
 from datetime import datetime, timezone
 
 from min_agent.curriculum import StructuredCurriculumAgent, parse_curriculum_task_json
@@ -923,3 +924,61 @@ def test_a_required_action_is_never_hold_baseline():
     assert _required_action({"uncovered_actions_now": ["SELL"]}) == "SELL"
     assert _required_action({"uncovered_actions_now": ["BUY", "SELL"]}) == "BUY|SELL"
     assert _required_action({"uncovered_actions_now": None}) is None
+
+
+def test_a_percentage_threshold_is_rescaled_to_the_fraction_the_schema_wants():
+    """Measured on the real models: the constrained decoder enforces `required` and
+    `enum` but ignores numeric `minimum`/`maximum`. A schema bounding
+    threshold_pct to 0.2 did not stop the model answering 1.5, 0.5 or 2.5 - it
+    reads the field as a percentage every time, and saying "0.02 means 2 percent"
+    in the prompt only moved it from 1.5 to 0.5. So every TREND_FOLLOW proposal was
+    rejected by StrategySpec and the curriculum fell back.
+
+    Rescaling is a unit conversion, not an invented value: 1.5 means 1.5 percent.
+    """
+    from min_agent.curriculum import _normalise_units
+
+    for given, expected in ((1.5, 0.015), (0.5, 0.005), (2.5, 0.025), (20, 0.2)):
+        params = {"threshold_pct": given}
+        _normalise_units(params)
+        assert params["threshold_pct"] == pytest.approx(expected)
+
+    # Values already in range, and nonsense, are left alone for the validator.
+    for given in (0.02, 0.1, 0.2):
+        params = {"threshold_pct": given}
+        _normalise_units(params)
+        assert params["threshold_pct"] == given
+    for given in (150.0, -1.0, 0):
+        params = {"threshold_pct": given}
+        _normalise_units(params)
+        assert params["threshold_pct"] == given
+
+
+def test_a_percentage_threshold_actually_produces_an_admissible_strategy():
+    """End to end: the model answers 1.5, and what reaches StrategySpec validates."""
+    import json as _json
+    from datetime import datetime, timezone
+
+    from min_agent.curriculum import generate_curriculum_task_json, kind_selection_schema
+    from min_agent.models import CurriculumTask, StrategySpec
+
+    def call(prompt, schema):
+        if set(schema.get("required", [])) == {"kind", "why"}:
+            return '{"kind": "TREND_FOLLOW", "why": "w"}'
+        return _json.dumps({
+            "strategy_id": "tf-1", "name": "TF", "symbols": ["SPY"],
+            "max_position_value": 5000, "rationale": "r", "enabled": True,
+            "kind": "TREND_FOLLOW",
+            "threshold_pct": 1.5,          # the model answers in percent
+            "reference_price": 766.0,
+            "quantity": 1, "confidence": 0.6,
+        })
+
+    task = CurriculumTask.model_validate_json(
+        generate_curriculum_task_json(call=call, prompt_context={})
+    )
+    spec = task.strategy_spec
+
+    # Re-validated through the model that admission uses.
+    StrategySpec.model_validate(spec.model_dump())
+    assert spec.parameters["threshold_pct"] == pytest.approx(0.015)

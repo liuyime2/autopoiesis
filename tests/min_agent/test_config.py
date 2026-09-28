@@ -16,7 +16,11 @@ def test_config_defaults_to_paper_deepseek_and_gpu_0(monkeypatch):
     config = AgentConfig.from_env()
 
     assert config.mode == "paper"
-    assert config.model == "deepseek-r1:8b"
+    # qwen3.8:27b needs ollama >= 0.13 for the qwen35 architecture, and it is far
+    # more token-efficient on the real curriculum call: 1022 tokens and ~36s
+    # against 15005 tokens and ~132s for deepseek-r1:8b, which thought for four
+    # minutes on a one-line answer.
+    assert config.model == "qwen3.8:27b"
     assert config.gpu_devices == "0"
     assert config.max_position_value == 5_000
     assert "SPY" in config.allowlist
@@ -104,3 +108,26 @@ def test_config_rejects_invalid_learning_cadence(monkeypatch):
         assert "MIN_AGENT_CURRICULUM_EVERY" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_the_model_is_pinned_in_the_same_three_places_everywhere():
+    """The model was switched in config.py alone and the health check went on
+    reporting the old one: minictrl exported MIN_AGENT_MODEL=deepseek-r1:8b and
+    the systemd unit pinned it too, so both overrode the default. A model upgrade
+    that the operator cannot see in `doctor` is not an upgrade."""
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    default = AgentConfig.from_env.__wrapped__ if False else None  # noqa: F841
+    from min_agent.config import AgentConfig as C
+
+    expected = C.from_env().model
+    pinned = set()
+    for name in ("minictrl", "tools/min-agent.service.in"):
+        text = (root / name).read_text()
+        for match in re.findall(r'MIN_AGENT_MODEL[^"\n]*?([a-z0-9.]+:[a-z0-9.-]+)', text):
+            pinned.add(match)
+    assert pinned == {expected}, (
+        f"model pinned as {sorted(pinned)} but the config default is {expected!r}"
+    )

@@ -22,7 +22,7 @@ Environment=MIN_AGENT_MODE=paper
 Environment=ALPACA_BASE_URL=https://paper-api.alpaca.markets
 Environment=APCA_API_BASE_URL=https://paper-api.alpaca.markets
 Environment=OLLAMA_BASE_URL=http://127.0.0.1:11434
-Environment=MIN_AGENT_MODEL=deepseek-r1:8b
+Environment=MIN_AGENT_MODEL=qwen3.8:27b
 Environment=MIN_AGENT_GPU_DEVICES=0
 Environment=MIN_AGENT_CURRICULUM_ENABLED=true
 Environment=MIN_AGENT_MAINTENANCE_INTERVAL_SECONDS=900

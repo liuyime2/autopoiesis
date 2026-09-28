@@ -546,6 +546,20 @@ _KIND_SELECT_SCHEMA = {
 }
 
 
+_FIELD_GUIDE = {
+    "TREND_FOLLOW": (
+        " Units: threshold_pct is a FRACTION, not a percentage - 0.02 means 2 "
+        "percent, and it must be greater than 0 and at most 0.2. reference_price is "
+        "the real last_price from the context, copied exactly."
+    ),
+    "FIXED_SIZE": (
+        " Units: confidence is a number between 0 and 1, not a percentage; quantity "
+        "is a whole number of shares."
+    ),
+    "HOLD_BASELINE": "",
+}
+
+
 def strategy_spec_schema(kind: str) -> dict[str, object]:
     """A flat, fully-required schema for one strategy kind."""
     params = _KIND_PARAM_SCHEMA[kind]
@@ -580,6 +594,7 @@ def generate_curriculum_task_json(*, call, prompt_context: dict, spec_hint: str 
     if spec_hint is not None:
         spec = _json_load(call(
             f"Return the strategy_spec for kind {spec_hint}. Every field is required. "
+            f"{_FIELD_GUIDE.get(spec_hint, '')}"
             f"Use only the symbols present in the context. {prompt_context_text(prompt_context)}",
             strategy_spec_schema(spec_hint),
         ))
@@ -612,6 +627,7 @@ def generate_curriculum_task_json(*, call, prompt_context: dict, spec_hint: str 
         kind = "FIXED_SIZE"
     spec = _json_load(call(
         f"Return the strategy_spec for kind {kind}. Every field is required. "
+        + _FIELD_GUIDE.get(kind, "")
         + (
             f"Set parameters.action to {required} - the library cannot express it "
             f"and the open positions have no exit. "
@@ -662,6 +678,7 @@ def _reshape_spec(spec: dict, kind: str) -> dict:
     """
     params_source = _KIND_PARAM_SCHEMA[kind]
     params = {key: spec[key] for key in params_source if key in spec}
+    _normalise_units(params)
     return {
         "strategy_id": spec.get("strategy_id"),
         "name": spec.get("name"),
@@ -673,6 +690,27 @@ def _reshape_spec(spec: dict, kind: str) -> dict:
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
         "rationale": spec.get("rationale"),
     }
+
+
+def _normalise_units(params: dict) -> None:
+    """Convert a percentage into the fraction the schema and validator want.
+
+    Measured on the real models: the constrained decoder enforces `required` and
+    `enum` but ignores numeric `minimum`/`maximum`, so a schema that says
+    threshold_pct <= 0.2 does not stop the model answering 1.5, 0.5 or 2.5 - it
+    reads the field as a percentage every time, and the prompt saying "0.02 means
+    2 percent" only moved it from 1.5 to 0.5. A value above the maximum and within
+    100 is therefore rescaled by a factor of 100, which is a unit conversion
+    rather than a value the agent invented: 1.5 means 1.5 percent, so 0.015.
+
+    Without this every TREND_FOLLOW proposal is rejected by StrategySpec and the
+    curriculum silently falls back.
+    """
+    threshold = params.get("threshold_pct")
+    if isinstance(threshold, (int, float)) and not isinstance(threshold, bool):
+        value = float(threshold)
+        if 0.2 < value <= 100.0:
+            params["threshold_pct"] = value / 100.0
 
 
 def _task_id(kind: str, spec: dict) -> str:

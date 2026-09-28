@@ -61,7 +61,7 @@ class AgentConfig:
             or os.getenv("APCA_API_BASE_URL")
             or "https://paper-api.alpaca.markets",
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/"),
-            model=os.getenv("MIN_AGENT_MODEL", "deepseek-r1:8b"),
+            model=os.getenv("MIN_AGENT_MODEL", "qwen3.8:27b"),
             gpu_devices=os.getenv("MIN_AGENT_GPU_DEVICES", "0"),
             journal_path=Path(os.getenv("MIN_AGENT_JOURNAL", "runtime/min_agent/journal.jsonl")),
             max_position_value=max_position_value,

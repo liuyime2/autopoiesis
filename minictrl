@@ -30,7 +30,7 @@ export MIN_AGENT_MODE="${MIN_AGENT_MODE:-paper}"
 export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
 export APCA_API_BASE_URL="https://paper-api.alpaca.markets"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
-export MIN_AGENT_MODEL="${MIN_AGENT_MODEL:-deepseek-r1:8b}"
+export MIN_AGENT_MODEL="${MIN_AGENT_MODEL:-qwen3.8:27b}"
 export MIN_AGENT_CURRICULUM_ENABLED="${MIN_AGENT_CURRICULUM_ENABLED:-true}"
 
 SERVICE_NAME="min-agent.service"
