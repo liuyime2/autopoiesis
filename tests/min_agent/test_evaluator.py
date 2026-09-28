@@ -403,3 +403,168 @@ def test_evaluator_reports_partial_close_and_remaining_open_lot():
     assert report.pnl.strategy_realized_pnl == {"s1": 8.0}
     assert report.pnl.closed_lots[0].quantity == 1
     assert report.pnl.open_lot_quantity == {"s1:SPY": 1}
+
+
+# ---------------------------------------------------------------------------
+# The lot ledger is account-level, attributed to the strategy that opened a lot.
+# Before this, lots were tracked per strategy, so the selector returning one
+# strategy per cycle made a closed lot structurally unreachable: the strategy
+# that opened a lot and the strategy that closed it were always different, and a
+# SELL could only match lots in its own tracker. All four SELL decisions this
+# agent ever produced therefore closed nothing, and strategy_realized_pnl was
+# empty and could never be otherwise.
+# ---------------------------------------------------------------------------
+
+
+def test_a_sell_by_one_strategy_closes_a_lot_opened_by_another():
+    opened = make_record(cycle_id="buy", action="BUY", quantity=2, strategy_id="opener")
+    closed = make_record(
+        cycle_id="sell", action="SELL", quantity=2, strategy_id="closer", last_price=110
+    )
+    evidence = BrokerEvidenceBatch(
+        generated_at=datetime.now(tz=timezone.utc),
+        window_start=datetime(2026, 6, 3, tzinfo=timezone.utc),
+        window_end=datetime(2026, 6, 4, tzinfo=timezone.utc),
+        activities=(
+            BrokerFillActivity(
+                activity_id="a-buy", order_id="oid-buy", client_order_id="cid-buy",
+                symbol="SPY", side="BUY", quantity=2, price=100,
+                transaction_time=datetime(2026, 6, 3, 14, 30, tzinfo=timezone.utc),
+            ),
+            BrokerFillActivity(
+                activity_id="a-sell", order_id="oid-sell", client_order_id="cid-sell",
+                symbol="SPY", side="SELL", quantity=2, price=110,
+                transaction_time=datetime(2026, 6, 3, 15, 0, tzinfo=timezone.utc),
+            ),
+        ),
+    )
+
+    report = DeterministicEvaluator().evaluate([opened, closed], evidence=evidence)
+
+    assert report.pnl.closed_lot_count == 1
+    # The lot's PnL belongs to the strategy that opened it, not the one that closed it.
+    assert report.pnl.strategy_realized_pnl == {"opener": 20.0}
+    assert "closer" not in report.pnl.strategy_realized_pnl
+    lot = report.pnl.closed_lots[0]
+    assert lot.strategy_id == "opener"
+    assert lot.closing_strategy_id == "closer"
+    assert lot.realized_pnl == 20.0
+    assert report.pnl.open_lot_quantity == {}
+
+
+def test_an_unmatched_sell_is_reported_instead_of_being_dropped():
+    """The old code incremented a tracker field nothing ever read, so a SELL that
+    closed nothing vanished without a trace."""
+    record = make_record(cycle_id="sell", action="SELL", quantity=5, strategy_id="closer")
+    evidence = BrokerEvidenceBatch(
+        generated_at=datetime.now(tz=timezone.utc),
+        window_start=datetime(2026, 6, 3, tzinfo=timezone.utc),
+        window_end=datetime(2026, 6, 4, tzinfo=timezone.utc),
+        activities=(
+            BrokerFillActivity(
+                activity_id="a-sell", order_id="oid-sell", client_order_id="cid-sell",
+                symbol="SPY", side="SELL", quantity=5, price=110, fees=1.0,
+                transaction_time=datetime(2026, 6, 3, 15, 0, tzinfo=timezone.utc),
+            ),
+        ),
+    )
+
+    report = DeterministicEvaluator().evaluate([record], evidence=evidence)
+
+    assert report.pnl.closed_lot_count == 0
+    assert report.pnl.unmatched_sell_quantity == {"closer": 5.0}
+    assert report.pnl.strategy_fees == {"closer": 1.0}, "the sell fee is still charged"
+    assert "no prior linked BUY lot" in " ".join(report.pnl.missing_reasons)
+
+
+def test_journal_confirmed_fills_establish_lots_opened_before_the_window():
+    """The broker evidence batch only covers a short window, but the agent's lots
+    were opened weeks earlier, so a SELL inside the window matched nothing and
+    closed_lot_count stayed at 0 forever. Journal-confirmed fills restore the cost
+    basis, and the price in each is one the broker reported."""
+    closed = make_record(
+        cycle_id="sell", action="SELL", quantity=1, strategy_id="closer", last_price=800
+    )
+    evidence = BrokerEvidenceBatch(
+        generated_at=datetime.now(tz=timezone.utc),
+        window_start=datetime(2026, 6, 18, tzinfo=timezone.utc),
+        window_end=datetime(2026, 6, 19, tzinfo=timezone.utc),
+        activities=(
+            BrokerFillActivity(
+                activity_id="a-sell", order_id="oid-sell", client_order_id="cid-sell",
+                symbol="SPY", side="SELL", quantity=1, price=800,
+                transaction_time=datetime(2026, 6, 18, 15, 0, tzinfo=timezone.utc),
+            ),
+        ),
+    )
+    seeded = (
+        BrokerFillActivity(
+            activity_id="cid-old-buy", client_order_id="cid-old-buy", symbol="SPY",
+            side="BUY", quantity=1, price=700,
+            transaction_time=datetime(2026, 6, 11, 14, 30, tzinfo=timezone.utc),
+            source="alpaca_journal_confirmed_fill",
+            strategy_id="opener",
+        ),
+    )
+
+    report = DeterministicEvaluator().evaluate([closed], evidence=evidence, seeded_fills=seeded)
+
+    assert report.pnl.closed_lot_count == 1
+    assert report.pnl.strategy_realized_pnl == {"opener": 100.0}
+    assert report.pnl.closed_lots[0].opened_at == datetime(2026, 6, 11, 14, 30, tzinfo=timezone.utc)
+    assert any(attribution.seeded for attribution in report.pnl.fill_attributions)
+
+
+def test_a_fill_present_in_both_sources_is_applied_once():
+    record = make_record(cycle_id="buy", action="BUY", quantity=2, strategy_id="s1")
+    activity = BrokerFillActivity(
+        activity_id="cid-buy", order_id="oid-buy", client_order_id="cid-buy", symbol="SPY",
+        side="BUY", quantity=2, price=100,
+        transaction_time=datetime(2026, 6, 3, 14, 30, tzinfo=timezone.utc),
+    )
+    evidence = BrokerEvidenceBatch(
+        generated_at=datetime.now(tz=timezone.utc),
+        window_start=datetime(2026, 6, 3, tzinfo=timezone.utc),
+        window_end=datetime(2026, 6, 4, tzinfo=timezone.utc),
+        activities=(activity,),
+    )
+
+    report = DeterministicEvaluator().evaluate([record], evidence=evidence, seeded_fills=(activity,))
+
+    assert report.pnl.open_lot_quantity == {"s1:SPY": 2}, "the same fill was counted twice"
+    assert len(report.pnl.fill_attributions) == 1
+
+
+def test_verified_pnl_reaches_the_metrics_layer_without_cycles_in_the_window():
+    """A strategy can close a lot and have no cycle in the current window. The old
+    `if strategy_id in buckets` guard dropped broker-verified PnL on the floor in
+    exactly that case: the number was computed, reported in
+    pnl.strategy_realized_pnl, and discarded before the lifecycle layer could see
+    it, with no log line."""
+    closed = make_record(
+        cycle_id="sell", action="SELL", quantity=1, strategy_id="closer", last_price=800
+    )
+    evidence = BrokerEvidenceBatch(
+        generated_at=datetime.now(tz=timezone.utc),
+        window_start=datetime(2026, 6, 18, tzinfo=timezone.utc),
+        window_end=datetime(2026, 6, 19, tzinfo=timezone.utc),
+        activities=(
+            BrokerFillActivity(
+                activity_id="cid-old-buy", client_order_id="cid-old-buy", symbol="SPY",
+                side="BUY", quantity=1, price=700, strategy_id="opener",
+                transaction_time=datetime(2026, 6, 11, 14, 30, tzinfo=timezone.utc),
+            ),
+            BrokerFillActivity(
+                activity_id="a-sell", order_id="oid-sell", client_order_id="cid-sell",
+                symbol="SPY", side="SELL", quantity=1, price=800,
+                transaction_time=datetime(2026, 6, 18, 15, 0, tzinfo=timezone.utc),
+            ),
+        ),
+    )
+
+    report = DeterministicEvaluator().evaluate([closed], evidence=evidence)
+
+    metrics = report.strategy_metrics
+    assert metrics["opener"].realized_pnl == 100.0
+    assert metrics["opener"].cycles == 0
+    assert metrics["opener"].pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED

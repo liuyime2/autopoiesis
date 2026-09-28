@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -51,6 +51,7 @@ class DeterministicEvaluator:
         records: list[CycleRecord],
         evidence: BrokerEvidenceBatch | None = None,
         fills: Mapping[str, float] | None = None,
+        seeded_fills: Sequence[BrokerFillActivity] | None = None,
     ) -> EvaluationReport:
         buckets: dict[str, _StrategyBucket] = {}
         guardian_rejections: dict[str, int] = {}
@@ -126,12 +127,17 @@ class DeterministicEvaluator:
         if first_equity is not None and last_equity is not None:
             observed_delta = last_equity - first_equity
 
-        pnl = _pnl_evidence(records, evidence)
+        pnl = _pnl_evidence(records, evidence, seeded_fills or ())
         for strategy_id, realized_pnl in pnl.strategy_realized_pnl.items():
-            if strategy_id in buckets:
-                buckets[strategy_id].realized_pnl = realized_pnl
-                buckets[strategy_id].fees = pnl.strategy_fees.get(strategy_id, 0.0)
-                buckets[strategy_id].pnl_evidence = pnl.status
+            # Not `if strategy_id in buckets`. A strategy can close a lot without
+            # appearing in the current cycle window, and the old guard dropped
+            # broker-verified PnL on the floor in exactly that case - the number was
+            # computed, reported in pnl.strategy_realized_pnl, and then discarded
+            # before the lifecycle layer could see it, with no log line.
+            bucket = buckets.setdefault(strategy_id, _StrategyBucket(strategy_id=strategy_id))
+            bucket.realized_pnl = realized_pnl
+            bucket.fees = pnl.strategy_fees.get(strategy_id, 0.0)
+            bucket.pnl_evidence = pnl.status
 
         return EvaluationReport(
             generated_at=datetime.now(tz=timezone.utc),
@@ -257,6 +263,27 @@ class _Lot:
     client_order_id: str | None
     opened_at: datetime
     source: str
+    strategy_id: str = ""
+
+
+@dataclass
+class _LotLedger:
+    """Lots are account-level, keyed by symbol, and attributed to the strategy that
+    opened them.
+
+    The ledger used to be per-strategy, which made a closed lot structurally
+    unreachable: the selector returns one strategy per cycle, so the strategy that
+    opened a lot and the strategy that closes it are different strategies, and a
+    SELL could only ever match lots in its own tracker. Every one of the four SELL
+    decisions this agent has ever made produced no closed lot, so
+    `strategy_realized_pnl` was empty and could never be otherwise.
+    """
+
+    lots: dict[str, list[_Lot]] = field(default_factory=dict)
+    per_strategy: dict[str, _StrategyPnl] = field(default_factory=dict)
+
+    def tracker(self, strategy_id: str) -> _StrategyPnl:
+        return self.per_strategy.setdefault(strategy_id, _StrategyPnl())
 
 
 @dataclass
@@ -273,12 +300,26 @@ def evaluate_cycles(records: list[CycleRecord]) -> EvaluationReport:
     return DeterministicEvaluator().evaluate(records)
 
 
-def _pnl_evidence(records: list[CycleRecord], evidence: BrokerEvidenceBatch | None) -> PnLEvidence:
+def _pnl_evidence(
+    records: list[CycleRecord],
+    evidence: BrokerEvidenceBatch | None,
+    seeded_fills: Sequence[BrokerFillActivity] = (),
+) -> PnLEvidence:
+    """Attribute broker fills to strategies and match closed lots FIFO.
+
+    `seeded_fills` are earlier broker-confirmed fills taken from the journal, and
+    they exist because the broker evidence batch only covers a 24h window. The
+    agent's open lots were opened weeks earlier, so a SELL inside the window could
+    not match anything and closed_lot_count stayed at 0 forever. Every seeded fill
+    carries a price the broker reported, so cost basis stays broker-sourced; the
+    evidence *status* is still gated on the fresh batch, because only that can
+    verify the exit.
+    """
     if evidence is None:
         return PnLEvidence(status=PNL_EVIDENCE_MISSING, missing_reasons=(PNL_EVIDENCE_MISSING,))
 
     order_to_strategy = _order_strategy_map(records)
-    strategy_pnl: dict[str, _StrategyPnl] = {}
+    ledger = _LotLedger()
     missing_reasons = list(evidence.missing_reasons)
     fill_candidates, order_derived_fill_count = _fill_candidates(evidence)
     fill_attributions: list[FillAttribution] = []
@@ -286,20 +327,34 @@ def _pnl_evidence(records: list[CycleRecord], evidence: BrokerEvidenceBatch | No
     linked_sell_count = 0
     unlinked_fill_count = 0
 
-    for activity in sorted(fill_candidates, key=lambda item: item.transaction_time):
+    # One ordered stream: journal-confirmed earlier fills first, then the fresh
+    # batch, de-duplicated by activity id so a fill in both is applied once.
+    stream: dict[str, BrokerFillActivity] = {}
+    for activity in (*seeded_fills, *fill_candidates):
+        stream.setdefault(activity.activity_id, activity)
+
+    for activity in sorted(stream.values(), key=lambda item: item.transaction_time):
         strategy_id = _activity_strategy(activity, order_to_strategy)
         status = "LINKED" if strategy_id else "UNLINKED"
-        fill_attributions.append(_fill_attribution(activity, strategy_id=strategy_id, status=status))
+        in_window = any(activity.activity_id == item.activity_id for item in fill_candidates)
+        fill_attributions.append(
+            _fill_attribution(
+                activity,
+                strategy_id=strategy_id,
+                status=status,
+                seeded=not in_window,
+            )
+        )
         if strategy_id is None:
             unlinked_fill_count += 1
             continue
         if activity.side == "BUY":
             linked_buy_count += 1
-        if activity.side == "SELL":
+        else:
             linked_sell_count += 1
-        tracker = strategy_pnl.setdefault(strategy_id, _StrategyPnl())
-        _apply_activity(tracker, activity, strategy_id=strategy_id)
+        _apply_activity(ledger, activity, strategy_id=strategy_id)
 
+    strategy_pnl = ledger.per_strategy
     closed_lots = [lot for tracker in strategy_pnl.values() for lot in tracker.closed_lots]
     strategy_realized = {
         strategy_id: round(tracker.realized_pnl, 10)
@@ -311,7 +366,12 @@ def _pnl_evidence(records: list[CycleRecord], evidence: BrokerEvidenceBatch | No
         for strategy_id, tracker in strategy_pnl.items()
         if tracker.fees > 0
     }
-    open_lot_quantity = _open_lot_quantity(strategy_pnl)
+    unmatched_sell = {
+        strategy_id: round(tracker.unmatched_sell_quantity, 10)
+        for strategy_id, tracker in strategy_pnl.items()
+        if tracker.unmatched_sell_quantity > 1e-9
+    }
+    open_lot_quantity = _open_lot_quantity(ledger)
 
     if order_derived_fill_count:
         missing_reasons.append(
@@ -327,9 +387,9 @@ def _pnl_evidence(records: list[CycleRecord], evidence: BrokerEvidenceBatch | No
         if linked_buy_count and not linked_sell_count:
             missing_reasons.append("linked BUY fills exist but no linked SELL fills closed lots")
         elif linked_sell_count and not linked_buy_count:
-            missing_reasons.append("linked SELL fills exist but no prior linked BUY lots existed in this evidence window")
+            missing_reasons.append("linked SELL fills exist but no prior linked BUY lot was available to close")
         elif linked_buy_count or linked_sell_count:
-            missing_reasons.append("no linked closed lots in evidence window")
+            missing_reasons.append("no linked closed lots were produced by the linked fills")
         elif unlinked_fill_count:
             missing_reasons.append("broker fills were excluded from strategy PnL because they were unlinked")
 
@@ -368,6 +428,7 @@ def _pnl_evidence(records: list[CycleRecord], evidence: BrokerEvidenceBatch | No
         closed_lot_count=len(closed_lots),
         order_derived_fill_count=order_derived_fill_count,
         open_lot_quantity=open_lot_quantity,
+        unmatched_sell_quantity=unmatched_sell,
     )
 
 
@@ -389,7 +450,75 @@ def _activity_strategy(activity: BrokerFillActivity, order_to_strategy: dict[str
         return order_to_strategy[activity.order_id]
     if activity.client_order_id and activity.client_order_id in order_to_strategy:
         return order_to_strategy[activity.client_order_id]
-    return None
+    # Journal-confirmed fills know their own strategy, which matters for lots
+    # opened long before the cycle records in the current window.
+    return activity.strategy_id
+
+
+def confirmed_fill_activities(journal, records: Sequence[CycleRecord] | None = None) -> list[BrokerFillActivity]:
+    """Rebuild broker-confirmed fills from the journal, with no time limit.
+
+    The broker evidence batch only covers a short window, so lots opened weeks
+    earlier were invisible to lot matching and no SELL could ever close one. Every
+    field here came from the broker: price and quantity from ORDER_FILL_CONFIRMED,
+    which is written only after the order is re-polled to a terminal fill state.
+
+    Timing is the one part that cannot come from the broker retroactively. The
+    fill event is written when the reconciler re-polls, which for the historical
+    orders was long after the trade. So the timestamp is the contemporaneous cycle
+    time (DataSnapshot.timestamp, the market-data time of the decision that placed
+    the order) where the cycle record still exists, and the two sources are
+    labelled differently so a reader can tell which is which.
+    """
+    from min_agent.fill_reconciler import FILL_EVENT
+
+    anchor: dict[str, datetime] = {}
+    for record in records or ():
+        coid = record.execution.client_order_id if record.execution else None
+        if coid:
+            anchor.setdefault(coid, record.snapshot.timestamp)
+
+    activities: list[BrokerFillActivity] = []
+    for event in journal.read_events(FILL_EVENT):
+        payload = event.payload
+        coid = payload.get("client_order_id")
+        price = payload.get("filled_avg_price")
+        quantity = payload.get("filled_quantity")
+        symbol = payload.get("symbol")
+        side = payload.get("side")
+        if not (
+            isinstance(coid, str)
+            and isinstance(price, (int, float))
+            and price > 0
+            and isinstance(quantity, (int, float))
+            and quantity > 0
+            and isinstance(symbol, str)
+            and isinstance(side, str)
+        ):
+            continue
+        strategy_id = payload.get("strategy_id")
+        try:
+            activities.append(
+                BrokerFillActivity(
+                    activity_id=coid,
+                    order_id=payload.get("order_id") if isinstance(payload.get("order_id"), str) else None,
+                    client_order_id=coid,
+                    symbol=symbol,
+                    side=side.strip().upper(),
+                    quantity=float(quantity),
+                    price=float(price),
+                    transaction_time=anchor.get(coid, event.timestamp),
+                    source=(
+                        "alpaca_journal_confirmed_fill"
+                        if coid in anchor
+                        else "alpaca_journal_confirmed_fill_time_unknown"
+                    ),
+                    strategy_id=strategy_id if isinstance(strategy_id, str) and strategy_id else None,
+                )
+            )
+        except Exception:
+            continue
+    return activities
 
 
 def _fill_candidates(evidence: BrokerEvidenceBatch) -> tuple[list[BrokerFillActivity], int]:
@@ -423,7 +552,9 @@ def _fill_candidates(evidence: BrokerEvidenceBatch) -> tuple[list[BrokerFillActi
     return candidates, order_derived
 
 
-def _fill_attribution(activity: BrokerFillActivity, *, strategy_id: str | None, status: str) -> FillAttribution:
+def _fill_attribution(
+    activity: BrokerFillActivity, *, strategy_id: str | None, status: str, seeded: bool = False
+) -> FillAttribution:
     return FillAttribution(
         fill_id=activity.activity_id,
         order_id=activity.order_id,
@@ -437,23 +568,39 @@ def _fill_attribution(activity: BrokerFillActivity, *, strategy_id: str | None, 
         transaction_time=activity.transaction_time,
         source=activity.source,
         attribution_status=status,
+        seeded=seeded,
     )
 
 
-def _open_lot_quantity(strategy_pnl: dict[str, _StrategyPnl]) -> dict[str, float]:
+def _open_lot_quantity(ledger: _LotLedger) -> dict[str, float]:
+    """Open quantity per owning strategy and symbol.
+
+    Lots live in the account-level ledger, but each one still belongs to the
+    strategy that opened it, and an open lot is what a future SELL will close -
+    so this is the map that says who is expected to realize PnL next.
+    """
     quantities: dict[str, float] = {}
-    for strategy_id, tracker in strategy_pnl.items():
-        for symbol, lots in tracker.lots.items():
-            quantity = sum(lot.quantity for lot in lots)
-            if quantity > 0:
-                quantities[f"{strategy_id}:{symbol}"] = round(quantity, 10)
+    for symbol, lots in ledger.lots.items():
+        for lot in lots:
+            if lot.quantity <= 1e-9:
+                continue
+            key = f"{lot.strategy_id or 'unattributed'}:{symbol}"
+            quantities[key] = round(quantities.get(key, 0.0) + lot.quantity, 10)
     return quantities
 
 
-def _apply_activity(tracker: _StrategyPnl, activity: BrokerFillActivity, *, strategy_id: str) -> None:
-    tracker.fees += activity.fees
+def _apply_activity(ledger: _LotLedger, activity: BrokerFillActivity, *, strategy_id: str) -> None:
+    """Apply one broker fill to the account-level lot ledger.
+
+    A BUY opens a lot attributed to `strategy_id`. A SELL matches FIFO against
+    whatever lots exist for the symbol and attributes each matched portion to the
+    strategy that opened that lot, recording the closing strategy separately. That
+    is the standard convention and it is the only one under which a lot opened by
+    one strategy can be closed by another.
+    """
     if activity.side == "BUY":
-        tracker.lots.setdefault(activity.symbol, []).append(
+        ledger.tracker(strategy_id).fees += activity.fees
+        ledger.lots.setdefault(activity.symbol, []).append(
             _Lot(
                 quantity=activity.quantity,
                 price=activity.price,
@@ -463,24 +610,28 @@ def _apply_activity(tracker: _StrategyPnl, activity: BrokerFillActivity, *, stra
                 client_order_id=activity.client_order_id,
                 opened_at=activity.transaction_time,
                 source=activity.source,
+                strategy_id=strategy_id,
             )
         )
         return
 
     remaining = activity.quantity
-    lots = tracker.lots.setdefault(activity.symbol, [])
+    lots = ledger.lots.setdefault(activity.symbol, [])
     sell_fee_remaining = activity.fees
-    while remaining > 0 and lots:
+    closing = ledger.tracker(strategy_id)
+    while remaining > 1e-9 and lots:
         lot = lots[0]
+        owner = lot.strategy_id or strategy_id
         matched = min(remaining, lot.quantity)
         buy_fee = lot.fees * (matched / lot.quantity) if lot.quantity else 0.0
         sell_fee = sell_fee_remaining * (matched / remaining) if remaining else 0.0
         realized_pnl = (activity.price - lot.price) * matched - buy_fee - sell_fee
+        tracker = ledger.tracker(owner)
         tracker.realized_pnl += realized_pnl
         tracker.closed_quantity += matched
         tracker.closed_lots.append(
             ClosedLotAttribution(
-                strategy_id=strategy_id,
+                strategy_id=owner,
                 symbol=activity.symbol,
                 buy_fill_id=lot.fill_id,
                 sell_fill_id=activity.activity_id,
@@ -497,15 +648,21 @@ def _apply_activity(tracker: _StrategyPnl, activity: BrokerFillActivity, *, stra
                 opened_at=lot.opened_at,
                 closed_at=activity.transaction_time,
                 source=_combined_source(lot.source, activity.source),
+                closing_strategy_id=strategy_id if strategy_id != owner else None,
             )
         )
         lot.quantity -= matched
         lot.fees -= buy_fee
         remaining -= matched
         sell_fee_remaining -= sell_fee
-        if lot.quantity <= 0:
+        if lot.quantity <= 1e-9:
             lots.pop(0)
-    tracker.unmatched_sell_quantity += remaining
+
+    # A SELL that matched nothing still cost money and is still a fact. Charge the
+    # remainder to the closing strategy so it is visible rather than dropped, which
+    # is what the old code did with `unmatched_sell_quantity`.
+    closing.unmatched_sell_quantity += remaining
+    closing.fees += sell_fee_remaining
 
 
 def _combined_source(open_source: str, close_source: str) -> str:

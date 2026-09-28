@@ -20,7 +20,7 @@ from min_agent.data_gateway import AlpacaDataGateway
 from min_agent.executor import AlpacaPaperExecutor
 from min_agent.guardian import Guardian
 from min_agent.health import HealthMonitor
-from min_agent.evaluator import DeterministicEvaluator, PNL_EVIDENCE_ACCOUNT_VERIFIED, PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+from min_agent.evaluator import DeterministicEvaluator, confirmed_fill_activities, PNL_EVIDENCE_ACCOUNT_VERIFIED, PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
 from min_agent.journal import JsonlJournal
 from min_agent.knowledge_admission import KnowledgeAdmission
 from min_agent.knowledge_library import KnowledgeLibrary
@@ -211,6 +211,8 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         max_daily_loss=config.max_daily_loss,
         max_trades_per_day=config.max_trades_per_day,
         max_total_exposure=config.max_total_exposure,
+        min_confidence=config.min_confidence,
+        max_snapshot_age_seconds=config.stale_after_seconds,
     )
     policy_engine = PolicyEngine(
         strategy_library=strategy_library,
@@ -388,7 +390,9 @@ def _ingest_evidence(config: AgentConfig) -> int:
 def _evidence_report(config: AgentConfig) -> int:
     journal = JsonlJournal(config.journal_path)
     batch = _latest_evidence_batch(journal)
-    report = DeterministicEvaluator().evaluate(journal.read_all(), evidence=batch)
+    report = DeterministicEvaluator().evaluate(
+        journal.read_all(), evidence=batch, seeded_fills=confirmed_fill_activities(journal, journal.read_all())
+    )
     event_status = "SUCCESS" if report.pnl_evidence != "missing_fill_price_and_broker_activity" else "SKIPPED"
     journal.append_event(
         JournalEvent(
@@ -407,7 +411,9 @@ def _evidence_report(config: AgentConfig) -> int:
 def _verify_profit_target(config: AgentConfig) -> int:
     journal = JsonlJournal(config.journal_path)
     batch = _latest_evidence_batch(journal)
-    report = DeterministicEvaluator().evaluate(journal.read_all(), evidence=batch)
+    report = DeterministicEvaluator().evaluate(
+        journal.read_all(), evidence=batch, seeded_fills=confirmed_fill_activities(journal)
+    )
     pnl = report.pnl
     result = {
         "target_daily_return_pct": 0.10,

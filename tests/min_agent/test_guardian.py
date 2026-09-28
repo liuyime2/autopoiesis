@@ -384,3 +384,45 @@ def _hold(symbol):
     from min_agent.models import TradeDecision
 
     return TradeDecision(symbol=symbol, action="HOLD", quantity=0, confidence=0.0, rationale="no edge")
+
+
+def test_admission_rejects_a_strategy_that_could_never_execute():
+    """A FIXED_SIZE strategy submits its confidence verbatim and the decision path
+    rejects anything under min_confidence, but admission accepted confidence
+    anywhere in [0, 1]. A strategy could therefore be admitted that was incapable
+    of ever placing an order. One SELL was rejected 100% of the time on exactly
+    this - "decision confidence below minimum" - and nothing in the system said
+    the strategy was structurally unexecutable."""
+    guardian = Guardian(allowlist={"SPY"}, max_position_value=5000, max_daily_loss=500)
+    strategy = StrategySpec(
+        strategy_id="low-conf",
+        name="low confidence",
+        kind="FIXED_SIZE",
+        symbols=("SPY",),
+        parameters={"action": "SELL", "quantity": 1, "confidence": 0.3},
+        max_position_value=1000,
+        rationale="test",
+        created_at=datetime.now(tz=timezone.utc),
+    )
+
+    result = guardian.review_strategy(strategy)
+
+    assert not result.approved
+    assert "could never execute" in result.reason
+    assert "0.30" in result.reason
+
+
+def test_admission_accepts_a_strategy_at_the_confidence_floor():
+    guardian = Guardian(allowlist={"SPY"}, max_position_value=5000, max_daily_loss=500)
+    strategy = StrategySpec(
+        strategy_id="ok",
+        name="fine",
+        kind="FIXED_SIZE",
+        symbols=("SPY",),
+        parameters={"action": "SELL", "quantity": 1, "confidence": 0.5},
+        max_position_value=1000,
+        rationale="test",
+        created_at=datetime.now(tz=timezone.utc),
+    )
+
+    assert guardian.review_strategy(strategy).approved

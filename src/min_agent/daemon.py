@@ -12,7 +12,13 @@ from uuid import uuid4
 from min_agent.atomicio import file_lock, write_text_atomic
 from min_agent.config import AgentConfig
 from min_agent.curriculum import StructuredCurriculumAgent
-from min_agent.evaluator import DeterministicEvaluator, PNL_EVIDENCE_ACCOUNT_VERIFIED, PNL_EVIDENCE_MISSING, PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+from min_agent.evaluator import (
+    DeterministicEvaluator,
+    PNL_EVIDENCE_ACCOUNT_VERIFIED,
+    PNL_EVIDENCE_MISSING,
+    PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
+    confirmed_fill_activities,
+)
 from min_agent.fill_reconciler import FILL_EVENT, FillReconciler
 from min_agent.health import HealthMonitor
 from min_agent.journal import JsonlJournal
@@ -199,7 +205,12 @@ class AgentDaemon:
     def _reflect(self, *, evidence: BrokerEvidenceBatch | None = None) -> None:
         try:
             recent = self.journal.last_n(self.config.reflection_window)
-            reflection = self.reflection_memory.reflect(recent, evidence=evidence, fills=self._confirmed_fills())
+            reflection = self.reflection_memory.reflect(
+                recent,
+                evidence=evidence,
+                fills=self._confirmed_fills(),
+                seeded_fills=self._confirmed_fill_activities(),
+            )
             self.reflection_memory.save(reflection)
             self._append_event(
                 "REFLECTION_GENERATED",
@@ -404,9 +415,15 @@ class AgentDaemon:
             )
             return None
 
+    def _confirmed_fill_activities(self):
+        return confirmed_fill_activities(self.journal, self.journal.read_all())
+
     def _record_pnl_evidence(self, evidence: BrokerEvidenceBatch | None) -> None:
         report = DeterministicEvaluator().evaluate(
-            self.journal.read_all(), evidence=evidence, fills=self._confirmed_fills()
+            self.journal.read_all(),
+            evidence=evidence,
+            fills=self._confirmed_fills(),
+            seeded_fills=self._confirmed_fill_activities(),
         )
         success = report.pnl_evidence != PNL_EVIDENCE_MISSING
         self._append_event(
@@ -418,7 +435,10 @@ class AgentDaemon:
 
     def _verify_profit_target(self, evidence: BrokerEvidenceBatch | None) -> None:
         report = DeterministicEvaluator().evaluate(
-            self.journal.read_all(), evidence=evidence, fills=self._confirmed_fills()
+            self.journal.read_all(),
+            evidence=evidence,
+            fills=self._confirmed_fills(),
+            seeded_fills=self._confirmed_fill_activities(),
         )
         pnl = report.pnl
         status = "unproven"

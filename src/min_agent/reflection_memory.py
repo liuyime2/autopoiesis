@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
 from min_agent.atomicio import write_text_atomic
 from min_agent.evaluator import DeterministicEvaluator
-from min_agent.models import BrokerEvidenceBatch, CycleRecord, ReflectionRecord, StrategyResult
+from min_agent.models import BrokerEvidenceBatch, BrokerFillActivity, CycleRecord, ReflectionRecord, StrategyResult
 
 
 class ReflectionMemory:
@@ -18,8 +18,11 @@ class ReflectionMemory:
         records: list[CycleRecord],
         evidence: BrokerEvidenceBatch | None = None,
         fills: Mapping[str, float] | None = None,
+        seeded_fills: Sequence[BrokerFillActivity] | None = None,
     ) -> ReflectionRecord:
-        evaluation = DeterministicEvaluator().evaluate(records, evidence=evidence, fills=fills)
+        evaluation = DeterministicEvaluator().evaluate(
+            records, evidence=evidence, fills=fills, seeded_fills=seeded_fills
+        )
         strategy_metrics = {
             sid: ev.model_dump(mode="json") for sid, ev in evaluation.strategy_metrics.items()
         }

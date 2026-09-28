@@ -180,6 +180,7 @@ class BrokerFillActivity(BaseModel):
     fees: float = Field(default=0, ge=0)
     transaction_time: datetime
     source: str = "alpaca_activities"
+    strategy_id: str | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -277,6 +278,7 @@ class FillAttribution(BaseModel):
     transaction_time: datetime
     source: str
     attribution_status: AttributionStatus
+    seeded: bool = False
 
     @field_validator("symbol")
     @classmethod
@@ -314,6 +316,7 @@ class ClosedLotAttribution(BaseModel):
     opened_at: datetime
     closed_at: datetime
     source: str
+    closing_strategy_id: str | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -346,6 +349,7 @@ class PnLEvidence(BaseModel):
     closed_lot_count: int = Field(default=0, ge=0)
     order_derived_fill_count: int = Field(default=0, ge=0)
     open_lot_quantity: dict[str, float] = Field(default_factory=dict)
+    unmatched_sell_quantity: dict[str, float] = Field(default_factory=dict)
 
     @field_validator("evidence_source")
     @classmethod

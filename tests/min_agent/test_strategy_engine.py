@@ -328,3 +328,176 @@ def test_strategy_spec_rejects_code_parameters():
         pass
     else:
         raise AssertionError("expected ValidationError for code parameter")
+
+
+# ---------------------------------------------------------------------------
+# An exit must never be blocked by a limit on opening risk.
+# ---------------------------------------------------------------------------
+
+
+def test_the_new_exposure_cap_does_not_constrain_a_sell():
+    """max_position_value exists to bound new exposure. Applied to a SELL it meant a
+    strategy whose cap sat below the share price could never exit: the cap zeroed
+    the quantity and the exit was silently rewritten to HOLD. One of the four SELL
+    decisions this agent ever made was rejected by exactly that logic."""
+    from min_agent.models import DataSnapshot
+    from min_agent.strategy_engine import StrategyExecutor
+
+    snapshot = DataSnapshot(
+        symbol="SPY",
+        timestamp=datetime(2026, 6, 3, 14, 30, tzinfo=timezone.utc),
+        market_open=True,
+        last_price=750,
+        source="alpaca",
+        account=AccountSnapshot(
+            equity=100_000, cash=100_000, buying_power=100_000,
+            portfolio_value=100_000, daily_loss=0,
+        ),
+    )
+    strategy = StrategySpec(
+        strategy_id="sell-1",
+        name="exit",
+        kind="FIXED_SIZE",
+        symbols=("SPY",),
+        parameters={"action": "SELL", "quantity": 3, "confidence": 0.8},
+        max_position_value=100,   # far below one share
+        rationale="test",
+        created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+
+    decision = StrategyExecutor().decide(strategy, snapshot)
+
+    assert decision.action == "SELL"
+    assert decision.quantity == 3
+
+
+def test_a_buy_is_still_capped_by_the_position_limit():
+    from min_agent.models import DataSnapshot
+    from min_agent.strategy_engine import StrategyExecutor
+
+    snapshot = DataSnapshot(
+        symbol="SPY",
+        timestamp=datetime(2026, 6, 3, 14, 30, tzinfo=timezone.utc),
+        market_open=True,
+        last_price=750,
+        source="alpaca",
+        account=AccountSnapshot(
+            equity=100_000, cash=100_000, buying_power=100_000,
+            portfolio_value=100_000, daily_loss=0,
+        ),
+    )
+    strategy = StrategySpec(
+        strategy_id="buy-1",
+        name="enter",
+        kind="FIXED_SIZE",
+        symbols=("SPY",),
+        parameters={"action": "BUY", "quantity": 10, "confidence": 0.8},
+        max_position_value=1500,   # two shares at 750
+        rationale="test",
+        created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+
+    assert StrategyExecutor().decide(strategy, snapshot).quantity == 2
+
+
+def test_a_buy_that_cannot_afford_one_share_still_holds():
+    from min_agent.models import DataSnapshot
+    from min_agent.strategy_engine import StrategyExecutor
+
+    snapshot = DataSnapshot(
+        symbol="SPY",
+        timestamp=datetime(2026, 6, 3, 14, 30, tzinfo=timezone.utc),
+        market_open=True,
+        last_price=750,
+        source="alpaca",
+        account=AccountSnapshot(
+            equity=100_000, cash=100_000, buying_power=100_000,
+            portfolio_value=100_000, daily_loss=0,
+        ),
+    )
+    strategy = StrategySpec(
+        strategy_id="buy-1",
+        name="enter",
+        kind="FIXED_SIZE",
+        symbols=("SPY",),
+        parameters={"action": "BUY", "quantity": 1, "confidence": 0.8},
+        max_position_value=100,
+        rationale="test",
+        created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+
+    assert StrategyExecutor().decide(strategy, snapshot).action == "HOLD"
+
+
+def test_broker_verified_negative_pnl_retires_without_cycles_in_the_window():
+    """A strategy can open a lot in one window and have it closed in a later one,
+    leaving zero cycles in the reflection window. Requiring cycles > 0 before
+    evaluating PnL made the only PnL-driven transition in the system unreachable
+    for exactly the strategies that had real PnL to report."""
+    from min_agent.evaluator import PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+    from min_agent.models import StrategyResult
+    from min_agent.strategy_engine import StrategyLifecycleManager
+
+    strategy = StrategySpec(
+        strategy_id="s1",
+        name="loser",
+        kind="FIXED_SIZE",
+        symbols=("SPY",),
+        parameters={"action": "BUY", "quantity": 1, "confidence": 0.8},
+        max_position_value=1000,
+        rationale="test",
+        created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        lifecycle="ACTIVE",
+    )
+    result = StrategyResult(
+        strategy_id="s1",
+        evaluated_at=datetime.now(tz=timezone.utc),
+        cycles=0,
+        submitted_orders=1,
+        rejected_orders=0,
+        skipped_orders=0,
+        errors=0,
+        score=0.5,
+        realized_pnl=-25.0,
+        pnl_evidence=PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
+    )
+
+    decisions = StrategyLifecycleManager().review([strategy], [result])
+
+    assert len(decisions) == 1
+    assert decisions[0].new_lifecycle == "RETIRED"
+    assert "negative realized PnL" in decisions[0].reason
+
+
+def test_verified_positive_pnl_alone_does_not_promote():
+    """PnL may retire a strategy, but it does not shorten probation. ACTIVE status
+    is earned by cycles, not by one lucky trade."""
+    from min_agent.evaluator import PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+    from min_agent.models import StrategyResult
+    from min_agent.strategy_engine import StrategyLifecycleManager
+
+    strategy = StrategySpec(
+        strategy_id="s1",
+        name="new",
+        kind="FIXED_SIZE",
+        symbols=("SPY",),
+        parameters={"action": "BUY", "quantity": 1, "confidence": 0.8},
+        max_position_value=1000,
+        rationale="test",
+        created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        lifecycle="PROBATION",
+    )
+    result = StrategyResult(
+        strategy_id="s1",
+        evaluated_at=datetime.now(tz=timezone.utc),
+        cycles=1,
+        submitted_orders=1,
+        rejected_orders=0,
+        skipped_orders=0,
+        errors=0,
+        score=0.9,
+        realized_pnl=500.0,
+        pnl_evidence=PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
+    )
+
+    assert StrategyLifecycleManager().review([strategy], [result]) == []

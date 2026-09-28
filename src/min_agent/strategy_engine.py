@@ -91,7 +91,23 @@ class StrategyLifecycleManager:
     def _review_one(self, strategy: StrategySpec, result: StrategyResult | None) -> StrategyLifecycleDecision | None:
         if strategy.lifecycle in {"BASELINE", "PAUSED", "RETIRED"}:
             return None
-        if result is None or result.cycles <= 0:
+        if result is None:
+            return None
+
+        # Broker-verified PnL stands on its own, so the PnL rule is evaluated
+        # before the cycle-count gate. A strategy can open a lot in one window and
+        # have it closed in a later one, leaving zero cycles in the reflection
+        # window; requiring cycles > 0 first meant the only PnL-driven transition
+        # in the system was unreachable for exactly the strategies that had real
+        # PnL to report. Every other rule below is cycle-based and keeps its gate.
+        if (
+            result.pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+            and result.realized_pnl is not None
+            and result.realized_pnl < 0
+        ):
+            return StrategyLifecycleDecision(strategy, "RETIRED", "broker-verified negative realized PnL")
+
+        if result.cycles <= 0:
             return None
 
         # Charge the strategy only for rejections that are its own fault. Using
@@ -108,8 +124,6 @@ class StrategyLifecycleManager:
         rejection_rate = fault_rejections / result.cycles
         if failure_rate >= self.severe_failure_rate:
             return StrategyLifecycleDecision(strategy, "RETIRED", f"severe operational failure rate {failure_rate:.2f}")
-        if result.pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED and result.realized_pnl is not None and result.realized_pnl < 0:
-            return StrategyLifecycleDecision(strategy, "RETIRED", "broker-verified negative realized PnL")
         if result.errors / result.cycles > self.max_error_rate:
             return StrategyLifecycleDecision(strategy, "PAUSED", "error rate above lifecycle threshold")
         if rejection_rate > self.max_rejection_rate:
@@ -234,10 +248,17 @@ class StrategyExecutor:
     def _fixed_size(self, strategy: StrategySpec, snapshot: DataSnapshot) -> TradeDecision:
         action = str(strategy.parameters["action"]).upper()
         quantity = int(strategy.parameters["quantity"]) if action != "HOLD" else 0
-        max_quantity = int(strategy.max_position_value // snapshot.last_price)
-        quantity = max(0, min(quantity, max_quantity))
-        if action != "HOLD" and quantity <= 0:
-            return self._hold(snapshot, strategy, "position size is zero after risk cap")
+        if action == "BUY":
+            # The cap bounds new exposure, so it applies to entries only. Applying
+            # it to a SELL meant a strategy whose max_position_value was below the
+            # share price could never exit: the cap zeroed the quantity and the
+            # exit was silently rewritten to HOLD, and a larger exit was silently
+            # truncated. A limit on opening risk must never be a reason to stay in
+            # the position. Guardian still bounds the SELL by real holdings.
+            max_quantity = int(strategy.max_position_value // snapshot.last_price)
+            quantity = max(0, min(quantity, max_quantity))
+            if quantity <= 0:
+                return self._hold(snapshot, strategy, "position size is zero after risk cap")
         return TradeDecision(
             symbol=snapshot.symbol,
             action=action,

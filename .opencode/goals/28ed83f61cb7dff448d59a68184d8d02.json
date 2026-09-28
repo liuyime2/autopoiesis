@@ -32,7 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790614478608
+      "observedAt": 1790615847116,
+      "lastRequestTokens": 30475,
+      "lastInputTokens": 29928
     }
   },
   "runtimeFingerprint": {
@@ -41,10 +43,10 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 14,
-    "tokens": 418621,
+    "turns": 15,
+    "tokens": 447155,
     "cost": 0,
-    "runtimeMs": 175644,
+    "runtimeMs": 184634,
     "seenMessageIDs": [
       "msg_0e84e4a64001WOfiNtqsqc3Gtz",
       "msg_0e851cf9c001x0WTKxhfBTZwDP",
@@ -59,7 +61,8 @@
       "msg_0e8baf9b70015VmdvqDIaMKO7u",
       "msg_0e8dbded7001LDSgqIGWcZfIME",
       "msg_0e8e0d4ce001HIjWH4PvV1xzad",
-      "msg_0e8e6342a0017Dwy5f8ZyDbV8P"
+      "msg_0e8e6342a0017Dwy5f8ZyDbV8P",
+      "msg_0e8f09dd7001GkV3xUHJIyaDeu"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -69,7 +72,7 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 79,
+  "progressRevision": 88,
   "observedProgressRevision": 79,
   "progressFingerprints": [
     "shell:b9b4f44e7752e63facec64bdbc0ee8e6fcf0da7ffe5fcf0ae88310a924a1a1f4",
@@ -150,60 +153,19 @@
     "shell-worktree:3d0561d3e18c0d4b4e21bbea19a26c17b3e7be561e64f635d5bfb795a6fb439b",
     "shell-worktree:c018b0e4948cc7b8ac7be7f13a5cad5e1f5ab184e5ff6530b96a112fe3313509",
     "shell-worktree:0774555d2666759944d9616cd9bf9a134b1929d663634607bb214b29b876dfa1",
-    "shell-worktree:75d538171fb1145d038782965bceb181377ed6d2cbb7540d858b4466503fd918"
+    "shell-worktree:75d538171fb1145d038782965bceb181377ed6d2cbb7540d858b4466503fd918",
+    "shell-worktree:614dd9a445e09120a38888decffcdff5fd518ad957b04ce02a893276f89028bb",
+    "shell-worktree:7e0ee466ff38ea76dd75c30f09729ddeb72036536be457a90a0717d70f3c9ab7",
+    "shell-worktree:c98b0e3987978ed42b3b203219148921c37483b2aaa24049876ab4f08f7fb690",
+    "shell-worktree:6a912ff56f8c17ae943922453d56be8661e7264c773ef8d1911fa577571be9fd",
+    "shell-worktree:36f898c1ee7b3e7a6f05ff7a89c8981ac3c9cccf6b51ea09dc24787860a17d83",
+    "shell-worktree:a993e9cadfb2d208d56f3ce06ced5989e8c5c31fbbb891ae647398920ae7f827",
+    "shell-worktree:6599610f6e7c68624c893424e5704f9f80dc7698dbf85c8285ab8f21752805d1",
+    "shell-worktree:a885ca93f9cec076df3488a686f70dae27525cfd61229e9982cb3552e2916a04",
+    "shell-worktree:821b2962318c6be504296cc71c82f2ad9b0a619cd773590c38cfc474976fe65e"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790605742782,
-      "summary": "[host:tool:edit] Project file content changed: src/min_agent/llm_decision.py",
-      "next": ""
-    },
-    {
-      "time": 1790606091511,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790606101065,
-      "summary": "[host:tool:edit] Project file content changed: src/min_agent/curriculum.py",
-      "next": ""
-    },
-    {
-      "time": 1790606110208,
-      "summary": "[host:tool:edit] Project file content changed: src/min_agent/daemon.py",
-      "next": ""
-    },
-    {
-      "time": 1790606481439,
-      "summary": "[host:tool:edit] Project file content changed: src/min_agent/cli.py",
-      "next": ""
-    },
-    {
-      "time": 1790606558808,
-      "summary": "[host:tool:edit] Project file content changed: src/min_agent/strategy_admission.py",
-      "next": ""
-    },
-    {
-      "time": 1790606841825,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790607012739,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790607170542,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790607174484,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790607230559,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -403,11 +365,61 @@
       "time": 1790614126975,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790614487132,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790614931296,
+      "summary": "Two-phase LLM curriculum shipped (0708824, 350 passed, audit 91/91). Live proof: the self-evolution loop proposed fixed-size-probe-0001 with source=llm, admission rejected a fabricated 100.0 reference price 87% from real SPY, retry accepted → strategy selectable in PROBATION. Curriculum had been on deterministic fallback for the whole audit; root cause was ollama's decoder ignoring const/additionalProperties inside oneOf, not prompt quality.",
+      "next": "Fix the five defects the SELL→closed-lot audit found: (1) per-strategy lot ledger cannot close a lot opened by another strategy, so per-strategy PnL is structurally unreachable; (2) 24h PnL evidence window cannot match a lot opened in June; (3) verified PnL dropped at evaluator.py:131 when the strategy has no cycles in the reflection window; (4) strategy_engine.py:237 applies the new-exposure cap to SELL, converting/truncating exits; (5) guardian min_confidence=0.5 is admission-blind, so a low-confidence SELL is unexecutable forever."
+    },
+    {
+      "time": 1790615009265,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790615160214,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790615220362,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790615404631,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790615417726,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790615476992,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790615506484,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790615599610,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 626,
+  "storageGeneration": 694,
   "createdAt": 1790603839704,
-  "updatedAt": 1790614478608,
+  "updatedAt": 1790615847116,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:d9032723a3b6a168bcb36a32abad20f8d6a283a12ad282159f115ca1e73acab9",

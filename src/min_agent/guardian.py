@@ -97,6 +97,20 @@ class Guardian:
             return GuardianResult(approved=False, reason="strategy contains symbols outside the allowlist")
         if strategy.max_position_value > self.max_position_value:
             return GuardianResult(approved=False, reason="strategy position value exceeds hard limit")
+        # A FIXED_SIZE strategy submits its confidence verbatim, and the decision
+        # path rejects anything under min_confidence. Admission accepted confidence
+        # anywhere in [0, 1], so a strategy could be admitted that was incapable of
+        # ever placing an order. One SELL was rejected 100% of the time on exactly
+        # this and nothing in the system said why. Reject it at the door instead.
+        confidence = strategy.parameters.get("confidence")
+        if isinstance(confidence, (int, float)) and float(confidence) < self.min_confidence:
+            return GuardianResult(
+                approved=False,
+                reason=(
+                    f"strategy confidence {float(confidence):.2f} is below the "
+                    f"guardian minimum {self.min_confidence:.2f}, so it could never execute"
+                ),
+            )
         return GuardianResult(approved=True, reason="approved")
 
     def _is_stale(self, snapshot: DataSnapshot, *, now: datetime | None) -> bool:

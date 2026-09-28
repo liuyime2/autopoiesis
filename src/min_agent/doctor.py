@@ -19,7 +19,11 @@ from enum import Enum
 from pathlib import Path
 
 from min_agent.config import AgentConfig
-from min_agent.evaluator import PNL_EVIDENCE_MISSING, DeterministicEvaluator
+from min_agent.evaluator import (
+    PNL_EVIDENCE_MISSING,
+    DeterministicEvaluator,
+    confirmed_fill_activities,
+)
 from min_agent.fill_reconciler import FILL_EVENT
 from min_agent.health import HealthMonitor
 from min_agent.journal import JsonlJournal
@@ -370,7 +374,9 @@ def _check_proof(report: DoctorReport, config: AgentConfig) -> None:
         qty = event.payload.get("filled_quantity")
         if isinstance(coid, str) and isinstance(qty, (int, float)) and qty > 0:
             fills[coid] = max(fills.get(coid, 0.0), float(qty))
-    evaluation = DeterministicEvaluator().evaluate(records, fills=fills)
+    evaluation = DeterministicEvaluator().evaluate(
+        records, fills=fills, seeded_fills=confirmed_fill_activities(journal, records)
+    )
 
     submitted = evaluation.submitted_orders
     filled = evaluation.filled_quantity
