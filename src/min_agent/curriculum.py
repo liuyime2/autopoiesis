@@ -440,3 +440,167 @@ class StructuredCurriculumAgent:
 
 def _now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
+
+
+# --- schema-constrained generation -------------------------------------------
+#
+# ollama's constrained decoder does not honour `const` or `additionalProperties`
+# inside a oneOf: a conditional schema describing the per-kind parameters was
+# accepted in 6.4s and then ignored, yielding task_type 'strategy_generation'
+# and arbitrary parameters. A FLAT object with a top-level `required` list and
+# `enum` values IS honoured - measured 4.6s, no missing required fields, no enum
+# violations. So the kind-conditional requirement is expressed by generating
+# against the schema for the kind that was chosen, rather than by encoding the
+# condition in one schema.
+
+_STRATEGY_FIELDS = {
+    "strategy_id": {"type": "string"},
+    "name": {"type": "string"},
+    "symbols": {"type": "array", "items": {"type": "string"}},
+    "max_position_value": {"type": "number", "exclusiveMinimum": 0},
+    "created_at": {"type": "string"},
+    "rationale": {"type": "string"},
+    "enabled": {"type": "boolean"},
+}
+
+_KIND_PARAM_SCHEMA: dict[str, dict[str, object]] = {
+    "HOLD_BASELINE": {},
+    "FIXED_SIZE": {
+        "action": {"type": "string", "enum": ["BUY", "SELL", "HOLD"]},
+        "quantity": {"type": "integer", "minimum": 1},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    },
+    "TREND_FOLLOW": {
+        "reference_price": {"type": "number", "exclusiveMinimum": 0},
+        "threshold_pct": {"type": "number", "minimum": 0, "maximum": 0.2},
+        "quantity": {"type": "integer", "minimum": 1},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    },
+}
+
+_KIND_SELECT_SCHEMA = {
+    "type": "object",
+    "required": ["kind", "why"],
+    "properties": {
+        "kind": {"type": "string", "enum": ["HOLD_BASELINE", "FIXED_SIZE", "TREND_FOLLOW"]},
+        "why": {"type": "string"},
+    },
+}
+
+
+def strategy_spec_schema(kind: str) -> dict[str, object]:
+    """A flat, fully-required schema for one strategy kind."""
+    params = _KIND_PARAM_SCHEMA[kind]
+    properties = {**_STRATEGY_FIELDS, "kind": {"type": "string", "enum": [kind]}, **params}
+    return {
+        "type": "object",
+        "required": sorted(properties),
+        "properties": properties,
+    }
+
+
+def kind_selection_schema() -> dict[str, object]:
+    return dict(_KIND_SELECT_SCHEMA)
+
+
+def generate_curriculum_task_json(*, call, prompt_context: dict, spec_hint: str | None = None) -> str:
+    """Two-phase, schema-constrained generation of one CurriculumTask.
+
+    `call(prompt, schema, context)` performs one constrained generation and
+    returns the raw response text.
+
+    Phase A picks the strategy kind with a tiny flat enum schema. Phase B asks
+    for the spec against that kind's flat, fully-required schema. Two small
+    calls rather than one schema that encodes the kind-conditional parameter
+    requirement, because ollama's constrained decoder honours a flat `required`
+    list and `enum` values but ignores `const` and `additionalProperties` inside
+    a oneOf. Measured: the oneOf form was accepted in 6.4s and then ignored; the
+    flat form is honoured.
+
+    The returned text is still only a candidate - the caller validates it.
+    """
+    if spec_hint is not None:
+        spec = _json_load(call(
+            f"Return the strategy_spec for kind {spec_hint}. Every field is required. "
+            f"Use only the symbols present in the context. {prompt_context_text(prompt_context)}",
+            strategy_spec_schema(spec_hint),
+        ))
+        task = {
+            "task_id": _task_id(spec_hint, spec),
+            "task_type": "STRATEGY_SPEC",
+            "summary": str(spec.get("name") or f"{spec_hint} proposal"),
+            "strategy_spec": _reshape_spec(spec, spec_hint),
+            "parameters": {},
+            "rationale": str(spec.get("rationale") or "proposed by the curriculum agent"),
+        }
+        return json.dumps(task)
+
+    kind_raw = call(
+        f"Choose exactly one strategy kind to propose next. {prompt_context_text(prompt_context)}",
+        kind_selection_schema(),
+    )
+    kind = str(_json_load(kind_raw).get("kind") or "FIXED_SIZE").upper()
+    if kind not in _KIND_PARAM_SCHEMA:
+        kind = "FIXED_SIZE"
+    spec = _json_load(call(
+        f"Return the strategy_spec for kind {kind}. Every field is required. "
+        f"Use only the symbols present in the context. {prompt_context_text(prompt_context)}",
+        strategy_spec_schema(kind),
+    ))
+    return json.dumps({
+        "task_id": _task_id(kind, spec),
+        "task_type": "STRATEGY_SPEC",
+        "summary": str(spec.get("name") or f"{kind} proposal"),
+        "strategy_spec": _reshape_spec(spec, kind),
+        "parameters": {},
+        "rationale": str(spec.get("rationale") or "proposed by the curriculum agent"),
+    })
+
+
+def prompt_context_text(prompt_context: dict) -> str:
+    return "Context: " + json.dumps(prompt_context, sort_keys=True)
+
+
+def json_text(value) -> str:
+    return json.dumps(value, sort_keys=True)
+
+
+def _json_load(raw: str) -> dict:
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end <= start:
+        raise ValueError("constrained response contained no JSON object")
+    parsed = json.loads(raw[start : end + 1])
+    if not isinstance(parsed, dict):
+        raise ValueError("constrained response was not a JSON object")
+    return parsed
+
+
+def _reshape_spec(spec: dict, kind: str) -> dict:
+    """Move the flat kind-specific keys into `parameters`, as StrategySpec wants.
+
+    `created_at` is overwritten with the system clock. The model had to supply the
+    field because the schema requires it, and it duly invented one - a strategy
+    admitted today came back with created_at 2024-06-14. That field orders
+    probation (StrategySelector sorts PROBATION candidates by created_at), so a
+    fabricated timestamp silently reorders promotion. A timestamp is the system's
+    to record, not the model's to invent.
+    """
+    params_source = _KIND_PARAM_SCHEMA[kind]
+    params = {key: spec[key] for key in params_source if key in spec}
+    return {
+        "strategy_id": spec.get("strategy_id"),
+        "name": spec.get("name"),
+        "kind": kind,
+        "symbols": spec.get("symbols"),
+        "parameters": params,
+        "max_position_value": spec.get("max_position_value"),
+        "enabled": spec.get("enabled", True),
+        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+        "rationale": spec.get("rationale"),
+    }
+
+
+def _task_id(kind: str, spec: dict) -> str:
+    raw = f"{kind}:{spec.get('strategy_id')}:{datetime.now(tz=timezone.utc).isoformat()}"
+    return f"task-{abs(hash(raw)) % 1000000:06d}"

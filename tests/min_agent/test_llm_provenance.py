@@ -23,6 +23,7 @@ The defects this file exists to prevent:
     threshold 3 was unreachable.
 """
 
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -358,46 +359,46 @@ def test_counter_resets_on_a_strategy_spec(tmp_path):
 # --- no fabricated numbers in the prompt -------------------------------------
 
 
-def test_curriculum_prompt_offers_no_copyable_price_example(monkeypatch):
-    """A literal 100.0 reference price in the prompt was copied verbatim into
-    nine admitted strategies, all anchored ~6x below the real SPY.
+def test_curriculum_generation_offers_no_copyable_price(monkeypatch):
+    """No generated prompt may contain an example price the model can copy.
 
-    Asserted against the prompt that is actually sent, not against the source,
-    so a comment cannot mask the problem and a real example cannot hide in one.
+    The original prompt carried a worked example anchored to a 100-dollar
+    reference price; the model copied it and nine strategies were admitted 4-7x
+    below the real SPY. The guarantee is now enforced by schema plus
+    StrategyAdmission rather than by prose, but the prompts must still be free of
+    copyable examples.
     """
     import min_agent.cli as cli
 
-    captured = {}
+    prompts = []
 
-    class CapturingEngine:
+    class Capturing:
         def __init__(self, **kwargs):
             self.base_url = "http://ollama.invalid"
             self.timeout = 1
-            self.model = "m"
 
         def transport(self, url, payload, timeout):
-            captured["prompt"] = payload["prompt"]
-            return {"response": "{}"}
+            prompts.append(payload["prompt"])
+            return {"response": '{"kind": "FIXED_SIZE", "why": "w"}'}
 
-    monkeypatch.setattr(cli, "OllamaDecisionEngine", CapturingEngine)
-    config = cli.AgentConfig.from_env()
-    cli._ollama_curriculum_transport(config)({"risk_limits": {}, "current_strategies": []})
+    monkeypatch.setattr(cli, "OllamaDecisionEngine", Capturing)
+    cli._ollama_curriculum_transport(cli.AgentConfig.from_env())({"current_strategies": []})
 
-    prompt = captured["prompt"]
-    assert '"reference_price":100.0' not in prompt
-    assert "2026-06-10T00:00:00Z" not in prompt
-    assert "must be taken from the current market price" in prompt.lower()
-    # The schema description may still name the key; that is not a value.
-    assert "reference_price" in prompt
-
-
-# --- admission rejects a fabricated reference price --------------------------
+    assert prompts, "the transport must have called the model"
+    for prompt in prompts:
+        assert '"reference_price":100.0' not in prompt
+        assert "2026-06-10" not in prompt
 
 
 def _admission(tmp_path, prices):
-    guardian = Guardian(allowlist={"SPY"}, max_position_value=5000, max_daily_loss=500)
-    library = StrategyLibrary(tmp_path / "strategies")
-    return StrategyAdmission(guardian=guardian, strategy_library=library, market_prices=prices)
+    from min_agent.guardian import Guardian
+    from min_agent.strategy_admission import StrategyAdmission
+
+    return StrategyAdmission(
+        guardian=Guardian(allowlist={"SPY"}, max_position_value=5000, max_daily_loss=500),
+        strategy_library=StrategyLibrary(tmp_path / "strategies"),
+        market_prices=prices,
+    )
 
 
 def test_reference_price_from_the_prompt_example_is_rejected(tmp_path):
@@ -452,37 +453,36 @@ def test_daemon_supplies_real_prices_to_admission(tmp_path):
 
 
 def test_both_llm_paths_use_schema_constrained_generation():
-    """format="json" only asks for *some* JSON. The model repeatedly omitted
-    required fields, so every curriculum call failed validation and fell back.
-
-    Measured against deepseek-r1:8b on the curriculum task, constraining to the
-    pydantic schema was not only correct but 5x faster (11.7s vs 54.4s) and
-    produced 4x less output (901 vs 6993 chars) - the model no longer has to
-    search for a valid shape.
-    """
+    """format="json" only asks for *some* JSON. Measured on deepseek-r1:8b for the
+    curriculum task, constraining to a schema was 5x faster (11.7s vs 54.4s) and
+    produced 4x less output (901 vs 6993 chars), and it removed every shape
+    error."""
     import inspect
 
     import min_agent.cli as cli
     from min_agent.llm_decision import OllamaDecisionEngine
 
-    curriculum = inspect.getsource(cli._ollama_curriculum_transport)
-    assert 'CurriculumTask.model_json_schema()' in curriculum
-    assert '"format": "json"' not in curriculum, "plain 'json' mode is not a schema"
+    transport_src = inspect.getsource(cli._ollama_curriculum_transport)
+    assert "generate_curriculum_task_json" in transport_src
+    assert '"format": "json"' not in transport_src, "plain 'json' mode is not a schema"
 
-    decision = inspect.getsource(OllamaDecisionEngine.decide)
-    assert "TradeDecision.model_json_schema()" in decision
-    assert '"format": "json"' not in decision
+    decision_src = inspect.getsource(OllamaDecisionEngine.decide)
+    assert "TradeDecision.model_json_schema()" in decision_src
+    assert '"format": "json"' not in decision_src
 
 
-def test_curriculum_schema_is_passed_to_the_transport():
-    """A live-shape test of the payload, with a fake engine."""
-    import json
-
+def test_curriculum_uses_flat_per_kind_schemas_not_a_oneof(monkeypatch):
+    """ollama's constrained decoder honours a flat `required` list and `enum`
+    values but ignores `const` and `additionalProperties` inside a oneOf -
+    measured: a oneOf conditional schema was accepted in 6.4s and then ignored,
+    producing task_type 'strategy_generation' and arbitrary parameters. The
+    kind-conditional requirement is therefore expressed by generating against the
+    chosen kind's flat schema.
+    """
     import min_agent.cli as cli
-    from min_agent.config import AgentConfig
-    from min_agent.models import CurriculumTask
+    from min_agent.curriculum import strategy_spec_schema
 
-    captured = {}
+    seen = []
 
     class Capturing:
         def __init__(self, **kwargs):
@@ -490,22 +490,73 @@ def test_curriculum_schema_is_passed_to_the_transport():
             self.timeout = 1
 
         def transport(self, url, payload, timeout):
-            captured["payload"] = payload
-            return {"response": "{}"}
+            seen.append(payload["format"])
+            return {"response": '{"kind": "FIXED_SIZE", "why": "w"}'}
 
-    original = cli.OllamaDecisionEngine
-    cli.OllamaDecisionEngine = Capturing
-    try:
-        config = AgentConfig.from_env()
-        cli._ollama_curriculum_transport(config)({})
-    finally:
-        cli.OllamaDecisionEngine = original
+    monkeypatch.setattr(cli, "OllamaDecisionEngine", Capturing)
+    cli._ollama_curriculum_transport(cli.AgentConfig.from_env())({"current_strategies": []})
 
-    fmt = captured["payload"]["format"]
-    assert isinstance(fmt, dict), "format must be a JSON schema object"
-    assert fmt == CurriculumTask.model_json_schema()
-    assert "properties" in fmt and "required" in fmt
-    json.dumps(fmt)  # must be serialisable for the wire
+    assert seen, "the transport must have called the model"
+    for schema in seen:
+        assert isinstance(schema, dict)
+        assert "oneOf" not in schema and "anyOf" not in schema, "the decoder ignores these"
+        assert schema.get("required"), "a flat schema needs a required list to be enforced"
+
+    required = strategy_spec_schema("FIXED_SIZE")["required"]
+    for field in ("action", "quantity", "confidence", "kind", "strategy_id", "created_at"):
+        assert field in required, f"{field} must be required for FIXED_SIZE"
+
+
+def test_two_phase_generation_assembles_a_valid_task():
+    """Phase A picks the kind, phase B fills that kind's required fields, and the
+    result validates without the model ever having to get the conditional right
+    in one shot."""
+    from min_agent.curriculum import generate_curriculum_task_json
+    from min_agent.models import CurriculumTask
+
+    schemas = []
+
+    def call(prompt, schema):
+        schemas.append(schema)
+        # The kind-selection schema requires [kind, why]; the per-kind spec schema
+        # requires the kind's own parameter fields. Dispatch on that, not on the
+        # presence of a `kind` property - both schemas have one.
+        if "action" not in schema.get("required", []):
+            return '{"kind": "FIXED_SIZE", "why": "no exploration"}'
+        return json.dumps({
+            "strategy_id": "fixed-probe-1", "name": "Probe", "symbols": ["SPY"],
+            "max_position_value": 1000, "created_at": "2026-09-28T00:00:00Z",
+            "rationale": "smallest admissible probe", "enabled": True,
+            "kind": "FIXED_SIZE", "action": "SELL", "quantity": 1, "confidence": 0.6,
+        })
+
+    task = CurriculumTask.model_validate_json(
+        generate_curriculum_task_json(call=call, prompt_context={"current_strategies": []})
+    )
+
+    assert task.task_type == "STRATEGY_SPEC"
+    assert task.strategy_spec.kind == "FIXED_SIZE"
+    assert task.strategy_spec.parameters == {"action": "SELL", "quantity": 1, "confidence": 0.6}
+    assert len(schemas) == 2, "kind selection, then spec generation"
+
+
+def test_two_phase_generation_handles_an_unknown_kind():
+    from min_agent.curriculum import generate_curriculum_task_json
+    from min_agent.models import CurriculumTask
+
+    def call(prompt, schema):
+        if "action" not in schema.get("required", []):
+            return '{"kind": "NONSENSE", "why": "w"}'
+        return json.dumps({  # noqa: E501
+            "strategy_id": "x", "name": "X", "symbols": ["SPY"], "max_position_value": 100,
+            "created_at": "2026-09-28T00:00:00Z", "rationale": "r",
+            "action": "BUY", "quantity": 1, "confidence": 0.6,
+        })
+
+    task = CurriculumTask.model_validate_json(
+        generate_curriculum_task_json(call=call, prompt_context={})
+    )
+    assert task.strategy_spec.kind == "FIXED_SIZE"
 
 
 def test_trade_decision_schema_is_passed_to_the_transport():

@@ -32,9 +32,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790613743809,
-      "lastRequestTokens": 472415,
-      "lastInputTokens": 471844
+      "observedAt": 1790614478608
     }
   },
   "runtimeFingerprint": {
@@ -43,10 +41,10 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 13,
-    "tokens": 416664,
+    "turns": 14,
+    "tokens": 418621,
     "cost": 0,
-    "runtimeMs": 162774,
+    "runtimeMs": 175644,
     "seenMessageIDs": [
       "msg_0e84e4a64001WOfiNtqsqc3Gtz",
       "msg_0e851cf9c001x0WTKxhfBTZwDP",
@@ -60,7 +58,8 @@
       "msg_0e8ad6751001VAsBAqNEa96xPw",
       "msg_0e8baf9b70015VmdvqDIaMKO7u",
       "msg_0e8dbded7001LDSgqIGWcZfIME",
-      "msg_0e8e0d4ce001HIjWH4PvV1xzad"
+      "msg_0e8e0d4ce001HIjWH4PvV1xzad",
+      "msg_0e8e6342a0017Dwy5f8ZyDbV8P"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -70,8 +69,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 74,
-  "observedProgressRevision": 71,
+  "progressRevision": 79,
+  "observedProgressRevision": 79,
   "progressFingerprints": [
     "shell:b9b4f44e7752e63facec64bdbc0ee8e6fcf0da7ffe5fcf0ae88310a924a1a1f4",
     "shell:223f6fdcc7c7b98bc06f796b532475229266e362ad32092e7bea22119ad6ec54",
@@ -146,40 +145,15 @@
     "shell-worktree:7fdcef429e9cba2775ac147d04aadbc2d8925c80b9aa01f3e616d9aa365cebf7",
     "shell-worktree:d2a2ebd2e8a23a6f75b9451c776bc2b1eb2cd6a296892e50abd24a99aa522fd9",
     "shell-worktree:9059f4fb2acb020d048d7ad1618eb73b8e75bf7954746e86fe271eff9217b567",
-    "shell-worktree:a5cba8be627fe7fa684c4afc8bbe2568a16c62ef7692dddbdf9ac23153c6c7b5"
+    "shell-worktree:a5cba8be627fe7fa684c4afc8bbe2568a16c62ef7692dddbdf9ac23153c6c7b5",
+    "shell-worktree:4e3d1995fcdf8fa2c75225d45b3caab53431343e7f79caa5acabe0ffe7b5e1ef",
+    "shell-worktree:3d0561d3e18c0d4b4e21bbea19a26c17b3e7be561e64f635d5bfb795a6fb439b",
+    "shell-worktree:c018b0e4948cc7b8ac7be7f13a5cad5e1f5ab184e5ff6530b96a112fe3313509",
+    "shell-worktree:0774555d2666759944d9616cd9bf9a134b1929d663634607bb214b29b876dfa1",
+    "shell-worktree:75d538171fb1145d038782965bceb181377ed6d2cbb7540d858b4466503fd918"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790605372548,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790605466727,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790605652571,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790605676069,
-      "summary": "Phases 0-3 complete. 282 tests passing (from 175). Commits: 4092bc4 baseline, 36395cd plan, 79967c1 phase 0, a24396b phase 1, 991c0f2 phase 2, 16dc28c phase 3a, 637b463 phase 3b/3c.\n\nPHASE 2 (991c0f2) - THE LATCH IS BROKEN, PROVEN ON REAL DATA\nThe reward function paid the maximum score for doing nothing and the selector was a deterministic argmax on it, so the system evolved toward HOLD and locked itself there. 800 of 851 recorded cycles were HOLD. _score is now reliability gated by exploration: operational * (0.25 + 0.75 * trade_attempts/cycles). Inaction is capped at 25% of reliability so it can never be the argmax while any candidate trades - structural, not a special case.\n\nReplayed through the real evaluator on the real 851 journal cycles, then through the real selector on the real strategy library:\n    before: trend-follow-sell-001 (36 HOLD, 0 attempts) score 1.000  <- argmax winner\n    after:  trend-follow-sell-001 (36 HOLD, 0 attempts) score 0.225\n            fixed-size-buy-001    ( 7 attempts)         score 0.900  <- argmax winner\n            tiny-fixed-size-001   (15 attempts)         score 0.900\n\nTwo real design flaws in my own first attempt, caught by the new tests:\n- PnL was additive +/-0.1/0.2 saturating at 1.0, so broker-verified profit could not outrank mere reliability and the PnL signal was discarded at the ceiling. PnL now reserves headroom multiplicatively: no evidence scores score*(1-bonus), verified profit reaches 1.0, verified loss falls below unverified reliability.\n- A TREND_FOLLOW spec has no 'action' key so it was eligible as a 'buy' probe even though its direction is implied by price vs reference_price and may be a SELL. Probes now prefer explicit FIXED_SIZE buys and never short.\n\nAlso: SYSTEM_REJECTION_REASONS stops Guardian's correct refusals (market closed, daily trade limit) being charged to the strategy - the root of the retire-then-reenable ping-pong that got fixed-size-sell-001 RETIRED for 'severe operational failure rate 1.00' when every order was correctly blocked. A result not carrying the split is read conservatively as 'all rejections are the strategy's fault'. The degenerate guard no longer exempts kind != FIXED_SIZE nor requires lifecycle == PROBATION, and now also catches promoted strategies that stop acting. An exploration floor makes a fresh install probe (smallest explicit FIXED_SIZE buy) instead of HOLDing forever.\n\nThree existing tests were regression locks ON the defect and were inverted rather than worked around: test_lifecycle_manager_promotes_hold_only_trend_after_evidence_cycles asserted a HOLD-only TREND_FOLLOW is PROMOTED; test_evaluator_keeps_per_strategy_metrics_independent asserted a pure-HOLD strategy scores 1.0; a third fixture was named 'after_successful_exposure' while reporting submitted_orders=0.\n\nPHASE 3a (16dc28c) - FILL FEEDBACK, the blocker for the success criterion\nMeasured on the recorded journal: 23 SUBMITTED orders, 23 with a resolvable client_order_id, 0 with any recorded fill. New FillReconciler polls get_order_by_client_order_id (verified present on alpaca-trade-api 3.2.0), reports fills plus terminal no-fill states, returns nothing on broker outage rather than inventing a fill. The daemon journals ORDER_FILL_CONFIRMED; the evaluator prefers it over the submit response's zero. Fills alone are still not PnL - the evaluator keeps reporting pnl_evidence as missing until closed-lot broker evidence exists, and a test pins that so a fill can never be mistaken for a verified result.\n\nPHASE 3b/3c (637b463) - DURABILITY + KNOWLEDGE READ PATH\nNew atomicio module (atomic write via tmp+fsync+os.replace, fcntl lock with timeout). All nine write sites now go through it, including the pidfile - a torn pid write can leave '2590' pointing --stop at an unrelated live process. Measured on the real 16.9MB journal: read_all 0.73s -> 0.040s, last_n(50) 0.71s -> 0.045s. Added size-capped rotation, fsync per append, and last_dropped_lines/last_dropped_samples so torn lines are counted rather than vanishing in silence. TradeCounter now uses a targeted streaming scan instead of read_all() every cycle - count_submitted_on(2026-06-18)=10, exactly the max_trades_per_day where the journal shows rejections.\n\nKnowledgeLibrary.load/list had zero call sites, so the library was write-only. PolicyEngine now consults accepted lessons and records them on the decision rationale. Writing that path surfaced a bug in the same commit: it read KnowledgeArtifact.title, which does not exist - the AttributeError fired inside decide_snapshot where TradingLoop's fail-closed handler turns every cycle into HOLD, the exact symptom the change was meant to fix. Pinned by a test.\n\nVERIFIED THIS TURN\n--check-env exits 1 naming the missing Alpaca credentials and unreachable ollama. --daemon refuses without credentials rather than crashing.\n\nSTILL OPEN\nD7: the LLM still makes zero trade decisions. cli.py:189 injects PolicyEngine, so every decision is a static JSON lookup; OllamaDecisionEngine.decide is dead in daemon mode. curriculum._fallback_task still silently substitutes a hard-coded strategy that daemon.py journals as SUCCESS, and the prompt still hard-codes created_at and reference_price 100.0 - the LLM copied that example into 9 admitted strategies against a ~$735 SPY.\nD9/D10: no supervisor, no doctor command, and the root docs (LEARNING_STATUS.md, learning_daemon_summary.md, findings.md, progress.md, task_plan.md) still describe the system as running.\nPhase 6 needs ALPACA_API_KEY/ALPACA_SECRET_KEY, absent from the environment and from every .env in the tree.",
-      "next": "Phase 4: put the LLM in the trade decision path with disclosed provenance. Currently cli.py:189 injects PolicyEngine, so every trade decision is a static JSON lookup and OllamaDecisionEngine.decide is dead in daemon mode. Also must remove the hardcoded prompt values at cli.py:232 (created_at 2026-06-10) and :238 (reference_price 100.0) which the LLM copied into 9 admitted strategies against a ~$735 SPY, and make curriculum._fallback_task disclose itself via CurriculumTask.source instead of being journaled as SUCCESS by daemon.py:249-262. Then Phase 5 (doctor + minictrl + systemd + rewrite the root docs that still claim the system is running) and Phase 6 (end-to-end proof, needs Alpaca paper credentials)."
-    },
-    {
-      "time": 1790605721880,
-      "summary": "[host:tool:edit] Project file content changed: src/min_agent/models.py",
-      "next": ""
-    },
-    {
-      "time": 1790605737441,
-      "summary": "[host:tool:write] Project file content changed: src/min_agent/llm_decision.py",
-      "next": ""
-    },
     {
       "time": 1790605742782,
       "summary": "[host:tool:edit] Project file content changed: src/min_agent/llm_decision.py",
@@ -399,11 +373,41 @@
       "time": 1790613538565,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790613770672,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790613782694,
+      "summary": "346 tests, 91/91 defect checks, doctor RESULT OK with 0 failures. Requirement audit still 16/18.\n\nLIVE STATE\nollama, min-agent and the watchdog timer all active under systemd, 0 restarts. Day loss recovered to -369.23 against the 500 cap, so Guardian is permitting orders again. The knowledge read path is confirmed working end to end - a PolicyEngine fallback decision's rationale carried 'lessons: No-exploration window detected from real journal cycles' from the admitted artifacts.\n\nWHAT I FIXED THIS TURN\nA risk-driven trading halt was invisible. Guardian logs 'approved' for a HOLD, so when the model declined to act because the day was down it had quietly become a second risk authority: it could halt trading with none of Guardian's auditability, and the journal showed an ordinary quiet cycle with a reassuring 'approved'. That is the same class of defect as the heartbeat replay - a halt that does not read as a halt.\n- TradeDecision.hold_reason, stated by the model, validated as a closed enum.\n- The decision prompt asks for it and states that the risk limits are enforced downstream, so the model should state its reason rather than act as a second risk check. That is a statement about who decides, and it is neutral about the outcome - it is not a nudge toward trading.\n- The evaluator counts hold reasons and EvaluationReport carries them.\n- doctor has a 'risk-driven halts' check.\nVerified live: the first cycle after the change recorded hold_reason='market_uncertain' where all 24 earlier cycles have None. The model's self-categorisation is imperfect - its rationale mentions the daily loss while it labelled the hold 'market_uncertain' - so '0/825 HOLD cycles attributed to a risk limit' is now a measurable fact rather than an unanswerable one.\n\nWHY THE LAST TWO CRITERIA ARE STILL OPEN, precisely\nBoth need a closed lot from a BUY->SELL round trip. Guardian would approve a SELL outright (dry-run confirmed: with daily_loss=0, approved=True; and the exposure cap is BUY-only so it does not gate closing the agent's 23 SPY shares). The only actor who can SELL is the LLM, because the strategy library has no selectable SELL strategy - fixed-size-sell-001 was correctly RETIRED for failing to sell while the position book was invisible, and trend-follow-sell-001 was correctly PAUSED today by the degenerate guard for 'no exploration evidence over the evaluation window'. So the library is in exactly the state the risk system should produce, and the exit is the LLM deciding to reduce risk. It has chosen HOLD on every cycle today, with a stated reason. I have not manipulated its inputs to change that.\n\nHONEST POSITION, ALSO WRITTEN INTO STATUS.md\nThe self-evolution loop is not proposing new skills: the curriculum still falls back on every call. It is disclosed (status=SKIPPED, source=fallback, with the validation error) and safe (invalid StrategySpec is rejected, admission would reject it). The remaining cause is that ollama's constrained decoding does not enforce const or additionalProperties inside a oneOf, which I measured, so the kind-conditional parameter requirement cannot be encoded.\nThe systemd units are not reboot-persistent because /home is at user quota and the manager cannot create $HOME/.config/systemd/user.\nThe key pair should be rotated in the Alpaca UI.",
+      "next": "The audit stands at 16/18. The two remaining obligations both need a closed lot from a BUY->SELL round trip, and the only actor who can SELL is the LLM, which is choosing HOLD on its own reasoning every cycle. I have deliberately not manipulated its inputs. Three items are genuinely the user's to decide and I should not decide them by editing prompts or limits: (1) whether a risk scalar belongs in the LLM's decision context at all, now that its abstention is countable via hold_reason and 'risk-driven halts' in doctor - removing it would be a legitimate design choice, and keeping it is also legitimate; (2) whether to spend more effort on the curriculum's conditional-parameter problem, which needs a different generation strategy than ollama's decoder can enforce; (3) freeing a few MB under $HOME to make the systemd units reboot-persistent."
+    },
+    {
+      "time": 1790613860681,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790613911287,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790614026134,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790614126975,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 588,
+  "storageGeneration": 626,
   "createdAt": 1790603839704,
-  "updatedAt": 1790613743809,
+  "updatedAt": 1790614478608,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:d9032723a3b6a168bcb36a32abad20f8d6a283a12ad282159f115ca1e73acab9",

@@ -489,24 +489,29 @@ def test_curriculum_context_omits_the_duplicate_evaluation_blob():
     assert len(json.dumps(reflection_only)) < len(json.dumps(reflection.model_dump(mode="json")))
 
 
-def test_prompt_requires_complete_objects_and_forbids_literal_placeholders():
-    """The model copies whatever example it is given.
+def test_generation_requires_complete_objects_by_schema_not_by_prose():
+    """The model copies whatever shape it is shown.
 
-    The context carries a worked_example showing the required shape, and without
-    an explicit instruction the model copied its task_id verbatim ('task-0001')
-    and omitted the top-level rationale - which is a validation failure, and
-    therefore a silent fallback. Both halves of this were real: the prompt was
-    rewritten at one point and lost its "placeholders are examples only" line.
+    Completeness used to depend on prompt prose ("every required field must be
+    present"), and the model omitted the top-level summary and rationale, which
+    is a validation failure and therefore a silent fallback. Completeness is now
+    enforced by a flat schema with a required list, which the constrained decoder
+    does honour - so the guarantee no longer rests on the model following an
+    instruction.
     """
-    import inspect
+    from min_agent.curriculum import kind_selection_schema, strategy_spec_schema
 
-    import min_agent.cli as cli
+    for kind in ("HOLD_BASELINE", "FIXED_SIZE", "TREND_FOLLOW"):
+        schema = strategy_spec_schema(kind)
+        assert "oneOf" not in schema and "anyOf" not in schema
+        assert set(schema["required"]) == set(schema["properties"]), (
+            f"{kind}: every field must be required, otherwise the decoder will omit it"
+        )
+        assert schema["properties"]["kind"]["enum"] == [kind]
 
-    source = inspect.getsource(cli._ollama_curriculum_transport)
-    assert "worked_example" in source or "SHAPE only" in source
-    assert "SHAPE only" in source, "the prompt must say the example is a shape, not a template"
-    assert "must not duplicate" in source or "not duplicate" in source
-    assert "must be present" in source, "the prompt must state required fields are mandatory"
+    select = kind_selection_schema()
+    assert select["required"] == ["kind", "why"]
+    assert select["properties"]["kind"]["enum"] == ["HOLD_BASELINE", "FIXED_SIZE", "TREND_FOLLOW"]
 
 
 def test_curriculum_context_carries_an_explicit_strategy_spec_shape():
@@ -636,3 +641,66 @@ def _simple_reflection():
         submitted_orders=1, rejected_orders=0, error_count=0,
         guardian_rejections={}, summary="s", strategy_scores={},
     )
+
+
+def test_generation_never_trusts_a_model_supplied_timestamp():
+    """The model had to supply created_at because the schema requires it, and it
+    duly invented one: a strategy admitted today came back with created_at
+    2024-06-14. That field orders probation - StrategySelector sorts PROBATION
+    candidates by created_at - so a fabricated timestamp silently reorders
+    promotion. A timestamp is the system's to record.
+    """
+    import json as _json
+    from datetime import datetime, timezone
+
+    from min_agent.curriculum import generate_curriculum_task_json
+    from min_agent.models import CurriculumTask
+
+    def call(prompt, schema):
+        if "action" not in schema.get("required", []):
+            return '{"kind": "FIXED_SIZE", "why": "w"}'
+        return _json.dumps({
+            "strategy_id": "probe-1", "name": "P", "symbols": ["SPY"],
+            "max_position_value": 1000,
+            "created_at": "2024-06-14T00:00:00+00:00",   # fabricated
+            "rationale": "r", "enabled": True, "kind": "FIXED_SIZE",
+            "action": "BUY", "quantity": 1, "confidence": 0.6,
+        })
+
+    before = datetime.now(tz=timezone.utc)
+    task = CurriculumTask.model_validate_json(
+        generate_curriculum_task_json(call=call, prompt_context={})
+    )
+    after = datetime.now(tz=timezone.utc)
+
+    created = task.strategy_spec.created_at
+    assert before <= created <= after, f"created_at came from the model: {created}"
+    assert created.year >= 2026, f"a pre-2026 timestamp is a fabrication: {created}"
+
+
+def test_generated_task_ids_are_unique_per_call():
+    """A repeated proposal must not collide, or the duplicate-id admission rule
+    would reject a legitimate second attempt."""
+    import json as _json
+
+    from min_agent.curriculum import generate_curriculum_task_json
+    from min_agent.models import CurriculumTask
+
+    def call(prompt, schema):
+        if "action" not in schema.get("required", []):
+            return '{"kind": "FIXED_SIZE", "why": "w"}'
+        return _json.dumps({
+            "strategy_id": "probe-1", "name": "P", "symbols": ["SPY"],
+            "max_position_value": 1000, "created_at": "2026-09-28T00:00:00Z",
+            "rationale": "r", "enabled": True, "kind": "FIXED_SIZE",
+            "action": "BUY", "quantity": 1, "confidence": 0.6,
+        })
+
+    ids = set()
+    for _ in range(6):
+        task = CurriculumTask.model_validate_json(
+            generate_curriculum_task_json(call=call, prompt_context={})
+        )
+        ids.add(task.task_id)
+    # The spec is identical each time, so ids must still be distinguishable.
+    assert len(ids) > 1, f"task_id is not unique per call: {ids}"
