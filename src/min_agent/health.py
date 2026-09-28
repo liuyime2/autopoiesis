@@ -5,6 +5,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from min_agent.atomicio import write_text_atomic
 from min_agent.models import HeartbeatPayload
 
 
@@ -41,8 +42,7 @@ class HealthMonitor:
         self._pid_probe = pid_probe
 
     def write(self, payload: HeartbeatPayload) -> None:
-        self.heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
-        self.heartbeat_path.write_text(payload.model_dump_json(indent=2), encoding="utf-8")
+        write_text_atomic(self.heartbeat_path, payload.model_dump_json(indent=2) + "\n")
 
     def read(self) -> HeartbeatPayload | None:
         if not self.heartbeat_path.exists():

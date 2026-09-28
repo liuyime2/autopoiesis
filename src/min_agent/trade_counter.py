@@ -12,15 +12,7 @@ class TradeCounter:
     def trades_today(self, *, now: datetime | None = None) -> int:
         current = now or datetime.now(tz=timezone.utc)
         today = current.astimezone(timezone.utc).date()
-        count = 0
-        for record in self.journal.read_all():
-            timestamp = record.snapshot.timestamp
-            if timestamp.tzinfo is None:
-                timestamp = timestamp.replace(tzinfo=timezone.utc)
-            if timestamp.astimezone(timezone.utc).date() != today:
-                continue
-            if record.decision.action == "HOLD":
-                continue
-            if record.execution.status == "SUBMITTED":
-                count += 1
-        return count
+        # Uses the journal's targeted scan rather than read_all(). This runs on
+        # every trading cycle, and read_all() cost scaled with the whole file:
+        # 0.73s at 16.9MB and growing linearly with no rotation to bound it.
+        return self.journal.count_submitted_on(today)

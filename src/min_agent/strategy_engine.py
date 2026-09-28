@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from min_agent.atomicio import file_lock, write_text_atomic
 from min_agent.evaluator import PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
 from min_agent.models import DataSnapshot, StrategyResult, StrategySpec, TradeDecision
 
@@ -10,11 +11,18 @@ from min_agent.models import DataSnapshot, StrategyResult, StrategySpec, TradeDe
 class StrategyLibrary:
     def __init__(self, directory: Path | str):
         self.directory = Path(directory)
+        self.rejected: list[tuple[str, str]] = []
+        """(filename, error) for files that failed to parse.
+
+        Previously these were `continue`d in silence, so a file torn by a
+        non-atomic write simply made the strategy vanish from the selector for
+        that cycle - which surfaced as a phantom HOLD with no diagnosis.
+        """
 
     def save(self, strategy: StrategySpec) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
-        path = self._path(strategy.strategy_id)
-        path.write_text(strategy.model_dump_json(indent=2), encoding="utf-8")
+        with file_lock(self._lock_path()):
+            write_text_atomic(self._path(strategy.strategy_id), strategy.model_dump_json(indent=2) + "\n")
 
     def exists(self, strategy_id: str) -> bool:
         return self._path(strategy_id).exists()
@@ -32,15 +40,19 @@ class StrategyLibrary:
         if not self.directory.exists():
             return []
         strategies = []
+        self.rejected = []
         for path in sorted(self.directory.glob("*.json")):
             try:
                 strategies.append(StrategySpec.model_validate_json(path.read_text(encoding="utf-8")))
-            except Exception:
-                continue
+            except Exception as exc:
+                self.rejected.append((path.name, f"{type(exc).__name__}: {exc}"))
         return strategies
 
     def _path(self, strategy_id: str) -> Path:
         return self.directory / f"{strategy_id}.json"
+
+    def _lock_path(self) -> Path:
+        return self.directory / ".library.lock"
 
 
 @dataclass(frozen=True)

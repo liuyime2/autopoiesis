@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
+from min_agent.atomicio import file_lock, write_text_atomic
 from min_agent.config import AgentConfig
 from min_agent.curriculum import StructuredCurriculumAgent
 from min_agent.evaluator import DeterministicEvaluator, PNL_EVIDENCE_ACCOUNT_VERIFIED, PNL_EVIDENCE_MISSING, PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
@@ -661,11 +662,15 @@ class AgentDaemon:
     def _acquire_lock(self) -> None:
         pidfile = Path(self.config.pidfile_path)
         pidfile.parent.mkdir(parents=True, exist_ok=True)
-        if pidfile.exists():
-            existing = pidfile.read_text(encoding="utf-8").strip()
-            if existing and self._pid_is_alive(existing):
-                raise DaemonAlreadyRunningError(f"daemon already running with pid {existing}")
-        pidfile.write_text(str(os.getpid()), encoding="utf-8")
+        # A non-atomic write can leave a truncated pid such as "2590", which may
+        # belong to an unrelated live process - `--stop` would then signal it.
+        # The lock also closes the check-then-write race between two daemons.
+        with file_lock(pidfile.with_suffix(".lock")):
+            if pidfile.exists():
+                existing = pidfile.read_text(encoding="utf-8").strip()
+                if existing and self._pid_is_alive(existing):
+                    raise DaemonAlreadyRunningError(f"daemon already running with pid {existing}")
+            write_text_atomic(pidfile, f"{os.getpid()}\n")
 
     def _release_lock(self) -> None:
         pidfile = Path(self.config.pidfile_path)

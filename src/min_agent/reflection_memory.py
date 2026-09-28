@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
+from min_agent.atomicio import write_text_atomic
 from min_agent.evaluator import DeterministicEvaluator
 from min_agent.models import BrokerEvidenceBatch, CycleRecord, ReflectionRecord, StrategyResult
 
@@ -45,8 +46,7 @@ class ReflectionMemory:
         )
 
     def save(self, record: ReflectionRecord) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(record.model_dump_json(indent=2), encoding="utf-8")
+        write_text_atomic(self.path, record.model_dump_json(indent=2) + "\n")
 
     def load(self) -> ReflectionRecord | None:
         if not self.path.exists():

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from min_agent.atomicio import write_text_atomic
 from min_agent.models import KnowledgeArtifact
 
 
@@ -11,8 +12,7 @@ class KnowledgeLibrary:
 
     def save(self, artifact: KnowledgeArtifact) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
-        path = self._path(artifact.artifact_id)
-        path.write_text(artifact.model_dump_json(indent=2), encoding="utf-8")
+        write_text_atomic(self._path(artifact.artifact_id), artifact.model_dump_json(indent=2) + "\n")
 
     def exists(self, artifact_id: str) -> bool:
         return self._path(artifact_id).exists()

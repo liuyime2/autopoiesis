@@ -189,6 +189,7 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
     policy_engine = PolicyEngine(
         strategy_library=strategy_library,
         reflection_memory=reflection_memory,
+        knowledge_library=knowledge_library,
     )
     loop = TradingLoop(
         data_gateway=AlpacaDataGateway(client=client),
