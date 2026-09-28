@@ -75,6 +75,8 @@ class StructuredCurriculumAgent:
         self.last_raw_excerpt: str = ""
         self._consecutive_evaluate_count: int = self._load_count()
         self.last_context: dict[str, object] = {}
+        self.capability_attempts: int = 0
+        self.max_capability_attempts: int = 1
 
     def propose(
         self,
@@ -85,6 +87,8 @@ class StructuredCurriculumAgent:
         recent_exploration_summary: dict[str, object] | None = None,
         guardian_max_position_value: float | None = None,
         open_positions: Sequence[Mapping[str, object]] = (),
+        last_price: float | None = None,
+        symbol: str = "SPY",
     ) -> CurriculumTask:
         if self.transport is None:
             return self._fallback_task(
@@ -117,8 +121,16 @@ class StructuredCurriculumAgent:
             "rejected_orders": reflection.rejected_orders,
             "error_count": reflection.error_count,
             "pnl_evidence": reflection.evaluation.get("pnl_evidence"),
-            "strategies": self._compact_strategies(current_strategies, reflection),
+            "strategies": self._compact_strategies(current_strategies, reflection)[:10],
             "strategy_count_total": len(current_strategies),
+            # "strategy_id: unique" in the schema block is unenforceable on its own.
+            # The model proposed fixed-size-sell-001, which the library already
+            # holds as RETIRED, so admission rejected the one strategy that could
+            # have supplied a missing exit. The ids in use are stated so a fresh
+            # one can be chosen; the count is stated too so the list's cap is not
+            # mistaken for the library size.
+            "strategy_ids_in_use": [strategy.strategy_id for strategy in current_strategies][-40:],
+            "strategy_id_must_not_be_one_of_the_above": True,
             # What the agent actually holds, and which actions the library can
             # currently express. The context previously described only the
             # strategies, so the engine could not see that the book carried 23
@@ -127,7 +139,7 @@ class StructuredCurriculumAgent:
             # being asked to fill; these are facts about the account and the
             # library, not an instruction to trade.
             "open_positions": [dict(item) for item in open_positions],
-            "capability_coverage": self._capability_coverage(current_strategies),
+            "capability_coverage": _capability_coverage(current_strategies, last_price, symbol),
             "recent_exploration_summary": recent_exploration_summary,
             "guardian_max_position_value": guardian_max_position_value,
             "exploration_policy": [
@@ -221,20 +233,26 @@ class StructuredCurriculumAgent:
         # reason appended. Both attempts are still validated.
         attempts = []
         for attempt in range(1 + self.max_parse_retries):
+            gap_attempt = attempt > 0 and "capability gap" in (attempts[-1] if attempts else "")
             ctx = prompt_context if attempt == 0 else {
                 **prompt_context,
-                "previous_output_rejected": {
-                    "error": attempts[-1],
-                    "instruction": (
-                        "Your previous object was rejected. Return it again with every "
-                        "required field present. If task_type is STRATEGY_SPEC then "
-                        "strategy_spec.parameters must match the required parameters for "
-                        "that kind exactly: HOLD_BASELINE {}, FIXED_SIZE "
-                        '{"action":"BUY|SELL|HOLD","quantity":int,"confidence":0-1}, '
-                        'TREND_FOLLOW {"reference_price":number,"threshold_pct":0-0.2,'
-                        '"quantity":int,"confidence":0-1}.'
-                    ),
-                },
+                **(
+                    {"unfilled_capability": _capability_demand(attempts, prompt_context)}
+                    if gap_attempt
+                    else {
+                        "previous_output_rejected": {
+                            "error": attempts[-1] if attempts else "no parse error recorded",
+                            "instruction": (
+                                "Return it again with every required field present. For "
+                                "STRATEGY_SPEC, strategy_spec.parameters must match the "
+                                'kind exactly: HOLD_BASELINE {}, FIXED_SIZE '
+                                '{"action":"BUY|SELL|HOLD","quantity":int,"confidence":0-1}, '
+                                'TREND_FOLLOW {"reference_price":number,"threshold_pct":0-0.2,'
+                                '"quantity":int,"confidence":0-1}.'
+                            ),
+                        }
+                    }
+                ),
             }
             self.last_context = ctx
             raw = self.transport(ctx)
@@ -243,9 +261,27 @@ class StructuredCurriculumAgent:
             except Exception as exc:
                 attempts.append(f"{type(exc).__name__}: {exc}")
                 continue
+
+            gap = _unmet_capability(task, prompt_context)
+            if gap and not (self.capability_attempts >= self.max_capability_attempts):
+                # The engine reported a capability the library cannot perform, and
+                # the model answered with a strategy that does not fill it. An
+                # 8B model asked for "the next distinct admissible strategy" keeps
+                # answering BUY. Escalating the retry with the specific gap named
+                # is the curriculum engine doing its job; the model still authors
+                # the strategy and the market still decides the outcome. If the gap
+                # is never filled the task is still returned and the shortfall is
+                # visible in capability_attempts.
+                self.capability_attempts = attempt + 1
+                attempts.append(
+                    f"capability gap not filled: library cannot express {gap}"
+                )
+                continue
+
             self.last_failure = None
             self.last_raw_excerpt = raw[-500:] if isinstance(raw, str) else ""
             self.parse_attempts = attempt + 1
+            self.capability_attempts = 0
             if task.task_type == "STRATEGY_SPEC" and task.strategy_spec is not None:
                 self._set_count(0)
             return task
@@ -264,33 +300,6 @@ class StructuredCurriculumAgent:
             recent_exploration_summary=recent_exploration_summary,
             guardian_max_position_value=guardian_max_position_value,
         )
-
-    @staticmethod
-    def _capability_coverage(strategies: Sequence[StrategySpec]) -> dict[str, object]:
-        """Which actions the selectable library can currently express."""
-        selectable = [
-            strategy
-            for strategy in strategies
-            if strategy.enabled and strategy.lifecycle not in {"PAUSED", "RETIRED"}
-        ]
-        covered: dict[str, list[str]] = {}
-        for strategy in selectable:
-            action = str(strategy.parameters.get("action", "")).upper()
-            if strategy.kind == "TREND_FOLLOW":
-                # TREND_FOLLOW derives its side from price, so it can express both.
-                for implied in ("BUY", "SELL"):
-                    covered.setdefault(implied, []).append(strategy.strategy_id)
-            elif action:
-                covered.setdefault(action, []).append(strategy.strategy_id)
-        return {
-            # Capped for the same reason the strategy list is: a runaway library
-            # must not be able to re-break the prompt. The true total is stated
-            # separately so the model is not misled about the library size.
-            "selectable_strategy_ids": [strategy.strategy_id for strategy in selectable][:40],
-            "selectable_strategy_count": len(selectable),
-            "uncovered_actions": sorted({"BUY", "SELL"} - set(covered)),
-            "covered_actions": {key: sorted(set(value))[:20] for key, value in sorted(covered.items())},
-        }
 
     def _compact_strategies(
         self, strategies: list[StrategySpec], reflection: ReflectionRecord | None = None
@@ -643,3 +652,118 @@ def _reshape_spec(spec: dict, kind: str) -> dict:
 def _task_id(kind: str, spec: dict) -> str:
     raw = f"{kind}:{spec.get('strategy_id')}:{datetime.now(tz=timezone.utc).isoformat()}"
     return f"task-{abs(hash(raw)) % 1000000:06d}"
+
+
+def _capability_coverage(
+    strategies: Sequence[StrategySpec], last_price: float | None, symbol: str
+) -> dict[str, object]:
+    """Which actions the selectable library can actually produce right now.
+
+    Nominal coverage is not coverage. TREND_FOLLOW derives its side from price, so
+    on paper the library could always sell - but the live strategy is anchored to a
+    June reference of 735.01 and SPY trades at 767, so it emits BUY and would keep
+    emitting BUY while price stays above 727.6. The library therefore had an exit on
+    paper and none in practice, and a coverage report based on declared actions said
+    "SELL: covered" anyway.
+
+    So each selectable strategy is evaluated at the real last price from the broker
+    snapshot and the actions it actually yields are counted. When no price is
+    available the result is marked unknown rather than assumed.
+    """
+    selectable = [
+        strategy
+        for strategy in strategies
+        if strategy.enabled and strategy.lifecycle not in {"PAUSED", "RETIRED"}
+    ]
+    declared: dict[str, list[str]] = {}
+    executable: dict[str, list[str]] = {}
+    for strategy in selectable:
+        action = str(strategy.parameters.get("action", "")).upper()
+        if action:
+            declared.setdefault(action, []).append(strategy.strategy_id)
+        if last_price is None or strategy.kind not in {"FIXED_SIZE", "TREND_FOLLOW"}:
+            continue
+        produced = _producible_action(strategy, last_price, symbol)
+        if produced:
+            executable.setdefault(produced, []).append(strategy.strategy_id)
+
+    return {
+        "evaluated_at_last_price": last_price,
+        "selectable_strategy_ids": [strategy.strategy_id for strategy in selectable][:40],
+        "selectable_strategy_count": len(selectable),
+        "declared_actions": {key: sorted(set(value))[:20] for key, value in sorted(declared.items())},
+        "executable_actions_now": {
+            key: sorted(set(value))[:20] for key, value in sorted(executable.items())
+        },
+        "uncovered_actions_now": (
+            None if last_price is None else sorted({"BUY", "SELL"} - set(executable))
+        ),
+    }
+
+
+def _producible_action(strategy: StrategySpec, last_price: float, symbol: str) -> str | None:
+    """The action this strategy would emit at `last_price`, or None if it holds.
+
+    Only the strategy's own sizing and threshold logic is consulted. Guardian is
+    not simulated: it stays authoritative at execution time, and the curriculum is
+    being told what the library can express, not what would be approved.
+    """
+    from min_agent.models import AccountSnapshot, DataSnapshot
+    from min_agent.strategy_engine import StrategyExecutor
+
+    try:
+        snapshot = DataSnapshot(
+            symbol=symbol,
+            timestamp=datetime.now(tz=timezone.utc),
+            market_open=True,
+            last_price=last_price,
+            source="curriculum_capability_probe",
+            account=AccountSnapshot(
+                equity=0.0, cash=0.0, buying_power=0.0, portfolio_value=0.0, daily_loss=0.0
+            ),
+        )
+        decision = StrategyExecutor().decide(strategy, snapshot)
+    except Exception:
+        return None
+    return decision.action if decision.action in {"BUY", "SELL"} else None
+
+
+def _unmet_capability(task: CurriculumTask, context: Mapping[str, object]) -> str | None:
+    """The action the library cannot perform that this task does not supply."""
+    coverage = context.get("capability_coverage")
+    if not isinstance(coverage, Mapping):
+        return None
+    uncovered = coverage.get("uncovered_actions_now")
+    if not uncovered:
+        return None
+    spec = task.strategy_spec
+    supplied = str(spec.parameters.get("action", "")).upper() if spec is not None else None
+    if spec is not None and spec.kind == "TREND_FOLLOW":
+        # A trend follower takes its side from price, so it can cover either.
+        return None
+    for action in uncovered:
+        if supplied == str(action).upper():
+            return None
+    return ", ".join(str(item) for item in uncovered)
+
+
+def _capability_demand(attempts: list[str], context: Mapping[str, object]) -> dict[str, object]:
+    coverage = context.get("capability_coverage")
+    price = coverage.get("evaluated_at_last_price") if isinstance(coverage, Mapping) else None
+    positions = context.get("open_positions") or []
+    return {
+        "uncovered_actions_now": (
+            coverage.get("uncovered_actions_now") if isinstance(coverage, Mapping) else None
+        ),
+        "evaluated_at_last_price": price,
+        "strategy_ids_already_in_use": list(context.get("strategy_ids_in_use") or [])[-25:],
+        "instruction": (
+            "The library cannot express the uncovered action at the real last "
+            "price, so the positions in open_positions have no working exit. "
+            "Propose a spec that expresses it: FIXED_SIZE with parameters.action "
+            "set to that action, or TREND_FOLLOW. Keep quantity small enough that "
+            "max_position_value covers it at last_price, set confidence at or above "
+            "the guardian minimum, use last_price for any reference_price, and "
+            "give strategy_id a value not present in strategy_ids_already_in_use."
+        ),
+    }

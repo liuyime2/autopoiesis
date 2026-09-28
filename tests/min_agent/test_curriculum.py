@@ -438,8 +438,12 @@ def test_curriculum_context_is_bounded_and_compact():
     # Growth is capped, so a runaway library cannot re-break the prompt.
     huge = measure(500)
     assert len(json.dumps(huge)) < 20000, "context must not grow without bound"
-    assert len(huge["strategies"]) == 40, "the per-strategy list must be capped"
+    assert len(huge["strategies"]) == 10, "the per-strategy list must be capped"
     assert huge["strategy_count_total"] == 500, "the true library size must still be stated"
+    # 10 detailed entries is what an 8B model follows; ids are cheap and are what
+    # stops the model proposing a duplicate, so those are listed separately.
+    assert len(huge["strategy_ids_in_use"]) == 40
+    assert len(json.dumps(realistic)) < 9000, "the live library is now 16 strategies"
 
     # The duplicated full-reflection blob must be gone.
     assert "evaluation" not in realistic
@@ -751,7 +755,7 @@ def test_curriculum_sees_the_open_book_and_the_capability_gap():
 
     assert ctx["open_positions"] == [{"symbol": "SPY", "quantity": 23, "market_value": 17500.0}]
     coverage = ctx["capability_coverage"]
-    assert coverage["uncovered_actions"] == ["SELL"], (
+    assert coverage["declared_actions"] == {"BUY": ["buy-1"]}, (
         "PAUSED and RETIRED strategies cannot express an action"
     )
     assert coverage["selectable_strategy_count"] == 1
@@ -772,7 +776,37 @@ def test_a_trend_follow_strategy_counts_as_covering_both_sides():
         created_at=datetime.now(tz=timezone.utc), rationale="t",
     )
 
-    coverage = StructuredCurriculumAgent._capability_coverage([strategy])
+    from min_agent.curriculum import _capability_coverage
 
-    assert coverage["uncovered_actions"] == []
-    assert set(coverage["covered_actions"]) == {"BUY", "SELL"}
+    # Anchored at 700, the same strategy sells at 650 and buys at 750, so the
+    # actions available depend on where the market actually is.
+    assert set(_capability_coverage([strategy], 650.0, "SPY")["executable_actions_now"]) == {"SELL"}
+    assert set(_capability_coverage([strategy], 750.0, "SPY")["executable_actions_now"]) == {"BUY"}
+    assert _capability_coverage([strategy], None, "SPY")["uncovered_actions_now"] is None
+
+
+def test_a_capability_that_cannot_fire_now_is_not_counted_as_covered():
+    """The live library had an exit on paper and none in practice: TREND_FOLLOW is
+    anchored to a June reference of 735.01, SPY trades at 767, so it emits BUY and
+    would keep emitting BUY while price stays above 727.6. A coverage report based
+    on declared actions said "SELL: covered" anyway, so the curriculum had no reason
+    to propose a strategy that could actually exit."""
+    from datetime import datetime, timezone
+
+    from min_agent.curriculum import _capability_coverage
+    from min_agent.models import StrategySpec
+
+    stale = StrategySpec(
+        strategy_id="trend-follow-buy-001", name="tf", kind="TREND_FOLLOW", symbols=("SPY",),
+        parameters={"threshold_pct": 0.01, "confidence": 0.55, "quantity": 1,
+                    "reference_price": 735.0057},
+        max_position_value=5000, enabled=True, lifecycle="ACTIVE",
+        created_at=datetime.now(tz=timezone.utc), rationale="t",
+    )
+
+    coverage = _capability_coverage([stale], 767.0, "SPY")
+
+    assert coverage["executable_actions_now"] == {"BUY": ["trend-follow-buy-001"]}
+    assert coverage["uncovered_actions_now"] == ["SELL"], (
+        "a nominal SELL that cannot fire is not an exit"
+    )
