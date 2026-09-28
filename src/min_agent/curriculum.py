@@ -58,6 +58,7 @@ class StructuredCurriculumAgent:
         state_path: Path | str | None = None,
         breakout_threshold: int = 3,
         max_strategies_in_prompt: int = 40,
+        max_parse_retries: int = 1,
     ):
         self.transport = transport
         # Tracks consecutive EVALUATE fallbacks so a dead loop can be broken.
@@ -68,6 +69,8 @@ class StructuredCurriculumAgent:
         self.state_path = Path(state_path) if state_path else None
         self.breakout_threshold = breakout_threshold
         self.max_strategies_in_prompt = max_strategies_in_prompt
+        self.max_parse_retries = max_parse_retries
+        self.parse_attempts = 0
         self.last_failure: str | None = None
         self.last_raw_excerpt: str = ""
         self._consecutive_evaluate_count: int = self._load_count()
@@ -196,25 +199,59 @@ class StructuredCurriculumAgent:
                 "Live trading instructions; paper-only.",
             ],
         }
-        raw = self.transport(prompt_context)
-        try:
-            task = parse_curriculum_task_json(raw)
-        except Exception as exc:
-            # The reason the model output was unusable belongs in the journal.
-            # Swallowing it made a 100% fallback rate look like normal operation:
-            # the journal said "fallback" without saying why, which is how the
-            # self-evolution loop stayed dead while every health check was green.
-            self.last_failure = f"{type(exc).__name__}: {exc}"
+        # The model's output is validated, not trusted. deepseek-r1:8b produces a
+        # usable task some of the time and an unusable one otherwise - typically
+        # a strategy_spec whose kind-conditional parameters are missing, because
+        # ollama's constrained decoding does not enforce `const` or
+        # `additionalProperties` in a oneOf schema (measured: the schema was
+        # accepted in 6.4s and then ignored, producing task_type
+        # 'strategy_generation' and arbitrary parameters). Rather than encode a
+        # conditional the decoder will not honour, retry once with the failure
+        # reason appended. Both attempts are still validated.
+        attempts = []
+        for attempt in range(1 + self.max_parse_retries):
+            ctx = prompt_context if attempt == 0 else {
+                **prompt_context,
+                "previous_output_rejected": {
+                    "error": attempts[-1],
+                    "instruction": (
+                        "Your previous object was rejected. Return it again with every "
+                        "required field present. If task_type is STRATEGY_SPEC then "
+                        "strategy_spec.parameters must match the required parameters for "
+                        "that kind exactly: HOLD_BASELINE {}, FIXED_SIZE "
+                        '{"action":"BUY|SELL|HOLD","quantity":int,"confidence":0-1}, '
+                        'TREND_FOLLOW {"reference_price":number,"threshold_pct":0-0.2,'
+                        '"quantity":int,"confidence":0-1}.'
+                    ),
+                },
+            }
+            raw = self.transport(ctx)
+            try:
+                task = parse_curriculum_task_json(raw)
+            except Exception as exc:
+                attempts.append(f"{type(exc).__name__}: {exc}")
+                continue
+            self.last_failure = None
             self.last_raw_excerpt = raw[-500:] if isinstance(raw, str) else ""
-            return self._fallback_task(
-                reflection,
-                current_strategies,
-                recent_exploration_summary=recent_exploration_summary,
-                guardian_max_position_value=guardian_max_position_value,
-            )
-        if task.task_type == "STRATEGY_SPEC" and task.strategy_spec is not None:
-            self._set_count(0)
-        return task
+            self.parse_attempts = attempt + 1
+            if task.task_type == "STRATEGY_SPEC" and task.strategy_spec is not None:
+                self._set_count(0)
+            return task
+
+        # Every attempt failed. The reason belongs in the journal: swallowing it
+        # made a 100% fallback rate look like normal operation, which is how the
+        # self-evolution loop stayed dead while every health check was green.
+        self.last_failure = (
+            f"after {len(attempts)} attempt(s): {attempts[-1]}" if attempts else "no attempt made"
+        )
+        self.last_raw_excerpt = raw[-500:] if isinstance(raw, str) else ""
+        self.parse_attempts = len(attempts)
+        return self._fallback_task(
+            reflection,
+            current_strategies,
+            recent_exploration_summary=recent_exploration_summary,
+            guardian_max_position_value=guardian_max_position_value,
+        )
 
     def _compact_strategies(
         self, strategies: list[StrategySpec], reflection: ReflectionRecord | None = None

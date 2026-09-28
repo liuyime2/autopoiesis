@@ -549,3 +549,90 @@ def test_curriculum_context_carries_an_explicit_strategy_spec_shape():
         assert required in fields["required"], f"{required} must be listed as required"
     assert captured["ctx"]["worked_example"]["strategy_spec"]["kind"] == "FIXED_SIZE"
     assert json.dumps(captured["ctx"]["schema"]).count("required") >= 4
+
+
+def test_a_rejected_parse_is_retried_before_falling_back():
+    """ollama's constrained decoding does not enforce `const` or
+    `additionalProperties` inside a oneOf schema - measured: a conditional schema
+    was accepted in 6.4s and then ignored, producing task_type
+    'strategy_generation' and arbitrary parameters. So the kind-conditional
+    requirement on strategy_spec parameters cannot be encoded, and the model
+    produces a usable task some of the time and not others. Retry once with the
+    failure reason, and still validate the retry.
+    """
+    outputs = [
+        '{"task_id":"t1","task_type":"STRATEGY_SPEC","summary":"s","strategy_spec":'
+        '{"strategy_id":"a","name":"A","kind":"FIXED_SIZE","symbols":["SPY"],'
+        '"max_position_value":100,"created_at":"2026-09-28T00:00:00Z",'
+        '"rationale":"r","parameters":{}},"parameters":{},"rationale":"r"}',
+        '{"task_id":"t2","task_type":"EVALUATE","summary":"ok","strategy_spec":null,'
+        '"parameters":{},"rationale":"r"}',
+    ]
+    seen = []
+
+    def transport(ctx):
+        seen.append(ctx)
+        return outputs[len(seen) - 1]
+
+    agent = StructuredCurriculumAgent(transport=transport)
+    task = agent.propose(
+        reflection=_simple_reflection(),
+        current_strategies=[],
+        guardian_max_position_value=1000,
+    )
+
+    assert task.source == "llm"
+    assert task.task_id == "t2"
+    assert agent.last_failure is None
+    assert len(seen) == 2, "the retry must actually call the model again"
+    assert "previous_output_rejected" in seen[1]
+    assert "FIXED_SIZE" in seen[1]["previous_output_rejected"]["instruction"]
+
+
+def test_the_retry_is_still_validated_not_trusted():
+    """A retry must not lower the bar: two bad outputs still fall back, and the
+    reason records both attempts."""
+    bad = ('{"task_id":"t","task_type":"STRATEGY_SPEC","summary":"s","strategy_spec":'
+           '{"strategy_id":"a","name":"A","kind":"FIXED_SIZE","symbols":["SPY"],'
+           '"max_position_value":100,"created_at":"2026-09-28T00:00:00Z",'
+           '"rationale":"r","parameters":{}},"parameters":{},"rationale":"r"}')
+    calls = []
+
+    def transport(ctx):
+        calls.append(ctx)
+        return bad
+
+    agent = StructuredCurriculumAgent(transport=transport)
+    task = agent.propose(
+        reflection=_simple_reflection(), current_strategies=[], guardian_max_position_value=1000
+    )
+
+    assert task.source == "fallback"
+    assert len(calls) == 2
+    assert agent.last_failure is not None
+    assert "2 attempt(s)" in agent.last_failure
+
+
+def test_retries_can_be_disabled():
+    calls = []
+
+    def transport(ctx):
+        calls.append(ctx)
+        return '{"task_id":"t","task_type":"EVALUATE","summary":"s","strategy_spec":null,"parameters":{},"rationale":"r"}'
+
+    agent = StructuredCurriculumAgent(transport=transport, max_parse_retries=0)
+    agent.propose(reflection=_simple_reflection(), current_strategies=[], guardian_max_position_value=1000)
+
+    assert len(calls) == 1
+
+
+def _simple_reflection():
+    from datetime import datetime, timezone
+
+    from min_agent.models import ReflectionRecord
+
+    return ReflectionRecord(
+        generated_at=datetime.now(tz=timezone.utc), window_cycles=10,
+        submitted_orders=1, rejected_orders=0, error_count=0,
+        guardian_rejections={}, summary="s", strategy_scores={},
+    )
