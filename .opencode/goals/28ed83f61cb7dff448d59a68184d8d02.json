@@ -32,7 +32,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790620389294,
+      "observedAt": 1790620816676,
       "lastRequestTokens": 123572,
       "lastInputTokens": 123153
     }
@@ -74,7 +74,7 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 122,
+  "progressRevision": 124,
   "observedProgressRevision": 103,
   "progressFingerprints": [
     "shell:b9b4f44e7752e63facec64bdbc0ee8e6fcf0da7ffe5fcf0ae88310a924a1a1f4",
@@ -198,20 +198,12 @@
     "shell-worktree:91e71853fe750469412e729480987d1c926fe79cb4081b4b84779e1902a91506",
     "shell-worktree:346dbc286925f4cb944d8ad8cc0ec6d648a44a273989b9d11accf9de1edc00d2",
     "shell-worktree:eabb3f411df79b67c66345c034f7401f29d550e30078e2d90503b09708b0bf2f",
-    "shell-worktree:fc6657d44fdba0fe1a3bc7dbc56a6c9d12eb4b5ec278f2b78956afafba79fc73"
+    "shell-worktree:fc6657d44fdba0fe1a3bc7dbc56a6c9d12eb4b5ec278f2b78956afafba79fc73",
+    "shell-worktree:2aef8fe4e753dcf1c5020b64be7c82d21284b662fa30e1aa3f39030eef55f4d1",
+    "shell-worktree:0941ffa59b14452cf37a50a67e662dfc0853a098e01396a764fd3978a331cfda"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790613860681,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790613911287,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790614026134,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -451,11 +443,21 @@
       "time": 1790620325176,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790620392507,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790620799334,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 1047,
+  "storageGeneration": 1076,
   "createdAt": 1790603839704,
-  "updatedAt": 1790620389294,
+  "updatedAt": 1790620816676,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:74578f8684f4a8634c2d684d2edeb15ac210e5081552d64bab0cc091cc564445",
