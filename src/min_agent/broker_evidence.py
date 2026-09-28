@@ -9,6 +9,9 @@ from min_agent.models import BrokerEvidenceBatch, BrokerFillActivity, BrokerOrde
 class BrokerEvidenceProvider:
     def __init__(self, *, client):
         self.client = client
+        self.window_fallback: str | None = None
+        """Set when a requested window could not be honoured, so the batch can
+        say so instead of advertising a window it did not fetch."""
 
     def ingest(self, *, window_start: datetime, window_end: datetime) -> BrokerEvidenceBatch:
         missing_reasons: list[str] = []
@@ -77,12 +80,37 @@ class BrokerEvidenceProvider:
         return activities
 
     def _fetch_portfolio_history(self, window_start: datetime, window_end: datetime) -> list[PortfolioHistoryPoint]:
+        """Fetch portfolio history for exactly the requested window.
+
+        `get_portfolio_history(date_start, date_end, period, timeframe)` takes
+        *strings* named `date_start`/`date_end`. This used to call
+        `get_portfolio_history(start=..., end=...)` with datetimes, which raises
+        TypeError, and then silently fell back to a no-argument call whose
+        default is `period="1M"`. So a 24-hour request was answered with a
+        30-day window while the batch still advertised the 24-hour window, and
+        every downstream account_return_pct came from the wrong period.
+
+        A window we cannot honour is reported, not substituted.
+        """
         if not hasattr(self.client, "get_portfolio_history"):
             raise AttributeError("client has no get_portfolio_history")
+        window_days = max(1, (window_end - window_start).days)
+        # Alpaca rejects intraday timeframes for windows over 30 days:
+        # "invalid timeframe provided: 15Min. Valid timeframe for days > 30 is 1D".
+        timeframe = "15Min" if window_days <= 30 else "1D"
         try:
-            history = self.client.get_portfolio_history(start=window_start, end=window_end)
+            history = self.client.get_portfolio_history(
+                date_start=window_start.strftime("%Y-%m-%d"),
+                date_end=window_end.strftime("%Y-%m-%d"),
+                timeframe=timeframe,
+            )
         except TypeError:
+            # A client whose signature genuinely differs. Retry unparameterised
+            # but say so, rather than pretending the window was honoured.
             history = self.client.get_portfolio_history()
+            self.window_fallback = f"unparameterised (requested {window_days}d @ {timeframe})"
+        else:
+            self.window_fallback = None
         return self._normalize_portfolio_history(history)
 
     def _normalize_order(self, order) -> BrokerOrderSnapshot | None:

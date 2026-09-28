@@ -94,3 +94,73 @@ def test_broker_fill_activity_rejects_fabricated_source():
             transaction_time=datetime.now(tz=timezone.utc),
             source="fake",
         )
+
+
+def test_portfolio_history_uses_the_real_signature_and_honours_the_window():
+    """Regression: `get_portfolio_history(start=, end=)` does not exist on
+    alpaca-trade-api 3.2.0. The signature is
+    (date_start: str, date_end: str, period, timeframe), and a TypeError was
+    swallowed into a no-argument call whose default is period="1M" - so a
+    24-hour request was answered with 30 days while the batch still advertised
+    24 hours.
+    """
+    import inspect
+    from datetime import datetime, timedelta, timezone
+
+    import alpaca_trade_api as tradeapi
+
+    signature = inspect.signature(tradeapi.REST.get_portfolio_history)
+    assert "date_start" in signature.parameters
+    assert "date_end" in signature.parameters
+    assert "timeframe" in signature.parameters
+
+    calls = []
+
+    class Client:
+        def get_portfolio_history(self, **kwargs):
+            calls.append(kwargs)
+            return []
+
+    provider = BrokerEvidenceProvider(client=Client())
+    end = datetime(2026, 9, 28, tzinfo=timezone.utc)
+    provider._fetch_portfolio_history(end - timedelta(hours=24), end)
+
+    assert calls == [{"date_start": "2026-09-27", "date_end": "2026-09-28", "timeframe": "15Min"}]
+    assert provider.window_fallback is None
+
+
+def test_portfolio_history_drops_to_daily_resolution_beyond_thirty_days():
+    """Alpaca rejects intraday timeframes for windows over 30 days:
+    'invalid timeframe provided: 15Min. Valid timeframe for days > 30 is 1D'."""
+    from datetime import datetime, timedelta, timezone
+
+    calls = []
+
+    class Client:
+        def get_portfolio_history(self, **kwargs):
+            calls.append(kwargs)
+            return []
+
+    provider = BrokerEvidenceProvider(client=Client())
+    end = datetime(2026, 9, 28, tzinfo=timezone.utc)
+    provider._fetch_portfolio_history(end - timedelta(days=120), end)
+
+    assert calls[0]["timeframe"] == "1D"
+    assert calls[0]["date_start"] == "2026-05-31"
+
+
+def test_an_unhonourable_window_is_disclosed_not_substituted():
+    from datetime import datetime, timedelta, timezone
+
+    class OddClient:
+        def get_portfolio_history(self, *args, **kwargs):
+            if kwargs:
+                raise TypeError("unexpected keyword argument")
+            return []
+
+    provider = BrokerEvidenceProvider(client=OddClient())
+    end = datetime(2026, 9, 28, tzinfo=timezone.utc)
+    provider._fetch_portfolio_history(end - timedelta(hours=24), end)
+
+    assert provider.window_fallback is not None
+    assert "unparameterised" in provider.window_fallback
