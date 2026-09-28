@@ -23,46 +23,45 @@ criterion:
 |---|---|
 | alpaca credentials | **PASS** — present in the external env file; paper endpoint reachable, market OPEN |
 | daemon | PASS — `min-agent.service` up, pid alive, heartbeat fresh |
-| proof: filled>0 | **PASS** — 23 orders submitted, 23 fills broker-confirmed, `fill_quantity_ratio` 1.0 |
-| proof: per-strategy pnl | **WARN** — still empty; the agent holds 23 SPY and has never closed a lot |
-| pnl evidence | **PASS** — broker portfolio history verified, `account_return_pct` 0.002 |
-| journal | OK — 18 MB, 910 cycles, 0 unparseable |
+| proof: submitted>0 | **PASS** — 24 orders submitted |
+| proof: filled>0 | **PASS** — 75 shares filled, 24 broker-confirmed, `fill_quantity_ratio` 1.0 |
+| proof: per-strategy pnl | **PASS** — 3 strategies, broker-verified: `tiny-fixed-size-001` +362.66, `fixed-size-buy-001` +120.37, `trend-follow-buy-001` +81.36 |
+| pnl evidence | **PASS** — `broker_strategy_closed_lot_pnl_verified`, 23 closed lots, 0 open |
+| journal | OK — 18 MB, 916 cycles, 0 unparseable |
 | strategy library | OK — 23 strategies, 10 selectable, including one SELL strategy |
 
-### The self-evolution loop now runs
+### The self-evolution loop now runs, and it closed a position
 
 This is the substantive change since the last update. Curriculum had been on
 deterministic fallback for the entire audit — the loop was dead while every health
-check reported green. It now runs end to end against the real model:
+check reported green. It now runs end to end against the real model, and the
+result was a real trade:
 
 ```
 18:15:18 SUCCESS  source=llm  trend-follow-sell-002   →  ACCEPTED into PROBATION
+19:01:04 SELL 52  trend-follow-sell-002                →  Guardian approved
+19:12:12 FILLED  52 @ 766.57                            →  broker-confirmed
 ```
 
 The model closed its own capability gap. It proposed `fixed-size-sell-002` with
 `action=SELL` after the engine stated which action the library could not express,
 and the daemon admitted `trend-follow-sell-002`, after which
-`capability_coverage` reported `uncovered_actions_now: []` — for the first time the
-library can actually sell.
+`capability_coverage` reported `uncovered_actions_now: []`.
+
+The cross-strategy attribution that made this work is the point: the 23 lots were
+opened by three *different* strategies across June, and `trend-follow-sell-002`
+closed all of them. The realized PnL is attributed to the opener, and the closing
+strategy is recorded separately. Total broker-verified realized PnL: **+564.39**.
 
 ### What is still missing, and why
 
-`proof: per-strategy pnl` is still empty, and it is now reachable rather than
-structurally impossible. The remaining steps are all system behaviour, not
-defects:
-
-- The agent holds 23 SPY bought in June at an average of **742.03**; last price
-  **767.25**, so +3.40% unrealized. Those lots are reconstructed from
-  broker-confirmed fills and are closable.
-- A SELL strategy is selectable (`trend-follow-sell-002`, PROBATION). The selector
-  walks the probation queue oldest-first, so it is currently 6th behind five BUY
-  strategies; each needs 3 cycles, so roughly 90 minutes of 5-minute cycles.
-- Guardian will approve a SELL: `max_total_exposure` and `max_position_value` are
-  BUY-gated, and the holdings check passes against 23 broker-confirmed shares.
-
-What has **not** been done, deliberately: no risk limit was weakened, no prompt was
-tuned to force a trade, and the market was not manipulated to produce a fill. The
-49 BUY decisions and 0 fills are the system's own record.
+One criterion remains: **a lifecycle transition driven by PnL.** The mechanism is
+implemented and tested — broker-verified PnL now both retires a strategy on a loss
+and, once probation's cycle bar is met, promotes one on a gain, with the figure
+recorded in the transition reason. It has not fired in this session because all
+three strategies carrying verified PnL are already `ACTIVE` or `RETIRED`, and the
+agent has just sold its last agent-owned share, so nothing is in `PROBATION` with a
+closed lot behind it. It needs a new round trip, not another fix.
 
 ## What was wrong, and what is fixed
 
@@ -140,9 +139,10 @@ back empty. Verified against the live API before changing anything.
    are in the transcript. The key pair should be regenerated in the Alpaca paper
    console and the external env file updated.
 
-2. **A closed lot.** `proof: per-strategy pnl` stays empty until one exists. The
-   path is open and reachable; see "What is still missing, and why" above. This
-   needs time in market hours, not another fix.
+2. **One more round trip.** Per-strategy PnL is proven; a lifecycle transition
+   *driven by* it is not yet, because nothing is in `PROBATION` with a closed lot
+   behind it. See "What is still missing, and why" above. This needs market hours,
+   not another fix.
 
 3. **Reboot-persistent units.** The systemd units are installed under
    `/run/user/$UID/systemd/user` and do not survive a reboot, because `$HOME` is
@@ -169,15 +169,17 @@ back empty. Verified against the live API before changing anything.
 
 A complete paper session in which, read from the journal:
 
-- `submitted > 0` — **met**, 23 broker-confirmed
-- **and** `filled > 0` — **met**, 23 shares, `fill_quantity_ratio` 1.0
-- **and** per-strategy PnL attribution is non-empty and broker-derived
-- **and** at least one lifecycle transition was driven by that PnL
+- `submitted > 0` — **met**, 24 broker-confirmed
+- **and** `filled > 0` — **met**, 75 shares, `fill_quantity_ratio` 1.0
+- **and** per-strategy PnL attribution is non-empty and broker-derived — **met**,
+  3 strategies, +564.39 total, all from closed lots
+- **and** at least one lifecycle transition was driven by that PnL — **not yet**,
+  see above
 
-The last two are unmet and need a closed lot. Cycle counts, green review files, and
-"the daemon is running" are **not** evidence. `minictrl doctor` prints these as
-`proof: submitted>0`, `proof: filled>0` and `proof: per-strategy pnl` for exactly
-that reason.
+Three of the four are met by real broker evidence. Cycle counts, green review
+files, and "the daemon is running" are **not** evidence. `minictrl doctor` prints
+these as `proof: submitted>0`, `proof: filled>0` and `proof: per-strategy pnl` for
+exactly that reason.
 
 ---
 

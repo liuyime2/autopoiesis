@@ -32,7 +32,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790623291556,
+      "observedAt": 1790623472748,
       "lastRequestTokens": 265537,
       "lastInputTokens": 265444
     }
@@ -75,10 +75,9 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 140,
+  "progressRevision": 141,
   "observedProgressRevision": 135,
   "progressFingerprints": [
-    "shell-worktree:04890afc8c5a6eaa5264119f764b44ded1af904f6eddcb31067182757d7ced9b",
     "file:.gitignore:d25ec7ff728ae155e5a47fef7d8ec7cbef36eadc233d524a7fe993e11c72977b",
     "shell-worktree:1cfa6a94dd0ef1989e8b1f018eca26400f75b10a91c058ff7276c12177f86db3",
     "shell-worktree:8fe9b32e88b84f5f1abad3598c583980f80d7e6e32346567306d408eeccf9453",
@@ -205,15 +204,11 @@
     "shell-worktree:703175dc74b682008a889077bf408784385e1a0d789cbe0e6fb3b519d975accf",
     "shell-worktree:e551f28c0bd8e7a56db5c2311d6901cc0ffbaa056d78d79a5be472db722d61f7",
     "shell-worktree:64a55dfc27c26d19e5dcc8fb14e2deb8aa1e4e7d9221a67cc05161a9196c2d3a",
-    "shell-worktree:9bab78344b465f4278a5ccf5e57886872c1595d8d071c08a2fec6f62a5439f8f"
+    "shell-worktree:9bab78344b465f4278a5ccf5e57886872c1595d8d071c08a2fec6f62a5439f8f",
+    "shell-worktree:95a1d8e109152f3293c6924a4b8c315ea279cb9001f9976d0e51cc4b0eb06ca0"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790616358002,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790616382051,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -458,11 +453,16 @@
       "time": 1790623222660,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790623299881,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 1291,
+  "storageGeneration": 1323,
   "createdAt": 1790603839704,
-  "updatedAt": 1790623291556,
+  "updatedAt": 1790623472748,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:74578f8684f4a8634c2d684d2edeb15ac210e5081552d64bab0cc091cc564445",
