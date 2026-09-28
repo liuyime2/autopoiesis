@@ -28,6 +28,7 @@ from min_agent.fill_reconciler import FILL_EVENT
 from min_agent.health import HealthMonitor
 from min_agent.journal import JsonlJournal
 from min_agent.knowledge_library import KnowledgeLibrary
+from min_agent.models import BrokerEvidenceBatch
 from min_agent.strategy_engine import StrategyLibrary
 
 OK = "ok"
@@ -374,8 +375,23 @@ def _check_proof(report: DoctorReport, config: AgentConfig) -> None:
         qty = event.payload.get("filled_quantity")
         if isinstance(coid, str) and isinstance(qty, (int, float)) and qty > 0:
             fills[coid] = max(fills.get(coid, 0.0), float(qty))
+    # The broker evidence batch is required, not optional. Without it
+    # _pnl_evidence returns MISSING before it looks at anything, so the doctor
+    # reported "per-strategy pnl empty" for a session in which three strategies
+    # had broker-verified closed-lot PnL totalling 564.39 - the same batch the
+    # daemon records and the CLI report reads. A health check that cannot see the
+    # proof it is meant to certify is worse than no check.
+    evidence_events = journal.read_events("BROKER_EVIDENCE_INGESTED")
+    evidence = (
+        BrokerEvidenceBatch.model_validate(evidence_events[-1].payload)
+        if evidence_events
+        else None
+    )
     evaluation = DeterministicEvaluator().evaluate(
-        records, fills=fills, seeded_fills=confirmed_fill_activities(journal, records)
+        records,
+        evidence=evidence,
+        fills=fills,
+        seeded_fills=confirmed_fill_activities(journal, records),
     )
 
     submitted = evaluation.submitted_orders
