@@ -239,6 +239,25 @@ class AgentDaemon:
                 payload={"error_type": type(exc).__name__},
             )
 
+    def _open_book(self) -> list[dict[str, object]]:
+        """Positions from the most recent real snapshot, for the curriculum context.
+
+        Only the fields an exit decision needs, and only what the broker reported.
+        """
+        for record in reversed(self.journal.read_all()):
+            held = [
+                {
+                    "symbol": position.symbol,
+                    "quantity": position.quantity,
+                    "market_value": round(position.market_value, 2),
+                }
+                for position in record.snapshot.positions
+                if position.quantity > 0
+            ]
+            if held:
+                return held
+        return []
+
     def _curriculum_proposal(self) -> None:
         try:
             reflection = self.reflection_memory.load()
@@ -257,6 +276,7 @@ class AgentDaemon:
                     current_strategies=strategies,
                     recent_exploration_summary=exploration_summary,
                     guardian_max_position_value=self.config.max_position_value,
+                    open_positions=self._open_book(),
                 )
             except (ConnectionError, TimeoutError, OSError):
                 self.sleep(5)
@@ -265,6 +285,7 @@ class AgentDaemon:
                     current_strategies=strategies,
                     recent_exploration_summary=exploration_summary,
                     guardian_max_position_value=self.config.max_position_value,
+                    open_positions=self._open_book(),
                 )
             strategy_id = task.strategy_spec.strategy_id if task.strategy_spec is not None else None
             # A fallback task is a hard-coded constant, not model output. It is

@@ -32,7 +32,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790615847116,
+      "observedAt": 1790616195468,
       "lastRequestTokens": 30475,
       "lastInputTokens": 29928
     }
@@ -72,7 +72,7 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 88,
+  "progressRevision": 92,
   "observedProgressRevision": 79,
   "progressFingerprints": [
     "shell:b9b4f44e7752e63facec64bdbc0ee8e6fcf0da7ffe5fcf0ae88310a924a1a1f4",
@@ -162,30 +162,14 @@
     "shell-worktree:a993e9cadfb2d208d56f3ce06ced5989e8c5c31fbbb891ae647398920ae7f827",
     "shell-worktree:6599610f6e7c68624c893424e5704f9f80dc7698dbf85c8285ab8f21752805d1",
     "shell-worktree:a885ca93f9cec076df3488a686f70dae27525cfd61229e9982cb3552e2916a04",
-    "shell-worktree:821b2962318c6be504296cc71c82f2ad9b0a619cd773590c38cfc474976fe65e"
+    "shell-worktree:821b2962318c6be504296cc71c82f2ad9b0a619cd773590c38cfc474976fe65e",
+    "shell-worktree:b5dbf5a496ce2244ea69f4cc98e57a56dd64b6c6d3b524782b6255d9c4101332",
+    "shell-worktree:3d35c6e295d05959fee3d761a06d6b286b459e6fd3d63b9ac161ce697bd50bc8",
+    "shell-worktree:5552002d0d1e94517da37134d4cd0fd81e0103bc6c06907ae51330a146f548a9",
+    "shell-worktree:60a0db3e4df27554b5070812e9516e03decc82ffae88c8a1121e79537194a652"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790607230559,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790607336260,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790607349167,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790607445119,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790607454791,
       "summary": "All six phases of the plan are complete. 322 tests pass (from 175). 91/91 defect checks pass across all 15 recorded defects. Ollama resolved and both LLM paths verified live against the real model.\n\nCOMMITS\n4092bc4 baseline (rollback point) / 36395cd the 7-phase plan / 79967c1 phase 0 / a24396b phase 1 / 991c0f2 phase 2 / 16dc28c phase 3a / 637b463 phase 3b/3c / 4831d60 phase 4 / 4c109fb phase 5 / e0ebc65 defect audit / ddc05e4 ollama resolution\n\nWHAT IS PROVEN THIS TURN\nPhase 5 delivered the fast-iteration primitive the objective asked for. 'minictrl doctor' checks 20 conditions and exits non-zero on any blocking fault, with a hint for each. It reports:\n  [FAIL] alpaca credentials  missing ['api_key', 'secret_key']\n  [FAIL] daemon              claims RUNNING but pid_alive=False stale=True age=8387657s\n  [PASS] ollama               serving deepseek-r1:8b\n  [PASS] proof: submitted>0  23 order(s) submitted\n  [WARN] proof: filled>0     0.0 share(s) filled (0 confirmed)\n  [WARN] proof: per-strategy pnl empty (pnl_evidence=missing_fill_price_and_broker_activity)\nA submission is explicitly not treated as proof.\nminictrl gives doctor|once|loop|daemon|install-service|service|logs|status|stop|reconcile|evidence|report|profit|check-env|test|audit, every subcommand propagating its real exit code. tools/min-agent.service.in is a systemd --user unit verified with systemd-analyze, with Restart=always, StartLimitBurst=5 in 900s, and credentials only via EnvironmentFile. STATUS.md and docs/superpowers/specs/2026-09-28-min-agent-runbook.md replace five stale root docs that described the system as running while it was 97 days dead.\ntools/audit_defects.py re-verifies all 15 defects as source properties; it runs inside the suite and as 'minictrl audit'. Its first draft reported 4 failures that were all artefacts of its own patterns, which I tightened rather than dismissing.\nOllama port/GPU mismatch from ollama.log (:11435, GPU 3) resolved: now serving on 127.0.0.1:11434 with deepseek-r1:8b on GPU 0.\nBoth LLM paths verified against the real model, not a stub: trade decision 8.4s, valid JSON, decision_source='llm', grounded in the real context; curriculum proposal 2.5s, parsed to a valid CurriculumTask with source='llm'.\n\nWHAT REMAINS - Phase 6, and it is blocked on one input\nPhase 6 requires a real paper session proving submitted>0 AND filled>0 AND non-empty broker-derived per-strategy PnL AND a lifecycle transition driven by that PnL. Verified absent: no credential environment variables; .env.optimized contains 25 config keys and zero secrets; the four key names appear only in code, tests and docs, never with a value. The Alpaca paper API IS network-reachable (GET /v2/clock returns HTTP 401, i.e. only the credential is missing), so nothing else stands in the way.\n\nI will not fabricate this. AGENTS.md rule 2 forbids it, and the whole point of this refactor was that a rubber-stamp health story hid a 97-day outage. Calling wait_for_user for the credentials rather than either polling again or declaring victory on a system that has never placed a fill.",
@@ -415,11 +399,31 @@
       "time": 1790615599610,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790615863117,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790615996454,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790616024858,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790616109630,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 694,
+  "storageGeneration": 720,
   "createdAt": 1790603839704,
-  "updatedAt": 1790615847116,
+  "updatedAt": 1790616195468,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:d9032723a3b6a168bcb36a32abad20f8d6a283a12ad282159f115ca1e73acab9",

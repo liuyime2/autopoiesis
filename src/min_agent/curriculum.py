@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -74,6 +74,7 @@ class StructuredCurriculumAgent:
         self.last_failure: str | None = None
         self.last_raw_excerpt: str = ""
         self._consecutive_evaluate_count: int = self._load_count()
+        self.last_context: dict[str, object] = {}
 
     def propose(
         self,
@@ -83,6 +84,7 @@ class StructuredCurriculumAgent:
         target_daily_return_pct: float = 10.0,
         recent_exploration_summary: dict[str, object] | None = None,
         guardian_max_position_value: float | None = None,
+        open_positions: Sequence[Mapping[str, object]] = (),
     ) -> CurriculumTask:
         if self.transport is None:
             return self._fallback_task(
@@ -117,6 +119,15 @@ class StructuredCurriculumAgent:
             "pnl_evidence": reflection.evaluation.get("pnl_evidence"),
             "strategies": self._compact_strategies(current_strategies, reflection),
             "strategy_count_total": len(current_strategies),
+            # What the agent actually holds, and which actions the library can
+            # currently express. The context previously described only the
+            # strategies, so the engine could not see that the book carried 23
+            # shares bought in June while no selectable strategy could express a
+            # SELL at all. It is a curriculum engine's job to know the gap it is
+            # being asked to fill; these are facts about the account and the
+            # library, not an instruction to trade.
+            "open_positions": [dict(item) for item in open_positions],
+            "capability_coverage": self._capability_coverage(current_strategies),
             "recent_exploration_summary": recent_exploration_summary,
             "guardian_max_position_value": guardian_max_position_value,
             "exploration_policy": [
@@ -225,6 +236,7 @@ class StructuredCurriculumAgent:
                     ),
                 },
             }
+            self.last_context = ctx
             raw = self.transport(ctx)
             try:
                 task = parse_curriculum_task_json(raw)
@@ -252,6 +264,33 @@ class StructuredCurriculumAgent:
             recent_exploration_summary=recent_exploration_summary,
             guardian_max_position_value=guardian_max_position_value,
         )
+
+    @staticmethod
+    def _capability_coverage(strategies: Sequence[StrategySpec]) -> dict[str, object]:
+        """Which actions the selectable library can currently express."""
+        selectable = [
+            strategy
+            for strategy in strategies
+            if strategy.enabled and strategy.lifecycle not in {"PAUSED", "RETIRED"}
+        ]
+        covered: dict[str, list[str]] = {}
+        for strategy in selectable:
+            action = str(strategy.parameters.get("action", "")).upper()
+            if strategy.kind == "TREND_FOLLOW":
+                # TREND_FOLLOW derives its side from price, so it can express both.
+                for implied in ("BUY", "SELL"):
+                    covered.setdefault(implied, []).append(strategy.strategy_id)
+            elif action:
+                covered.setdefault(action, []).append(strategy.strategy_id)
+        return {
+            # Capped for the same reason the strategy list is: a runaway library
+            # must not be able to re-break the prompt. The true total is stated
+            # separately so the model is not misled about the library size.
+            "selectable_strategy_ids": [strategy.strategy_id for strategy in selectable][:40],
+            "selectable_strategy_count": len(selectable),
+            "uncovered_actions": sorted({"BUY", "SELL"} - set(covered)),
+            "covered_actions": {key: sorted(set(value))[:20] for key, value in sorted(covered.items())},
+        }
 
     def _compact_strategies(
         self, strategies: list[StrategySpec], reflection: ReflectionRecord | None = None

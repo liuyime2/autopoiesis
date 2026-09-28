@@ -704,3 +704,75 @@ def test_generated_task_ids_are_unique_per_call():
         ids.add(task.task_id)
     # The spec is identical each time, so ids must still be distinguishable.
     assert len(ids) > 1, f"task_id is not unique per call: {ids}"
+
+
+def test_curriculum_sees_the_open_book_and_the_capability_gap():
+    """The context described only the strategies, so the engine could not see that
+    the book carried 23 shares bought in June while no selectable strategy could
+    express a SELL at all. A curriculum engine needs to know the gap it is being
+    asked to fill. These are facts about the account and the library, read from
+    the broker snapshot - not an instruction to trade."""
+    from datetime import datetime, timezone
+
+    from min_agent.models import ReflectionRecord, StrategySpec
+
+    def spec(sid, kind, action=None, lifecycle="ACTIVE"):
+        parameters = {"action": action, "quantity": 1, "confidence": 0.6} if action else {}
+        return StrategySpec(
+            strategy_id=sid, name=sid, kind=kind, symbols=("SPY",), parameters=parameters,
+            max_position_value=1000, enabled=True, lifecycle=lifecycle,
+            created_at=datetime.now(tz=timezone.utc), rationale="t",
+        )
+
+    strategies = [
+        spec("buy-1", "FIXED_SIZE", "BUY"),
+        spec("retired-sell", "FIXED_SIZE", "SELL", lifecycle="RETIRED"),
+        spec("paused-sell", "FIXED_SIZE", "SELL", lifecycle="PAUSED"),
+    ]
+    captured = {}
+
+    def transport(ctx):
+        captured["ctx"] = ctx
+        return (
+            '{"kind": "FIXED_SIZE", "why": "w"}'
+        )
+
+    agent = StructuredCurriculumAgent(transport=transport)
+    agent.propose(
+        reflection=ReflectionRecord(
+            generated_at=datetime.now(tz=timezone.utc), window_cycles=10, submitted_orders=1,
+            rejected_orders=0, error_count=0, guardian_rejections={}, summary="s",
+        ),
+        current_strategies=strategies,
+        open_positions=({"symbol": "SPY", "quantity": 23, "market_value": 17500.0},),
+    )
+    # The transport is invoked twice (kind, then spec); the context is shared.
+    ctx = agent.last_context
+
+    assert ctx["open_positions"] == [{"symbol": "SPY", "quantity": 23, "market_value": 17500.0}]
+    coverage = ctx["capability_coverage"]
+    assert coverage["uncovered_actions"] == ["SELL"], (
+        "PAUSED and RETIRED strategies cannot express an action"
+    )
+    assert coverage["selectable_strategy_count"] == 1
+    assert "retired-sell" not in coverage["selectable_strategy_ids"]
+
+
+def test_a_trend_follow_strategy_counts_as_covering_both_sides():
+    from min_agent.models import StrategySpec
+    from datetime import datetime, timezone
+
+    strategy = StrategySpec(
+        strategy_id="tf", name="tf", kind="TREND_FOLLOW", symbols=("SPY",),
+        parameters={
+            "threshold_pct": 0.02, "confidence": 0.6, "quantity": 1,
+            "reference_price": 700.0,
+        },
+        max_position_value=1000, enabled=True, lifecycle="ACTIVE",
+        created_at=datetime.now(tz=timezone.utc), rationale="t",
+    )
+
+    coverage = StructuredCurriculumAgent._capability_coverage([strategy])
+
+    assert coverage["uncovered_actions"] == []
+    assert set(coverage["covered_actions"]) == {"BUY", "SELL"}
