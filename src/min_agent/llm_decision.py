@@ -217,6 +217,13 @@ class HybridDecisionEngine:
             ),
             "paper_only": True,
             "risk_limits": self.risk_limits,
+            # What the limits mean right now. The model was told the cap but never
+            # the total it is measured against, so it could not know that this
+            # account holds ~$76k against a $20k cap and that every BUY would be
+            # rejected by Guardian - it kept proposing BUY and Guardian kept saying
+            # "total exposure exceeds hard limit". This is arithmetic on the broker
+            # positions already in the context, not a hint to trade.
+            "exposure": self._exposure(snapshot),
         }
         held = next((pos for pos in snapshot.positions if pos.symbol == snapshot.symbol), None)
         lots: dict[str, dict[str, object]] = {}
@@ -239,6 +246,26 @@ class HybridDecisionEngine:
             context["open_lots"] = lots
         context["lessons"] = [a.summary for a in self._lessons(strategy_id)]
         return context
+
+    def _exposure(self, snapshot: DataSnapshot) -> dict[str, Any]:
+        total = sum(pos.market_value for pos in snapshot.positions)
+        cap = self.risk_limits.get("max_total_exposure")
+        position_value = snapshot.last_price
+        held_here = next(
+            (pos for pos in snapshot.positions if pos.symbol == snapshot.symbol), None
+        )
+        out: dict[str, Any] = {
+            "total_portfolio_value": round(total, 2),
+            "position_count": len(snapshot.positions),
+        }
+        if isinstance(cap, (int, float)) and cap > 0:
+            out["max_total_exposure"] = cap
+            out["exposure_utilisation_pct"] = round(total / cap * 100, 2)
+            # Guardian's exact test is `total + order_value > cap` for a BUY.
+            out["buy_blocked_by_exposure_limit"] = total + position_value > cap
+        if held_here is not None:
+            out["position_in_this_symbol"] = held_here.quantity
+        return out
 
     def _lessons(self, strategy_id: str | None) -> list[KnowledgeArtifact]:
         if self.lessons is None or strategy_id is None:

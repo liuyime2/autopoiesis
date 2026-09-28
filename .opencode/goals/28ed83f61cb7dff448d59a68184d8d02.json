@@ -32,7 +32,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790620255752,
+      "observedAt": 1790620389294,
       "lastRequestTokens": 123572,
       "lastInputTokens": 123153
     }
@@ -74,7 +74,7 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 119,
+  "progressRevision": 122,
   "observedProgressRevision": 103,
   "progressFingerprints": [
     "shell:b9b4f44e7752e63facec64bdbc0ee8e6fcf0da7ffe5fcf0ae88310a924a1a1f4",
@@ -195,25 +195,13 @@
     "shell-worktree:0c52e8e2642f6b7f2d440945521d28cefef55292c60788d1e626ff0797384f68",
     "shell-worktree:f784f3273b3ba9959117cb99793b50cc732dc931574c7e0857a3a9e797fb0f1e",
     "shell-worktree:f0acae07e6c19fe9fe61d7aa5a4f5ff3068d336aa9e030201af32ab181d382db",
-    "shell-worktree:91e71853fe750469412e729480987d1c926fe79cb4081b4b84779e1902a91506"
+    "shell-worktree:91e71853fe750469412e729480987d1c926fe79cb4081b4b84779e1902a91506",
+    "shell-worktree:346dbc286925f4cb944d8ad8cc0ec6d648a44a273989b9d11accf9de1edc00d2",
+    "shell-worktree:eabb3f411df79b67c66345c034f7401f29d550e30078e2d90503b09708b0bf2f",
+    "shell-worktree:fc6657d44fdba0fe1a3bc7dbc56a6c9d12eb4b5ec278f2b78956afafba79fc73"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790613538565,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790613770672,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790613782694,
-      "summary": "346 tests, 91/91 defect checks, doctor RESULT OK with 0 failures. Requirement audit still 16/18.\n\nLIVE STATE\nollama, min-agent and the watchdog timer all active under systemd, 0 restarts. Day loss recovered to -369.23 against the 500 cap, so Guardian is permitting orders again. The knowledge read path is confirmed working end to end - a PolicyEngine fallback decision's rationale carried 'lessons: No-exploration window detected from real journal cycles' from the admitted artifacts.\n\nWHAT I FIXED THIS TURN\nA risk-driven trading halt was invisible. Guardian logs 'approved' for a HOLD, so when the model declined to act because the day was down it had quietly become a second risk authority: it could halt trading with none of Guardian's auditability, and the journal showed an ordinary quiet cycle with a reassuring 'approved'. That is the same class of defect as the heartbeat replay - a halt that does not read as a halt.\n- TradeDecision.hold_reason, stated by the model, validated as a closed enum.\n- The decision prompt asks for it and states that the risk limits are enforced downstream, so the model should state its reason rather than act as a second risk check. That is a statement about who decides, and it is neutral about the outcome - it is not a nudge toward trading.\n- The evaluator counts hold reasons and EvaluationReport carries them.\n- doctor has a 'risk-driven halts' check.\nVerified live: the first cycle after the change recorded hold_reason='market_uncertain' where all 24 earlier cycles have None. The model's self-categorisation is imperfect - its rationale mentions the daily loss while it labelled the hold 'market_uncertain' - so '0/825 HOLD cycles attributed to a risk limit' is now a measurable fact rather than an unanswerable one.\n\nWHY THE LAST TWO CRITERIA ARE STILL OPEN, precisely\nBoth need a closed lot from a BUY->SELL round trip. Guardian would approve a SELL outright (dry-run confirmed: with daily_loss=0, approved=True; and the exposure cap is BUY-only so it does not gate closing the agent's 23 SPY shares). The only actor who can SELL is the LLM, because the strategy library has no selectable SELL strategy - fixed-size-sell-001 was correctly RETIRED for failing to sell while the position book was invisible, and trend-follow-sell-001 was correctly PAUSED today by the degenerate guard for 'no exploration evidence over the evaluation window'. So the library is in exactly the state the risk system should produce, and the exit is the LLM deciding to reduce risk. It has chosen HOLD on every cycle today, with a stated reason. I have not manipulated its inputs to change that.\n\nHONEST POSITION, ALSO WRITTEN INTO STATUS.md\nThe self-evolution loop is not proposing new skills: the curriculum still falls back on every call. It is disclosed (status=SKIPPED, source=fallback, with the validation error) and safe (invalid StrategySpec is rejected, admission would reject it). The remaining cause is that ollama's constrained decoding does not enforce const or additionalProperties inside a oneOf, which I measured, so the kind-conditional parameter requirement cannot be encoded.\nThe systemd units are not reboot-persistent because /home is at user quota and the manager cannot create $HOME/.config/systemd/user.\nThe key pair should be rotated in the Alpaca UI.",
-      "next": "The audit stands at 16/18. The two remaining obligations both need a closed lot from a BUY->SELL round trip, and the only actor who can SELL is the LLM, which is choosing HOLD on its own reasoning every cycle. I have deliberately not manipulated its inputs. Three items are genuinely the user's to decide and I should not decide them by editing prompts or limits: (1) whether a risk scalar belongs in the LLM's decision context at all, now that its abstention is countable via hold_reason and 'risk-driven halts' in doctor - removing it would be a legitimate design choice, and keeping it is also legitimate; (2) whether to spend more effort on the curriculum's conditional-parameter problem, which needs a different generation strategy than ollama's decoder can enforce; (3) freeing a few MB under $HOME to make the systemd units reboot-persistent."
-    },
     {
       "time": 1790613860681,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -448,11 +436,26 @@
       "time": 1790620254541,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790620260847,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790620313608,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790620325176,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 1022,
+  "storageGeneration": 1047,
   "createdAt": 1790603839704,
-  "updatedAt": 1790620255752,
+  "updatedAt": 1790620389294,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:74578f8684f4a8634c2d684d2edeb15ac210e5081552d64bab0cc091cc564445",

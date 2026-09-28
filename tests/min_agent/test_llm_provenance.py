@@ -708,7 +708,7 @@ class _StubPolicy:
         return []
 
 
-def _basis_snapshot(*, last_price=700.0, spy_quantity=0):
+def _basis_snapshot(*, last_price=700.0, spy_quantity=0, extra_positions=()):
     from min_agent.models import AccountSnapshot, DataSnapshot, PositionSnapshot
 
     positions = (
@@ -716,7 +716,7 @@ def _basis_snapshot(*, last_price=700.0, spy_quantity=0):
                           market_value=float(spy_quantity) * last_price),)
         if spy_quantity
         else ()
-    )
+    ) + tuple(extra_positions)
     return DataSnapshot(
         symbol="SPY",
         timestamp=datetime(2026, 9, 28, 18, 0, tzinfo=timezone.utc),
@@ -809,3 +809,56 @@ def _fixed_size_spec(*, strategy_id, action, quantity=1):
         max_position_value=1000, enabled=True, lifecycle="PROBATION",
         created_at=datetime.now(tz=timezone.utc), rationale="t",
     )
+
+
+def test_the_context_states_that_the_exposure_limit_already_blocks_buying():
+    """The model was told the cap but never the total it is measured against, so it
+    could not know that this account holds ~$76k against a $20k cap and that every
+    BUY would be rejected by Guardian. It kept proposing BUY and Guardian kept
+    answering "total exposure exceeds hard limit" - 49 BUY decisions, 0 fills.
+
+    This is arithmetic on the broker positions already in the context, not a hint to
+    trade, and it changes nothing about enforcement: Guardian still decides.
+    """
+    from min_agent.llm_decision import HybridDecisionEngine
+
+    engine = HybridDecisionEngine(
+        llm=object(),
+        policy_engine=_StubPolicy(),
+        risk_limits={"max_total_exposure": 20000.0},
+    )
+    from min_agent.models import PositionSnapshot
+
+    # The live account: 23 SPY plus ~$59k of positions outside the allowlist, so
+    # total exposure is far past the $20k cap and every BUY is rejected.
+    snapshot = _basis_snapshot(
+        last_price=767.0,
+        spy_quantity=23,
+        extra_positions=(
+            PositionSnapshot(symbol="TLT", quantity=226.0, market_value=17745.52),
+        ),
+    )
+    context = engine._context(snapshot)
+
+    exposure = context["exposure"]
+    assert exposure["max_total_exposure"] == 20000.0
+    assert exposure["total_portfolio_value"] > 20000.0
+    assert exposure["buy_blocked_by_exposure_limit"] is True
+    assert exposure["position_in_this_symbol"] == 23
+    assert exposure["position_count"] == 2
+
+
+def test_a_flat_account_is_not_reported_as_exposure_blocked():
+    from min_agent.llm_decision import HybridDecisionEngine
+
+    engine = HybridDecisionEngine(
+        llm=object(),
+        policy_engine=_StubPolicy(),
+        risk_limits={"max_total_exposure": 20000.0},
+    )
+    context = engine._context(_basis_snapshot(last_price=700.0, spy_quantity=0))
+
+    exposure = context["exposure"]
+    assert exposure["total_portfolio_value"] == 0.0
+    assert exposure["buy_blocked_by_exposure_limit"] is False
+    assert "position_in_this_symbol" not in exposure
