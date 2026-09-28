@@ -737,12 +737,22 @@ def _unmet_capability(task: CurriculumTask, context: Mapping[str, object]) -> st
     if not uncovered:
         return None
     spec = task.strategy_spec
-    supplied = str(spec.parameters.get("action", "")).upper() if spec is not None else None
-    if spec is not None and spec.kind == "TREND_FOLLOW":
-        # A trend follower takes its side from price, so it can cover either.
-        return None
+    if spec is None:
+        return ", ".join(str(item) for item in uncovered)
+    supplied = {str(spec.parameters.get("action", "")).upper()}
+    if spec.kind == "TREND_FOLLOW":
+        # A trend follower takes its side from price, so it can cover either - but
+        # only in one regime at a time. Treating every TREND_FOLLOW as covering
+        # SELL let three consecutive BUY-only proposals count as filling the gap.
+        # It counts only if it actually produces the action at the real price.
+        supplied = set()
+    last_price = coverage.get("evaluated_at_last_price")
+    if isinstance(last_price, (int, float)):
+        produced = _producible_action(spec, float(last_price), "SPY")
+        if produced:
+            supplied.add(produced)
     for action in uncovered:
-        if supplied == str(action).upper():
+        if str(action).upper() in supplied:
             return None
     return ", ".join(str(item) for item in uncovered)
 

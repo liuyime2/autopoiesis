@@ -810,3 +810,38 @@ def test_a_capability_that_cannot_fire_now_is_not_counted_as_covered():
     assert coverage["uncovered_actions_now"] == ["SELL"], (
         "a nominal SELL that cannot fire is not an exit"
     )
+
+
+def test_a_trend_follow_buy_only_proposal_does_not_count_as_filling_the_sell_gap():
+    """Treating every TREND_FOLLOW as covering SELL let three consecutive
+    BUY-only proposals count as filling the gap, and the library stayed
+    exitless. Covering the action means producing it at the real price."""
+    from datetime import datetime, timezone
+
+    from min_agent.curriculum import _unmet_capability
+    from min_agent.models import CurriculumTask, StrategySpec
+
+    spec = StrategySpec(
+        strategy_id="trend-follow-buy-004", name="tf", kind="TREND_FOLLOW", symbols=("SPY",),
+        parameters={"threshold_pct": 0.01, "confidence": 0.6, "quantity": 1,
+                    "reference_price": 735.0},
+        max_position_value=5000, enabled=True, lifecycle="ACTIVE",
+        created_at=datetime.now(tz=timezone.utc), rationale="t",
+    )
+    task = CurriculumTask(
+        task_id="t", task_type="STRATEGY_SPEC", summary="s", strategy_spec=spec,
+        rationale="r", source="llm",
+    )
+    context = {
+        "capability_coverage": {
+            "uncovered_actions_now": ["SELL"],
+            "evaluated_at_last_price": 767.0,
+        }
+    }
+
+    # At 767 it buys, so it does not supply an exit.
+    assert _unmet_capability(task, context) == "SELL"
+
+    # The same strategy below its reference does sell, and then it does.
+    context["capability_coverage"]["evaluated_at_last_price"] = 700.0
+    assert _unmet_capability(task, context) is None

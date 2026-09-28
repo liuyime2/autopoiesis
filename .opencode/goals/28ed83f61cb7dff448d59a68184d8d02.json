@@ -32,7 +32,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790617239168,
+      "observedAt": 1790617868631,
       "lastRequestTokens": 30475,
       "lastInputTokens": 29928
     }
@@ -72,7 +72,7 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 96,
+  "progressRevision": 98,
   "observedProgressRevision": 79,
   "progressFingerprints": [
     "shell:b9b4f44e7752e63facec64bdbc0ee8e6fcf0da7ffe5fcf0ae88310a924a1a1f4",
@@ -170,25 +170,12 @@
     "shell-worktree:fb141f2635d9ff6a6612881e427e4f4495e65df76c611ab6e5e3c78cf76b3a33",
     "shell-worktree:3e35d77ab41b8f6bdceb2fdfe1ccd210f7433d10952f9ebb3b058504614bf607",
     "shell-worktree:ad5f80dbb177bcb212abbc591ecf8adb6356cf47912456be5cac255e08fdc1f3",
-    "shell-worktree:a3185c8893158633975569cd63b925186e7a5681ab901a135183097a465af394"
+    "shell-worktree:a3185c8893158633975569cd63b925186e7a5681ab901a135183097a465af394",
+    "shell-worktree:f8b397cda9ba06dcba90d838f62b59c5630d6c82a62d6421514652534e5c1288",
+    "shell-worktree:96b7ffe8da9f5be64569a71fce5bfa97d4fe02b0df1cb935ecdc29154ae0cc11"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790609074853,
-      "summary": "Phase 6 is partially proved against the live Alpaca paper account. 328 tests pass, 91/91 defect checks pass.\n\nCREDENTIALS AND ENVIRONMENT\nCredentials work: account ACTIVE, market OPEN right now, 6 positions, ollama serving deepseek-r1:8b. Secrets live in $XDG_CONFIG_HOME/min-agent/env (mode 600), outside the working tree, so git can never see them. Noted for the user: the key pair was pasted into chat, so it should be rotated in the Alpaca UI.\n\nDOCTOR: from 3 blocking failures to 1. alpaca credentials, broker clock, broker positions and ollama all PASS; only 'daemon' remains, because the daemon is not running yet.\n\nPROOF SO FAR, ALL FROM REAL BROKER DATA\n- submitted>0: 23 agent orders, located at the broker by their min-agent-* client_order_ids\n- filled>0: 0 -> 23. The FillReconciler resolved every one of the June orders the old\n  code had recorded as filled_quantity 0.0. fill_quantity_ratio 0.0 -> 1.0.\n- per-strategy attribution works: open lots tiny-fixed-size-001:SPY 13,\n  fixed-size-buy-001:SPY 6, trend-follow-buy-001:SPY 4, unlinked fills 0\n- pnl_evidence upgraded from missing_fill_price_and_broker_activity to\n  broker_portfolio_history_verified\n- the 3 live cycles show decision_source='llm', i.e. the LLM is making the\n  decisions, and Guardian returning 'daily loss limit reached'\n\nNEW DEFECT FOUND AND FIXED (06ee35c)\nbroker_evidence called get_portfolio_history(start=<datetime>, end=<datetime>).\nThat signature does not exist on alpaca-trade-api 3.2.0; it takes date_start/date_end\nas strings. The TypeError was swallowed into a no-argument call whose default is\nperiod='1M', so a 24-hour request was answered with 30 days while the batch still\nadvertised 24 hours. Measured after the fix against the live API: 24h -> 8 points\nspanning today 13:30-15:15, 7d -> 143 points, 120d -> 82 points from 2026-06-02,\nwith no fallback. Timeframe is derived from the window because Alpaca rejects 15Min\npast 30 days. 3 regression tests added.\n\nSTILL BLOCKED, AND IT IS NOT A CODE PROBLEM\nclosed lots = 0, so per-strategy realized PnL is empty. The system says exactly\nwhy: 'linked BUY fills exist but no linked SELL fills closed lots'. The agent never\nsold a share in its entire history - that was defect D1/D2, the position book was\ninvisible so Guardian rejected every SELL. Closing a lot requires a real BUY->SELL\nround trip, and two independent limits block it today:\n1. today's loss is $532 against max_daily_loss=$500, so Guardian refuses every BUY\n   and every SELL. This is the risk system working correctly.\n2. held exposure is $76,819 against a $20,000 aggregate cap, so every BUY is refused\n   by max_total_exposure. Most of that holding is BIL, TLT, XLE, XLF and XLB, which\n   are not in the agent's allowlist at all and appear to be pre-existing account\n   holdings rather than anything the agent bought.\n\nNeither limit may be changed by me. AGENTS.md section 6 forbids it and\ntests/min_agent/test_governance.py fails any script that assigns a risk limit. I also\nwill not simulate a broker to manufacture a closed lot - that is the fabrication\nAGENTS.md rule 2 forbids, and it is the same class of fiction as the 112 green\nreviews that hid the 97-day outage.",
-      "next": "One decision is needed from the user to finish the proof: whether to raise MIN_AGENT_MAX_DAILY_LOSS from $500 for one session so the agent can complete a BUY->SELL round trip and produce a closed lot. Today's loss is $532, so every BUY and SELL is currently refused. Options: (A) keep $500 and accept that the round trip happens at tomorrow's open - the risk system is demonstrably working today, and today's cycles show Guardian returning 'daily loss limit reached' with decision_source='llm'; (B) raise to e.g. $1000 via the environment variable only - no code change, no Guardian change, an explicit logged human decision; (C) wait. I must not change a risk limit myself: AGENTS.md section 6 forbids it and tests/min_agent/test_governance.py fails any ops script that assigns one. I will also flag that the paper account holds $76,819 of exposure against a $20,000 aggregate cap, so every BUY is blocked by max_total_exposure regardless of the daily-loss decision - most of it in instruments outside the agent's allowlist (BIL, TLT, XLE, XLF, XLB), which appear to be pre-existing account holdings rather than agent positions."
-    },
-    {
-      "time": 1790609202128,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790609944867,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790610049174,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -423,11 +410,26 @@
       "time": 1790616382051,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790617253802,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790617506108,
+      "summary": "Fixed 5 exit-path defects (b38afcd) and made the curriculum engine report and fill executable-capability gaps (d2d6608). 365 passed, audit 91/91. Key findings: the lot ledger was per-strategy so no strategy could ever close another's lot (all 4 historical SELLs closed nothing); the 24h PnL window could not match June lots; verified PnL was silently dropped before the lifecycle layer saw it; max_position_value truncated exits; guardian min_confidence=0.5 was admission-blind. Live: June lots now reconstruct as {tiny-fixed-size-001:13, fixed-size-buy-001:6, trend-follow-buy-001:4}, capability coverage correctly reports SELL uncovered at the real 767.25, and the daemon admitted trend-follow-buy-002 at 17:43.",
+      "next": "Keep the live loop running until a SELL strategy is admitted and selected, then let a real order fill so a closed lot and per-strategy PnL form naturally. No rigging: do not alter risk limits, prompts to force a trade, or the market. Restore the curriculum interval to the shipped default once observed."
+    },
+    {
+      "time": 1790617833207,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 747,
+  "storageGeneration": 765,
   "createdAt": 1790603839704,
-  "updatedAt": 1790617239168,
+  "updatedAt": 1790617868631,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:d9032723a3b6a168bcb36a32abad20f8d6a283a12ad282159f115ca1e73acab9",
