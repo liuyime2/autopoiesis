@@ -145,8 +145,39 @@ def test_portfolio_history_drops_to_daily_resolution_beyond_thirty_days():
     end = datetime(2026, 9, 28, tzinfo=timezone.utc)
     provider._fetch_portfolio_history(end - timedelta(days=120), end)
 
+    # A 120-day window is already known to exceed the intraday limit, so daily is
+    # requested first rather than paying a call the broker will reject.
     assert calls[0]["timeframe"] == "1D"
     assert calls[0]["date_start"] == "2026-05-31"
+
+
+def test_a_window_that_spans_thirty_one_calendar_days_is_not_intraday():
+    """The boundary is inclusive of dates, not a 24h duration: a window exactly
+    30*24h long spans 31 dates and Alpaca already rejects intraday for it. That is
+    why `--ingest-evidence`, which requests exactly 30 days, failed with
+    'invalid timeframe provided: 15Min. Valid timeframe for days > 30 is 1D'."""
+    from datetime import datetime, timedelta, timezone
+
+    seen = []
+
+    class Client:
+        def get_portfolio_history(self, **kwargs):
+            seen.append(kwargs)
+            if kwargs.get("timeframe") == "15Min":
+                raise RuntimeError(
+                    "invalid timeframe provided: 15Min. Valid timeframe for days > 30 is 1D"
+                )
+            return []
+
+    provider = BrokerEvidenceProvider(client=Client())
+    end = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
+    provider._fetch_portfolio_history(end - timedelta(days=30), end)
+
+    # 30*24h spans 31 dates, so the provider asks for daily first.
+    assert [call["timeframe"] for call in seen] == ["1D"]
+    assert "1D" in (provider.window_fallback or ""), (
+        "the resolution we had to accept must be disclosed, not silent"
+    )
 
 
 def test_an_unhonourable_window_is_disclosed_not_substituted():

@@ -94,24 +94,41 @@ class BrokerEvidenceProvider:
         """
         if not hasattr(self.client, "get_portfolio_history"):
             raise AttributeError("client has no get_portfolio_history")
-        window_days = max(1, (window_end - window_start).days)
-        # Alpaca rejects intraday timeframes for windows over 30 days:
+        # Alpaca rejects intraday timeframes once the window exceeds 30 days:
         # "invalid timeframe provided: 15Min. Valid timeframe for days > 30 is 1D".
-        timeframe = "15Min" if window_days <= 30 else "1D"
-        try:
-            history = self.client.get_portfolio_history(
-                date_start=window_start.strftime("%Y-%m-%d"),
-                date_end=window_end.strftime("%Y-%m-%d"),
-                timeframe=timeframe,
+        # The boundary is counted in inclusive calendar days, so a window that is
+        # exactly 30*24h long spans 31 dates and is already over the limit - which
+        # is why `--ingest-evidence` failed with a 30-day request.
+        inclusive_days = (window_end.date() - window_start.date()).days + 1
+        # A window already known to be too long is asked for daily first, rather
+        # than paying a call that is certain to be rejected.
+        preferred = ["1D", "15Min"] if inclusive_days > 30 else ["15Min", "1D"]
+        last_error: Exception | None = None
+        for timeframe in preferred:
+            try:
+                history = self.client.get_portfolio_history(
+                    date_start=window_start.strftime("%Y-%m-%d"),
+                    date_end=window_end.strftime("%Y-%m-%d"),
+                    timeframe=timeframe,
+                )
+            except TypeError:
+                # A client whose signature genuinely differs. Retry unparameterised
+                # but say so, rather than pretending the window was honoured.
+                history = self.client.get_portfolio_history()
+                self.window_fallback = f"unparameterised (requested {inclusive_days}d)"
+                return self._normalize_portfolio_history(history)
+            except Exception as exc:  # noqa: BLE001 - the next timeframe may work
+                last_error = exc
+                continue
+            # Alpaca told us which timeframe it will accept, so if we had to step
+            # down to 1D the batch is still honest - it says so.
+            self.window_fallback = (
+                None
+                if timeframe == "15Min"
+                else f"timeframe {timeframe} (intraday rejected for a {inclusive_days}-day window)"
             )
-        except TypeError:
-            # A client whose signature genuinely differs. Retry unparameterised
-            # but say so, rather than pretending the window was honoured.
-            history = self.client.get_portfolio_history()
-            self.window_fallback = f"unparameterised (requested {window_days}d @ {timeframe})"
-        else:
-            self.window_fallback = None
-        return self._normalize_portfolio_history(history)
+            return self._normalize_portfolio_history(history)
+        raise last_error if last_error else RuntimeError("no portfolio history fetched")
 
     def _normalize_order(self, order) -> BrokerOrderSnapshot | None:
         order_id = _text(_get(order, "id", _get(order, "order_id", None)))
