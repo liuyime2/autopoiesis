@@ -523,3 +523,61 @@ def test_trade_decision_schema_is_passed_to_the_transport():
     engine.decide({"symbol": "SPY", "last_price": 700.0})
 
     assert captured["payload"]["format"] == TradeDecision.model_json_schema()
+
+
+def test_a_risk_driven_hold_is_distinguishable_from_an_ordinary_one():
+    """Guardian logs "approved" for a HOLD, so when the model declines because of
+    a risk scalar it has quietly become a second risk authority: it can halt
+    trading with none of Guardian's auditability, and the journal shows an
+    ordinary quiet cycle. That is the same class of invisible-halt defect as the
+    heartbeat replay - a halt that does not read as a halt.
+    """
+    from min_agent.evaluator import DeterministicEvaluator
+    from min_agent.models import (
+        AccountSnapshot,
+        CycleRecord,
+        DataSnapshot,
+        ExecutionResult,
+        GuardianResult,
+        TradeDecision,
+    )
+
+    def record(hold_reason):
+        snapshot = DataSnapshot(
+            symbol="SPY", timestamp=NOW, market_open=True, last_price=700.0, source="alpaca",
+            account=AccountSnapshot(
+                equity=100_000, cash=100_000, buying_power=100_000, portfolio_value=100_000, daily_loss=300
+            ),
+        )
+        decision = TradeDecision(
+            symbol="SPY", action="HOLD", quantity=0, confidence=0.3, rationale="r",
+            hold_reason=hold_reason, decision_source="llm",
+        )
+        return CycleRecord(
+            cycle_id=f"c-{hold_reason}-{id(hold_reason)}", snapshot=snapshot, decision=decision,
+            guardian=GuardianResult(approved=True, reason="approved"),
+            execution=ExecutionResult(status="SKIPPED", order_id=None, filled_quantity=0, message="hold"),
+            strategy_id="s1",
+        )
+
+    report = DeterministicEvaluator().evaluate(
+        [record("risk_limit_near"), record("risk_limit_near"), record("no_signal")]
+    )
+
+    assert report.hold_reasons == {"risk_limit_near": 2, "no_signal": 1}
+    assert report.action_counts["HOLD"] == 3
+    # Guardian approved all of them; only the model knew two were risk halts.
+    assert report.guardian_approved == 3
+
+
+def test_hold_reason_is_validated():
+    from min_agent.models import TradeDecision
+
+    assert TradeDecision(
+        symbol="SPY", action="HOLD", quantity=0, confidence=0.1, rationale="r", hold_reason="no_signal"
+    ).hold_reason == "no_signal"
+    with pytest.raises(Exception):
+        TradeDecision(
+            symbol="SPY", action="HOLD", quantity=0, confidence=0.1, rationale="r",
+            hold_reason="because_i_said_so",
+        )

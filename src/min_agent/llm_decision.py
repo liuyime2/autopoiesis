@@ -52,10 +52,15 @@ class OllamaDecisionEngine:
     def decide(self, context: dict[str, Any]) -> TradeDecision:
         prompt = (
             "You are a paper-trading decision engine. Return exactly one JSON object with keys: "
-            "symbol, action, quantity, confidence, rationale. action must be BUY, SELL, or HOLD. "
+            "symbol, action, quantity, confidence, rationale, hold_reason. "
+            "action must be BUY, SELL, or HOLD. "
             "quantity must be 0 when action is HOLD, and a positive integer otherwise. "
             "Base every number on the context you are given; do not invent prices. "
-            "If the context does not support a trade, return HOLD. "
+            "If the context does not support a trade, return HOLD and set hold_reason. "
+            "hold_reason must be exactly one of: no_signal, risk_limit_near, market_uncertain, "
+            "await_confirmation, other. Use risk_limit_near only when a risk figure in the "
+            "context is what stopped you. The risk limits in the context are enforced "
+            "independently downstream; state your reason, do not act as a second risk check. "
             "Do not include any order outside the supplied symbol and risk context.\n"
             f"Context: {json.dumps(context, sort_keys=True)}"
         )

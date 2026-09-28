@@ -12,15 +12,17 @@ all of which described the system as running when it had been dead for 97 days.
 ./minictrl doctor
 ```
 
-Ollama has since been started on `:11434` serving `deepseek-r1:8b`, and the
-LLM paths were verified live against the real model (see below). It currently
-reports two blocking problems:
+Ollama is serving on `:11434` with `deepseek-r1:8b`, both LLM paths are
+verified live against the real model, and the credentials work, so the only
+remaining blocking problem is the daemon, which is stopped whenever the unit is
+not running. With the stack up, `doctor` reports **RESULT OK** with 0 failures
+and 2 warnings, both of them the closed-lot criterion:
 
 | Check | State |
 |---|---|
 | alpaca credentials | **FAIL** — `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` are absent from the environment and from every `.env` in the tree. The paper API itself is reachable (`GET /v2/clock` → HTTP 401, i.e. only the credential is missing) |
-| daemon | **FAIL** — `heartbeat.json` claims `RUNNING`, but pid 2590767 is dead and the heartbeat is 97 days stale |
-| proof: filled>0 | **WARN** — 23 orders were submitted, 0 fills were ever recorded |
+| daemon | PASS when `min-agent.service` is up; FAIL otherwise. The 97-day stale heartbeat is detected |
+| proof: filled>0 | **PASS** — 23 orders submitted, 23 fills broker-confirmed, `fill_quantity_ratio` 1.0 |
 | proof: per-strategy pnl | **WARN** — empty; needs broker closed-lot evidence |
 | journal | OK — 16.9 MB, 5387 lines, 851 cycles, 0 unparseable |
 | strategy library | OK — 15 strategies, 4 selectable, all parse |
@@ -98,3 +100,39 @@ A complete paper session in which, read from the journal:
 Cycle counts, green review files, and "the daemon is running" are **not**
 evidence. `minictrl doctor` prints these as `proof: submitted>0`,
 `proof: filled>0` and `proof: per-strategy pnl` for exactly that reason.
+
+---
+
+## What is NOT working, stated plainly
+
+**The self-evolution loop is not proposing new skills.** The curriculum agent
+has been falling back to a hard-coded `EVALUATE` on every call. The journal says
+so (`status=SKIPPED`, `source=fallback`, with the validation error) — it is
+disclosed, and it is safe: an invalid `StrategySpec` is rejected by validation and
+would be rejected by the admission gate.
+
+Root cause, measured: the context was ~14 kB, and `deepseek-r1:8b` stopped
+following it and emitted a meta-refusal. That is fixed (context ~8 kB, parsed).
+Schema-constrained generation replaced `format="json"`, which was 5x faster and
+4x smaller. What remains is that `StrategySpec` requires
+`action/quantity/confidence` when `kind` is `FIXED_SIZE` — a pydantic
+`model_validator`, and ollama's constrained decoding does not enforce `const` or
+`additionalProperties` inside a `oneOf` (measured: the schema was accepted in
+6.4 s and then ignored). So the model succeeds some of the time and not others.
+A validated retry raises the hit rate; it does not make it reliable.
+
+**A risk-driven halt used to be invisible.** Guardian logs `approved` for a HOLD,
+so when the model declined because of the day's loss it was acting as a second
+risk authority with none of Guardian's auditability, and the journal showed an
+ordinary quiet cycle. `TradeDecision.hold_reason` now records why, the evaluator
+counts the reasons, and `doctor` has a `risk-driven halts` check. This was fixed
+for observability, not to induce trading: the model is still choosing HOLD on
+its own reasoning, and the two audit criteria still need a closed lot.
+
+**The systemd units are not reboot-persistent.** They live in `/run/user/$UID`
+because `/home` is at user quota, so the manager cannot create
+`$HOME/.config/systemd/user`. Freeing a few MB under `$HOME` makes
+`minictrl install-service` permanent.
+
+**The key pair was pasted into a conversation and should be rotated** in the
+Alpaca UI.

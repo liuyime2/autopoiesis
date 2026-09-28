@@ -396,6 +396,23 @@ def _check_proof(report: DoctorReport, config: AgentConfig) -> None:
             f"empty (pnl_evidence={evaluation.pnl_evidence})",
             "needs broker closed-lot evidence; a fill alone is not PnL",
         )
+    risk_halts = evaluation.hold_reasons.get("risk_limit_near", 0)
+    total_holds = evaluation.action_counts.get("HOLD", 0)
+    if risk_halts:
+        share = risk_halts / total_holds if total_holds else 0
+        report.add(
+            "risk-driven halts", WARN,
+            f"{risk_halts}/{total_holds} HOLD cycles were attributed to a near risk limit "
+            f"by the decision maker ({share:.0%})",
+            "Guardian enforces the limits independently. A decision maker that abstains "
+            "on risk grounds is acting as a second risk authority and can halt trading "
+            "without appearing to - see TradeDecision.hold_reason",
+        )
+    elif total_holds:
+        report.add(
+            "risk-driven halts", OK,
+            f"0/{total_holds} HOLD cycles attributed to a risk limit",
+        )
     if evaluation.pnl_evidence == PNL_EVIDENCE_MISSING:
         report.add(
             "pnl evidence", WARN, PNL_EVIDENCE_MISSING,

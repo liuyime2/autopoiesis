@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790613384070,
-      "lastRequestTokens": 457887,
-      "lastInputTokens": 457023
+      "observedAt": 1790613743809,
+      "lastRequestTokens": 472415,
+      "lastInputTokens": 471844
     }
   },
   "runtimeFingerprint": {
@@ -43,10 +43,10 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 12,
-    "tokens": 414732,
+    "turns": 13,
+    "tokens": 416664,
     "cost": 0,
-    "runtimeMs": 149737,
+    "runtimeMs": 162774,
     "seenMessageIDs": [
       "msg_0e84e4a64001WOfiNtqsqc3Gtz",
       "msg_0e851cf9c001x0WTKxhfBTZwDP",
@@ -59,7 +59,8 @@
       "msg_0e89e6632001IDSD2FRvwtz0Y7",
       "msg_0e8ad6751001VAsBAqNEa96xPw",
       "msg_0e8baf9b70015VmdvqDIaMKO7u",
-      "msg_0e8dbded7001LDSgqIGWcZfIME"
+      "msg_0e8dbded7001LDSgqIGWcZfIME",
+      "msg_0e8e0d4ce001HIjWH4PvV1xzad"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -69,8 +70,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 70,
-  "observedProgressRevision": 68,
+  "progressRevision": 74,
+  "observedProgressRevision": 71,
   "progressFingerprints": [
     "shell:b9b4f44e7752e63facec64bdbc0ee8e6fcf0da7ffe5fcf0ae88310a924a1a1f4",
     "shell:223f6fdcc7c7b98bc06f796b532475229266e362ad32092e7bea22119ad6ec54",
@@ -141,35 +142,14 @@
     "shell-worktree:f87e93c7a7788da6876722502cd3e29079463cf119d3d6a72dc0b0c0e328a289",
     "shell-worktree:0567474b4be11c35b5b1adbcbe7e7b38dc28dd89bc5c0f16b7b66551e77570f2",
     "shell-worktree:8275f6eeb7a00747abcf4ab50524e9f1b7b1cab8eaf4a0086b5d8a239c85fdc9",
-    "shell-worktree:b59fc8ee015be5697c5ba1b5cfc15742e4d566c963c94b25f2970720b4818a7e"
+    "shell-worktree:b59fc8ee015be5697c5ba1b5cfc15742e4d566c963c94b25f2970720b4818a7e",
+    "shell-worktree:7fdcef429e9cba2775ac147d04aadbc2d8925c80b9aa01f3e616d9aa365cebf7",
+    "shell-worktree:d2a2ebd2e8a23a6f75b9451c776bc2b1eb2cd6a296892e50abd24a99aa522fd9",
+    "shell-worktree:9059f4fb2acb020d048d7ad1618eb73b8e75bf7954746e86fe271eff9217b567",
+    "shell-worktree:a5cba8be627fe7fa684c4afc8bbe2568a16c62ef7692dddbdf9ac23153c6c7b5"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790605132130,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790605146321,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790605188636,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790605257686,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790605266346,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790605372548,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -394,11 +374,36 @@
       "time": 1790613251678,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790613412769,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790613433210,
+      "summary": "Closed out the curriculum investigation honestly. 344 tests pass, 91/91 defect checks pass, doctor reports RESULT OK with 0 failures and 2 warnings. Requirement audit stands at 16/18.\n\nCURRICULUM: 5 of 6 causes fixed, and the 6th is a tool limit\nFixed: prompt bloat (14kB -> ~8kB, meta-refusal eliminated), the four duplicated per-strategy maps merged into one, the list capped at 40 so growth cannot re-break it, schema-constrained generation replacing format='json' (5x faster, 4x smaller, all shape errors gone), the fallback now recording why, and a validated retry once on parse failure.\nNot fixed: the kind-conditional requirement on strategy_spec.parameters. I measured that ollama's constrained decoding accepts a oneOf schema in 6.4s and then ignores it - it does not enforce `const` or `additionalProperties`, producing task_type 'strategy_generation' and arbitrary parameters. So the condition cannot be encoded, deepseek-r1:8b succeeds some of the time and not others, and in the daemon it is currently failing. I have stopped chasing it: it blocks no success criterion, and continuing would be expanding scope on my own initiative. The failure is safe - StrategySpec validation rejects it, admission would reject it, and the fallback is disclosed with its reason - but the self-evolution loop is not proposing new skills, and I am not claiming otherwise.\n\nTHE PROOF CRITERION IS NOW UNBLOCKED BY RISK, AND I AM NOT RIGGING IT\nThe day's loss recovered from -542 to -321.22, under the 500 cap, so Guardian is permitting orders again. Confirmed by dry-run earlier: with daily_loss=0 Guardian approves a SELL outright, and the exposure cap is BUY-only so it does not gate closing the agent's 23 SPY shares.\nThe LLM chose HOLD on every cycle, with the rationale 'equity has decreased from the day start, and the daily loss is significant'. That is a reasoned decision from real data. I have deliberately not manipulated its inputs to force a trade: tuning until activity appears is precisely the anti-pattern this project's plan ruled out of scope, and I wrote that exclusion myself.\nThe open design question I am flagging rather than silently deciding: the LLM treats daily_loss in its context as a veto it has no authority over, while Guardian - which does have that authority, and is the only thing that should - stopped blocking hours ago. Whether a risk scalar belongs in the decision context at all is a design call for the user, not something to settle by editing a prompt toward activity.\n\nSTACK\nollama, min-agent and the watchdog timer are all active under systemd with 0 restarts. doctor: RESULT OK, 22 checks, 0 failures, 2 warnings (both the closed-lot criterion). submitted>0 = 23, filled>0 = 23 broker-confirmed. Journal 17.4MB, 877 cycles, recency 0.0h.\n\nSECURITY NOTE, still outstanding\nThe key pair was pasted into the conversation. It should be rotated in the Alpaca UI.",
+      "next": "Guardian is now permitting orders (day loss -321.22 against a 500 cap), so the only thing standing between the current state and the last two proof criteria is the LLM choosing to SELL. I am not going to manipulate its inputs to force that. Three things are worth the user's decision: (1) the LLM treats daily_loss in its context as a veto it cannot act on, having HOLDed every cycle for hours while Guardian stopped blocking - whether the risk scalar belongs in the decision context at all, given Guardian is the authority, is a genuine design question I should not answer by editing the prompt toward activity; (2) the curriculum is still falling back in the daemon, so the self-evolution loop is not proposing new skills - a real capability gap, disclosed and safe, but not working; (3) freeing a few MB under $HOME makes the systemd units permanent instead of living in /run tmpfs."
+    },
+    {
+      "time": 1790613497225,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790613517773,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790613538565,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 566,
+  "storageGeneration": 588,
   "createdAt": 1790603839704,
-  "updatedAt": 1790613384070,
+  "updatedAt": 1790613743809,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:d9032723a3b6a168bcb36a32abad20f8d6a283a12ad282159f115ca1e73acab9",

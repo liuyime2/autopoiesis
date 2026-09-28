@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 Action = Literal["BUY", "SELL", "HOLD"]
 DecisionSource = Literal["llm", "fallback_policy_engine", "policy_engine", "baseline"]
+HoldReason = Literal["no_signal", "risk_limit_near", "market_uncertain", "await_confirmation", "other"]
 AttributionStatus = Literal["LINKED", "UNLINKED"]
 StrategyKind = Literal["HOLD_BASELINE", "TREND_FOLLOW", "FIXED_SIZE"]
 StrategyLifecycle = Literal["PROBATION", "ACTIVE", "PAUSED", "RETIRED", "BASELINE"]
@@ -549,6 +550,13 @@ class EvaluationReport(BaseModel):
     guardian_rejected: int = Field(ge=0)
     guardian_rejections: dict[str, int] = Field(default_factory=dict)
     action_counts: dict[str, int] = Field(default_factory=dict)
+    hold_reasons: dict[str, int] = Field(default_factory=dict)
+    """Why HOLDs happened, as stated by the decision maker.
+
+    A risk-driven abstention (`risk_limit_near`) means the decision maker is acting
+    as a second risk authority. It has to be countable, otherwise a trading halt reads
+    as an ordinary quiet day in the journal.
+    """
     data_sources: dict[str, int] = Field(default_factory=dict)
     market_open_cycles: int = Field(ge=0)
     market_closed_cycles: int = Field(ge=0)
@@ -677,6 +685,19 @@ class TradeDecision(BaseModel):
     confidence: float = Field(ge=0, le=1)
     rationale: str = Field(min_length=1)
     strategy_id: str | None = None
+    hold_reason: HoldReason | None = None
+    """Why a HOLD was chosen, stated by the model.
+
+    Without this a risk-driven abstention is indistinguishable from an ordinary
+    one in the audit trail. Guardian logs "approved" for a HOLD, so when the model
+    declines to act because of a risk scalar it has de-facto become a second risk
+    authority - one that can halt trading with none of Guardian's
+    auditability, and which an operator cannot see or attribute. Recording the
+    reason makes the halt visible as a halt.
+
+    It is a reason, not a permission: Guardian still reviews every decision, and
+    this never widens or narrows what is allowed.
+    """
     decision_source: DecisionSource = "baseline"
     """Who produced this decision.
 

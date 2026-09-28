@@ -55,6 +55,7 @@ class DeterministicEvaluator:
         buckets: dict[str, _StrategyBucket] = {}
         guardian_rejections: dict[str, int] = {}
         action_counts = {"BUY": 0, "SELL": 0, "HOLD": 0}
+        hold_reasons: dict[str, int] = {}
         data_sources: dict[str, int] = {}
         submitted = 0
         rejected = 0
@@ -77,6 +78,10 @@ class DeterministicEvaluator:
             strategy_id = record.strategy_id or record.decision.strategy_id
 
             action_counts[action] = action_counts.get(action, 0) + 1
+            if action == "HOLD" and record.decision.hold_reason:
+                hold_reasons[record.decision.hold_reason] = (
+                    hold_reasons.get(record.decision.hold_reason, 0) + 1
+                )
             data_sources[record.snapshot.source] = data_sources.get(record.snapshot.source, 0) + 1
             intended_notional += notional
             # A market order's submit response always reports filled_qty 0.
@@ -140,6 +145,7 @@ class DeterministicEvaluator:
             guardian_rejected=guardian_rejected,
             guardian_rejections=guardian_rejections,
             action_counts={key: value for key, value in action_counts.items() if value},
+            hold_reasons={key: value for key, value in hold_reasons.items() if value},
             data_sources=data_sources,
             market_open_cycles=market_open_cycles,
             market_closed_cycles=market_closed_cycles,
