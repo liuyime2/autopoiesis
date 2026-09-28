@@ -228,13 +228,12 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
     # reviews whatever comes out either way. Previously the daemon injected
     # policy_engine alone, so OllamaDecisionEngine.decide was unreachable
     # outside --once: every trade decision was a static JSON lookup.
-    records = journal.read_all()
-    cached_cost_basis = open_lot_cost_basis(journal, records)
+    agent_lots = _agent_open_lots(journal)
 
     def cost_basis(symbol: str) -> dict[str, object] | None:
         # Frozen at start-up: the lots can only change through a fill, and a fill
         # does not happen inside a decision.
-        return dict(cached_cost_basis.get(symbol, {})) or None
+        return dict(agent_lots.get(symbol, {})) or None
 
     decision_engine = HybridDecisionEngine(
         llm=OllamaDecisionEngine(
@@ -251,7 +250,7 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
             "max_total_exposure": config.max_total_exposure or None,
             "min_confidence": config.min_confidence,
         },
-        cost_basis=lambda: _agent_open_lots(journal),
+        cost_basis=cost_basis,
     )
     loop = TradingLoop(
         data_gateway=AlpacaDataGateway(client=client),

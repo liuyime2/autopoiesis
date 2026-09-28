@@ -32,7 +32,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790618191109,
+      "observedAt": 1790618863891,
       "lastRequestTokens": 123572,
       "lastInputTokens": 123153
     }
@@ -74,8 +74,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 102,
-  "observedProgressRevision": 98,
+  "progressRevision": 104,
+  "observedProgressRevision": 103,
   "progressFingerprints": [
     "shell:b9b4f44e7752e63facec64bdbc0ee8e6fcf0da7ffe5fcf0ae88310a924a1a1f4",
     "shell:223f6fdcc7c7b98bc06f796b532475229266e362ad32092e7bea22119ad6ec54",
@@ -178,20 +178,12 @@
     "shell-worktree:0e93e21520b8f1630a45e759e80d3629da27762ae5e96b402b5720281522698c",
     "shell-worktree:fb18868548930ed7266589fae5348be75cc34d537d54ad3efce4086cbf99a7c9",
     "shell-worktree:5f96c1d3402a4cef37927db960ad01c20e25627d40396ba3a3c6417955e9de00",
-    "shell-worktree:d881c94a70e35ff47cb07834b9dbf55e23a11098a5b46064def4585ea9feb031"
+    "shell-worktree:d881c94a70e35ff47cb07834b9dbf55e23a11098a5b46064def4585ea9feb031",
+    "shell-worktree:6ea224c7bf06c7e6370b146bbe2baf5157a1c508e4e3b087696e36d9126d4bf9",
+    "shell-worktree:48f174e66ffc086941ebfb2a38ba2f5ab1255263bb7b5673fa7e3bc075d12c47"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790610430150,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790610932554,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790610947809,
       "summary": "Final requirement audit run: 16 of 18 obligations met. 334 tests green under all three ambient conditions, 91/91 defect checks pass, doctor reports ok=True exit=0 with 22 checks and 0 failures.\n\nMET (with live evidence)\n- 审查: 15 defects recorded with reproduction evidence, re-verified as source properties by tools/audit_defects.py\n- 跑通: daemon alive (pid alive, age 624s), broker reachable with valid credentials and market OPEN, ollama serving deepseek-r1:8b, LLM making the decisions, Guardian enforced and machine-enforced by 15 governance tests, market-open checks and paper/live separation intact, journal complete (17.0MB, 855 cycles, recency ok)\n- 有效果: submitted>0 = 23 orders; filled>0 = 23.0 shares broker-confirmed\n- 快速迭代: minictrl doctor (one command, non-zero on fault), minictrl loop/once for bounded runs, systemd units verified with StartLimitBurst, watchdog timer writing a bounded doctor history\n\nOPEN, both the same root cause\n- per-strategy PnL attribution non-empty\n- a lifecycle transition driven by that PnL\nNeither is possible without a closed lot, which needs a SELL, and every BUY and SELL is currently refused because the day's loss is $542.47 against a $500 cap. This is the risk system working correctly, and I will not raise the limit.\n\nWORK DONE THIS TURN\n1. Guardian ordering: the daily-loss check sat above the HOLD branch, so a deliberate no-op was journalled as a risk REJECTION. Now gates orders only. Confirmed live - a HOLD is approved while a BUY is still refused.\n2. test_quiet_mode_is_one_line failed 100% of runs once real credentials existed. It called main(), which reads AgentConfig.from_env() - the real environment, ignoring the fixture - and asserted rc == 1, which held only while no credentials existed. It now scrubs the env and asserts the contract; added a second test that the exit code and printed verdict cannot disagree. This is the second test here that only passed because the system was broken.\n3. My own requirement audit reported 'no fabricated data' as failing on the word 'synthetic' inside the docstring that states the prohibition. The audit now strips comments and docstrings before scanning. A checker that flags the guards is worse than none.\n4. install-transient had two bugs: a transient unit named ollama.service shadowed the file unit, and it used 'enable --now' where enable always fails because /home is at quota - so it printed FAILED for a healthy stack. It now starts only and reports observed state rather than a return code.\n5. Proved the outage/recovery loop live: with ollama stopped under a running daemon the next cycle recorded decision_source='fallback_policy_engine', and after restarting ollama the next cycle recorded decision_source='llm'. The fallback is disclosed, never silent.",
@@ -431,11 +423,21 @@
       "time": 1790618165135,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790618202803,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790618786380,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 809,
+  "storageGeneration": 867,
   "createdAt": 1790603839704,
-  "updatedAt": 1790618191109,
+  "updatedAt": 1790618863891,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:74578f8684f4a8634c2d684d2edeb15ac210e5081552d64bab0cc091cc564445",
