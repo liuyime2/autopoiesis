@@ -164,3 +164,24 @@ def test_minictrl_and_doctor_exist_for_fast_iteration():
     text = _source("src/min_agent/cli.py")
     assert '"--doctor"' in text
     assert "run_doctor" in text
+
+
+def test_every_recorded_defect_is_still_fixed():
+    """tools/audit_defects.py re-verifies all 15 defects from the recovery plan.
+
+    A regression in any of them is a regression in the whole point of the
+    refactor, so the audit runs as part of the suite rather than being a script
+    someone has to remember to invoke.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [sys.executable, "tools/audit_defects.py"],
+        cwd=root, capture_output=True, text=True,
+        env={**__import__("os").environ, "PYTHONPATH": str(root / "src")},
+    )
+    assert result.returncode == 0, f"defect audit failed:\n{result.stdout[-3000:]}"
+    assert "checks pass across 15 defects" in result.stdout

@@ -7,7 +7,7 @@
 #   minictrl daemon               run the daemon in the foreground
 #   minictrl install-service     install the systemd --user unit
 #   minictrl service status|start|stop|logs
-#   minictrl status|stop|reconcile|evidence|report|profit|test
+#   minictrl status|stop|reconcile|evidence|report|profit|test|audit
 #
 # Every subcommand propagates its real exit code. The previous scripts did not:
 # `set -e` without `pipefail` meant a `| tee` pipeline reported tee's status, so
@@ -57,6 +57,7 @@ case "$cmd" in
   profit)          agent --verify-profit-target ;;
   check-env)       agent --check-env ;;
   test)            "$CONDA_BIN" run --no-capture-output -n llm python -m pytest tests/min_agent -q "$@" ;;
+  audit)           "$CONDA_BIN" run --no-capture-output -n llm python tools/audit_defects.py ;;
 
   install-service)
     unit="$HOME/.config/systemd/user/$SERVICE_NAME"
