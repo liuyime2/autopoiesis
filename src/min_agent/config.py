@@ -26,6 +26,7 @@ class AgentConfig:
     daemon_interval_seconds: int = 300
     max_trades_per_day: int = 10
     min_confidence: float = 0.5
+    max_account_value: float = 0.0
     max_daily_cycles: int = 288
     heartbeat_path: Path = Path("runtime/min_agent/heartbeat.json")
     pidfile_path: Path = Path("runtime/min_agent/daemon.pid")
@@ -71,6 +72,7 @@ class AgentConfig:
             daemon_interval_seconds=_positive_int("MIN_AGENT_DAEMON_INTERVAL_SECONDS", 300),
             max_trades_per_day=_positive_int("MIN_AGENT_MAX_TRADES_PER_DAY", 10),
             min_confidence=_bounded_float("MIN_AGENT_MIN_CONFIDENCE", 0.5, 0.0, 1.0),
+            max_account_value=_optional_float("MIN_AGENT_MAX_ACCOUNT_VALUE"),
             max_daily_cycles=_positive_int("MIN_AGENT_MAX_DAILY_CYCLES", 288),
             heartbeat_path=Path(os.getenv("MIN_AGENT_HEARTBEAT", "runtime/min_agent/heartbeat.json")),
             pidfile_path=Path(os.getenv("MIN_AGENT_PIDFILE", "runtime/min_agent/daemon.pid")),
@@ -114,6 +116,17 @@ def _positive_float(name: str, default: float) -> float:
     value = float(os.getenv(name, str(default)))
     if value <= 0:
         raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _optional_float(name: str) -> float:
+    """An optional cap: absent, or any positive value, meaning unset."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return 0.0
+    value = float(raw)
+    if value <= 0:
+        raise ValueError(f"{name} must be positive when set")
     return value
 
 

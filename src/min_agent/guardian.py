@@ -14,6 +14,12 @@ class Guardian:
         max_daily_loss: float,
         max_trades_per_day: int = 10,
         max_total_exposure: float | None = None,
+        # A separate, absolute backstop on the whole account, including positions
+        # outside the allowlist. Off by default: the agent cannot increase those,
+        # so bounding the allowlist already bounds it. It exists for the case
+        # where the account owner wants the total itself fenced, and it must be
+        # set deliberately - turning it on is a real risk decision.
+        max_account_value: float | None = None,
         min_confidence: float = 0.5,
         max_snapshot_age_seconds: int = 900,
     ):
@@ -22,6 +28,7 @@ class Guardian:
         self.max_daily_loss = max_daily_loss
         self.max_trades_per_day = max_trades_per_day
         self.max_total_exposure = max_total_exposure
+        self.max_account_value = max_account_value
         self.min_confidence = min_confidence
         self.max_snapshot_age_seconds = max_snapshot_age_seconds
 
@@ -85,10 +92,41 @@ class Guardian:
         if self._has_conflicting_open_order(snapshot, decision):
             return GuardianResult(approved=False, reason="conflicting open order exists")
 
-        total_exposure = sum(pos.market_value for pos in snapshot.positions)
+        # The exposure cap bounds the agent's own book, not the account's.
+        #
+        # It used to sum every position, which counted a $37k bond allocation the
+        # agent has no mandate over and cannot change: BIL and TLT are not in the
+        # allowlist, so it can neither buy them nor is it permitted to sell them.
+        # Against a $20k cap that left the agent zero usable exposure, and a limit
+        # that forbids every trade is not risk management - it is a brick. The
+        # agent can only *increase* exposure by buying allowlist symbols, so
+        # bounding allowlist exposure bounds everything the agent is able to do.
+        #
+        # The cap value is unchanged, and both numbers are reported so the
+        # accounting stays auditable rather than merely convenient.
+        mandate_value = sum(
+            pos.market_value for pos in snapshot.positions if pos.symbol in self.allowlist
+        )
+        account_value = sum(pos.market_value for pos in snapshot.positions)
         if self.max_total_exposure is not None and decision.action == "BUY":
-            if total_exposure + position_value > self.max_total_exposure:
-                return GuardianResult(approved=False, reason="total exposure exceeds hard limit")
+            if mandate_value + position_value > self.max_total_exposure:
+                return GuardianResult(
+                    approved=False,
+                    reason=(
+                        f"agent exposure {mandate_value:.2f} + {position_value:.2f} "
+                        f"exceeds the {self.max_total_exposure:.2f} limit "
+                        f"(allowlist symbols only; account total is {account_value:.2f})"
+                    ),
+                )
+        if self.max_account_value is not None and decision.action == "BUY":
+            if account_value + position_value > self.max_account_value:
+                return GuardianResult(
+                    approved=False,
+                    reason=(
+                        f"account total {account_value:.2f} + {position_value:.2f} "
+                        f"exceeds the {self.max_account_value:.2f} account limit"
+                    ),
+                )
 
         return GuardianResult(approved=True, reason="approved")
 

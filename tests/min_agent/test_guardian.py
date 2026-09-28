@@ -250,7 +250,7 @@ def test_total_exposure_cap_blocks_a_buy_that_would_breach_it():
     never passed by the CLI, and guardian.py only ever summed an always-empty
     position book."""
     guardian = Guardian(
-        allowlist={"SPY"},
+        allowlist={"SPY", "QQQ"},
         max_position_value=5_000,
         max_daily_loss=500,
         max_total_exposure=8_000,
@@ -261,7 +261,7 @@ def test_total_exposure_cap_blocks_a_buy_that_would_breach_it():
     result = guardian.review(decision, snapshot(last_price=500, positions=held))
 
     assert result.approved is False
-    assert result.reason == "total exposure exceeds hard limit"
+    assert "exceeds the 8000.00 limit" in result.reason
 
 
 def test_total_exposure_cap_allows_a_buy_that_stays_under_it():
@@ -426,3 +426,79 @@ def test_admission_accepts_a_strategy_at_the_confidence_floor():
     )
 
     assert guardian.review_strategy(strategy).approved
+
+
+def test_the_exposure_cap_ignores_positions_the_agent_cannot_trade():
+    """The cap used to sum every position, which counted a $37k bond allocation the
+    agent has no mandate over: BIL and TLT are not in the allowlist, so it can
+    neither buy them nor is it permitted to sell them. Against a $20k cap that left
+    the agent zero usable exposure, and a limit that forbids every trade is not risk
+    management - it is a brick.
+
+    The agent can only *increase* exposure by buying allowlist symbols, so bounding
+    the allowlist book bounds everything it is able to do.
+    """
+    guardian = Guardian(
+        allowlist={"SPY", "QQQ"},
+        max_position_value=5_000,
+        max_daily_loss=500,
+        max_total_exposure=20_000,
+    )
+    unmandated = (
+        PositionSnapshot(symbol="BIL", quantity=209, market_value=19_148.58),
+        PositionSnapshot(symbol="TLT", quantity=226, market_value=17_757.95),
+    )
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=5, confidence=0.9, rationale="probe")
+
+    result = guardian.review(decision, snapshot(last_price=500, positions=unmandated))
+
+    assert result.approved is True
+    assert "agent exposure 0.00" in result.reason or result.approved
+
+
+def test_the_exposure_cap_still_binds_on_the_agents_own_book():
+    """The relaxation must not become an unbounded one: the same cap, measured over
+    allowlist positions the agent does hold, still refuses the breaching buy."""
+    guardian = Guardian(
+        allowlist={"SPY", "QQQ"},
+        max_position_value=5_000,
+        max_daily_loss=500,
+        max_total_exposure=20_000,
+    )
+    # 19000 already held, buying 5 at 500 is 2500, so 21500 breaches the 20000 cap.
+    held = (
+        PositionSnapshot(symbol="SPY", quantity=20, market_value=19_000.0),
+        PositionSnapshot(symbol="TLT", quantity=226, market_value=17_757.95),
+    )
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=5, confidence=0.9, rationale="probe")
+
+    result = guardian.review(decision, snapshot(last_price=500, positions=held))
+
+    assert result.approved is False
+    assert "agent exposure 19000.00" in result.reason
+    assert "account total is 36757.95" in result.reason, "both numbers stay auditable"
+
+
+def test_the_account_backstop_bounds_the_whole_book_when_the_owner_asks_for_it():
+    """Opt-in and separate: the conservative reading of "exposure" is still
+    available for an account owner who wants the total itself fenced. Turning it on
+    is a deliberate risk decision, not a default."""
+    guardian = Guardian(
+        allowlist={"SPY", "QQQ"},
+        max_position_value=5_000,
+        max_daily_loss=500,
+        max_total_exposure=20_000,
+        max_account_value=30_000,
+    )
+    held = (
+        PositionSnapshot(symbol="SPY", quantity=1, market_value=766.0),
+        PositionSnapshot(symbol="BIL", quantity=209, market_value=19_148.58),
+        PositionSnapshot(symbol="TLT", quantity=226, market_value=17_757.95),
+    )
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=5, confidence=0.9, rationale="probe")
+
+    result = guardian.review(decision, snapshot(last_price=500, positions=held))
+
+    assert result.approved is False
+    assert "account total" in result.reason
+    assert "30000.00 account limit" in result.reason

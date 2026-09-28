@@ -255,21 +255,42 @@ class HybridDecisionEngine:
         return context
 
     def _exposure(self, snapshot: DataSnapshot) -> dict[str, Any]:
+        """The exposure arithmetic Guardian will actually apply, plus the account total.
+
+        It has to match Guardian exactly. When the cap was measured over every
+        position, the model was told a BUY was blocked by a $37k bond allocation it
+        had no mandate over, and it correctly held - against a limit that forbade
+        every trade. Guardian now measures the allowlist book, because that is the
+        only exposure the agent can increase, so the context has to say the same
+        thing. The account total is still reported, clearly separated, so the model
+        can see the rest of the book without it being charged against its limit.
+        """
         total = sum(pos.market_value for pos in snapshot.positions)
+        allowlist = self.risk_limits.get("allowlist")
+        names = set(allowlist) if isinstance(allowlist, (list, tuple, set)) else None
+        mandate = sum(
+            pos.market_value
+            for pos in snapshot.positions
+            if names is None or pos.symbol in names
+        )
         cap = self.risk_limits.get("max_total_exposure")
         position_value = snapshot.last_price
         held_here = next(
             (pos for pos in snapshot.positions if pos.symbol == snapshot.symbol), None
         )
         out: dict[str, Any] = {
-            "total_portfolio_value": round(total, 2),
+            "agent_book_value": round(mandate, 2),
+            "account_total_value": round(total, 2),
             "position_count": len(snapshot.positions),
         }
         if isinstance(cap, (int, float)) and cap > 0:
             out["max_total_exposure"] = cap
-            out["exposure_utilisation_pct"] = round(total / cap * 100, 2)
-            # Guardian's exact test is `total + order_value > cap` for a BUY.
-            out["buy_blocked_by_exposure_limit"] = total + position_value > cap
+            out["exposure_headroom"] = round(max(0.0, cap - mandate), 2)
+            # Guardian's exact test for a BUY, over the allowlist book.
+            out["buy_blocked_by_exposure_limit"] = mandate + position_value > cap
+        account_cap = self.risk_limits.get("max_account_value")
+        if isinstance(account_cap, (int, float)) and account_cap > 0:
+            out["buy_blocked_by_account_limit"] = total + position_value > account_cap
         if held_here is not None:
             out["position_in_this_symbol"] = held_here.quantity
         return out

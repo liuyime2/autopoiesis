@@ -217,6 +217,7 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         max_trades_per_day=config.max_trades_per_day,
         max_total_exposure=config.max_total_exposure,
         min_confidence=config.min_confidence,
+        max_account_value=config.max_account_value or None,
         max_snapshot_age_seconds=config.stale_after_seconds,
     )
     policy_engine = PolicyEngine(
@@ -249,6 +250,8 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
             "max_trades_per_day": config.max_trades_per_day,
             "max_total_exposure": config.max_total_exposure or None,
             "min_confidence": config.min_confidence,
+            "allowlist": sorted(config.allowlist),
+            "max_account_value": config.max_account_value or None,
         },
         cost_basis=cost_basis,
     )

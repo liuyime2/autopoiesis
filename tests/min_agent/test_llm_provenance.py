@@ -842,7 +842,7 @@ def test_the_context_states_that_the_exposure_limit_already_blocks_buying():
 
     exposure = context["exposure"]
     assert exposure["max_total_exposure"] == 20000.0
-    assert exposure["total_portfolio_value"] > 20000.0
+    assert exposure["account_total_value"] > 20000.0
     assert exposure["buy_blocked_by_exposure_limit"] is True
     assert exposure["position_in_this_symbol"] == 23
     assert exposure["position_count"] == 2
@@ -854,11 +854,12 @@ def test_a_flat_account_is_not_reported_as_exposure_blocked():
     engine = HybridDecisionEngine(
         llm=object(),
         policy_engine=_StubPolicy(),
-        risk_limits={"max_total_exposure": 20000.0},
+        risk_limits={"max_total_exposure": 20000.0, "allowlist": ["SPY"]},
     )
     context = engine._context(_basis_snapshot(last_price=700.0, spy_quantity=0))
 
     exposure = context["exposure"]
-    assert exposure["total_portfolio_value"] == 0.0
+    assert exposure["account_total_value"] == 0.0
+    assert exposure["agent_book_value"] == 0.0
     assert exposure["buy_blocked_by_exposure_limit"] is False
     assert "position_in_this_symbol" not in exposure
