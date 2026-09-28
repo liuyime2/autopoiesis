@@ -19,6 +19,30 @@ PNL_EVIDENCE_PARTIAL_FILLS = "broker_fills_matched_without_portfolio_history"
 PNL_EVIDENCE_ACCOUNT_VERIFIED = "broker_portfolio_history_verified"
 PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED = "broker_strategy_closed_lot_pnl_verified"
 
+# Fraction of the reliability score a strategy keeps for pure inaction. Anything
+# above 0 and below 1 makes doing nothing strictly worse than acting while
+# reliable, which is what the selector's argmax needs to see.
+INACTION_FLOOR = 0.25
+PNL_BONUS = 0.1
+PNL_PENALTY = 0.2
+
+# Guardian refusals that are the risk system working correctly, not the strategy
+# misbehaving. A strategy stopped because the market closed, or because the
+# daily trade limit was already reached, obeyed the system. Charging it for that
+# is what made fixed-size-sell-001 get RETIRED for "severe operational failure
+# rate 1.00" when every one of its orders was correctly blocked for selling
+# shares the gateway could not see.
+SYSTEM_REJECTION_REASONS = frozenset({
+    "market is closed",
+    "max trades per day reached",
+    "data snapshot is stale",
+    "daily loss limit reached",
+    "insufficient buying power",
+    "conflicting open order exists",
+    "only paper mode is allowed",
+    "account day-start equity unavailable",
+})
+
 
 class DeterministicEvaluator:
     def evaluate(self, records: list[CycleRecord], evidence: BrokerEvidenceBatch | None = None) -> EvaluationReport:
@@ -130,6 +154,8 @@ class _StrategyBucket:
         self.rejected_orders = 0
         self.skipped_orders = 0
         self.errors = 0
+        self.trade_attempts = 0
+        self.strategy_fault_rejections = 0
         self.action_counts = {"BUY": 0, "SELL": 0, "HOLD": 0}
         self.guardian_rejections: dict[str, int] = {}
         self.intended_notional = 0.0
@@ -149,6 +175,11 @@ class _StrategyBucket:
         if record.decision.quantity > 0:
             self.order_quantity += record.decision.quantity
 
+        # An attempt is any cycle in which the strategy wanted to trade while
+        # the market was open, whether or not the order survived Guardian.
+        if record.decision.action in ("BUY", "SELL") and record.snapshot.market_open:
+            self.trade_attempts += 1
+
         if record.execution.status == "SUBMITTED":
             self.submitted_orders += 1
             self.submitted_intended_notional += notional
@@ -165,6 +196,8 @@ class _StrategyBucket:
 
         if not record.guardian.approved:
             self.guardian_rejections[record.guardian.reason] = self.guardian_rejections.get(record.guardian.reason, 0) + 1
+            if record.guardian.reason not in SYSTEM_REJECTION_REASONS:
+                self.strategy_fault_rejections += 1
 
     def to_evaluation(self) -> StrategyEvaluation:
         return StrategyEvaluation(
@@ -183,7 +216,16 @@ class _StrategyBucket:
             pnl_evidence=self.pnl_evidence,
             realized_pnl=self.realized_pnl,
             fees=self.fees,
-            score=_score(self.cycles, self.errors, self.rejected_orders, self.realized_pnl),
+            trade_attempts=self.trade_attempts,
+            strategy_fault_rejections=self.strategy_fault_rejections,
+            score=_score(
+                self.cycles,
+                self.errors,
+                self.rejected_orders,
+                strategy_fault_rejections=self.strategy_fault_rejections,
+                trade_attempts=self.trade_attempts,
+                realized_pnl=self.realized_pnl,
+            ),
         )
 
 
@@ -460,15 +502,41 @@ def _ratio(numerator: float, denominator: float) -> float | None:
     return numerator / denominator
 
 
-def _score(cycles: int, errors: int, rejected_orders: int, realized_pnl: float | None = None) -> float:
+def _score(
+    cycles: int,
+    errors: int,
+    rejected_orders: int,
+    *,
+    strategy_fault_rejections: int | None = None,
+    trade_attempts: int = 0,
+    realized_pnl: float | None = None,
+) -> float:
+    """Score a strategy as reliability gated by exploration.
+
+    The previous version was `1 - (errors + rejections) / cycles`, so a strategy
+    that never acted and was never corrected scored a perfect 1.0 while a
+    strategy that placed five real orders scored 0.833. StrategySelector takes a
+    deterministic argmax over this value, so the system selected the do-nothing
+    strategy every cycle, it kept its 1.0, and it was selected again. In the
+    recorded run that produced 800 HOLD cycles out of 851.
+
+    The fix is structural rather than a special case: a strategy earns at most
+    25% of its reliability score for pure inaction, so inaction can never be
+    the argmax while any candidate actually trades. Broker-verified PnL can then
+    only adjust a score that was earned by acting - it can no longer substitute
+    for acting.
+    """
     if cycles <= 0:
         return 0.0
-    penalty = errors + rejected_orders
-    operational_score = max(0.0, 1.0 - (penalty / cycles))
+    faults = strategy_fault_rejections if strategy_fault_rejections is not None else rejected_orders
+    operational = max(0.0, 1.0 - ((errors + faults) / cycles))
+    exploration = min(1.0, max(0, trade_attempts) / cycles)
+    score = operational * (INACTION_FLOOR + (1.0 - INACTION_FLOOR) * exploration)
     if realized_pnl is None:
-        return operational_score
+        # Reserve headroom. Without this, a strategy that traded reliably but
+        # has no PnL evidence ties with one the broker has verified as
+        # profitable, and PnL cannot discriminate at the ceiling.
+        return score * (1.0 - PNL_BONUS)
     if realized_pnl > 0:
-        return min(1.0, operational_score + 0.1)
-    if realized_pnl < 0:
-        return max(0.0, operational_score - 0.2)
-    return operational_score
+        return min(1.0, score * (1.0 + PNL_BONUS))
+    return max(0.0, score * (1.0 - PNL_PENALTY))

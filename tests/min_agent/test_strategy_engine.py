@@ -145,8 +145,8 @@ def test_strategy_selector_prefers_higher_score():
     a = make_spec(strategy_id="a")
     b = make_spec(strategy_id="b")
     results = [
-        StrategyResult(strategy_id="a", cycles=10, submitted_orders=3, rejected_orders=0, errors=0, score=0.3, evaluated_at=datetime.now(tz=timezone.utc)),
-        StrategyResult(strategy_id="b", cycles=10, submitted_orders=5, rejected_orders=0, errors=0, score=0.7, evaluated_at=datetime.now(tz=timezone.utc)),
+        StrategyResult(strategy_id="a", cycles=10, submitted_orders=3, rejected_orders=0, errors=0, score=0.3, evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=3),
+        StrategyResult(strategy_id="b", cycles=10, submitted_orders=5, rejected_orders=0, errors=0, score=0.7, evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=5),
     ]
 
     chosen = selector.select([a, b], results)
@@ -221,14 +221,23 @@ def test_strategy_selector_prefers_tradable_over_baseline_after_probation():
 def test_lifecycle_manager_promotes_probation_after_successful_exposure():
     manager = StrategyLifecycleManager(min_active_cycles=3, min_active_submitted_orders=1)
     strategy = make_spec(strategy_id="trial", kind="FIXED_SIZE", lifecycle="PROBATION", action="BUY", quantity=1)
-    result = StrategyResult(strategy_id="trial", cycles=3, submitted_orders=0, rejected_orders=0, errors=0, score=1.0, evaluated_at=datetime.now(tz=timezone.utc))
+    result = StrategyResult(strategy_id="trial", cycles=3, submitted_orders=3, rejected_orders=0, errors=0, score=1.0, evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=3)
 
     [decision] = manager.review([strategy], [result])
 
     assert decision.new_lifecycle == "ACTIVE"
 
 
-def test_lifecycle_manager_promotes_hold_only_trend_after_evidence_cycles():
+def test_lifecycle_manager_pauses_hold_only_trend_after_evidence_cycles():
+    """Inverted regression lock.
+
+    This test used to assert that a TREND_FOLLOW strategy which only ever
+    produced HOLD cycles was PROMOTED to ACTIVE. It held the top score (1.0),
+    was selected every cycle, held again, kept the score, and was selected
+    again - 800 of 851 recorded cycles were HOLD. The degenerate guard missed it
+    twice: once because it returned False for any kind != "FIXED_SIZE", and
+    once because it required lifecycle == "PROBATION".
+    """
     manager = StrategyLifecycleManager(min_active_cycles=3)
     strategy = make_spec(strategy_id="trend", kind="TREND_FOLLOW", lifecycle="PROBATION")
     result = StrategyResult(
@@ -242,11 +251,12 @@ def test_lifecycle_manager_promotes_hold_only_trend_after_evidence_cycles():
         skipped_orders=3,
         action_counts={"HOLD": 3},
         intended_notional=0,
+        trade_attempts=0,
     )
 
     [decision] = manager.review([strategy], [result])
 
-    assert decision.new_lifecycle == "ACTIVE"
+    assert decision.new_lifecycle == "PAUSED"
 
 
 def test_lifecycle_manager_pauses_degenerate_fixed_size_no_exploration():

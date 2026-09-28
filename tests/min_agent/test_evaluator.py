@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from min_agent.evaluator import (
     PNL_EVIDENCE_ACCOUNT_VERIFIED,
     PNL_EVIDENCE_MISSING,
@@ -154,11 +156,20 @@ def test_evaluator_keeps_per_strategy_metrics_independent():
     assert s1.rejected_orders == 1
     assert s1.guardian_rejections == {"hard limit": 1}
     assert s1.filled_quantity == 2
-    assert s1.score == 0.5
+    # operational 0.5 (1 of 2 cycles faulted) x full exploration, less the
+    # headroom reserved for broker-verified PnL that s1 does not have yet.
+    assert s1.trade_attempts == 2
+    assert s1.strategy_fault_rejections == 1
+    assert s1.score == pytest.approx(0.45)
     assert s2.cycles == 1
     assert s2.skipped_orders == 1
     assert s2.rejected_orders == 0
-    assert s2.score == 1.0
+    # A strategy that only ever held no longer earns a perfect score. It used to
+    # score 1.0 and win the selector's argmax over strategies that traded, which
+    # is what locked the agent into a permanent HOLD cycle.
+    assert s2.trade_attempts == 0
+    assert s2.score == pytest.approx(0.225)
+    assert s1.score > s2.score
 
 
 def test_evaluator_uses_broker_portfolio_history_for_account_pnl():

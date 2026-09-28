@@ -517,6 +517,20 @@ class StrategyEvaluation(BaseModel):
     realized_pnl: float | None = None
     fees: float | None = None
     score: float
+    trade_attempts: int = Field(default=0, ge=0)
+    """Cycles in which the strategy actually tried to trade.
+
+    Distinct from submitted_orders: a BUY that Guardian stopped because the
+    market was closed is still an attempt. Without this, inaction was
+    indistinguishable from success and scored perfectly.
+    """
+    strategy_fault_rejections: int | None = None
+    """Rejections attributable to the strategy, excluding the risk system's own
+    correct refusals (market closed, daily trade limit reached, ...).
+
+    None means "not split" and is read as all of rejected_orders. Defaulting to
+    0 would silently under-charge any result built without the split, which
+    would reward a strategy for rejections the system issued against it."""
 
 
 class EvaluationReport(BaseModel):
@@ -566,6 +580,8 @@ class StrategyResult(BaseModel):
     filled_quantity: float = Field(default=0, ge=0)
     fees: float | None = None
     pnl_evidence: str = "missing_fill_price_and_broker_activity"
+    trade_attempts: int = Field(default=0, ge=0)
+    strategy_fault_rejections: int | None = None
 
 
 class CurriculumTask(BaseModel):

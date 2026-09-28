@@ -43,10 +43,14 @@ def config(tmp_path, *, symbols=("SPY",), interval=1):
 
 
 class FakeLoop:
-    def __init__(self, journal=None, strategy_id=None):
+    def __init__(self, journal=None, strategy_id=None, action="HOLD", quantity=0, status="SKIPPED", confidence=0.1):
         self.symbols = []
         self.journal = journal
         self.strategy_id = strategy_id
+        self.action = action
+        self.quantity = quantity
+        self.status = status
+        self.confidence = confidence
 
     def run_once(self, symbol):
         self.symbols.append(symbol)
@@ -63,9 +67,9 @@ class FakeLoop:
         record = CycleRecord(
             cycle_id=f"cycle-{len(self.symbols)}",
             snapshot=snapshot,
-            decision=TradeDecision(symbol=symbol, action="HOLD", quantity=0, confidence=0.1, rationale="wait", strategy_id=self.strategy_id),
+            decision=TradeDecision(symbol=symbol, action=self.action, quantity=self.quantity, confidence=self.confidence, rationale="test", strategy_id=self.strategy_id),
             guardian=GuardianResult(approved=True, reason="approved"),
-            execution=ExecutionResult(status="SKIPPED", order_id=None, filled_quantity=0, message="hold"),
+            execution=ExecutionResult(status=self.status, order_id=None, filled_quantity=0, message="test"),
             strategy_id=self.strategy_id,
         )
         if self.journal is not None:
@@ -511,7 +515,7 @@ def test_daemon_persists_lifecycle_updates(tmp_path):
             rationale="test",
         )
     )
-    loop = FakeLoop(journal=journal, strategy_id="trial")
+    loop = FakeLoop(journal=journal, strategy_id="trial", action="BUY", quantity=1, status="SUBMITTED", confidence=0.8)
     daemon = AgentDaemon(
         config=cfg,
         loop=loop,

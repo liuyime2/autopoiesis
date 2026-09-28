@@ -68,6 +68,8 @@ class ReflectionMemory:
                         realized_pnl=metrics.get("realized_pnl"),
                         fees=metrics.get("fees"),
                         pnl_evidence=metrics.get("pnl_evidence", "missing_fill_price_and_broker_activity"),
+                        trade_attempts=metrics.get("trade_attempts", 0),
+                        strategy_fault_rejections=metrics.get("strategy_fault_rejections", 0),
                     )
                 )
             return results

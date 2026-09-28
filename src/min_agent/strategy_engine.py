@@ -82,8 +82,18 @@ class StrategyLifecycleManager:
         if result is None or result.cycles <= 0:
             return None
 
-        failure_rate = (result.errors + result.rejected_orders) / result.cycles
-        rejection_rate = result.rejected_orders / result.cycles
+        # Charge the strategy only for rejections that are its own fault. Using
+        # rejected_orders here is what retired strategies for obeying the daily
+        # trade limit, after which auto-fix.sh force-re-enabled them outside the
+        # admission gate. A result that does not carry the split is read as
+        # "all rejections are the strategy's fault", the conservative direction.
+        fault_rejections = (
+            result.strategy_fault_rejections
+            if result.strategy_fault_rejections is not None
+            else result.rejected_orders
+        )
+        failure_rate = (result.errors + fault_rejections) / result.cycles
+        rejection_rate = fault_rejections / result.cycles
         if failure_rate >= self.severe_failure_rate:
             return StrategyLifecycleDecision(strategy, "RETIRED", f"severe operational failure rate {failure_rate:.2f}")
         if result.pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED and result.realized_pnl is not None and result.realized_pnl < 0:
@@ -96,28 +106,39 @@ class StrategyLifecycleManager:
             if self._is_degenerate_no_exploration(strategy, result):
                 return StrategyLifecycleDecision(strategy, "PAUSED", "probation produced no exploration evidence")
             return StrategyLifecycleDecision(strategy, "ACTIVE", "probation completed with acceptable operational metrics")
+        # A promoted strategy that has stopped acting is just as stuck as one
+        # that never started. This used to be checked only during PROBATION.
+        if self._is_degenerate_no_exploration(strategy, result):
+            return StrategyLifecycleDecision(strategy, "PAUSED", "no exploration evidence over the evaluation window")
         return None
 
     def _is_degenerate_no_exploration(self, strategy: StrategySpec, result: StrategyResult) -> bool:
-        if strategy.kind != "FIXED_SIZE":
+        """A tradable strategy that never tried to trade is not working.
+
+        Previously guarded by `if strategy.kind != "FIXED_SIZE": return False`,
+        which exempts every TREND_FOLLOW strategy, and by a
+        `lifecycle == "PROBATION"` requirement that is permanently false once
+        the strategy is promoted. The strategy holding the top score in the
+        recorded run was a promoted TREND_FOLLOW, so both guards missed it.
+        """
+        if strategy.kind == "HOLD_BASELINE" or strategy.lifecycle == "BASELINE":
             return False
-        action = str(strategy.parameters["action"]).upper()
-        quantity = int(strategy.parameters["quantity"])
-        return (
-            strategy.lifecycle == "PROBATION"
-            and (action == "HOLD" or quantity == 0)
-            and result.action_counts.get("BUY", 0) == 0
-            and result.action_counts.get("SELL", 0) == 0
-            and result.submitted_orders == 0
-            and result.rejected_orders == 0
-            and result.intended_notional == 0
-        )
+        if result is None:
+            return False
+        return result.cycles >= self.min_active_cycles and result.trade_attempts == 0
 
 
 class StrategySelector:
-    def __init__(self, *, min_probation_cycles: int = 3, min_probation_submitted_orders: int = 1):
+    def __init__(
+        self,
+        *,
+        min_probation_cycles: int = 3,
+        min_probation_submitted_orders: int = 1,
+        exploration_floor_cycles: int = 5,
+    ):
         self.min_probation_cycles = min_probation_cycles
         self.min_probation_submitted_orders = min_probation_submitted_orders
+        self.exploration_floor_cycles = exploration_floor_cycles
 
     def select(self, strategies: list[StrategySpec], results: list[StrategyResult] | None = None) -> StrategySpec | None:
         eligible = [
@@ -136,7 +157,46 @@ class StrategySelector:
 
         candidates = tradable or eligible
         scores = {result.strategy_id: result.score for result in results or []}
+        # A candidate counts as explored only if it has a history that shows it
+        # tried. Having no result at all is unevaluated, not explored - otherwise
+        # a brand-new strategy suppresses the floor and the argmax falls back to
+        # a stale score.
+        explored = [
+            s for s in candidates
+            if (result := result_by_id.get(s.strategy_id)) is not None and result.trade_attempts > 0
+        ]
+        if not explored and self._exploration_floor_engaged(result_by_id):
+            probe = self._probe_strategy(candidates)
+            if probe is not None:
+                return probe
         return max(candidates, key=lambda strategy: scores.get(strategy.strategy_id, 0.0))
+
+    def _exploration_floor_engaged(self, result_by_id: dict[str, StrategyResult]) -> bool:
+        """Only take over once there is a real window to have learned from.
+
+        With no history at all the agent has no basis for scoring anything, and
+        waiting for a score it can never earn is how the previous version
+        latched. Once several full windows have passed with zero attempts
+        anywhere, a bounded probe is the correct research move.
+        """
+        results = list(result_by_id.values())
+        if not results:
+            return False
+        return any(r.cycles >= self.exploration_floor_cycles for r in results)
+
+    def _probe_strategy(self, candidates: list[StrategySpec]) -> StrategySpec | None:
+        """Smallest, most predictable BUY, so the cost of evidence is bounded.
+
+        Preference order: an explicit FIXED_SIZE buy, then anything else that
+        buys. Never a SELL: there is no position evidence to sell, and an
+        unhedged short is not a probe. A TREND_FOLLOW spec has no `action` key,
+        so its direction is implied by price versus reference_price and may be a
+        SELL - it is only eligible when its parameters say so explicitly.
+        """
+        buys = [s for s in candidates if _is_buy_strategy(s)]
+        if not buys:
+            return None
+        return min(buys, key=lambda s: (0 if s.kind == "FIXED_SIZE" else 1, _probe_quantity(s), s.created_at, s.strategy_id))
 
     def _needs_probation(self, strategy: StrategySpec, result: StrategyResult | None) -> bool:
         if strategy.lifecycle != "PROBATION":
@@ -210,3 +270,20 @@ class StrategyExecutor:
             rationale=f"strategy:{strategy.strategy_id} {reason}",
             strategy_id=strategy.strategy_id,
         )
+
+
+def _is_buy_strategy(strategy: StrategySpec) -> bool:
+    action = str(strategy.parameters.get("action", "")).upper()
+    if action:
+        return action == "BUY"
+    # A TREND_FOLLOW spec carries no `action`. Its direction is implied by price
+    # versus reference_price, so it is only an explicit buy if it says so.
+    return str(strategy.parameters.get("direction", "")).upper() == "BUY"
+
+
+def _probe_quantity(strategy: StrategySpec) -> int:
+    for key in ("quantity", "shares"):
+        value = strategy.parameters.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return max(1, int(value))
+    return 1
