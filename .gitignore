@@ -27,8 +27,8 @@ __pycache__/
 .venv/
 venv/
 
-# --- one-off throwaway operator scripts (see docs/plans/ refactor plan) ---
-check_real_alpaca.py
+# --- stale lock file from a dead Claude session ---
+.claude/scheduled_tasks.lock
 
 # --- editors / OS ---
 .DS_Store
