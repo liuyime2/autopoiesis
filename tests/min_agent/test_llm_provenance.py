@@ -692,6 +692,8 @@ def test_no_cost_basis_means_no_invented_pnl():
 
 
 class _StubPolicy:
+    reflection_memory = None
+
     def __init__(self):
         self.selector = self
         self.strategy_library = self
@@ -726,4 +728,84 @@ def _basis_snapshot(*, last_price=700.0, spy_quantity=0):
             portfolio_value=100_000, daily_loss=0,
         ),
         positions=positions,
+    )
+
+
+def test_the_selected_strategy_mandate_is_shown_to_the_model():
+    """The model was given an opaque selected_strategy_id and nothing else, so it
+    could not tell that the strategy it was asked to act for was a SELL."""
+    from min_agent.llm_decision import HybridDecisionEngine
+
+    class _Policy(_StubPolicy):
+        # reflection_memory must exist: _context swallows any error from the
+        # selector lookup and then decides with no strategy context at all.
+        reflection_memory = None
+
+        def __init__(self, spec):
+            super().__init__()
+            self._spec = spec
+
+        def list(self):
+            return [self._spec] if self._spec else []
+
+        def select(self, *_args, **_kwargs):
+            return self._spec
+
+    spec = _fixed_size_spec(strategy_id="exit-1", action="SELL", quantity=1)
+    engine = HybridDecisionEngine(llm=object(), policy_engine=_Policy(spec))
+    context = engine._context(_basis_snapshot(last_price=767.0, spy_quantity=23))
+
+    assert context["selected_strategy_id"] == "exit-1"
+    assert context["selected_strategy"]["parameters"]["action"] == "SELL"
+    assert context["selected_strategy"]["kind"] == "FIXED_SIZE"
+
+
+def test_a_decision_is_attributed_to_the_selected_strategy():
+    """All 908 journaled cycles carried strategy_id=None: the decision schema never
+    asked the model for one, so per-strategy metrics could not accumulate for the
+    LLM path and no lifecycle review could be about a decision the model made.
+    Attribution is the system's to record."""
+    from min_agent.llm_decision import HybridDecisionEngine
+
+    class _Spec:
+        strategy_id = "exit-1"
+        kind = "FIXED_SIZE"
+        parameters = {"action": "SELL", "quantity": 1, "confidence": 0.7}
+        max_position_value = 1000.0
+        lifecycle = "PROBATION"
+
+    class _Policy(_StubPolicy):
+        reflection_memory = None
+
+        def list(self):
+            return [_Spec()]
+
+        def select(self, *_args, **_kwargs):
+            return _Spec()
+
+    class _LLM:
+        def decide(self, _context):
+            from min_agent.models import TradeDecision
+
+            return TradeDecision(
+                symbol="SPY", action="SELL", quantity=1, confidence=0.7, rationale="r"
+            )
+
+    engine = HybridDecisionEngine(llm=_LLM(), policy_engine=_Policy())
+    decision = engine.decide_snapshot(_basis_snapshot(last_price=767.0, spy_quantity=23))
+
+    assert decision.strategy_id == "exit-1"
+    assert decision.decision_source == "llm"
+
+
+def _fixed_size_spec(*, strategy_id, action, quantity=1):
+    from datetime import datetime, timezone
+
+    from min_agent.models import StrategySpec
+
+    return StrategySpec(
+        strategy_id=strategy_id, name=strategy_id, kind="FIXED_SIZE", symbols=("SPY",),
+        parameters={"action": action, "quantity": quantity, "confidence": 0.7},
+        max_position_value=1000, enabled=True, lifecycle="PROBATION",
+        created_at=datetime.now(tz=timezone.utc), rationale="t",
     )

@@ -137,7 +137,17 @@ class HybridDecisionEngine:
         # Stamp provenance here rather than trusting the inner engine to have
         # done it, so a decision that came from the model can never be recorded
         # as anything else.
-        return decision.model_copy(update={"decision_source": "llm"})
+        #
+        # The selected strategy is stamped here too, for the same reason. The
+        # decision schema never asked the model for a strategy_id, so all 908
+        # journaled cycles carried strategy_id=None: per-strategy metrics could
+        # not accumulate for the LLM path at all, and no lifecycle review could
+        # ever be about a decision the model actually made.
+        selected = context.get("selected_strategy_id")
+        update: dict[str, Any] = {"decision_source": "llm"}
+        if isinstance(selected, str) and selected and not decision.strategy_id:
+            update["strategy_id"] = selected
+        return decision.model_copy(update=update)
 
     def _fallback(self, snapshot: DataSnapshot, reason: str) -> TradeDecision:
         decision = self.policy_engine.decide_snapshot(snapshot)
@@ -154,12 +164,22 @@ class HybridDecisionEngine:
         # context is better than no decision, and Guardian reviews the result
         # either way.
         strategy_id = None
+        selected_spec = None
         try:
             selected = self.policy_engine.selector.select(
                 self.policy_engine.strategy_library.list(),
                 self._results(),
             )
-            strategy_id = selected.strategy_id if selected is not None else None
+            if selected is not None:
+                strategy_id = selected.strategy_id
+                selected_spec = next(
+                    (
+                        strategy
+                        for strategy in self.policy_engine.strategy_library.list()
+                        if strategy.strategy_id == selected.strategy_id
+                    ),
+                    None,
+                )
         except Exception:
             strategy_id = None
         context: dict[str, Any] = {
@@ -181,6 +201,20 @@ class HybridDecisionEngine:
                 for o in snapshot.open_orders
             ],
             "selected_strategy_id": strategy_id,
+            # The mandate the model is deciding under. It was previously given an
+            # opaque id and nothing else, so it could not tell that the strategy it
+            # was asked to act for was a SELL.
+            "selected_strategy": (
+                {
+                    "strategy_id": selected_spec.strategy_id,
+                    "kind": selected_spec.kind,
+                    "parameters": dict(selected_spec.parameters),
+                    "max_position_value": selected_spec.max_position_value,
+                    "lifecycle": selected_spec.lifecycle,
+                }
+                if selected_spec is not None
+                else None
+            ),
             "paper_only": True,
             "risk_limits": self.risk_limits,
         }

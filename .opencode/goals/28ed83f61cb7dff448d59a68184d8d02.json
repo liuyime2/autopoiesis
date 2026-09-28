@@ -32,7 +32,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790619196278,
+      "observedAt": 1790619719197,
       "lastRequestTokens": 123572,
       "lastInputTokens": 123153
     }
@@ -74,7 +74,7 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 108,
+  "progressRevision": 115,
   "observedProgressRevision": 103,
   "progressFingerprints": [
     "shell:b9b4f44e7752e63facec64bdbc0ee8e6fcf0da7ffe5fcf0ae88310a924a1a1f4",
@@ -184,50 +184,17 @@
     "shell-worktree:9e01be9277a7cbbe065873eea95407598440166600117c4d578d16de4b58e9d4",
     "shell-worktree:b8b64a47eaf7d7b2c5add09c0aec2cca8a70fb1dde4eef35949ba6f5e923a454",
     "shell-worktree:f4ee2303a0cc64f7fd339dde1825ed0d3becac9c1e442a9c8546b72f367cfdee",
-    "shell-worktree:343ded1d5879590dd8b809d0883ef3db6c905be1389545852e34caced73751d4"
+    "shell-worktree:343ded1d5879590dd8b809d0883ef3db6c905be1389545852e34caced73751d4",
+    "shell-worktree:502ebd9f48c62e8aed6d5c8aef74c7124d5275cb478673bd4fb74747c48437e7",
+    "shell-worktree:fbf340e70e70673ebe3a0cdbd6fbc4df754021c63ee310c0513f7b77b9a32e13",
+    "shell-worktree:b41b73054ba0c31516b6f47f6fdef313d97a1a6b67ad1b52903098472aa65b57",
+    "shell-worktree:231079e06e230ecb71da156ce3a94f5579093623da0c523adb4e85ab88da8f6a",
+    "shell-worktree:c04f9492e529704fbff92393e61730fbcd6003399ab5eb0bf05aae535eeb9058",
+    "shell-worktree:bdfb080b3e63f2ef225aa8bce35ab2a5660367a3796c67b90b83002932a16b0f",
+    "shell-worktree:93841f69725ac8732b9b4ef66f945eecfdd683ccc110e52008531594a71e8aa6"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790612251196,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790612639412,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790612893381,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790612909025,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790613095621,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790613106974,
-      "summary": "Investigated why the self-evolution loop was dead, and found the root cause. 341 tests pass, 91/91 defect checks pass, doctor ok=True with 0 failures.\n\nMAJOR FINDING: the curriculum had been falling back 100% of the time\nThe journal disclosed it (status=SKIPPED, source=fallback) but never said why, so\na 100% failure rate looked like normal operation. Once the reason was recorded,\nthe chain came out in four steps:\n\n1. Root cause: prompt bloat. The context embedded the entire ReflectionRecord\n   dump (~5kB, including strategy_metrics plus a duplicate nested `evaluation`\n   blob) and a full model_dump of every strategy (~8.4kB for 15) - about 14kB.\n   deepseek-r1:8b could not follow it and emitted a meta-refusal: 'I need to\n   extract the query field from the JSON... I will decline to respond'. Verified\n   0/2 parses at 14kB, 2/2 after compacting.\n2. Over-corrected: compacting removed the full strategy dump that had been\n   serving as the de-facto schema example, so the model then emitted specs\n   missing strategy_id, name, symbols and max_position_value. The shape is now\n   stated explicitly plus a worked example.\n3. The same 40 strategies were sent four times as separate maps (strategies,\n   strategy_scores, strategy_actions, strategy_trade_evidence) - ~12.5kB of a\n   15.3kB context. Merged into one entry per strategy, capped at 40 so a growing\n   library cannot re-break it; 500 strategies still fits.\n4. format='json' only asks for 'some JSON'. Both LLM paths now pass the pydantic\n   JSON schema, measured against deepseek-r1:8b as 5x faster (11.7s vs 54.4s)\n   and 901 vs 6993 chars of output. This eliminated all shape errors.\n\nSTILL OPEN, stated plainly\nThe remaining curriculum failure is a conditional requirement JSON Schema cannot\nexpress: StrategySpec requires action/quantity/confidence when kind is FIXED_SIZE,\nwhich is a pydantic model_validator; with a permissive object type, constrained\ndecoding collapses `parameters` to {}. So the curriculum is still falling back\nand is not yet driving the loop. The failure is safe (StrategySpec validation\nrejects it, admission would reject it) and disclosed, but I am not claiming the\nself-evolution loop works end to end when it does not. Fixing it properly needs a\noneOf schema per kind, which I have not done.\n\nALSO FIXED\n- Guardian: the daily-loss check sat above the HOLD branch, so a deliberate\n  no-op was journalled as a risk REJECTION. Now gates orders only. Confirmed\n  live - a HOLD is approved while the day is -542 against a 500 cap.\n- test_quiet_mode_is_one_line failed 100% once real credentials were exported:\n  it called main(), which reads the real environment while ignoring its fixture,\n  and asserted rc == 1, which held only while no credentials existed. Now\n  controls its inputs and asserts the contract. Second test pins that the exit\n  code and printed verdict cannot disagree.\n- My own requirement audit flagged the word 'synthetic' inside the docstring that\n  states the prohibition. It now strips comments and docstrings before scanning.\n- install-transient: a transient unit named ollama.service shadowed the file\n  unit, and it used 'enable --now' where enable always fails because /home is at\n  quota - so it printed FAILED for a healthy stack. It now starts only and\n  reports observed state.\n- Journal: appends held an exclusive flock but readers took none, so a scan\n  concurrent with an append could count a torn line as corruption. Readers now\n  take a shared lock, with three tests on the contract.\n- minictrl clears a tripped systemd start-limit before starting, so the\n  crash-loop protection does not leave an operator unable to start the service.\n\nRequirement audit stands at 16/18. Unchanged and blocked on the next session:\nper-strategy PnL and the lifecycle transition driven by it, both needing a\nclosed lot from a BUY->SELL round trip, which today's -542 day loss (against a\n500 cap) correctly forbids.",
-      "next": "One obligation is blocked until the next session: the closed-lot round trip. Today's day P&L is -542 against max_daily_loss=500, so Guardian refuses every BUY and SELL; a SELL is not blocked by max_total_exposure (BUY-only), so the daily loss is the only gate on closing the agent's 23 SPY shares. It resets at 2026-09-29 09:30 ET and needs no change from the user. The second open item is infrastructure: systemd units live in /run (tmpfs) because /home is at user quota, so they are not reboot-persistent. Freeing a few MB under $HOME makes 'minictrl install-service' permanent. The curriculum conditional-parameter gap does not block any success criterion, so I will not expand scope to build a oneOf schema unless the user wants it."
-    },
-    {
-      "time": 1790613212609,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790613251678,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790613412769,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -437,11 +404,51 @@
       "time": 1790619085703,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790619203539,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790619461213,
+      "summary": "Full self-evolution loop now runs live with no manual intervention. The SELL capability gap closed itself: at 18:15:18 the curriculum proposed trend-follow-sell-002, admission accepted it into PROBATION, and capability coverage reports uncovered now: []. Library is 22 strategies, up from 16. Also fixed a daemon crash (NameError in the start-up path, 6 min down, invisible to 369 green tests) and added tests/min_agent/test_cli_startup.py, which walks every function in the package and fails on any unbound loaded name - verified by reintroducing the exact break. 379 passed, audit 91/91.",
+      "next": "Watch the decision path now that a SELL strategy is selectable: the LLM decides and has been holding for 26/26 cycles, but the context now carries cost basis (23 SPY at 742.03 vs 767.25, +3.4%). Confirm whether a SELL is emitted, Guardian approves it, the order fills at the broker, and the account-level lot ledger produces a closed lot with per-strategy PnL. Do not alter risk limits or pressure the model."
+    },
+    {
+      "time": 1790619473561,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790619512717,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790619543076,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790619705153,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790619705658,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790619711226,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 908,
+  "storageGeneration": 960,
   "createdAt": 1790603839704,
-  "updatedAt": 1790619196278,
+  "updatedAt": 1790619719197,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:74578f8684f4a8634c2d684d2edeb15ac210e5081552d64bab0cc091cc564445",
