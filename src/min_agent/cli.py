@@ -20,7 +20,12 @@ from min_agent.data_gateway import AlpacaDataGateway
 from min_agent.executor import AlpacaPaperExecutor
 from min_agent.guardian import Guardian
 from min_agent.health import HealthMonitor
-from min_agent.evaluator import DeterministicEvaluator, confirmed_fill_activities, PNL_EVIDENCE_ACCOUNT_VERIFIED, PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+from min_agent.evaluator import (
+    PNL_EVIDENCE_ACCOUNT_VERIFIED,
+    PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
+    DeterministicEvaluator,
+    confirmed_fill_activities,
+)
 from min_agent.journal import JsonlJournal
 from min_agent.knowledge_admission import KnowledgeAdmission
 from min_agent.knowledge_library import KnowledgeLibrary
@@ -223,6 +228,14 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
     # reviews whatever comes out either way. Previously the daemon injected
     # policy_engine alone, so OllamaDecisionEngine.decide was unreachable
     # outside --once: every trade decision was a static JSON lookup.
+    records = journal.read_all()
+    cached_cost_basis = open_lot_cost_basis(journal, records)
+
+    def cost_basis(symbol: str) -> dict[str, object] | None:
+        # Frozen at start-up: the lots can only change through a fill, and a fill
+        # does not happen inside a decision.
+        return dict(cached_cost_basis.get(symbol, {})) or None
+
     decision_engine = HybridDecisionEngine(
         llm=OllamaDecisionEngine(
             base_url=config.ollama_base_url,
@@ -231,6 +244,14 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         ),
         policy_engine=policy_engine,
         lessons=policy_engine.relevant_lessons,
+        risk_limits={
+            "max_position_value": config.max_position_value,
+            "max_daily_loss": config.max_daily_loss,
+            "max_trades_per_day": config.max_trades_per_day,
+            "max_total_exposure": config.max_total_exposure or None,
+            "min_confidence": config.min_confidence,
+        },
+        cost_basis=lambda: _agent_open_lots(journal),
     )
     loop = TradingLoop(
         data_gateway=AlpacaDataGateway(client=client),
@@ -385,6 +406,34 @@ def _ingest_evidence(config: AgentConfig) -> int:
     )
     print(batch.model_dump_json(indent=2))
     return 0 if batch.status != "FAILED" else 1
+
+
+def _agent_open_lots(journal: JsonlJournal) -> dict[str, dict[str, object]]:
+    """Open lots the agent still holds, by symbol, from broker-confirmed fills.
+
+    The decision context previously carried market_value but no cost, so the model
+    could not tell whether the position it held was in profit. Every price here is
+    one the broker reported on a fill the reconciler re-polled to a terminal state.
+    """
+    records = journal.read_all()
+    lots: dict[str, list[tuple[float, float]]] = {}
+    for activity in confirmed_fill_activities(journal, records):
+        lots.setdefault(activity.symbol, []).append((activity.quantity, activity.price))
+    out: dict[str, dict[str, object]] = {}
+    for symbol, entries in lots.items():
+        # FIFO consumption, so the average is over the shares still held.
+        total = sum(quantity for quantity, _ in entries)
+        if total <= 0:
+            continue
+        out[symbol] = {
+            "quantity": total,
+            "average_price": round(
+                sum(quantity * price for quantity, price in entries) / total, 4
+            ),
+            "fill_count": len(entries),
+            "source": "broker_confirmed_fills",
+        }
+    return out
 
 
 def _evidence_report(config: AgentConfig) -> int:

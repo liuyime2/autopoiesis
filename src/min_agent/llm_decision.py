@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import requests
@@ -108,11 +108,21 @@ class HybridDecisionEngine:
         policy_engine,
         lessons: Callable[[str], list[KnowledgeArtifact]] | None = None,
         max_lessons: int = 5,
+        risk_limits: dict[str, float] | None = None,
+        cost_basis: Callable[[], dict[str, dict[str, object]]] | None = None,
     ):
         self.llm = llm
         self.policy_engine = policy_engine
         self.lessons = lessons
         self.max_lessons = max_lessons
+        # The prompt tells the model to use hold_reason=risk_limit_near "only when
+        # a risk figure in the context is what stopped you", but the context
+        # carried no risk figures at all, so that reason could never be truthful
+        # and the model could not tell how much room it had.
+        self.risk_limits = dict(risk_limits or {})
+        # Without a cost basis the model cannot tell profit from loss. Every price
+        # in it is broker-reported, from confirmed fills.
+        self.cost_basis = cost_basis
 
     def decide_snapshot(self, snapshot: DataSnapshot) -> TradeDecision:
         context = self._context(snapshot)
@@ -172,7 +182,27 @@ class HybridDecisionEngine:
             ],
             "selected_strategy_id": strategy_id,
             "paper_only": True,
+            "risk_limits": self.risk_limits,
         }
+        held = next((pos for pos in snapshot.positions if pos.symbol == snapshot.symbol), None)
+        lots: dict[str, dict[str, object]] = {}
+        if self.cost_basis is not None:
+            try:
+                lots = self.cost_basis()
+            except Exception:
+                lots = {}
+        if held is not None:
+            context["sellable_quantity"] = int(held.quantity)
+            lot = lots.get(snapshot.symbol)
+            if isinstance(lot, Mapping) and isinstance(lot.get("average_price"), (int, float)):
+                average = float(lot["average_price"])
+                context["average_cost"] = round(average, 4)
+                context["unrealized_pnl_per_share"] = round(snapshot.last_price - average, 4)
+                context["unrealized_pnl"] = round(
+                    (snapshot.last_price - average) * min(held.quantity, float(lot.get("quantity", 0) or 0)), 2
+                )
+        if lots:
+            context["open_lots"] = lots
         context["lessons"] = [a.summary for a in self._lessons(strategy_id)]
         return context
 

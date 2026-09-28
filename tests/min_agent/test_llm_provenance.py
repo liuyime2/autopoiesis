@@ -632,3 +632,98 @@ def test_hold_reason_is_validated():
             symbol="SPY", action="HOLD", quantity=0, confidence=0.1, rationale="r",
             hold_reason="because_i_said_so",
         )
+
+
+def test_the_decision_context_states_the_hard_risk_limits():
+    """The prompt tells the model to use hold_reason=risk_limit_near "only when a
+    risk figure in the context is what stopped you", but no risk figure was ever in
+    the context, so that reason could not be truthful. Stating the limits is not a
+    hint to trade: Guardian enforces them downstream regardless."""
+    from min_agent.llm_decision import HybridDecisionEngine
+
+    engine = HybridDecisionEngine(
+        llm=object(),
+        policy_engine=_StubPolicy(),
+        risk_limits={"max_position_value": 5000, "max_daily_loss": 500},
+    )
+    context = engine._context(_basis_snapshot())
+
+    assert context["risk_limits"]["max_daily_loss"] == 500
+    assert context["risk_limits"]["max_position_value"] == 5000
+
+
+def test_the_decision_context_carries_cost_basis_so_profit_is_evaluable():
+    """PositionSnapshot has only quantity and market_value, so nothing in the
+    context could say whether the position was in profit. The model was asked to
+    decide about a position it had no way to evaluate, and instructed to HOLD when
+    the context did not support a trade - so it held, correctly, forever."""
+    from min_agent.llm_decision import HybridDecisionEngine
+
+    engine = HybridDecisionEngine(
+        llm=object(),
+        policy_engine=_StubPolicy(),
+        cost_basis=lambda: {
+            "SPY": {
+                "quantity": 23.0,
+                "average_price": 742.0313,
+                "fill_count": 23,
+                "source": "broker_confirmed_fills",
+            }
+        },
+    )
+    context = engine._context(_basis_snapshot(last_price=767.0, spy_quantity=23))
+
+    assert context["average_cost"] == 742.0313
+    assert context["unrealized_pnl_per_share"] == pytest.approx(24.9687, abs=1e-3)
+    assert context["unrealized_pnl"] == pytest.approx(24.9687 * 23, abs=0.01)
+    assert context["sellable_quantity"] == 23
+    assert context["open_lots"]["SPY"]["source"] == "broker_confirmed_fills"
+
+
+def test_no_cost_basis_means_no_invented_pnl():
+    from min_agent.llm_decision import HybridDecisionEngine
+
+    engine = HybridDecisionEngine(llm=object(), policy_engine=_StubPolicy())
+    context = engine._context(_basis_snapshot(last_price=767.0, spy_quantity=23))
+
+    assert "average_cost" not in context
+    assert "unrealized_pnl" not in context
+    assert context["sellable_quantity"] == 23
+
+
+class _StubPolicy:
+    def __init__(self):
+        self.selector = self
+        self.strategy_library = self
+
+    def list(self):
+        return []
+
+    def select(self, *_args, **_kwargs):
+        return None
+
+    def relevant_lessons(self, _strategy_id):
+        return []
+
+
+def _basis_snapshot(*, last_price=700.0, spy_quantity=0):
+    from min_agent.models import AccountSnapshot, DataSnapshot, PositionSnapshot
+
+    positions = (
+        (PositionSnapshot(symbol="SPY", quantity=float(spy_quantity),
+                          market_value=float(spy_quantity) * last_price),)
+        if spy_quantity
+        else ()
+    )
+    return DataSnapshot(
+        symbol="SPY",
+        timestamp=datetime(2026, 9, 28, 18, 0, tzinfo=timezone.utc),
+        market_open=True,
+        last_price=last_price,
+        source="alpaca",
+        account=AccountSnapshot(
+            equity=100_000, cash=50_000, buying_power=50_000,
+            portfolio_value=100_000, daily_loss=0,
+        ),
+        positions=positions,
+    )

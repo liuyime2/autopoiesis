@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790617868631,
-      "lastRequestTokens": 30475,
-      "lastInputTokens": 29928
+      "observedAt": 1790618191109,
+      "lastRequestTokens": 123572,
+      "lastInputTokens": 123153
     }
   },
   "runtimeFingerprint": {
@@ -43,10 +43,10 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 15,
-    "tokens": 447155,
+    "turns": 17,
+    "tokens": 567136,
     "cost": 0,
-    "runtimeMs": 184634,
+    "runtimeMs": 207694,
     "seenMessageIDs": [
       "msg_0e84e4a64001WOfiNtqsqc3Gtz",
       "msg_0e851cf9c001x0WTKxhfBTZwDP",
@@ -62,7 +62,9 @@
       "msg_0e8dbded7001LDSgqIGWcZfIME",
       "msg_0e8e0d4ce001HIjWH4PvV1xzad",
       "msg_0e8e6342a0017Dwy5f8ZyDbV8P",
-      "msg_0e8f09dd7001GkV3xUHJIyaDeu"
+      "msg_0e8f09dd7001GkV3xUHJIyaDeu",
+      "msg_0e92436990010fAV7U6faTm2nI",
+      "msg_0e92690c9001vDSMViT7kMW4xZ"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -72,8 +74,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 98,
-  "observedProgressRevision": 79,
+  "progressRevision": 102,
+  "observedProgressRevision": 98,
   "progressFingerprints": [
     "shell:b9b4f44e7752e63facec64bdbc0ee8e6fcf0da7ffe5fcf0ae88310a924a1a1f4",
     "shell:223f6fdcc7c7b98bc06f796b532475229266e362ad32092e7bea22119ad6ec54",
@@ -172,30 +174,14 @@
     "shell-worktree:ad5f80dbb177bcb212abbc591ecf8adb6356cf47912456be5cac255e08fdc1f3",
     "shell-worktree:a3185c8893158633975569cd63b925186e7a5681ab901a135183097a465af394",
     "shell-worktree:f8b397cda9ba06dcba90d838f62b59c5630d6c82a62d6421514652534e5c1288",
-    "shell-worktree:96b7ffe8da9f5be64569a71fce5bfa97d4fe02b0df1cb935ecdc29154ae0cc11"
+    "shell-worktree:96b7ffe8da9f5be64569a71fce5bfa97d4fe02b0df1cb935ecdc29154ae0cc11",
+    "shell-worktree:0e93e21520b8f1630a45e759e80d3629da27762ae5e96b402b5720281522698c",
+    "shell-worktree:fb18868548930ed7266589fae5348be75cc34d537d54ad3efce4086cbf99a7c9",
+    "shell-worktree:5f96c1d3402a4cef37927db960ad01c20e25627d40396ba3a3c6417955e9de00",
+    "shell-worktree:d881c94a70e35ff47cb07834b9dbf55e23a11098a5b46064def4585ea9feb031"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790610049174,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790610061048,
-      "summary": "Phase 6d done: the stack is running unattended under systemd, and doctor reports RESULT OK. 331 tests pass (five consecutive green runs with the daemon live). 91/91 defect checks pass.\n\nUNATTENDED STACK, VERIFIED\n  ollama.service        active  restarts=0\n  min-agent.service     active  restarts=0   heartbeat RUNNING, pid alive\n  quant-watchdog.timer  active\n  doctor: RESULT OK, with alpaca credentials / broker clock / broker positions /\n  ollama / daemon / journal / strategy library all PASS.\n\nPROOF CRITERIA: 3 of 4 now PASS on real broker data\n  [PASS] proof: submitted>0   23 order(s) submitted\n  [PASS] proof: filled>0      23.0 share(s) filled (23 confirmed)\n  [PASS] daemon               pid alive\n  [WARN] proof: per-strategy pnl  empty - needs a closed lot\nLive cycles show decision_source='llm' and Guardian correctly returning 'daily\nloss limit reached'.\n\nTWO NEW DEFECTS FOUND AND FIXED\n1. install-service printed 'enabled' after every enable had failed - the same\n   false-success pattern this whole refactor removes, reintroduced in new code.\n   It now verifies the manager can see each unit and exits 1 with an explanation.\n   The verification was itself wrong on the first attempt (missing --user), which\n   is an argument for verifying twice.\n2. A suite run failed only while the daemon was live: appends held an exclusive\n   flock but readers took none, so a scan concurrent with an append could observe\n   a partial line and count it as corruption. Readers now take a shared lock.\n   Three tests pin the contract, including that a reader waits for the writer and\n   raises TimeoutError only after its own budget rather than hanging a cycle.\n\nENVIRONMENT CONSTRAINT, now fully characterised\nThe systemd user manager resolves unit paths from its own start-time environment,\nwhich has no XDG_CONFIG_HOME (that variable is injected by the tool harness and\nappears in no profile file), so it searches $HOME/.config/systemd/user - and /home\nis at user quota (even a 1KB write fails), so that directory cannot exist.\nPermanent user units are therefore impossible until a few MB are freed under\n$HOME. The manager does search /run/user/$UID/systemd/user, which is writable, so\n'minictrl install-transient' renders the real unit files there and starts them.\nThe stack is genuinely running; it just is not reboot-persistent, and that is a\ndisk-space fact rather than a code one.",
-      "next": "One item remains and it is a human decision, not code. The closed-lot round trip needs trading to be permitted today, and two independent limits block it: today's loss is ~$543 against max_daily_loss=$500 (Guardian refuses every BUY and SELL - correct behaviour), and held exposure is $76,819 against a $20,000 aggregate cap (most of it BIL/TLT/XLE/XLF/XLB, which are outside the agent's allowlist and appear to be pre-existing account holdings, not agent positions). I must not change either limit: AGENTS.md section 6 forbids it and tests/min_agent/test_governance.py fails any script that assigns one. Options for the user: (A) keep $500 and let the round trip happen at tomorrow's open when the loss resets - nothing to change, and today's cycles are themselves evidence the risk system works; (B) free home disk quota so the systemd units become permanent instead of living in /run - the only remaining infrastructure gap; (C) a one-off raised daily-loss cap via the environment variable only, explicitly authorised. Everything else in the objective is complete and proven."
-    },
-    {
-      "time": 1790610104763,
-      "summary": "[host:tool:edit] Project file content changed: src/min_agent/guardian.py",
-      "next": ""
-    },
-    {
-      "time": 1790610126767,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790610430150,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -425,59 +411,79 @@
       "time": 1790617833207,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790618043681,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790618050188,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790618069408,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790618165135,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 765,
+  "storageGeneration": 809,
   "createdAt": 1790603839704,
-  "updatedAt": 1790617868631,
+  "updatedAt": 1790618191109,
   "todoPlan": {
     "goalRevision": 1,
-    "digest": "sha256:d9032723a3b6a168bcb36a32abad20f8d6a283a12ad282159f115ca1e73acab9",
+    "digest": "sha256:74578f8684f4a8634c2d684d2edeb15ac210e5081552d64bab0cc091cc564445",
     "total": 6,
-    "pending": 4,
+    "pending": 3,
     "inProgress": 1,
-    "completed": 1,
+    "completed": 2,
     "cancelled": 0,
-    "observedAt": 1790608720858,
+    "observedAt": 1790617873919,
     "items": [
       {
-        "key": "todo:0361294c2d5656043c7fc156:1",
-        "content": "Phases 0-5 complete (79967c1, a24396b, 991c0f2, 16dc28c, 637b463, 4831d60, 4c109fb) + audit e0ebc65 + automation b339d51. 325 tests.",
+        "key": "todo:cbfbc06ebd10c7772ccd6543:1",
+        "content": "Fix the 5 exit-path defects so a closed lot / per-strategy PnL is reachable at all",
         "status": "completed",
         "priority": "high",
         "order": 0
       },
       {
-        "key": "todo:93112c0ee72c4d1ff578897c:1",
-        "content": "Phase 6a: run minictrl doctor with real credentials; verify credentials check flips to PASS and broker is reachable",
-        "status": "in_progress",
+        "key": "todo:10c6a57c2963423f5965ee8d:1",
+        "content": "Make the curriculum engine report executable-capability gaps and fill them",
+        "status": "completed",
         "priority": "high",
         "order": 1
       },
       {
-        "key": "todo:1020c1cd7ac5a64f4c80ab3b:1",
-        "content": "Phase 6b: ingest real broker evidence for the 6 leftover June positions/orders to satisfy filled>0 and per-strategy PnL attribution",
-        "status": "pending",
+        "key": "todo:439481024fdd1c3bbcd2e028:1",
+        "content": "Verify a SELL strategy gets admitted and selected by the live loop",
+        "status": "in_progress",
         "priority": "high",
         "order": 2
       },
       {
-        "key": "todo:56ff30304560bf8486c7e66a:1",
-        "content": "Phase 6c: run a real paper cycle end to end and confirm the guard outcome is honest",
+        "key": "todo:64875be33c28202681a1258d:1",
+        "content": "Observe a real broker-confirmed SELL fill forming a closed lot + per-strategy PnL",
         "status": "pending",
         "priority": "high",
         "order": 3
       },
       {
-        "key": "todo:56c56bf33e3118bc4fa95598:1",
-        "content": "Phase 6d: install + enable the real services (min-agent + watchdog timer) and confirm the stack runs unattended",
+        "key": "todo:903ba122862d491a85803cc5:1",
+        "content": "Verify a PnL-driven lifecycle transition fires from broker evidence",
         "status": "pending",
         "priority": "high",
         "order": 4
       },
       {
-        "key": "todo:59eaccc0cb0806d55b96ac12:1",
-        "content": "Final: requirement-by-requirement audit of the whole objective; decide on the daily-loss limit question with the user",
+        "key": "todo:4ce7ab3bb50260ffd1af30b8:1",
+        "content": "Restore shipped defaults, run full tests + audit + doctor, update STATUS.md, commit",
         "status": "pending",
         "priority": "high",
         "order": 5
@@ -486,26 +492,20 @@
     "anomalies": [
       {
         "kind": "substantial_replacement",
-        "summary": "Native Todo plan changed substantially in the same Goal revision: 12 removed, 6 added, 0 retained.",
+        "summary": "Native Todo plan changed substantially in the same Goal revision: 6 removed, 6 added, 0 retained.",
         "itemKeys": [
-          "todo:1663deba5a5823ac8fb41971:1",
-          "todo:7648cafceabf98e5ce055a30:1",
-          "todo:a6edd874edff8cf2729bb3ef:1",
-          "todo:bd91f7742858677b249a6b66:1",
-          "todo:796c3e53076463a2af4c7e3e:1",
-          "todo:bd9f75d1e0bd7344a83fa230:1",
-          "todo:3c9156bef762899abee67631:1",
-          "todo:45d9adb3dd5550a833b8d71f:1",
-          "todo:8b700df3eec50a4d0ae692b6:1",
-          "todo:c9bf7c4010c785c6f18554b9:1",
-          "todo:9e1ae77470256ac0bbe6b4dc:1",
-          "todo:42592d7b1ba1ee3874f0f29a:1",
           "todo:0361294c2d5656043c7fc156:1",
           "todo:93112c0ee72c4d1ff578897c:1",
           "todo:1020c1cd7ac5a64f4c80ab3b:1",
           "todo:56ff30304560bf8486c7e66a:1",
           "todo:56c56bf33e3118bc4fa95598:1",
-          "todo:59eaccc0cb0806d55b96ac12:1"
+          "todo:59eaccc0cb0806d55b96ac12:1",
+          "todo:cbfbc06ebd10c7772ccd6543:1",
+          "todo:10c6a57c2963423f5965ee8d:1",
+          "todo:439481024fdd1c3bbcd2e028:1",
+          "todo:64875be33c28202681a1258d:1",
+          "todo:903ba122862d491a85803cc5:1",
+          "todo:4ce7ab3bb50260ffd1af30b8:1"
         ]
       }
     ]

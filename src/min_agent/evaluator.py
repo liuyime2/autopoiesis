@@ -724,3 +724,4 @@ def _score(
     if realized_pnl > 0:
         return min(1.0, score * (1.0 + PNL_BONUS))
     return max(0.0, score * (1.0 - PNL_PENALTY))
+
