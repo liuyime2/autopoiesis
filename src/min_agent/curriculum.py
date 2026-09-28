@@ -140,6 +140,16 @@ class StructuredCurriculumAgent:
             # library, not an instruction to trade.
             "open_positions": [dict(item) for item in open_positions],
             "capability_coverage": _capability_coverage(current_strategies, last_price, symbol),
+            # Restated as a flat, unambiguous demand rather than left inside
+            # capability_coverage. The model chose FIXED_SIZE and then action=BUY
+            # three times in a row while the library stayed unable to sell: phase A
+            # is asked to pick a kind from a three-item enum, and a nested report
+            # saying "uncovered_actions_now: [SELL]" did not steer a choice that
+            # has no SELL in it. Stating the required action next to the enum is
+            # what makes the gap actionable at the point the kind is chosen.
+            "required_action": (
+                _required_action(_capability_coverage(current_strategies, last_price, symbol))
+            ),
             "recent_exploration_summary": recent_exploration_summary,
             "guardian_max_position_value": guardian_max_position_value,
             "exploration_policy": [
@@ -583,8 +593,18 @@ def generate_curriculum_task_json(*, call, prompt_context: dict, spec_hint: str 
         }
         return json.dumps(task)
 
+    required = prompt_context.get("required_action")
+    demand = (
+        f"The library cannot express a {required} at the real last price, and the "
+        f"positions in open_positions have no working exit because of it. Choose a "
+        f"kind whose parameters can carry action={required}: FIXED_SIZE takes an "
+        f"action field, and TREND_FOLLOW derives its side from price. "
+        f"Do not choose HOLD_BASELINE, which cannot exit. "
+        if isinstance(required, str) and required
+        else "Choose exactly one strategy kind to propose next. "
+    )
     kind_raw = call(
-        f"Choose exactly one strategy kind to propose next. {prompt_context_text(prompt_context)}",
+        f"{demand}{prompt_context_text(prompt_context)}",
         kind_selection_schema(),
     )
     kind = str(_json_load(kind_raw).get("kind") or "FIXED_SIZE").upper()
@@ -592,7 +612,13 @@ def generate_curriculum_task_json(*, call, prompt_context: dict, spec_hint: str 
         kind = "FIXED_SIZE"
     spec = _json_load(call(
         f"Return the strategy_spec for kind {kind}. Every field is required. "
-        f"Use only the symbols present in the context. {prompt_context_text(prompt_context)}",
+        + (
+            f"Set parameters.action to {required} - the library cannot express it "
+            f"and the open positions have no exit. "
+            if isinstance(required, str) and required and kind == "FIXED_SIZE"
+            else ""
+        )
+        + f"Use only the symbols present in the context. {prompt_context_text(prompt_context)}",
         strategy_spec_schema(kind),
     ))
     return json.dumps({
@@ -652,6 +678,19 @@ def _reshape_spec(spec: dict, kind: str) -> dict:
 def _task_id(kind: str, spec: dict) -> str:
     raw = f"{kind}:{spec.get('strategy_id')}:{datetime.now(tz=timezone.utc).isoformat()}"
     return f"task-{abs(hash(raw)) % 1000000:06d}"
+
+
+def _required_action(coverage: Mapping[str, object]) -> str | None:
+    """The single action the next strategy must express, if the library lacks one.
+
+    Reported as a flat string because it is consumed by a three-item kind enum, not
+    by free text. HOLD_BASELINE cannot satisfy it: holding is not an exit.
+    """
+    uncovered = coverage.get("uncovered_actions_now")
+    if not uncovered:
+        return None
+    actions = [str(item).upper() for item in uncovered]
+    return actions[0] if len(actions) == 1 else "|".join(actions)
 
 
 def _capability_coverage(

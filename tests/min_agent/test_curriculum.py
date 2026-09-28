@@ -845,3 +845,81 @@ def test_a_trend_follow_buy_only_proposal_does_not_count_as_filling_the_sell_gap
     # The same strategy below its reference does sell, and then it does.
     context["capability_coverage"]["evaluated_at_last_price"] = 700.0
     assert _unmet_capability(task, context) is None
+
+
+def test_the_required_action_is_stated_in_the_prompts_that_choose_and_fill():
+    """The library could not sell and the model chose FIXED_SIZE then wrote
+    action=BUY three times running. Phase A picks a kind from a three-item enum, so
+    a gap buried in a nested capability_coverage report cannot steer it. The demand
+    has to be a flat statement in the prompt for both the kind choice and the spec
+    that writes the action."""
+    from datetime import datetime, timezone
+
+    from min_agent.curriculum import generate_curriculum_task_json, kind_selection_schema
+    from min_agent.models import CurriculumTask, ReflectionRecord, StrategySpec
+
+    def spec(sid, action):
+        return StrategySpec(
+            strategy_id=sid, name=sid, kind="FIXED_SIZE", symbols=("SPY",),
+            parameters={"action": action, "quantity": 1, "confidence": 0.7},
+            max_position_value=1000, enabled=True, lifecycle="ACTIVE",
+            created_at=datetime.now(tz=timezone.utc), rationale="t",
+        )
+
+    prompts = []
+
+    def call(prompt, schema):
+        prompts.append(prompt)
+        if set(schema.get("required", [])) == {"kind", "why"}:
+            return '{"kind": "FIXED_SIZE", "why": "w"}'
+        return json.dumps({
+            "strategy_id": "exit-1", "name": "Exit", "symbols": ["SPY"],
+            "max_position_value": 1000, "rationale": "r", "enabled": True,
+            "kind": "FIXED_SIZE", "action": "SELL", "quantity": 1, "confidence": 0.7,
+        })
+
+    context = {
+        "required_action": "SELL",
+        "capability_coverage": {"uncovered_actions_now": ["SELL"]},
+        "open_positions": [{"symbol": "SPY", "quantity": 23}],
+    }
+    task = CurriculumTask.model_validate_json(
+        generate_curriculum_task_json(call=call, prompt_context=context)
+    )
+
+    assert len(prompts) == 2
+    # Phase A chooses the kind; phase B writes the action. Both must name SELL.
+    for index, prompt in enumerate(prompts):
+        assert "SELL" in prompt, f"phase {index} prompt never mentions the required action"
+    assert "parameters.action to SELL" in prompts[1]
+    assert task.strategy_spec.parameters["action"] == "SELL"
+
+
+def test_no_capability_gap_means_no_demand_in_the_prompt():
+    from min_agent.curriculum import generate_curriculum_task_json, kind_selection_schema
+
+    prompts = []
+
+    def call(prompt, schema):
+        prompts.append(prompt)
+        if set(schema.get("required", [])) == {"kind", "why"}:
+            return '{"kind": "FIXED_SIZE", "why": "w"}'
+        return json.dumps({
+            "strategy_id": "b-1", "name": "B", "symbols": ["SPY"],
+            "max_position_value": 1000, "rationale": "r", "enabled": True,
+            "kind": "FIXED_SIZE", "action": "BUY", "quantity": 1, "confidence": 0.7,
+        })
+
+    generate_curriculum_task_json(call=call, prompt_context={"required_action": None})
+
+    assert all("no working exit" not in prompt for prompt in prompts)
+    assert all("parameters.action to" not in prompt for prompt in prompts)
+    assert "Choose exactly one strategy kind" in prompts[0]
+
+
+def test_a_required_action_is_never_hold_baseline():
+    from min_agent.curriculum import _required_action
+
+    assert _required_action({"uncovered_actions_now": ["SELL"]}) == "SELL"
+    assert _required_action({"uncovered_actions_now": ["BUY", "SELL"]}) == "BUY|SELL"
+    assert _required_action({"uncovered_actions_now": None}) is None
