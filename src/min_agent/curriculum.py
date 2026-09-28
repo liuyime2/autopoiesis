@@ -57,6 +57,7 @@ class StructuredCurriculumAgent:
         transport: CurriculumTransport | None = None,
         state_path: Path | str | None = None,
         breakout_threshold: int = 3,
+        max_strategies_in_prompt: int = 40,
     ):
         self.transport = transport
         # Tracks consecutive EVALUATE fallbacks so a dead loop can be broken.
@@ -66,6 +67,9 @@ class StructuredCurriculumAgent:
         # breakout was unreachable. Persisted next to the journal instead.
         self.state_path = Path(state_path) if state_path else None
         self.breakout_threshold = breakout_threshold
+        self.max_strategies_in_prompt = max_strategies_in_prompt
+        self.last_failure: str | None = None
+        self.last_raw_excerpt: str = ""
         self._consecutive_evaluate_count: int = self._load_count()
 
     def propose(
@@ -85,6 +89,16 @@ class StructuredCurriculumAgent:
                 guardian_max_position_value=guardian_max_position_value,
             )
 
+        # Deliberately compact. The previous context embedded the entire
+        # ReflectionRecord dump (~5kB, which itself contains strategy_metrics and
+        # a duplicate `evaluation` blob) plus a full model_dump of every strategy
+        # (~8.4kB for 15 strategies) - about 14kB. deepseek-r1:8b could not
+        # follow it: it stopped producing a curriculum task and instead emitted a
+        # meta-refusal about "extracting the 'query' field", so every daemon
+        # curriculum call fell back to a hard-coded EVALUATE. The self-evolution
+        # loop was dead while reporting healthy. Only what a decision actually
+        # needs is sent: current strategy identities and states, their measured
+        # scores and action counts, the exploration summary, and the limits.
         prompt_context = {
             "target_daily_return_pct": target_daily_return_pct,
             "safety": {
@@ -93,8 +107,13 @@ class StructuredCurriculumAgent:
                 "generated_code_allowed": False,
                 "real_data_only": True,
             },
-            "reflection": reflection.model_dump(mode="json"),
-            "strategies": [strategy.model_dump(mode="json") for strategy in current_strategies],
+            "window_cycles": reflection.window_cycles,
+            "submitted_orders": reflection.submitted_orders,
+            "rejected_orders": reflection.rejected_orders,
+            "error_count": reflection.error_count,
+            "pnl_evidence": reflection.evaluation.get("pnl_evidence"),
+            "strategies": self._compact_strategies(current_strategies, reflection),
+            "strategy_count_total": len(current_strategies),
             "recent_exploration_summary": recent_exploration_summary,
             "guardian_max_position_value": guardian_max_position_value,
             "exploration_policy": [
@@ -103,13 +122,55 @@ class StructuredCurriculumAgent:
                 "Do not force orders; Guardian, market-open checks, and paper executor remain authoritative.",
                 "Do not claim profitability or target achievement without broker evidence in the supplied context.",
             ],
+            # Stated explicitly rather than shown by example. The full
+            # model_dump of every strategy used to serve as the de-facto schema,
+            # and when the context was compacted that example went with it: the
+            # model then emitted a strategy_spec missing strategy_id, name,
+            # symbols and max_position_value, and every call fell back. A
+            # 400-character field list is a better teacher than 8kB of examples.
             "schema": {
-                "task_id": "string",
-                "task_type": "STRATEGY_SPEC|OPTIMIZE|EVALUATE",
-                "summary": "string",
-                "strategy_spec": "optional structured StrategySpec; required for STRATEGY_SPEC",
-                "parameters": "object of safe scalar params",
-                "rationale": "string",
+                "task_id": "string, required, unique",
+                "task_type": "STRATEGY_SPEC|OPTIMIZE|EVALUATE, required",
+                "summary": "string, required, one line",
+                "strategy_spec": "required when task_type is STRATEGY_SPEC, else null",
+                "parameters": "object of safe scalar params, optional",
+                "rationale": "string, required",
+            },
+            "strategy_spec_fields": {
+                "required": [
+                    "strategy_id", "name", "kind", "symbols",
+                    "max_position_value", "created_at", "rationale",
+                ],
+                "optional": ["parameters", "enabled", "lifecycle"],
+                "field_notes": {
+                    "strategy_id": "a unique id not already present in strategies[].strategy_id",
+                    "name": "human readable label",
+                    "kind": "one of HOLD_BASELINE, FIXED_SIZE, TREND_FOLLOW",
+                    "symbols": "array of symbols, e.g. [\"SPY\"]",
+                    "parameters": "must match supported_strategy_schemas[kind] exactly",
+                    "max_position_value": "a number at or below guardian_max_position_value",
+                    "created_at": "ISO-8601 UTC timestamp, the current time",
+                    "enabled": "true",
+                    "rationale": "why this skill, grounded in the evidence above",
+                },
+            },
+            "worked_example": {
+                "task_id": "task-0001",
+                "task_type": "STRATEGY_SPEC",
+                "summary": "add a small fixed-size probe because nothing has explored",
+                "strategy_spec": {
+                    "strategy_id": "fixed-size-probe-0001",
+                    "name": "Fixed Size Probe",
+                    "kind": "FIXED_SIZE",
+                    "symbols": ["SPY"],
+                    "parameters": {"action": "BUY", "quantity": 1, "confidence": 0.6},
+                    "max_position_value": guardian_max_position_value or 5000.0,
+                    "enabled": True,
+                    "created_at": "<current ISO-8601 UTC timestamp>",
+                    "rationale": "no exploration in the recent window",
+                },
+                "parameters": {},
+                "rationale": "smallest admissible trading skill",
             },
             "supported_strategy_schemas": {
                 kind: {
@@ -138,7 +199,13 @@ class StructuredCurriculumAgent:
         raw = self.transport(prompt_context)
         try:
             task = parse_curriculum_task_json(raw)
-        except Exception:
+        except Exception as exc:
+            # The reason the model output was unusable belongs in the journal.
+            # Swallowing it made a 100% fallback rate look like normal operation:
+            # the journal said "fallback" without saying why, which is how the
+            # self-evolution loop stayed dead while every health check was green.
+            self.last_failure = f"{type(exc).__name__}: {exc}"
+            self.last_raw_excerpt = raw[-500:] if isinstance(raw, str) else ""
             return self._fallback_task(
                 reflection,
                 current_strategies,
@@ -148,6 +215,50 @@ class StructuredCurriculumAgent:
         if task.task_type == "STRATEGY_SPEC" and task.strategy_spec is not None:
             self._set_count(0)
         return task
+
+    def _compact_strategies(
+        self, strategies: list[StrategySpec], reflection: ReflectionRecord | None = None
+    ) -> list[dict[str, object]]:
+        """Bounded, decision-relevant view of the library.
+
+        The per-strategy payload scales linearly, so a library that grew past a
+        few dozen entries would push the prompt back to the size at which
+        deepseek-r1:8b stopped following it. Selectable strategies come first
+        (those are the ones a proposal has to fit around), then the rest by most
+        recent, capped, with the omitted count stated so the model is not misled
+        into thinking the library is small.
+        """
+        if len(strategies) <= self.max_strategies_in_prompt:
+            ordered = strategies
+        else:
+            def rank(spec: StrategySpec) -> tuple[int, str]:
+                selectable = spec.enabled and spec.lifecycle not in {"PAUSED", "RETIRED"}
+                return (0 if selectable else 1, spec.created_at)
+
+            ordered = sorted(strategies, key=rank)[: self.max_strategies_in_prompt]
+        # One entry per strategy, carrying its own measured evidence. These were
+        # four separate per-strategy maps (strategies, strategy_scores,
+        # strategy_actions, strategy_trade_evidence), which sent the same 40
+        # strategies four times: ~12.5kB of a 15.3kB context. Merged, it is
+        # ~6.6kB and the model reads it as a table instead of four lists to join.
+        metrics = (reflection.strategy_metrics if reflection else None) or {}
+        scores = (reflection.strategy_scores if reflection else None) or {}
+        return [
+            {
+                "strategy_id": spec.strategy_id,
+                "kind": spec.kind,
+                "lifecycle": spec.lifecycle,
+                "symbols": list(spec.symbols),
+                "parameters": spec.parameters,
+                "score": scores.get(spec.strategy_id),
+                "action_counts": (metrics.get(spec.strategy_id) or {}).get("action_counts", {}),
+                "cycles": (metrics.get(spec.strategy_id) or {}).get("cycles", 0),
+                "trade_attempts": (metrics.get(spec.strategy_id) or {}).get("trade_attempts", 0),
+                "submitted_orders": (metrics.get(spec.strategy_id) or {}).get("submitted_orders", 0),
+                "filled_quantity": (metrics.get(spec.strategy_id) or {}).get("filled_quantity", 0.0),
+            }
+            for spec in ordered
+        ]
 
     def _fallback_task(
         self,

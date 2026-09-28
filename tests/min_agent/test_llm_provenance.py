@@ -449,3 +449,77 @@ def test_daemon_supplies_real_prices_to_admission(tmp_path):
 
     assert "set_market_prices" in inspect.getsource(daemon.AgentDaemon._curriculum_proposal)
     assert "_last_known_prices" in inspect.getsource(daemon.AgentDaemon._last_known_prices)
+
+
+def test_both_llm_paths_use_schema_constrained_generation():
+    """format="json" only asks for *some* JSON. The model repeatedly omitted
+    required fields, so every curriculum call failed validation and fell back.
+
+    Measured against deepseek-r1:8b on the curriculum task, constraining to the
+    pydantic schema was not only correct but 5x faster (11.7s vs 54.4s) and
+    produced 4x less output (901 vs 6993 chars) - the model no longer has to
+    search for a valid shape.
+    """
+    import inspect
+
+    import min_agent.cli as cli
+    from min_agent.llm_decision import OllamaDecisionEngine
+
+    curriculum = inspect.getsource(cli._ollama_curriculum_transport)
+    assert 'CurriculumTask.model_json_schema()' in curriculum
+    assert '"format": "json"' not in curriculum, "plain 'json' mode is not a schema"
+
+    decision = inspect.getsource(OllamaDecisionEngine.decide)
+    assert "TradeDecision.model_json_schema()" in decision
+    assert '"format": "json"' not in decision
+
+
+def test_curriculum_schema_is_passed_to_the_transport():
+    """A live-shape test of the payload, with a fake engine."""
+    import json
+
+    import min_agent.cli as cli
+    from min_agent.config import AgentConfig
+    from min_agent.models import CurriculumTask
+
+    captured = {}
+
+    class Capturing:
+        def __init__(self, **kwargs):
+            self.base_url = "http://ollama.invalid"
+            self.timeout = 1
+
+        def transport(self, url, payload, timeout):
+            captured["payload"] = payload
+            return {"response": "{}"}
+
+    original = cli.OllamaDecisionEngine
+    cli.OllamaDecisionEngine = Capturing
+    try:
+        config = AgentConfig.from_env()
+        cli._ollama_curriculum_transport(config)({})
+    finally:
+        cli.OllamaDecisionEngine = original
+
+    fmt = captured["payload"]["format"]
+    assert isinstance(fmt, dict), "format must be a JSON schema object"
+    assert fmt == CurriculumTask.model_json_schema()
+    assert "properties" in fmt and "required" in fmt
+    json.dumps(fmt)  # must be serialisable for the wire
+
+
+def test_trade_decision_schema_is_passed_to_the_transport():
+    from min_agent.models import TradeDecision
+
+    captured = {}
+
+    def transport(url, payload, timeout):
+        captured["payload"] = payload
+        return {"response": '{"symbol":"SPY","action":"HOLD","quantity":0,"confidence":0.1,"rationale":"r"}'}
+
+    engine = OllamaDecisionEngine(
+        base_url="http://ollama.invalid", model="m", gpu_devices="0", transport=transport
+    )
+    engine.decide({"symbol": "SPY", "last_price": 700.0})
+
+    assert captured["payload"]["format"] == TradeDecision.model_json_schema()

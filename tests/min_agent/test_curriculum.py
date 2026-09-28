@@ -368,3 +368,184 @@ def test_curriculum_context_includes_schema_progression_and_forbidden_outputs():
     assert "no exploration" in " ".join(captured["exploration_policy"])
     assert "tiny FIXED_SIZE" in " ".join(captured["curriculum_progression"])
     assert "Unsupported strategy parameters" in " ".join(captured["forbidden_outputs"])
+
+
+def test_curriculum_context_is_bounded_and_compact():
+    """Regression, with the measured failure point.
+
+    The old context embedded the whole ReflectionRecord dump plus a full
+    model_dump of every strategy: ~14kB with only 15 strategies. At that size
+    deepseek-r1:8b stopped following the instruction and emitted a meta-refusal
+    about "extracting the 'query' field", so every daemon curriculum call fell
+    back to a hard-coded EVALUATE. The self-evolution loop was dead while every
+    health check reported green.
+
+    Verified live: 15 strategies -> ~6kB parses 2/2; the old 14kB shape parsed
+    0/2. This pins that the payload stays bounded and that growth is capped.
+    """
+    import json
+    from datetime import datetime, timezone
+
+    from min_agent.models import ReflectionRecord, StrategySpec
+
+    def spec(i):
+        return StrategySpec(
+            strategy_id=f"strategy-{i:03d}", name="T", kind="FIXED_SIZE", symbols=("SPY",),
+            parameters={"action": "BUY", "quantity": 1, "confidence": 0.6},
+            max_position_value=1000, enabled=True, lifecycle="ACTIVE",
+            created_at=datetime.now(tz=timezone.utc), rationale="t",
+        )
+
+    def reflection_for(n):
+        return ReflectionRecord(
+            generated_at=datetime.now(tz=timezone.utc), window_cycles=200,
+            submitted_orders=40, rejected_orders=3, error_count=0,
+            guardian_rejections={}, summary="s",
+            strategy_scores={f"strategy-{i:03d}": 0.5 for i in range(n)},
+            strategy_metrics={
+                f"strategy-{i:03d}": {
+                    "cycles": 20, "trade_attempts": 5, "submitted_orders": 5,
+                    "filled_quantity": 5.0, "action_counts": {"BUY": 5}, "score": 0.5,
+                }
+                for i in range(n)
+            },
+        )
+
+    def measure(count):
+        captured = {}
+
+        def transport(ctx):
+            captured["ctx"] = ctx
+            return (
+                '{"task_id":"t","task_type":"EVALUATE","summary":"s","strategy_spec":null,'
+                '"parameters":{},"rationale":"r"}'
+            )
+
+        StructuredCurriculumAgent(transport=transport).propose(
+            reflection=reflection_for(count), current_strategies=[spec(i) for i in range(count)]
+        )
+        return captured["ctx"]
+
+    realistic = measure(15)
+    # Measured: 15 strategies -> ~8.3kB with the explicit schema block, and
+    # that parses. The old shape was ~14kB with the same 15 strategies and
+    # produced a meta-refusal 0/2 times.
+    assert len(json.dumps(realistic)) < 10000, (
+        f"realistic 15-strategy context is {len(json.dumps(realistic))} chars; "
+        "deepseek-r1:8b failed to follow it at ~14kB"
+    )
+
+    # Growth is capped, so a runaway library cannot re-break the prompt.
+    huge = measure(500)
+    assert len(json.dumps(huge)) < 20000, "context must not grow without bound"
+    assert len(huge["strategies"]) == 40, "the per-strategy list must be capped"
+    assert huge["strategy_count_total"] == 500, "the true library size must still be stated"
+
+    # The duplicated full-reflection blob must be gone.
+    assert "evaluation" not in realistic
+    # One entry per strategy, carrying its own evidence, rather than four maps.
+    first = realistic["strategies"][0]
+    for key in ("strategy_id", "kind", "lifecycle", "parameters", "score",
+                "action_counts", "trade_attempts", "submitted_orders", "filled_quantity"):
+        assert key in first, f"merged strategy entry is missing {key!r}"
+    for gone in ("strategy_scores", "strategy_actions", "strategy_trade_evidence", "reflection"):
+        assert gone not in realistic, f"{gone!r} duplicated the strategy data"
+
+
+def test_curriculum_context_omits_the_duplicate_evaluation_blob():
+    """ReflectionRecord carries both strategy_metrics and a full nested
+    `evaluation`; sending the whole record doubled the payload for no gain."""
+    import json
+    from datetime import datetime, timezone
+
+    from min_agent.models import ReflectionRecord
+
+    reflection = ReflectionRecord(
+        generated_at=datetime.now(tz=timezone.utc), window_cycles=10,
+        submitted_orders=1, rejected_orders=0, error_count=0,
+        guardian_rejections={}, summary="s", strategy_scores={"a": 0.5},
+        strategy_metrics={"a": {"cycles": 1, "trade_attempts": 1, "action_counts": {"BUY": 1}}},
+    )
+    captured = {}
+
+    def transport(ctx):
+        captured["ctx"] = ctx
+        return (
+            '{"task_id":"t","task_type":"EVALUATE","summary":"s","strategy_spec":null,'
+            '"parameters":{},"rationale":"r"}'
+        )
+
+    StructuredCurriculumAgent(transport=transport).propose(
+        reflection=reflection, current_strategies=[]
+    )
+
+    assert "evaluation" not in captured["ctx"]
+    # The reflection-derived slice must be far smaller than the whole record.
+    reflection_only = {
+        k: v for k, v in captured["ctx"].items()
+        if k in ("window_cycles", "submitted_orders", "rejected_orders",
+                 "error_count", "pnl_evidence", "strategies", "strategy_count_total")
+    }
+    assert len(json.dumps(reflection_only)) < len(json.dumps(reflection.model_dump(mode="json")))
+
+
+def test_prompt_requires_complete_objects_and_forbids_literal_placeholders():
+    """The model copies whatever example it is given.
+
+    The context carries a worked_example showing the required shape, and without
+    an explicit instruction the model copied its task_id verbatim ('task-0001')
+    and omitted the top-level rationale - which is a validation failure, and
+    therefore a silent fallback. Both halves of this were real: the prompt was
+    rewritten at one point and lost its "placeholders are examples only" line.
+    """
+    import inspect
+
+    import min_agent.cli as cli
+
+    source = inspect.getsource(cli._ollama_curriculum_transport)
+    assert "worked_example" in source or "SHAPE only" in source
+    assert "SHAPE only" in source, "the prompt must say the example is a shape, not a template"
+    assert "must not duplicate" in source or "not duplicate" in source
+    assert "must be present" in source, "the prompt must state required fields are mandatory"
+
+
+def test_curriculum_context_carries_an_explicit_strategy_spec_shape():
+    """Compacting the context removed the full model_dump of every strategy,
+    which had been serving as the de-facto schema example. The model then emitted
+    a strategy_spec with no strategy_id, name, symbols or max_position_value and
+    every call fell back. The shape must be stated, not shown by example."""
+    import json
+    from datetime import datetime, timezone
+
+    from min_agent.models import ReflectionRecord, StrategySpec
+
+    reflection = ReflectionRecord(
+        generated_at=datetime.now(tz=timezone.utc), window_cycles=10,
+        submitted_orders=1, rejected_orders=0, error_count=0,
+        guardian_rejections={}, summary="s", strategy_scores={},
+    )
+    captured = {}
+
+    def transport(ctx):
+        captured["ctx"] = ctx
+        return (
+            '{"task_id":"t","task_type":"EVALUATE","summary":"s","strategy_spec":null,'
+            '"parameters":{},"rationale":"r"}'
+        )
+
+    StructuredCurriculumAgent(transport=transport).propose(
+        reflection=reflection,
+        current_strategies=[
+            StrategySpec(
+                strategy_id="s1", name="S", kind="FIXED_SIZE", symbols=("SPY",),
+                parameters={"action": "BUY", "quantity": 1, "confidence": 0.6},
+                max_position_value=100, created_at=datetime.now(tz=timezone.utc), rationale="t",
+            )
+        ],
+    )
+
+    fields = captured["ctx"]["strategy_spec_fields"]
+    for required in ("strategy_id", "name", "kind", "symbols", "max_position_value", "created_at", "rationale"):
+        assert required in fields["required"], f"{required} must be listed as required"
+    assert captured["ctx"]["worked_example"]["strategy_spec"]["kind"] == "FIXED_SIZE"
+    assert json.dumps(captured["ctx"]["schema"]).count("required") >= 4

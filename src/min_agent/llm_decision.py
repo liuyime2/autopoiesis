@@ -63,7 +63,12 @@ class OllamaDecisionEngine:
             "model": self.model,
             "prompt": prompt,
             "stream": False,
-            "format": "json",
+            # Schema-constrained, not format="json". Measured against
+            # deepseek-r1:8b on the curriculum task this was 5x faster and 4x
+            # smaller than the unconstrained form, because the model no longer
+            # has to search for a valid shape - and it cannot emit a decision
+            # missing required fields.
+            "format": TradeDecision.model_json_schema(),
             "options": {"temperature": 0.1},
         }
         response = self.transport(f"{self.base_url}/api/generate", payload, self.timeout)

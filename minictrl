@@ -153,6 +153,11 @@ case "$cmd" in
         echo "  $u is not visible to the manager" >&2
         continue
       fi
+      # Clear any tripped start-limit first. StartLimitBurst=5 in 900s exists
+      # to stop a broken daemon spinning forever, but it also trips on repeated
+      # *manual* restarts during development and then refuses to start at all,
+      # which looks like the service is broken rather than protected.
+      systemctl --user reset-failed "$u" 2>/dev/null
       if systemctl --user start "$u" 2>/dev/null; then
         sleep 1
         state="$(systemctl --user is-active "$u" 2>&1)"

@@ -262,10 +262,14 @@ class AgentDaemon:
             # journalled as SUCCESS, which made them indistinguishable from real
             # proposals.
             from_model = task.source == "llm"
+            reason = getattr(self.curriculum_agent, "last_failure", None)
+            message = task.summary if from_model else f"deterministic fallback (not LLM output): {task.summary}"
+            if not from_model and reason:
+                message = f"{message} | reason: {reason}"
             self._append_event(
                 "CURRICULUM_PROPOSED",
                 status="SUCCESS" if from_model else "SKIPPED",
-                message=task.summary if from_model else f"deterministic fallback (not LLM output): {task.summary}",
+                message=message,
                 strategy_id=strategy_id,
                 task_id=task.task_id,
                 payload={
