@@ -140,9 +140,73 @@ def test_doctor_fails_on_missing_credentials(tmp_path):
 
 
 def test_doctor_fails_on_an_unreachable_ollama(config):
-    report = run_doctor(config, skip_broker=True)
+    """Point at a port nothing listens on rather than relying on ollama being
+    down: this test broke the moment ollama was actually started."""
+    from dataclasses import replace
+
+    report = run_doctor(replace(config, ollama_base_url="http://127.0.0.1:1"), skip_broker=True)
 
     assert _check(report, "ollama").status is Status.FAIL
+    assert "unreachable" in _check(report, "ollama").detail
+
+
+def test_doctor_passes_ollama_when_the_model_is_served(config, monkeypatch):
+    """The positive case, so the check is not just 'always fail'."""
+    from dataclasses import replace
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"models": [{"name": "deepseek-r1:8b"}]}
+
+    import requests
+
+    monkeypatch.setattr(requests, "get", lambda url, timeout=5: Response())
+
+    report = run_doctor(replace(config, ollama_base_url="http://127.0.0.1:11434"), skip_broker=True)
+
+    assert _check(report, "ollama").status is Status.OK
+
+
+def test_doctor_writes_a_bounded_history(config, monkeypatch):
+    from min_agent.doctor import record, run_doctor
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"models": [{"name": "deepseek-r1:8b"}]}
+
+    import requests
+
+    monkeypatch.setattr(requests, "get", lambda url, timeout=5: Response())
+    monkeypatch.setattr(requests, "post", lambda *a, **k: (_ for _ in ()).throw(OSError("no broker")))
+
+    for _ in range(3):
+        record(run_doctor(config, skip_broker=True), config)
+
+    history = config.journal_path.parent / "doctor-history.jsonl"
+    lines = history.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 3
+    # The fixture has credentials but an empty strategy directory, so the
+    # recorded failure is the untradeable library, not the credentials.
+    assert json.loads(lines[0])["ok"] is False
+    assert "strategy library" in json.loads(lines[0])["failures"]
+
+
+def test_quiet_mode_is_one_line(config, capsys):
+    from min_agent.cli import main
+
+    rc = main(["--doctor", "--quiet", "--skip-broker"])
+    out = capsys.readouterr().out.strip()
+
+    assert rc == 1
+    assert len(out.splitlines()) == 1
+    assert out.startswith("ok=False exit=1")
+    assert "failures=[" in out
 
 
 def test_doctor_fails_when_no_strategy_is_selectable(config):

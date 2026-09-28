@@ -15,6 +15,9 @@ Type=simple
 WorkingDirectory=@ROOT@
 
 Environment=PYTHONPATH=@ROOT@/src
+# The env's own interpreter, not `conda run`: a service should not spawn a
+# wrapper process on every start, and systemd needs a real executable.
+Environment=PATH=@ENVBIN@:/usr/local/bin:/usr/bin:/bin
 Environment=MIN_AGENT_MODE=paper
 Environment=ALPACA_BASE_URL=https://paper-api.alpaca.markets
 Environment=APCA_API_BASE_URL=https://paper-api.alpaca.markets
@@ -30,7 +33,7 @@ Environment=MIN_AGENT_CURRICULUM_INTERVAL_SECONDS=3600
 # or an EnvironmentFile, so the secret is never in a unit file.
 EnvironmentFile=-%h/.config/min-agent/env
 
-ExecStart=@CONDA@ run --no-capture-output -n llm python -m min_agent.cli --daemon
+ExecStart=@PYTHON@ -m min_agent.cli --daemon
 
 Restart=always
 RestartSec=30

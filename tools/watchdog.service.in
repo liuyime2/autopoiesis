@@ -1,0 +1,24 @@
+[Unit]
+Description=QuantVoyager unattended health watchdog
+Documentation=file://@ROOT@/docs/superpowers/specs/2026-09-28-min-agent-runbook.md
+After=min-agent.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+Environment=PYTHONPATH=@ROOT@/src
+Environment=PATH=@ENVBIN@:/usr/local/bin:/usr/bin:/bin
+Environment=OLLAMA_BASE_URL=http://127.0.0.1:11434
+EnvironmentFile=-%h/.config/min-agent/env
+ExecStart=@PYTHON@ -m min_agent.cli --doctor --quiet
+
+# The whole point: an unattended system that never notices it is broken is the
+# failure mode this project spent a refactor removing. A daemon was dead for 97
+# days and 112 consecutive automated reviews said "ok" because they replayed a
+# heartbeat file. This runs the real check on a timer and records the outcome.
+#
+# ExecStartCondition is not used on purpose: the watchdog must run *because* the
+# daemon may be down, not skip when it is.
+
+StandardOutput=append:@ROOT@/runtime/min_agent/watchdog.log
+StandardError=append:@ROOT@/runtime/min_agent/watchdog.log

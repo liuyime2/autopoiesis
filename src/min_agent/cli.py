@@ -52,11 +52,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-cycles", type=int, default=None, help="Optional controlled daemon cycle limit for smoke tests.")
     parser.add_argument("--doctor", action="store_true", help="Check the whole system and exit non-zero on any fault.")
     parser.add_argument("--skip-broker", action="store_true", help="With --doctor, do not contact the broker.")
+    parser.add_argument("--quiet", action="store_true", help="With --doctor, one compact line for logging.")
     args = parser.parse_args(argv)
 
     config = AgentConfig.from_env()
     if args.doctor:
-        return _doctor(config, skip_broker=args.skip_broker)
+        return _doctor(config, skip_broker=args.skip_broker, quiet=args.quiet)
     if args.check_env:
         return _check_env(config)
     if args.once:
@@ -82,13 +83,23 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
-def _doctor(config: AgentConfig, *, skip_broker: bool = False) -> int:
-    from min_agent.doctor import build_client, run_doctor
+def _doctor(config: AgentConfig, *, skip_broker: bool = False, quiet: bool = False) -> int:
+    from min_agent.doctor import build_client, record, run_doctor
 
     report = run_doctor(config, client=build_client(config), skip_broker=skip_broker)
-    print(report.render())
-    print()
-    print(json.dumps(report.to_dict(), indent=2, sort_keys=True))
+    record(report, config)
+    if quiet:
+        failures = ",".join(c.name for c in report.failures) or "none"
+        warnings = ",".join(c.name for c in report.warnings) or "none"
+        print(
+            f"ok={not report.failures} exit={report.exit_code} "
+            f"failures=[{failures}] warnings=[{warnings}] "
+            f"checks={len(report.checks)}"
+        )
+    else:
+        print(report.render())
+        print()
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True))
     return report.exit_code
 
 

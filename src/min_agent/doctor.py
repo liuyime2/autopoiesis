@@ -12,9 +12,11 @@ anything is wrong. It is the loop to run after every change.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 
 from min_agent.config import AgentConfig
 from min_agent.evaluator import PNL_EVIDENCE_MISSING, DeterministicEvaluator
@@ -102,6 +104,39 @@ class DoctorReport:
         else:
             lines.append("RESULT: OK - everything checked is healthy")
         return "\n".join(lines)
+
+
+def record(report: DoctorReport, config: AgentConfig, *, history: bool = True) -> None:
+    """Append this run to a bounded history so drift is visible over time.
+
+    A single green reading proves nothing; the 97-day outage survived because
+    nothing was watching. The history is what makes "it has been unhealthy since
+    Tuesday" answerable.
+    """
+    if not history:
+        return
+    path = config.journal_path.parent / "doctor-history.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "at": datetime.now(timezone.utc).isoformat(),
+        "ok": not report.failures,
+        "failures": [c.name for c in report.failures],
+        "warnings": [c.name for c in report.warnings],
+    }
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    _trim(path, keep=2000)
+
+
+def _trim(path: Path, *, keep: int) -> None:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    if len(lines) <= keep:
+        return
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines[-keep:]) + "\n")
 
 
 def run_doctor(config: AgentConfig, *, client=None, skip_broker: bool = False) -> DoctorReport:
