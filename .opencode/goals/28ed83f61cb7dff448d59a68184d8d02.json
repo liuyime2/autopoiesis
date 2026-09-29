@@ -32,7 +32,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790688889173,
+      "observedAt": 1790689031151,
       "lastRequestTokens": 448061,
       "lastInputTokens": 447534
     }
@@ -77,7 +77,7 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 106,
+  "progressRevision": 107,
   "observedProgressRevision": 106,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
@@ -185,15 +185,11 @@
     "shell-worktree:8e80ba5cf1051d2b6750658420ad7b086539b21a6e7ac17741806a49fddddf77",
     "shell-worktree:e73b3db3f059f158e88c333f004aba9e0178f5c6587d200225640043d7676e21",
     "shell-worktree:aef535eb08cc822002d53e8e4a10f35ed24c0540fd67ad1802b94b93c19bcdb3",
-    "shell-worktree:a142e02c26982d9506cb135d04312c9029838ee35a4a4eed60e28a68edbea396"
+    "shell-worktree:a142e02c26982d9506cb135d04312c9029838ee35a4a4eed60e28a68edbea396",
+    "shell-worktree:78ac8ae6362f9228cc198b981b0fa54a957f1778dbf039159412809ea2a18443"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790684686244,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790684772517,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -438,11 +434,16 @@
       "time": 1790688734192,
       "summary": "Closed the second open audit requirement: failed-experiment records. The objective requires every failed trial to be recorded, because selection bias is invisible otherwise - keep the best of forty variants and report it as the only candidate and the number inherits the selection without showing it. Admission rejections were already recorded in production, but a backtest that failed its out-of-sample bar left NO trace at all: research/ wrote nothing, so a search could run, could fail, and leave behind no evidence it had happened. The obvious fix - letting research append to the production journal - would break the separation the objective also requires, for a good reason: a backtest that graded itself could then influence production state. So trials.py is a separate append-only sink in its own file that nothing in production reads, satisfying both requirements rather than trading one for the other. Writes are atomic with fsync; a write failure is reported by return value rather than raised into the caller, because the trial already ran and its value is in the result rather than the bookkeeping; a torn final line is skipped on read rather than costing the history behind it. Recorded live: 27 trials, 0 passed, 27 failed, all INSUFFICIENT. Three of my own mistakes, each caught by something rather than by reading the diff: the first trial payload keyed on the whole verdict sentence, so two identical outcomes landed in different buckets because their trade counts differed - defeating the only thing the grouping is for, so the verdict is now split into a code and a detail; the call site for the doctor check was missing because the insertion anchor did not match, and the doctor-checks-reachable gate caught it immediately, the second time that gate has caught a check that was defined, wired and dead; and the production-research-separation gate caught a real violation I had just introduced - I put the trial-ledger check in doctor, so production imported the research layer it is meant to be independent of. The check now lives in the verification harness, which is not production, and doctor no longer touches research at all. Commit f763002. make verify: 22 classes, 0 failed, 660 distinct tests, 91/91 audit, doctor OK, exit 0.",
       "next": "Remaining from the requirement-by-requirement audit: the per-step contract's input/output/responsibility-boundary halves are still undocumented (the logging and automated-test halves are confirmed - every stage has a failure event type journalled and a test class), which is a documentation deliverable rather than code, and is the last explicit objective requirement not yet evidenced. Also worth noting as a finding rather than deleting: runtime/ contains smoke-test debris (observable-smoke-journal.jsonl, observable-smoke2-journal.jsonl, daemon.out.crashed-1324) that nothing reads, and the earlier recovery plan has an unchecked item to delete engine.pid/ollama.pid and the engine.log symlink - these are runtime artifacts rather than repository files since runtime/ is gitignored, so cleaning them is a judgement call about evidence that should not be made unilaterally. Everything else is gated on the 09:30 EDT open: Phase 7, the 67 pending llm decisions, the first model-provenance-stamped session, and the calibration verdict. The two user actions stand: free $HOME quota (.cache 835M or .local 707M) so units can be made reboot-persistent, and confirm the daemon may run unattended."
+    },
+    {
+      "time": 1790688904668,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 743,
+  "storageGeneration": 748,
   "createdAt": 1790641773516,
-  "updatedAt": 1790688889173,
+  "updatedAt": 1790689031151,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:c3cb3254c518367f1c8cd88244e84bcbd83597fa1d10bffb8cee3387f57fdc53",

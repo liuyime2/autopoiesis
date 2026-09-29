@@ -1426,3 +1426,64 @@ Every claim in the contract was re-checked against the code rather than written 
 memory — 38 Guardian tests, the `shadow-` client-order prefix, the admission
 write-if-absent guard, the absence of a `understand` module and the cost default all
 verified.
+
+## 32. First evidence from the reopened market
+
+At **09:30 EDT on 2026-09-29** the market opened and the loop produced its first new
+cycle — the first in 18 hours, and the first that could exercise anything added
+since.
+
+```
+timestamp   : 2026-09-29 09:30:00 EDT
+market_open : True     price: 766.825
+action      : HOLD     source: llm
+MODEL       : qwen3.8:27b     <- the first decision ever to carry provenance
+confidence  : 0.82
+strategy    : trend-follow-20260612-006
+guardian    : approved          execution: SKIPPED
+```
+
+### 32.1 Provenance works, and it shows immediately
+
+```
+model registry: 921 decision(s): qwen3.8:27b 1; 920 predate provenance and are
+                unattributable
+```
+
+One attributable decision, 920 honestly unattributable. The registry refuses to
+back-fill the history, and the first new decision lands attributed — which is the
+whole point of adding the field before the market reopened rather than after.
+
+### 32.2 A confidence unlike anything on record
+
+The model stated **0.82**. The historical mean LLM confidence is **0.276**, and the
+previous maximum across all 67 prior LLM decisions was 1.0 with almost everything
+clustered at 0.5 or below. A single 0.82 is one data point and proves nothing.
+
+It is worth recording precisely because it is **not** yet evidence: `model
+calibration` still reads `INSUFFICIENT: 68 llm decisions, 0 scored`. The new cycle
+added to the pending count rather than to the scored count, because a 24-hour horizon
+needs a quote from 2026-09-30 09:30 onward. One confident HOLD is not a calibration
+curve, and the check that says so is the one that will eventually judge it.
+
+### 32.3 Everything else held its state across the restart
+
+`hold_quality` is unchanged at 0.687 over 350 scored; pending moved 67 → 68,
+correctly, because the newest decision has no horizon quote yet. The after-cost figure
+is unchanged at +555.72. Runtime integrity is OK on 921 cycles and 5926 events.
+
+The 68 pending decisions are the measurement the whole system is now waiting on, and
+they resolve over the next 24 hours of market hours. That is not a defect to fix; it
+is the first data the objective's criteria can be applied to.
+
+### 32.4 Runtime debris, reported and not deleted
+
+Three files in `runtime/min_agent/` are referenced by **zero** source files:
+`observable-smoke-journal.jsonl`, `observable-smoke2-journal.jsonl`, and
+`daemon.out.crashed-1324`, 7K each.
+
+They are smoke-test leftovers, and the earlier recovery plan has an unchecked item to
+delete this class of file. They are **not** deleted here: `runtime/` is the system's
+evidence store, and a file called `daemon.out.crashed-1324` is the record of a crash
+having happened. Removing evidence because it is unreferenced is exactly the wrong
+instinct, and the fact that nothing reads it is a reason to leave it, not to remove it.
