@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790642189455,
-      "lastRequestTokens": 420031,
-      "lastInputTokens": 419636
+      "observedAt": 1790642963749,
+      "lastRequestTokens": 440129,
+      "lastInputTokens": 439502
     }
   },
   "runtimeFingerprint": {
@@ -43,12 +43,13 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 1,
-    "tokens": 418129,
+    "turns": 2,
+    "tokens": 419959,
     "cost": 0,
-    "runtimeMs": 9914,
+    "runtimeMs": 18639,
     "seenMessageIDs": [
-      "msg_0ea911ff0001xqHQnFmbF3aICp"
+      "msg_0ea911ff0001xqHQnFmbF3aICp",
+      "msg_0ea980dc20015f3lGA67tXRaUK"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -58,13 +59,19 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 4,
-  "observedProgressRevision": 0,
+  "progressRevision": 10,
+  "observedProgressRevision": 5,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
     "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
     "shell-worktree:b0ca9582d43b0b4b67e7f0142e387b150b1e130f2ce944d4aeefd1b15a43293a",
-    "shell-worktree:09b1c7fb586006a7a12e6656cfa2927aed35051065845d220cb4a04e15bb061b"
+    "shell-worktree:09b1c7fb586006a7a12e6656cfa2927aed35051065845d220cb4a04e15bb061b",
+    "shell-worktree:bd7ff486b0dee23b90ee233068589df3e08921a3d4217262d8fdde51740dee4a",
+    "shell-worktree:310b6aada798709776e9c9576664575ad66bd2dfd2e5f7a837b187d31fc7b227",
+    "shell-worktree:f5bab95ed421ea7e05ca86eb882dbe84e941080a87b074f9a5428d00f8c06a19",
+    "shell-worktree:b06b3c957c83a5a5b9ad32118c903576cbc26e55865004254e8ece5a24ed70c0",
+    "shell-worktree:7c9e2929057a8ce0cfa1ce605f7e94515e3a8569cf022065e1d6a35f0399f93b",
+    "shell-worktree:3dd347e05435d0ae3933f70dce8e3af3ffd02c8c783ad9219db342684b9cc41b"
   ],
   "stalledTurns": 0,
   "progressNotes": [
@@ -87,62 +94,141 @@
       "time": 1790642150165,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790642203226,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790642212797,
+      "summary": "Fact-level audit complete and written to docs/superpowers/SYSTEM_AUDIT.md. Classification of every component against real call paths, not names. Key findings: (1) the production chain is intact through fill and PnL attribution (+564.39, broker-confirmed) and stops dead after that - counterfactual evaluation, offline validation, shadow trading, experiment registry, champion-challenger, strategy lineage and cost accounting have zero source hits; (2) the knowledge base's strategy-relevance filter is dead logic - source_refs hold cycle UUIDs and tags hold generic words, so it can never match and the fallback feeds every decision the same 5 near-identical artifacts; (3) fees are 0.0 across all 24 fills, so the cost code path has never run with real data; (4) 27 strategies with 9 near-duplicate BUY variants, because duplicate detection only covers id and TREND_FOLLOW parameters. Deleted 24 files: src/voyager_quant (dead, contains exec() on model-generated Python), skill_library (its content), tools/legacy (10/12 unreferenced, full_ingest broken and aimed at the live journal), plus two never-read window-hash fields and two never-read submitted-order params. Merged three drifted copies of the evidence-batch reader into one. 405 passed, audit 91/91.",
+      "next": "Per the delete→merge→simplify→reuse→repair→add ordering, next is the ADD-last step the objective defines as the actual missing infrastructure: the counterfactual ledger for HOLD decisions (good hold / missed alpha / avoided loss / false trade), then a unified `make verify` gate covering the 13 named check classes with FAIL=0. Before that, the knowledge-base relevance filter needs either repairing so it matches or deleting with that stated, and the 9 near-duplicate BUY strategies need an evidence-based dedupe."
+    },
+    {
+      "time": 1790642274805,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790642414869,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790642750489,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790642799110,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790642808948,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 39,
+  "storageGeneration": 89,
   "createdAt": 1790641773516,
-  "updatedAt": 1790642189455,
+  "updatedAt": 1790642963749,
   "todoPlan": {
     "goalRevision": 1,
-    "digest": "sha256:37e2ae6150590c2a0d0e1955d47cd8a16720f4e27b6c52534ff8654339568b60",
-    "total": 6,
-    "pending": 5,
+    "digest": "sha256:110298eb2bd110e097590b04ce9fcdecb8385efa056e8aa45e888b9482e76060",
+    "total": 9,
+    "pending": 4,
     "inProgress": 1,
-    "completed": 0,
+    "completed": 4,
     "cancelled": 0,
-    "observedAt": 1790641784037,
+    "observedAt": 1790642236685,
     "items": [
       {
-        "key": "todo:0d8337b0e0bdc1d16d43a773:1",
-        "content": "Fact-level audit: classify every component as actively used / partially wired / implemented but unused / obsolete / duplicated / broken / missing, with real call-path evidence",
-        "status": "in_progress",
+        "key": "todo:d84e69e5a9e13ba82045c2d2:1",
+        "content": "Fact-level audit with used/unused/broken/missing classification",
+        "status": "completed",
         "priority": "high",
         "order": 0
       },
       {
-        "key": "todo:27eb29fe995eda95eae2425a:1",
-        "content": "Trace the single real end-to-end data/control flow and document where the loop actually breaks",
-        "status": "pending",
+        "key": "todo:bb693a35b89dd9adc151560e:1",
+        "content": "Trace the single real end-to-end flow and document where the loop breaks",
+        "status": "completed",
         "priority": "high",
         "order": 1
       },
       {
-        "key": "todo:0a01d7f5a2ca1aaaebfb0a71:1",
-        "content": "Delete/merge/simplify dead and duplicated paths per delete→merge→simplify→reuse→repair→add",
-        "status": "pending",
+        "key": "todo:26d4188b74fd5a161b1797ea:1",
+        "content": "Delete dead/obsolete paths (voyager_quant, skill_library, tools/legacy, dead fields)",
+        "status": "completed",
         "priority": "high",
         "order": 2
       },
       {
-        "key": "todo:9a627f3e59e22e63535a55d4:1",
-        "content": "Unify one data flow, one state source, one PnL ledger, one lifecycle, one execution truth, one entry point",
-        "status": "pending",
+        "key": "todo:f28fde70723f9ccb6656123a:1",
+        "content": "Merge the three drifted copies of the evidence-batch reader",
+        "status": "completed",
         "priority": "high",
         "order": 3
       },
       {
-        "key": "todo:7c0327e4f97a6bc5ce3447cc:1",
-        "content": "Build the unified `make verify` gate covering all 13 named check classes, FAIL=0",
-        "status": "pending",
+        "key": "todo:51a8c8080269d38deec4e9b5:1",
+        "content": "SIMPLIFY: stop the strategy zoo accreting — semantic/behavioral duplicate detection + evidence-based retirement of the 9 near-duplicate BUYs",
+        "status": "in_progress",
         "priority": "high",
         "order": 4
       },
       {
-        "key": "todo:c0c150bad8d866dc9c0b3d44:1",
-        "content": "Author the fact-level system document (architecture, usage table, break points, phase plan, PnL attribution)",
+        "key": "todo:87790c13a6401a6cd025ed29:1",
+        "content": "REPAIR: the dead knowledge-base relevance filter (must match or be deleted, stated)",
         "status": "pending",
         "priority": "high",
         "order": 5
+      },
+      {
+        "key": "todo:ae5e5a73097a9b63cfb2ed26:1",
+        "content": "ADD: counterfactual ledger for HOLD (good hold / missed alpha / avoided loss / false trade)",
+        "status": "pending",
+        "priority": "high",
+        "order": 6
+      },
+      {
+        "key": "todo:0fd39a6e2684cd9a3280f308:1",
+        "content": "ADD: unified `make verify` covering the 13 named check classes, FAIL=0",
+        "status": "pending",
+        "priority": "high",
+        "order": 7
+      },
+      {
+        "key": "todo:885e246877a68ae4bafca8d1:1",
+        "content": "Update SYSTEM_AUDIT.md to reflect the post-refactor state",
+        "status": "pending",
+        "priority": "medium",
+        "order": 8
+      }
+    ],
+    "anomalies": [
+      {
+        "kind": "substantial_replacement",
+        "summary": "Native Todo plan changed substantially in the same Goal revision: 6 removed, 9 added, 0 retained.",
+        "itemKeys": [
+          "todo:0d8337b0e0bdc1d16d43a773:1",
+          "todo:27eb29fe995eda95eae2425a:1",
+          "todo:0a01d7f5a2ca1aaaebfb0a71:1",
+          "todo:9a627f3e59e22e63535a55d4:1",
+          "todo:7c0327e4f97a6bc5ce3447cc:1",
+          "todo:c0c150bad8d866dc9c0b3d44:1",
+          "todo:d84e69e5a9e13ba82045c2d2:1",
+          "todo:bb693a35b89dd9adc151560e:1",
+          "todo:26d4188b74fd5a161b1797ea:1",
+          "todo:f28fde70723f9ccb6656123a:1",
+          "todo:51a8c8080269d38deec4e9b5:1",
+          "todo:87790c13a6401a6cd025ed29:1",
+          "todo:ae5e5a73097a9b63cfb2ed26:1",
+          "todo:0fd39a6e2684cd9a3280f308:1",
+          "todo:885e246877a68ae4bafca8d1:1"
+        ]
       }
     ]
   }

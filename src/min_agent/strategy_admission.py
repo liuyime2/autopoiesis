@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from min_agent.guardian import Guardian
 from min_agent.models import StrategySpec
-from min_agent.strategy_engine import StrategyLibrary
+from min_agent.strategy_engine import StrategyLibrary, behavioural_signature
 
 
 @dataclass(frozen=True)
@@ -131,6 +131,13 @@ class StrategyAdmission:
             return "TREND_FOLLOW requires an admitted FIXED_SIZE skill first"
         if strategy.kind == "TREND_FOLLOW" and self._duplicates_trend_follow(strategy, strategies):
             return "duplicate TREND_FOLLOW parameters rejected; propose distinct exploration parameters"
+        twin = self._behavioural_duplicate(strategy, strategies)
+        if twin is not None:
+            return (
+                f"behaviourally identical to existing strategy {twin!r}: same kind, "
+                f"symbols, action, quantity and max_position_value. Propose a strategy "
+                f"that differs in one of those, or explain what problem it solves."
+            )
         return None
 
     def _is_small_fixed_size(self, strategy: StrategySpec) -> bool:
@@ -142,6 +149,28 @@ class StrategyAdmission:
             and quantity == 1
             and strategy.max_position_value <= self.guardian.max_position_value
         )
+
+    def _behavioural_duplicate(self, strategy: StrategySpec, strategies: list[StrategySpec]) -> str | None:
+        """The id of a strategy this one would behave identically to, if any.
+
+        `confidence` and `name` are deliberately excluded. `confidence` is only an
+        admission gate - Guardian refuses anything under min_confidence, so every
+        admitted strategy is already past it - and it is copied straight into the
+        TradeDecision without altering the action or the quantity. Nine strategies
+        in the live library were FIXED_SIZE/SPY/BUY/qty=1/5000 differing only in
+        confidence 0.6-0.95, and all nine emit a byte-identical order. The library
+        had 13 selectable strategies of which 9 were the same strategy, because the
+        only duplicate rules were id-equality and TREND_FOLLOW parameter equality.
+        """
+        mine = behavioural_signature(strategy)
+        if mine is None:
+            return None
+        for existing in strategies:
+            if existing.strategy_id == strategy.strategy_id:
+                continue
+            if behavioural_signature(existing) == mine:
+                return existing.strategy_id
+        return None
 
     def _duplicates_trend_follow(self, strategy: StrategySpec, strategies: list[StrategySpec]) -> bool:
         for existing in strategies:

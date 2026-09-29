@@ -285,11 +285,15 @@ def _check_lifecycle_provenance(
     library = StrategyLibrary(config.strategy_dir)
     unaccounted = []
     for strategy in library.list():
-        if strategy.lifecycle in decided.values():
+        if strategy.lifecycle in {"PROBATION", "BASELINE", "ACTIVE"}:
+            # The default states; a gated state is what needs an account.
             continue
-        if not decided.get(strategy.strategy_id) and strategy.lifecycle not in {
-            "PROBATION", "BASELINE", "ACTIVE"
-        }:
+        # Per strategy, not per value. The first cut asked whether *any* decision
+        # had produced this lifecycle, so one journalled retirement laundered every
+        # other unjournalled one - the check passed against eight strategies that
+        # had been retired with no recorded decision at all, which is precisely the
+        # bypass it exists to catch.
+        if decided.get(strategy.strategy_id) != strategy.lifecycle:
             unaccounted.append(f"{strategy.strategy_id}={strategy.lifecycle}")
     if unaccounted:
         report.add(

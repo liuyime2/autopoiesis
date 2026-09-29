@@ -663,6 +663,27 @@ class AgentDaemon:
         results = self.reflection_memory.strategy_results(reflection)
         for decision in self.lifecycle_manager.review(self.strategy_library.list(), results):
             old_lifecycle = decision.strategy.lifecycle
+            payload = {
+                "old_lifecycle": old_lifecycle,
+                "new_lifecycle": decision.new_lifecycle,
+                "reason": decision.reason,
+            }
+            # Journal the intent, write the file, then journal the outcome.
+            #
+            # Saving first meant a crash between the save and the event left a
+            # strategy in a terminal state with no recorded decision - and that is
+            # exactly what happened here: eight duplicate retirements landed on
+            # disk while nothing was journalled, which the provenance check could
+            # not even see, let alone report. Writing the event first means the
+            # worst case is an event for a transition that did not happen, which
+            # is visible and harmless; the reverse is a silent state change.
+            event_id = self._append_event(
+                "STRATEGY_LIFECYCLE_UPDATED",
+                status="SUCCESS",
+                message=decision.reason,
+                strategy_id=decision.strategy.strategy_id,
+                payload={**payload, "phase": "decided"},
+            )
             updated = decision.strategy.model_copy(update={"lifecycle": decision.new_lifecycle})
             self.strategy_library.save(updated)
             self._append_event(
@@ -670,11 +691,7 @@ class AgentDaemon:
                 status="SUCCESS",
                 message=decision.reason,
                 strategy_id=decision.strategy.strategy_id,
-                payload={
-                    "old_lifecycle": old_lifecycle,
-                    "new_lifecycle": decision.new_lifecycle,
-                    "reason": decision.reason,
-                },
+                payload={**payload, "phase": "applied", "decided_event_id": event_id},
             )
 
     def _due(self, last_at: datetime | None, interval_seconds: int) -> bool:
@@ -699,9 +716,16 @@ class AgentDaemon:
         payload: dict[str, object] | None = None,
         strategy_id: str | None = None,
         task_id: str | None = None,
-    ) -> None:
+    ) -> str | None:
+        """Append an event and return its id, so a caller can correlate the phases.
+
+        Returning the id is what lets the lifecycle manager journal its decision
+        before it writes the file: the 'decided' event and the 'applied' event can
+        be tied together, so a crash between them leaves a traceable half-state
+        rather than a silent state change.
+        """
         if self.journal is None:
-            return
+            return None
         event = JournalEvent(
             event_id=str(uuid4()),
             event_type=event_type,
@@ -714,6 +738,7 @@ class AgentDaemon:
             payload=payload or {},
         )
         self.journal.append_event(event)
+        return event.event_id
 
     def _heartbeat(self, status: str, message: str) -> None:
         payload = HeartbeatPayload(

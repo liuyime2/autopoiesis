@@ -198,3 +198,54 @@ def test_lowering_a_risk_limit_is_not_flagged_as_loosened(tmp_path):
     report = run_doctor(config, skip_broker=True)
 
     assert _status(report, "risk limits vs baseline") == "ok"
+
+
+def test_a_duplicate_retirement_unjournalled_by_one_legitimate_decision_fails(tmp_path):
+    """The check this was written for, made able to fail.
+
+    The first version asked whether *any* decision had produced a given lifecycle,
+    so one journalled retirement laundered every other unjournalled one. It passed
+    against eight strategies that had been retired with no recorded decision at
+    all - the exact bypass it exists to catch, and a check that cannot fail is
+    worse than no check.
+    """
+    from datetime import datetime, timezone
+
+    from min_agent.atomicio import write_json_atomic
+    from min_agent.journal import JsonlJournal
+    from min_agent.models import JournalEvent, StrategySpec
+    from min_agent.strategy_engine import StrategyLibrary
+
+    config = _config(tmp_path)
+    write_json_atomic(tmp_path / RISK_BASELINE_PATH, {
+        "recorded_at": "2026-09-28T00:00:00+00:00",
+        "limits": {
+            "max_position_value": 5000.0, "max_daily_loss": 500.0,
+            "max_total_exposure": 20000.0, "max_account_value": 0.0,
+            "max_trades_per_day": 10, "min_confidence": 0.5,
+            "allowlist": ["QQQ", "SPY"],
+        },
+    })
+    library = StrategyLibrary(config.strategy_dir)
+    for sid in ("legitimate", "sneaky-1", "sneaky-2"):
+        library.save(StrategySpec(
+            strategy_id=sid, name=sid, kind="FIXED_SIZE", symbols=("SPY",),
+            parameters={"action": "BUY", "quantity": 1, "confidence": 0.7},
+            max_position_value=1000.0, enabled=True, lifecycle="RETIRED",
+            created_at=datetime(2026, 6, 1, tzinfo=timezone.utc), rationale="t",
+        ))
+
+    journal = JsonlJournal(config.journal_path)
+    journal.append_event(JournalEvent(
+        event_id="e1", event_type="STRATEGY_LIFECYCLE_UPDATED",
+        timestamp=datetime.now(tz=timezone.utc), status="SUCCESS", message="x",
+        strategy_id="legitimate",
+        payload={"old_lifecycle": "PROBATION", "new_lifecycle": "RETIRED", "reason": "r"},
+    ))
+
+    report = run_doctor(config, skip_broker=True)
+
+    assert _status(report, "lifecycle provenance") == "fail"
+    detail = _detail(report, "lifecycle provenance")
+    assert "sneaky-1" in detail and "sneaky-2" in detail
+    assert "legitimate" not in detail, "the journalled one must not be implicated"

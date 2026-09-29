@@ -732,3 +732,146 @@ def test_no_closed_lot_does_not_block_promotion_forever():
     assert len(decisions) == 1
     assert decisions[0].new_lifecycle == "ACTIVE"
     assert "362" not in decisions[0].reason
+
+
+# ---------------------------------------------------------------------------
+# The strategy zoo. Nine of thirteen selectable strategies were behaviourally
+# identical, so the library looked like a broad ensemble while being one strategy.
+# ---------------------------------------------------------------------------
+
+
+def _dup(strategy_id, *, kind="FIXED_SIZE", action="BUY", quantity=1,
+         confidence=0.7, max_position=5000.0, lifecycle="PROBATION", day=1):
+    from min_agent.models import StrategySpec
+
+    return StrategySpec(
+        strategy_id=strategy_id, name=strategy_id, kind=kind, symbols=("SPY",),
+        parameters={"action": action, "quantity": quantity, "confidence": confidence},
+        max_position_value=max_position, enabled=True, lifecycle=lifecycle,
+        created_at=datetime(2026, 6, day, tzinfo=timezone.utc), rationale="t",
+    )
+
+
+def test_identical_strategies_are_retired_and_the_evidenced_one_is_kept():
+    """Nine were FIXED_SIZE/SPY/BUY/qty=1/5000 differing only in confidence 0.6-0.95.
+    All nine emit a byte-identical order, so the library had 13 selectable
+    strategies of which 9 were the same strategy."""
+    from min_agent.evaluator import PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+    from min_agent.models import StrategyResult
+    from min_agent.strategy_engine import StrategyLifecycleManager
+
+    winner = _dup("winner", confidence=0.6)
+    # More cycles but no order ever placed, and no PnL.
+    busy = _dup("busy", confidence=0.95, day=2)
+    other = _dup("other", confidence=0.75, day=3)
+
+    def result_for(sid, *, cycles, submitted, pnl, evidence):
+        return StrategyResult(
+            strategy_id=sid, evaluated_at=datetime.now(tz=timezone.utc), cycles=cycles,
+            submitted_orders=submitted, rejected_orders=0, skipped_orders=0, errors=0,
+            score=0.5, trade_attempts=submitted,
+            realized_pnl=pnl, pnl_evidence=evidence,
+        )
+
+    results = [
+        result_for("winner", cycles=0, submitted=23, pnl=120.37,
+                   evidence=PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED),
+        result_for("busy", cycles=9, submitted=0, pnl=None,
+                   evidence=PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED),
+        result_for("other", cycles=0, submitted=0, pnl=None,
+                   evidence=PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED),
+    ]
+
+    decisions = StrategyLifecycleManager().review([winner, busy, other], results)
+
+    retired = {d.strategy.strategy_id: d for d in decisions
+               if "behavioural duplicate" in d.reason}
+    assert set(retired) == {"busy", "other"}
+    assert "winner" not in retired, "the evidenced copy must survive"
+    assert "fixed" not in str(retired["busy"].reason) and "winner" in retired["busy"].reason
+
+
+def test_a_single_strategy_is_never_treated_as_its_own_duplicate():
+    from min_agent.models import StrategyResult
+    from min_agent.strategy_engine import StrategyLifecycleManager
+
+    alone = _dup("alone")
+    result = StrategyResult(
+        strategy_id="alone", evaluated_at=datetime.now(tz=timezone.utc), cycles=9,
+        submitted_orders=9, rejected_orders=0, skipped_orders=0, errors=0,
+        score=0.5, trade_attempts=9,
+    )
+
+    decisions = StrategyLifecycleManager().review([alone], [result])
+
+    assert not [d for d in decisions if "behavioural duplicate" in d.reason]
+
+
+def test_differing_quantity_is_a_genuinely_different_strategy():
+    from min_agent.models import StrategyResult
+    from min_agent.strategy_engine import StrategyLifecycleManager
+
+    one = _dup("one", quantity=1)
+    two = _dup("two", quantity=2)
+    results = [
+        StrategyResult(strategy_id=sid, evaluated_at=datetime.now(tz=timezone.utc),
+                       cycles=5, submitted_orders=1, rejected_orders=0, skipped_orders=0,
+                       errors=0, score=0.5, trade_attempts=1)
+        for sid in ("one", "two")
+    ]
+
+    decisions = StrategyLifecycleManager().review([one, two], results)
+
+    assert not [d for d in decisions if "behavioural duplicate" in d.reason]
+
+
+def test_buy_and_sell_are_not_duplicates_of_each_other():
+    from min_agent.models import StrategyResult
+    from min_agent.strategy_engine import StrategyLifecycleManager
+
+    buy = _dup("buy", action="BUY")
+    sell = _dup("sell", action="SELL")
+    results = [
+        StrategyResult(strategy_id=sid, evaluated_at=datetime.now(tz=timezone.utc),
+                       cycles=5, submitted_orders=1, rejected_orders=0, skipped_orders=0,
+                       errors=0, score=0.5, trade_attempts=1)
+        for sid in ("buy", "sell")
+    ]
+
+    decisions = StrategyLifecycleManager().review([buy, sell], results)
+
+    assert not [d for d in decisions if "behavioural duplicate" in d.reason]
+
+
+def test_admission_rejects_a_strategy_that_would_behave_identically_to_one_in_the_library():
+    from min_agent.guardian import Guardian
+    from min_agent.strategy_engine import StrategyLibrary
+    from min_agent.strategy_admission import StrategyAdmission
+    import tempfile, pathlib
+
+    with tempfile.TemporaryDirectory() as tmp:
+        library = StrategyLibrary(pathlib.Path(tmp) / "strategies")
+        # The progression gate requires a baseline before any trading skill, so
+        # the duplicate rule is only reachable past it.
+        library.save(StrategySpec(
+            strategy_id="baseline", name="baseline", kind="HOLD_BASELINE",
+            symbols=("SPY",), parameters={}, max_position_value=1.0, enabled=True,
+            lifecycle="BASELINE", created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+            rationale="t",
+        ))
+        existing = _dup("existing", confidence=0.6, day=2)
+        library.save(existing)
+        admission = StrategyAdmission(
+            guardian=Guardian(allowlist={"SPY"}, max_position_value=5000, max_daily_loss=500),
+            strategy_library=library,
+            market_prices={"SPY": 767.0},
+        )
+        # Same behaviour, different id and a different confidence - which admission
+        # previously accepted, because it only rejected id and TREND_FOLLOW equality.
+        twin = _dup("twin", confidence=0.95, day=2)
+
+        result = admission.admit(twin)
+
+        assert result.accepted is False
+        assert "behaviourally identical" in result.reason
+        assert "existing" in result.reason

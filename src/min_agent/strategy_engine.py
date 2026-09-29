@@ -85,6 +85,83 @@ class StrategyLifecycleManager:
             decision = self._review_one(strategy, result)
             if decision is not None:
                 decisions.append(decision)
+        decisions.extend(self._retire_behavioural_duplicates(strategies, result_by_id))
+        return decisions
+
+    def _retire_behavioural_duplicates(
+        self, strategies: list[StrategySpec], result_by_id: dict[str, StrategyResult]
+    ) -> list[StrategyLifecycleDecision]:
+        """Retire the weaker copy of any pair that would emit an identical order.
+
+        Nine of the thirteen selectable strategies in the live library were
+        FIXED_SIZE/SPY/BUY/qty=1/5000 differing only in confidence, and all nine
+        emit a byte-identical order. Admission now refuses such a duplicate, but the
+        nine already in the library have to go, and hand-editing the files is
+        exactly the bypass this project removed.
+
+        The survivor is chosen by evidence - most cycles, then most submitted
+        orders, then oldest - so the copy with the history is the one kept, and the
+        decision is journaled with the reason. It is a retirement rather than a
+        deletion: the file stays, the lifecycle is terminal, and provenance is
+        auditable.
+        """
+        groups: dict[tuple, list[StrategySpec]] = {}
+        for strategy in strategies:
+            if strategy.lifecycle in {"PAUSED", "RETIRED", "BASELINE"} or not strategy.enabled:
+                continue
+            signature = behavioural_signature(strategy)
+            if signature is not None:
+                groups.setdefault(signature, []).append(strategy)
+
+        def evidence_rank(strategy: StrategySpec) -> tuple:
+            """Rank by verifiable evidence, in the order the evidence actually counts.
+
+            The first cut ranked on cycles first and was wrong in a way only real
+            data revealed: fixed-size-probe-0002 won with 3 cycles, 0 submitted
+            orders and no PnL, over fixed-size-buy-001 which holds +120.37 of
+            broker-verified realized PnL. Cycles in a reflection window are an
+            artefact of which records happen to be in that window; orders actually
+            placed and PnL actually realized are the evidence.
+            """
+            result = result_by_id.get(strategy.strategy_id)
+            verified = (
+                result is not None
+                and result.pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+                and result.realized_pnl is not None
+            )
+            return (
+                1 if verified else 0,
+                result.realized_pnl if verified else 0.0,
+                result.submitted_orders if result is not None else 0,
+                result.filled_quantity if result is not None else 0.0,
+                result.cycles if result is not None else 0,
+                # Oldest first, so the longest-lived copy survives a full tie.
+                -strategy.created_at.timestamp(),
+            )
+
+        decisions: list[StrategyLifecycleDecision] = []
+        for signature, members in groups.items():
+            if len(members) < 2:
+                continue
+            ordered = sorted(members, key=evidence_rank, reverse=True)
+            keeper, duplicates = ordered[0], ordered[1:]
+            for duplicate in duplicates:
+                result = result_by_id.get(duplicate.strategy_id)
+                detail = (
+                    f"; kept {keeper.strategy_id} which has "
+                    f"{result.cycles if result else 0} cycle(s) against this one's "
+                    f"{result_by_id.get(duplicate.strategy_id).cycles if result_by_id.get(duplicate.strategy_id) else 0}"
+                    if result is not None
+                    else f"; kept {keeper.strategy_id}"
+                )
+                decisions.append(
+                    StrategyLifecycleDecision(
+                        duplicate,
+                        "RETIRED",
+                        f"behavioural duplicate of {keeper.strategy_id}: identical kind, "
+                        f"symbols, action, quantity and max_position_value{detail}",
+                    )
+                )
         return decisions
 
     def _review_one(self, strategy: StrategySpec, result: StrategyResult | None) -> StrategyLifecycleDecision | None:
@@ -426,3 +503,31 @@ def _produced_action(strategy: StrategySpec, last_price: float) -> str | None:
     except Exception:
         return None
     return decision.action if decision.action in {"BUY", "SELL"} else None
+
+
+def behavioural_signature(strategy: StrategySpec) -> tuple | None:
+    """What a strategy would actually do, or None if it cannot be reduced to one.
+
+    Two strategies with the same signature emit the same order on the same
+    snapshot, so keeping both is a zoo rather than an ensemble. `name` and
+    `confidence` are excluded: the first is cosmetic and the second is an admission
+    gate that every admitted strategy has already passed, and neither changes the
+    action or the quantity.
+
+    A TREND_FOLLOW returns None because its side is derived from price at decision
+    time, so it cannot be compared to another strategy without a snapshot.
+    """
+    if strategy.kind == "HOLD_BASELINE":
+        return ("HOLD_BASELINE", tuple(sorted(strategy.symbols)))
+    if strategy.kind == "TREND_FOLLOW":
+        return None
+    action = str(strategy.parameters.get("action", "")).upper()
+    if action not in {"BUY", "SELL", "HOLD"}:
+        return None
+    return (
+        strategy.kind,
+        tuple(sorted(strategy.symbols)),
+        action,
+        int(strategy.parameters.get("quantity", 0) or 0),
+        round(float(strategy.max_position_value), 2),
+    )
