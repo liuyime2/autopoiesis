@@ -1197,3 +1197,60 @@ and it clears itself as soon as the market is open and new decisions are stamped
 
 This closes the only phase that was **partial** for a missing component rather than
 thin data. Every other remaining gap is a function of elapsed market time.
+
+## 28. Unrealized PnL, and an unmatched sell worth investigating
+
+Only realized PnL was attributed. A position the agent was **holding** contributed
+nothing to its own record, so the account figure and the agent figure could never be
+reconciled even in principle — one measured closed trades, the other measured
+everything, and the gap could only be explained away.
+
+`PnLEvidence` now carries `open_lots`, `unrealized_pnl`, `net_pnl` and `net_of_fees`.
+Open lots keep the strategy that opened them, matching the realized side's rule: the
+strategy that opens a lot is the one expected to realize its PnL, which may not be the
+strategy that eventually sells it.
+
+Verified end to end by the daemon writing it, not by a script:
+
+```
+realized        : {'tiny-fixed-size-001': 362.66, 'fixed-size-buy-001': 120.37,
+                   'trend-follow-buy-001': 81.36}
+open lots       : []
+unrealized      : 0.0
+NET             : 564.39
+net of fees     : 564.39
+```
+
+The agent holds no SPY — the account's positions are BIL, TLT, XLB, XLE and XLF — so
+unrealized is 0 and `net` equals `realized`. That is the correct answer, not a stub.
+The machinery is proven only by test against a live position, because there is no live
+position.
+
+**The refusal that matters:** an open lot whose price is unknown is reported with
+`current_price=None` and `unrealized_pnl=None`, never valued at its entry price.
+Marking an open position at its own cost reports it as worth exactly nothing, which is
+a fabricated number wearing the appearance of a measurement.
+
+### 28.1 A finding this surfaced
+
+```
+UNMATCHED SELLS {'trend-follow-sell-002': 29.0}
+```
+
+**29 shares were sold that no linked BUY can account for.** The account holds no SPY,
+so those shares came from somewhere the fill linkage cannot see — a pre-existing
+position, a fill whose `client_order_id` never linked, or a lot opened before the
+journal began. The 23 closed lots that carry the +564.39 are all fully linked, so the
+verified figure is unaffected; but `doctor` now surfaces the unmatched quantity rather
+than leaving it in a payload field, because 29 shares of unexplained selling is the
+kind of thing that should be visible rather than stored.
+
+**Not yet diagnosed.** It needs the `ORDER_FILL_CONFIRMED` events for that strategy
+traced back, which is real work and not something to guess at.
+
+### 28.2 A crash on its own history, caught by a test
+
+The first `doctor` implementation formatted `unrealized:+.2f` unconditionally. Every
+stored `PNL_EVIDENCE_RECORDED` event predates the field, so the report would have
+raised `TypeError` on its own history — the same shape as reading a `JournalEvent` as a
+dict. It now tolerates a payload without the fields and degrades to `net` alone.

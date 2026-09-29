@@ -10,6 +10,7 @@ from min_agent.models import (
     ClosedLotAttribution,
     CycleRecord,
     EvaluationReport,
+    OpenLotAttribution,
     FillAttribution,
     PnLEvidence,
     StrategyEvaluation,
@@ -416,6 +417,26 @@ def _pnl_evidence(
         if tracker.unmatched_sell_quantity > 1e-9
     }
     open_lot_quantity = _open_lot_quantity(ledger)
+    # Marked from the latest price the loop actually observed, per symbol.
+    last_prices: dict[str, float] = {}
+    last_seen: datetime | None = None
+    for record in records:
+        snap = getattr(record, "snapshot", None)
+        if snap is None or snap.last_price <= 0:
+            continue
+        last_prices[snap.symbol] = snap.last_price
+        if last_seen is None or snap.timestamp > last_seen:
+            last_seen = snap.timestamp
+    open_lots = _open_lots(ledger, last_prices, last_seen)
+    unrealized = (
+        sum(lot.unrealized_pnl for lot in open_lots)
+        if open_lots and all(lot.unrealized_pnl is not None for lot in open_lots)
+        else (0.0 if not open_lots else None)
+    )
+    realized_total = sum(strategy_realized.values()) if strategy_realized else 0.0
+    fees_total = sum(strategy_fees.values()) if strategy_fees else 0.0
+    net = None if unrealized is None else round(realized_total + unrealized, 6)
+    net_of_fees = None if net is None else round(net - fees_total, 6)
 
     if order_derived_fill_count:
         missing_reasons.append(
@@ -473,6 +494,10 @@ def _pnl_evidence(
         order_derived_fill_count=order_derived_fill_count,
         open_lot_quantity=open_lot_quantity,
         unmatched_sell_quantity=unmatched_sell,
+        open_lots=open_lots,
+        unrealized_pnl=None if unrealized is None else round(unrealized, 6),
+        net_pnl=net,
+        net_of_fees=net_of_fees,
     )
 
 
@@ -633,6 +658,50 @@ def _fill_attribution(
         attribution_status=status,
         seeded=seeded,
     )
+
+
+def _open_lots(
+    ledger: _LotLedger,
+    prices: Mapping[str, float],
+    as_of: datetime | None,
+) -> tuple[OpenLotAttribution, ...]:
+    """Open agent lots, marked to the last price the system actually saw.
+
+    Only realized PnL was attributed before this, so a position the agent was
+    holding contributed nothing to its own record. That made the account figure and
+    the agent figure impossible to reconcile even in principle: one measured closed
+    trades, the other measured everything.
+
+    A lot whose symbol has no observed price is reported with `current_price=None`
+    and `unrealized_pnl=None` rather than valued at its entry price. Marking an open
+    position at its own cost reports it as worth exactly nothing, which is a
+    fabricated number wearing the appearance of a measurement.
+    """
+    out: list[OpenLotAttribution] = []
+    for symbol, lots in ledger.lots.items():
+        price = prices.get(symbol)
+        for lot in lots:
+            if lot.quantity <= 1e-9:
+                continue
+            unrealized = None
+            pct = None
+            if price is not None and lot.price:
+                unrealized = (price - lot.price) * lot.quantity
+                pct = (price - lot.price) / lot.price
+            out.append(
+                OpenLotAttribution(
+                    strategy_id=lot.strategy_id or "unattributed",
+                    symbol=symbol,
+                    quantity=lot.quantity,
+                    entry_price=lot.price,
+                    current_price=price,
+                    unrealized_pnl=None if unrealized is None else round(unrealized, 6),
+                    unrealized_pnl_pct=None if pct is None else round(pct, 6),
+                    opened_at=lot.opened_at,
+                    as_of=as_of,
+                )
+            )
+    return tuple(out)
 
 
 def _open_lot_quantity(ledger: _LotLedger) -> dict[str, float]:

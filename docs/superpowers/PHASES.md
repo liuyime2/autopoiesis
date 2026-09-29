@@ -151,7 +151,7 @@ Different scopes, different periods. The 970.93 difference is not a loss.
 | **regime awareness** | measured, unusable on this data |
 | **champion–challenger performance** | champion `fixed-size-buy-001` (+120.37) exists; no challenger has been measured against it |
 | **model provenance for the 920 existing decisions** | the field was added after they were written, so all 920 report `UNATTRIBUTED`. They are deliberately **not** back-filled: assigning them the currently configured model would assert a fact about the past that is not known, and would make every future comparison look like evidence for a model that never ran |
-| **unrealized PnL** | not implemented; only realized is attributed |
+| **unrealized PnL for a position the agent currently holds** | implemented. It reads 0.00 today because the agent holds no open lots — the account has no SPY — so the machinery is unexercised against a live position and is proven only by test |
 
 ---
 
@@ -182,11 +182,17 @@ Expected effect, stated in advance so it can be falsified: after ~20 additional
 trading days, the 67 pending LLM decisions resolve, `model calibration` moves off
 `INSUFFICIENT`, and at least one strategy crosses the 10-out-of-sample-trade bar.
 
-### 2. Unrealized PnL
+### Done since this was written
 
-Only realized PnL is attributed, so open lots contribute nothing to the account
-picture and the account figure and the agent figure cannot be reconciled even in
-principle. Small, and it removes a standing source of the confusion §4 documents.
+Unrealized PnL is **implemented**: `PnLEvidence` now carries `open_lots`,
+`unrealized_pnl`, `net_pnl` and `net_of_fees`. It reads 0.00 on the live journal
+because the agent holds no open lots, and `net` equals `realized` for that reason —
+which is the correct answer, not a stub.
+
+It is proven only by test against a live position, because there is no live position.
+An open lot whose price is unknown is reported as **unpriced** rather than valued at
+its entry cost, since marking a position at its own cost reports it as worth exactly
+nothing — a fabricated number wearing the appearance of a measurement.
 
 ### Done since this was written
 

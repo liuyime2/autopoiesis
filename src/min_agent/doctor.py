@@ -630,10 +630,31 @@ def _check_pnl_attribution(
         records, latest.payload["pnl"], latest.payload, regime_labels=labels
     )
     causes = "; ".join(f"{c.cause}={c.verdict}" for c in result.causes)
+    pnl = latest.payload.get("pnl") or {}
+    net = pnl.get("net_pnl")
+    unrealized = pnl.get("unrealized_pnl")
+    # net = realized + unrealized, stated so the two cannot be confused for the
+    # account figure, which covers the whole account over all time.
+    # Tolerates a payload that predates the unrealized fields. Every stored
+    # PnL event before this change lacks them, and a report that crashes on its own
+    # history is a report nobody can read.
+    total = ""
+    if net is not None and unrealized is not None:
+        total = (
+            f" (net {net:+.2f} = realized {result.total_realized_pnl:+.2f}"
+            f" + unrealized {unrealized:+.2f})"
+        )
+    elif net is not None:
+        total = f" (net {net:+.2f})"
     detail = (
-        f"{result.headline()} | {causes} | by regime: "
+        f"{result.headline()}{total} | {causes} | by regime: "
         f"{ {k: round(v, 2) for k, v in result.by_regime.items()} }"
     )
+    if pnl.get("unmatched_sell_quantity"):
+        detail += (
+            f" | UNMATCHED SELLS {pnl['unmatched_sell_quantity']}: shares were sold "
+            "that no linked BUY could account for, so that PnL is unproven"
+        )
 
     # Severity follows a distinction that has to be stated, because it decides
     # whether this is a code fault or a fact about the data:

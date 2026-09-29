@@ -299,6 +299,28 @@ class FillAttribution(BaseModel):
         return _require_real_source(value)
 
 
+class OpenLotAttribution(BaseModel):
+    """A lot the agent still holds, and what it is worth right now.
+
+    Priced from the latest observed price for the symbol, not from the broker's
+    portfolio history, because the portfolio history is a whole-account series and
+    this is per-lot. `current_price` is therefore the price the system last saw, and
+    `as_of` says when - an open lot marked at a price from three days ago is a
+    historical fact, not a valuation, and the timestamp is what tells the two apart.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    strategy_id: str = Field(min_length=1)
+    symbol: str
+    quantity: float = Field(gt=0)
+    entry_price: float = Field(gt=0)
+    current_price: float | None = Field(default=None, gt=0)
+    unrealized_pnl: float | None = None
+    unrealized_pnl_pct: float | None = None
+    opened_at: datetime
+    as_of: datetime | None = None
+
+
 class ClosedLotAttribution(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -353,6 +375,16 @@ class PnLEvidence(BaseModel):
     order_derived_fill_count: int = Field(default=0, ge=0)
     open_lot_quantity: dict[str, float] = Field(default_factory=dict)
     unmatched_sell_quantity: dict[str, float] = Field(default_factory=dict)
+    #: Open agent lots and what they are worth right now. Only realized PnL was
+    #: attributed before this, so a position the agent was holding contributed
+    #: nothing to its own record - and the account figure and the agent figure could
+    #: never be reconciled even in principle, only explained away.
+    open_lots: tuple[OpenLotAttribution, ...] = ()
+    #: Realized plus unrealized, when both are known. `None` rather than a guess
+    #: when the open side cannot be priced.
+    unrealized_pnl: float | None = None
+    net_pnl: float | None = None
+    net_of_fees: float | None = None
 
     @field_validator("evidence_source")
     @classmethod
