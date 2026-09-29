@@ -19,7 +19,8 @@ from enum import Enum
 from pathlib import Path
 
 from min_agent import (
-    counterfactual, experiment_registry, lineage, strategy_engine,
+    calibration, counterfactual, experiment_registry, lineage,
+    strategy_engine,
 )
 from min_agent.atomicio import write_json_atomic
 from min_agent.broker_evidence import latest_evidence_batch
@@ -238,6 +239,11 @@ def _check_governance(report: DoctorReport, config: AgentConfig) -> None:
     #    second registry to drift.
     if journal is not None:
         _check_experiment_chain(report, config, journal)
+
+        # 9. Whether the model's stated confidence has predicted anything. Recorded
+        #    on every decision, used as a gate, and never once compared against an
+        #    outcome.
+        _check_model_calibration(report, config, journal, records)
 
         # 8. Champion-challenger, search effort, and whether candidates can say
         #    what they are for.
@@ -529,6 +535,48 @@ def _check_champion_and_search(
         report.add("champion / search", WARN, detail)
     else:
         report.add("champion / search", OK, detail)
+
+
+def _check_model_calibration(
+    report: DoctorReport,
+    config: AgentConfig,
+    journal: "JsonlJournal",
+    records: list,
+) -> None:
+    """Score the model's confidence against what actually happened.
+
+    A warning is the right level for "we cannot tell yet", because it is the truthful
+    state: every LLM decision so far falls inside a single closed session, so the
+    counterfactual ledger has no outcome to score any of them against. Saying
+    "unmeasured" is the whole point. A pass here would mean the model had been shown
+    to earn its threshold, which is not a claim the evidence supports.
+    """
+    try:
+        verdicts = {
+            row.cycle_id: row.verdict
+            for row in counterfactual.evaluate(
+                records,
+                symbol=config.symbols[0] if config.symbols else "SPY",
+                horizon_hours=config.counterfactual_horizon_hours,
+                assumed_cost_pct=config.assumed_round_trip_cost_pct,
+            ).rows
+        }
+        rows = calibration.build_rows(records, verdicts, source="llm")
+        result = calibration.calibrate(rows, min_confidence=config.min_confidence)
+    except Exception as exc:
+        report.add(
+            "model calibration", WARN, f"evaluation failed: {type(exc).__name__}"
+        )
+        return
+
+    detail = (
+        f"{result.total_decisions} llm decision(s), {result.scored} scored, "
+        f"{result.pending} still awaiting an outcome; {result.verdict.split(':')[0]}"
+    )
+    if result.brier is not None:
+        detail += f", Brier {result.brier:.3f}, base rate {result.base_rate:.1%}"
+    level = OK if result.verdict.startswith("SIGNAL") else WARN
+    report.add("model calibration", level, detail)
 
 
 def _check_knowledge_value(report: DoctorReport, config: AgentConfig) -> None:

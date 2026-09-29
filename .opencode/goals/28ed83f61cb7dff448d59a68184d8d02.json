@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790684360569,
-      "lastRequestTokens": 275231,
-      "lastInputTokens": 274706
+      "observedAt": 1790684775564,
+      "lastRequestTokens": 297797,
+      "lastInputTokens": 297228
     }
   },
   "runtimeFingerprint": {
@@ -43,10 +43,10 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 10,
-    "tokens": 629790,
+    "turns": 11,
+    "tokens": 631922,
     "cost": 0,
-    "runtimeMs": 113766,
+    "runtimeMs": 132194,
     "seenMessageIDs": [
       "msg_0ea911ff0001xqHQnFmbF3aICp",
       "msg_0ea980dc20015f3lGA67tXRaUK",
@@ -57,7 +57,8 @@
       "msg_0ecf211f5001nujl702C3l4B8b",
       "msg_0ecfd69670014qmYHmG3TDmCBH",
       "msg_0ed08e47000190UwmUWfvjYtFw",
-      "msg_0ed120ec4001dPLWY1B1573bAi"
+      "msg_0ed120ec4001dPLWY1B1573bAi",
+      "msg_0ed1baed1001D2QQ3NSpiGKKKG"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -67,8 +68,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 64,
-  "observedProgressRevision": 62,
+  "progressRevision": 67,
+  "observedProgressRevision": 65,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
     "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
@@ -133,30 +134,13 @@
     "shell-worktree:c33c3edfd551dd20e8628a46025ff5c7f98b5b7b8df6045aa66bfd5a9536c9a4",
     "shell-worktree:469aad362dfd87d367348926a9cec8f18553ae2e80013b40371dbe21bf9eac64",
     "shell-worktree:b6e2636b6cec08e2102b02ec7e9cb21a9e9acad4e7142cfd1299c4142e3ad2af",
-    "shell-worktree:49bab1d1e9b42a2607c1bf720330135944d620c1ef92a37d6a2828957a7a6ebd"
+    "shell-worktree:49bab1d1e9b42a2607c1bf720330135944d620c1ef92a37d6a2828957a7a6ebd",
+    "shell-worktree:0f113096d0fce9d8a8655144bf9b244c75f8e02d48100dc95da56a04a3bb8175",
+    "shell-worktree:a85fcc43ff4fd64a72ed69a2f60287e205ece77e40c23ae5e0ecefac47999e72",
+    "shell-worktree:0f6722d441776250c6be9ca90fcdc5879f431121ca8c7a679705d44f778f2af5"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790643610847,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790643642913,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790643653240,
-      "summary": "First ADD step done: the counterfactual ledger. Every decision is now scored against the first real broker quote at or after a wall-clock horizon, classified GOOD_HOLD / MISSED_ALPHA / NEUTRAL / FALSE_TRADE, after an explicit configured cost assumption (the paper broker reports zero commission, so a gross figure would flatter the system by exactly what it would really have paid). Wired into daemon maintenance - 467 rows journaled live - and surfaced in doctor. Two things the first cut got wrong, caught by reading the journal rather than the code: a cycle-count horizon spanned a median of 8 minutes and a maximum of 97 days (the system was dead for 97 days), so it is now wall-clock with gaps beyond max_gap_hours refused rather than scored; and 49% of consecutive quotes are byte-identical because the gateway repeats the last trade when nothing traded, so repeats are now collapsed (920 quotes -> 467 observations). That corrected an earlier bogus number: the cycle-counted version reported hold quality 0.295, an artifact of 3-minute noise. At a real 24h horizon the live journal gives hold_quality 0.687 over 350 scored - 224 good holds, 95 missed alpha, 24 neutral, 7 false trades, 67 pending, 50 refused as gaps. 421 passed, audit 91/91, doctor RESULT OK.",
-      "next": "The second ADD step: a unified `make verify` gate covering the 13 check classes the objective names - software, syntax/import, unit/integration, data integrity, point-in-time/no-leakage, PnL accounting, lifecycle invariants, Guardian bypass prevention, replay determinism, crash recovery, broker reconciliation, shadow/live consistency - with FAIL=0 and no fallback able to mask a failure. Nothing exists today: no Makefile, and the checks are scattered across pytest, tools/audit_defects.py and doctor. Market reopens 09:30 EDT for the first live test of the exposure-cap fix and of a fresh round trip feeding the new counterfactual."
-    },
-    {
-      "time": 1790643776454,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790643820949,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -386,11 +370,31 @@
       "time": 1790684061282,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790684382564,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790684395338,
+      "summary": "Three more objective requirements implemented, all as derived views over the journal rather than new stores. (1) Lineage did not exist: StrategySpec has no lineage field at all, so nothing linked a strategy back to the failure it was proposed to fix; the link does exist in the curriculum event (exploration summary + task_id), so it is derived. (2) Search effort left no trace: the live journal holds 69 proposals across 63 task ids and task-20260611-002 produced THREE variants - a search whose surviving sibling inherits that selection, invisible without a trial count. search_effort now reports proposals, distinct tasks, tasks that searched, and max variants per task. (3) No champion existed: two ACTIVE strategies and no benchmark. The champion is designated from broker-verified strategy-level PnL only - fixed-size-buy-001 at +120.37, highest of the two ACTIVE strategies with verified PnL. Naming one from cycles or an in-sample backtest would be choosing a benchmark on evidence the system already distrusts, so with nothing verified the answer is None and the report says why. Live findings: 33 candidates from 31 tasks, 1 task searched, max 3 variants, and 33 of 33 candidates cannot state what observation motivated them - not one candidate in the system's history recorded the observation that produced it, because the proposal schema requires only free-text rationale. Reported, not backfilled: inventing a justification after the fact would be worse than recording that none was given. Four mistakes, three the same shape as before: the doctor check was DEFINED AND NEVER CALLED (anchor didn't match) - the \"implemented but unused\" category this audit exists to eliminate, created in the commit hunting for it; the new reachability gate is itself wrong twice, first a double-escaped regex matching a literal backslash, then subtracting name SETS which cannot work because every called name is also a defined name so the sets are identical and the subtraction empties to nothing (it reported all 17 checks as unreachable) - it now distinguishes call sites by position; ReflectionMemory was used but never imported in doctor.py, the NameError swallowed by the check's own except Exception, leaving results empty and the report claiming champion=NONE while a champion was on file; and the champion reason read \"the only such strategy on record\" when two qualified, so it now counts qualifiers and names the runner-up. Commit c633130. make verify: 21 classes, 0 failed, 572 distinct tests, 91/91 audit, doctor OK, exit 0.",
+      "next": "Remaining from the full objective, not yet started: model-prediction-vs-actual alignment (the objective requires model predictions to be checked against actual outcomes - currently the LLM's confidence is recorded but never scored for calibration, so a model that is confidently wrong looks identical to one that is right), unrealized PnL (only realized is attributed), regime context (referenced in curriculum prose but not computed or recorded), and the doc deliverables 5-8: per-phase tasks/dependencies/test methods/exit criteria/verification results, PnL cause attribution across signal/model/strategy/allocation/execution/cost/regime, proven-capability vs design-target, and the next 1-3 highest-value changes. Phase 7 still needs market hours. Model calibration is the highest-value remaining item: it is the only way to tell whether the decision engine is adding value over a coin flip, which is the question the whole loop ultimately answers."
+    },
+    {
+      "time": 1790684686244,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790684772517,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 490,
+  "storageGeneration": 511,
   "createdAt": 1790641773516,
-  "updatedAt": 1790684360569,
+  "updatedAt": 1790684775564,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:d9b69ac2c1f8b0bbc90c47d5bb5615b71ffc238325b2b248340f3a260feb8032",

@@ -913,3 +913,63 @@ that none was given.
 | 6 evidence-gated probation | **met** — both PROBATION strategies correctly blocked |
 | 7 prospective promote/pause/retire | **incomplete** — lifecycle runs on evidence, prospective duration not yet accumulated |
 | 8 regime-aware allocation, retraining, evolution | **not started**, correctly |
+
+## 23. Model prediction vs actual outcome
+
+The objective requires model predictions to be aligned against actual results. The
+system records a `confidence` on every decision and **never once compares it to what
+happened**. Confidence is used as a gate — `min_confidence` decides whether an order
+may be sent — and never as a claim to be tested. So a model that is confidently wrong
+is indistinguishable from one that is right, and the threshold is untested.
+
+The pairing needs no new data: every decision carries a confidence, and the
+counterfactual ledger already scores every decision against the first real broker
+quote at or after the horizon. `calibration.py` joins the two.
+
+### 23.1 What it found: the model's value is unmeasured
+
+```
+model calibration: 67 llm decision(s), 0 scored, 67 still awaiting an outcome
+```
+
+All 67 LLM decisions fall between 11:20 and 15:59 on 2026-09-28 — a single session —
+and the 24-hour horizon needs a quote from 2026-09-29 11:20 onward, which does not
+exist because the market has been closed. Mean LLM confidence is 0.276.
+
+So the honest reading is not "the model is bad". It is **"we do not know yet"**, and
+the report says exactly that: `INSUFFICIENT`, with a note that the value is
+unmeasured rather than good. A pass here would mean the model had been shown to earn
+its threshold, which the evidence does not support.
+
+### 23.2 Scoring rules, and the one that could have flattered the model
+
+Only a hold that avoided a loss counts as correct. A `MISSED_ALPHA` — a hold that
+should have been a trade — is **incorrect**, and a `FALSE_TRADE` is incorrect. Scoring
+a missed rally as "correct caution" would give any model that never trades a perfect
+curve for free, which is the easiest way to manufacture good calibration. `NEUTRAL`
+is excluded rather than counted either way, because a move that did not clear the
+cost is silence.
+
+### 23.3 The metric, and why the obvious one was wrong
+
+The first comparison was "accuracy of gate-clearing decisions vs the base rate". With
+`min_confidence` at 0.5, a 0.6 and a 0.9 both clear the gate, so the comparison
+measured almost every decision and **could not tell a model that separates good from
+bad from one that does not** — a test failed for the right reason with the wrong
+metric.
+
+The sharper question is whether the **most confident populated bucket** beats the
+base rate. That is what "does confidence identify the good decisions" actually asks,
+and it is now the comparison, with a test that pins the gate comparison's weakness so
+it is not reintroduced.
+
+Brier score is reported alongside: 0 is perfect, 0.25 is what always claiming 0.5
+scores. Confidence is bucketed 0.2 wide so 0.95 and 1.0 land together — splitting them
+produced a one-member bucket that read as a 100% accurate stratum.
+
+### 23.4 Why it is a doctor warning, not a pass
+
+`OK` requires the verdict to start with `SIGNAL`, which requires the top bucket to
+beat the base rate on at least 30 scored decisions. Until the market supplies
+outcomes, the check is a warning — and a warning here is the truthful state, not a
+defect in the report.
