@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
+from min_agent import counterfactual
 from min_agent.atomicio import write_json_atomic
 from min_agent.broker_evidence import latest_evidence_batch
 from min_agent.config import AgentConfig
@@ -226,6 +227,10 @@ def _check_governance(report: DoctorReport, config: AgentConfig) -> None:
     #    decision, which is the same zoo pathology the strategy library had.
     _check_knowledge_value(report, config)
 
+    # 6. Decision quality. 864 of 920 cycles are HOLD and this is the only thing
+    #    that can say whether they were right.
+    _check_decision_quality(report, config, records)
+
 
 def _check_risk_baseline(report: DoctorReport, config: AgentConfig) -> None:
     current = {
@@ -338,6 +343,47 @@ def _check_admission_provenance(
         )
     else:
         report.add("admission provenance", OK, f"all {len(accepted)} file(s) traceable to admission")
+
+
+def _check_decision_quality(
+    report: DoctorReport, config: AgentConfig, records: list
+) -> None:
+    """Report how the HOLDs actually turned out, after cost.
+
+    Read from the journalled counterfactual rows rather than recomputed, so this is
+    the same number the loop recorded. A missing or unscored result is reported as
+    such: "we cannot tell yet" must not read as "we are doing fine".
+    """
+    symbol = config.symbols[0] if config.symbols else "SPY"
+    try:
+        result = counterfactual.evaluate(
+            records,
+            symbol=symbol,
+            horizon_hours=config.counterfactual_horizon_hours,
+            assumed_cost_pct=config.assumed_round_trip_cost_pct,
+        )
+    except Exception as exc:
+        report.add("decision quality", WARN, f"evaluation failed: {type(exc).__name__}")
+        return
+    if not result.rows:
+        report.add("decision quality", WARN, "no decision could be scored yet")
+        return
+    quality = result.hold_quality()
+    counts = result.counts()
+    detail = (
+        f"hold_quality={quality} over {len(result.scored)} scored "
+        f"({result.pending_count} pending, {result.gap_count} refused as gaps); "
+        f"holds: {counts.get('GOOD_HOLD', 0)} good, "
+        f"{counts.get('MISSED_ALPHA', 0)} missed alpha, "
+        f"{counts.get('FALSE_TRADE', 0)} false trade"
+    )
+    if quality is None:
+        report.add(
+            "decision quality", WARN, detail,
+            "no hold has a later quote yet; the journal needs more market hours",
+        )
+    else:
+        report.add("decision quality", OK, detail)
 
 
 def _check_knowledge_value(report: DoctorReport, config: AgentConfig) -> None:

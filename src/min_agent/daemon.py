@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from min_agent.atomicio import file_lock, write_text_atomic
 from min_agent.broker_evidence import latest_evidence_batch
+from min_agent import counterfactual
 from min_agent.config import AgentConfig
 from min_agent.curriculum import StructuredCurriculumAgent
 from min_agent.evaluator import (
@@ -236,6 +237,71 @@ class AgentDaemon:
                 payload={"error_type": type(exc).__name__},
             )
 
+    def _record_counterfactuals(self) -> None:
+        """Score every decision against what the market actually did next.
+
+        864 of 920 journaled cycles are HOLD, and until this existed nothing
+        recorded what happened after them, so the system could count decisions and
+        their realized PnL but never learn whether a hold was right. This is the
+        first thing in the loop that can say a hold was wrong.
+        """
+        if self.journal is None:
+            return
+        try:
+            symbol = self.config.symbols[0] if self.config.symbols else "SPY"
+            report = counterfactual.evaluate(
+                self.journal.read_all(),
+                symbol=symbol,
+                horizon_hours=self.config.counterfactual_horizon_hours,
+                assumed_cost_pct=self.config.assumed_round_trip_cost_pct,
+            )
+        except Exception as exc:
+            self._append_event(
+                "COUNTERFACTUAL_EVALUATED",
+                status="FAILED",
+                message=f"{type(exc).__name__}: {exc}",
+                payload={"status": "failed"},
+            )
+            return
+        if not report.rows:
+            return
+        counts = report.counts()
+        self._append_event(
+            "COUNTERFACTUAL_EVALUATED",
+            status="SUCCESS",
+            message=(
+                f"hold_quality={report.hold_quality()} "
+                f"scored={len(report.scored)} pending={report.pending_count} "
+                f"gap={report.gap_count}"
+            ),
+            payload={
+                "symbol": symbol,
+                "horizon_hours": self.config.counterfactual_horizon_hours,
+                "assumed_round_trip_cost_pct": self.config.assumed_round_trip_cost_pct,
+                "hold_quality": report.hold_quality(),
+                "counts": counts,
+                "scored": len(report.scored),
+                "pending": report.pending_count,
+                "gap": report.gap_count,
+                "net_pct_total": round(report.net_pct_total(), 4),
+                "rows": [
+                    {
+                        "cycle_id": row.cycle_id,
+                        "action": row.action,
+                        "strategy_id": row.strategy_id,
+                        "decided_at": row.decided_at.isoformat(),
+                        "price_at_decision": row.price_at_decision,
+                        "price_at_horizon": row.price_at_horizon,
+                        "gap_hours": row.gap_hours,
+                        "gross_return_pct": row.gross_return_pct,
+                        "net_return_pct": row.net_return_pct,
+                        "verdict": row.verdict,
+                    }
+                    for row in report.rows
+                ],
+            },
+        )
+
     def _last_market(self) -> tuple[float | None, str]:
         """The most recent real broker price, for evaluating executable capability."""
         for record in reversed(self.journal.read_all()):
@@ -352,6 +418,7 @@ class AgentDaemon:
         if self.journal is not None:
             self._record_pnl_evidence(evidence)
             self._verify_profit_target(evidence)
+            self._record_counterfactuals()
         if self.reflection_memory is not None and self._due(self.last_reflection_at, self.config.reflection_interval_seconds):
             self._reflect(evidence=evidence)
         if self.curriculum_agent is not None and self.reflection_memory is not None and self._due(self.last_curriculum_at, self.config.curriculum_interval_seconds):

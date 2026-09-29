@@ -27,6 +27,11 @@ class AgentConfig:
     max_trades_per_day: int = 10
     min_confidence: float = 0.5
     max_account_value: float = 0.0
+    # How long to wait before scoring a decision against the market. The paper
+    # broker reports zero commission, so a gross-only figure would flatter the
+    # system by what it would really have paid; this is that assumption.
+    assumed_round_trip_cost_pct: float = 0.05
+    counterfactual_horizon_hours: float = 24.0
     max_daily_cycles: int = 288
     heartbeat_path: Path = Path("runtime/min_agent/heartbeat.json")
     pidfile_path: Path = Path("runtime/min_agent/daemon.pid")
@@ -73,6 +78,10 @@ class AgentConfig:
             max_trades_per_day=_positive_int("MIN_AGENT_MAX_TRADES_PER_DAY", 10),
             min_confidence=_bounded_float("MIN_AGENT_MIN_CONFIDENCE", 0.5, 0.0, 1.0),
             max_account_value=_optional_float("MIN_AGENT_MAX_ACCOUNT_VALUE"),
+            assumed_round_trip_cost_pct=_positive_float(
+                "MIN_AGENT_ASSUMED_ROUND_TRIP_COST_PCT", 0.05),
+            counterfactual_horizon_hours=_positive_float(
+                "MIN_AGENT_COUNTERFACTUAL_HORIZON_HOURS", 24.0),
             max_daily_cycles=_positive_int("MIN_AGENT_MAX_DAILY_CYCLES", 288),
             heartbeat_path=Path(os.getenv("MIN_AGENT_HEARTBEAT", "runtime/min_agent/heartbeat.json")),
             pidfile_path=Path(os.getenv("MIN_AGENT_PIDFILE", "runtime/min_agent/daemon.pid")),
