@@ -64,22 +64,33 @@ class PolicyEngine:
         return decision
 
     def relevant_lessons(self, strategy_id: str) -> list:
-        """Admitted lessons that bear on this strategy.
+        """Admitted lessons to show the decision maker.
 
-        Best-effort by design: a lesson is context, not a hard input, so a
-        corrupt artifact must never be able to block a trading cycle.
+        There is no strategy-relevance filter here any more, and there never was a
+        working one. It tested `strategy_id in artifact.source_refs or
+        strategy_id in artifact.tags`, but the producer puts cycle UUIDs in
+        source_refs and generic words ("exploration", "probation", "lifecycle") in
+        tags - never a strategy id. The condition could not be true, so `relevant`
+        was always empty and a fallback returned the first N LESSON artifacts to
+        *every* decision regardless of strategy. Nine of the eleven admitted
+        artifacts were variants of one sentence, so what actually reached the model
+        was the same five near-identical lines on every cycle.
+
+        Keeping a filter that reads as strategy-scoped while being a no-op is worse
+        than not having one, so it is gone. The strategy_id argument is retained
+        because callers pass it and because it is the obvious place to reintroduce
+        real scoping once lessons are actually derived per strategy - which is a
+        research-layer change, not something to fake here.
+
+        Best-effort by design: a lesson is context, not a hard input, so a corrupt
+        artifact must never be able to block a trading cycle.
         """
+        del strategy_id  # no working relevance test exists; see the docstring
         if self.knowledge_library is None:
             return []
         try:
             artifacts = self.knowledge_library.list(status="ACCEPTED")
         except Exception:
             return []
-        relevant = [
-            artifact
-            for artifact in artifacts
-            if strategy_id in (artifact.source_refs or ()) or strategy_id in (artifact.tags or ())
-        ]
-        if not relevant:
-            relevant = [a for a in artifacts if a.artifact_type == "LESSON"]
-        return relevant[: self.max_lessons]
+        lessons = [a for a in artifacts if a.artifact_type == "LESSON"]
+        return lessons[: self.max_lessons]

@@ -221,6 +221,11 @@ def _check_governance(report: DoctorReport, config: AgentConfig) -> None:
     if journal is not None:
         _check_admission_provenance(report, config, journal)
 
+    # 5. The knowledge library must not be a pile of near-identical lines. Nine of
+    #    eleven artifacts were variants of one sentence, all reaching every
+    #    decision, which is the same zoo pathology the strategy library had.
+    _check_knowledge_value(report, config)
+
 
 def _check_risk_baseline(report: DoctorReport, config: AgentConfig) -> None:
     current = {
@@ -333,6 +338,37 @@ def _check_admission_provenance(
         )
     else:
         report.add("admission provenance", OK, f"all {len(accepted)} file(s) traceable to admission")
+
+
+def _check_knowledge_value(report: DoctorReport, config: AgentConfig) -> None:
+    """Flag a knowledge library that is growing without carrying information."""
+    try:
+        artifacts = [
+            a for a in KnowledgeLibrary(config.knowledge_dir).list(status="ACCEPTED")
+        ]
+    except Exception as exc:
+        report.add("knowledge value", WARN, f"library unreadable: {type(exc).__name__}")
+        return
+    if not artifacts:
+        report.add("knowledge value", OK, "no accepted artifacts")
+        return
+    seen: dict[str, int] = {}
+    for artifact in artifacts:
+        key = " ".join(artifact.summary.lower().split())
+        seen[key] = seen.get(key, 0) + 1
+    distinct = len(seen)
+    if distinct == 1 and len(artifacts) > 1:
+        report.add(
+            "knowledge value", WARN,
+            f"{len(artifacts)} accepted artifact(s) carrying {distinct} distinct "
+            f"statement(s)",
+            "the library is not adding information; it needs a real derivation",
+        )
+    else:
+        report.add(
+            "knowledge value", OK,
+            f"{len(artifacts)} accepted artifact(s), {distinct} distinct statement(s)",
+        )
 
 
 def _now_iso() -> str:

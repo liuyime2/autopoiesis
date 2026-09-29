@@ -24,6 +24,20 @@ class KnowledgeAdmission:
     def _content_hash(artifact: KnowledgeArtifact) -> int:
         return hash((artifact.summary, artifact.answer))
 
+    def _already_on_disk(self, artifact: KnowledgeArtifact) -> bool:
+        try:
+            existing = self.knowledge_library.list(status="ACCEPTED")
+        except Exception:
+            # A library we cannot read must not become a way to force duplicates.
+            return False
+        summary = " ".join(artifact.summary.lower().split())
+        answer = " ".join(artifact.answer.lower().split())
+        for other in existing:
+            if " ".join(other.summary.lower().split()) == summary and \
+                    " ".join(other.answer.lower().split()) == answer:
+                return True
+        return False
+
     def admit(self, artifact: KnowledgeArtifact) -> KnowledgeAdmissionResult:
         if self.knowledge_library.exists(artifact.artifact_id):
             return KnowledgeAdmissionResult(
@@ -37,6 +51,17 @@ class KnowledgeAdmission:
             return KnowledgeAdmissionResult(
                 accepted=False,
                 reason="content hash already admitted this session; identical lesson rejected",
+                artifact_id=artifact.artifact_id,
+            )
+        # The in-memory set is a fast path, not the rule. It resets on every
+        # restart, so an identical lesson re-derived the next day was accepted
+        # again: eleven accepted artifacts held two distinct statements, ten of
+        # them variants of one sentence, and all eleven were fed to every
+        # decision. Dedupe has to survive the process.
+        if self._already_on_disk(artifact):
+            return KnowledgeAdmissionResult(
+                accepted=False,
+                reason="an identical lesson is already in the library; duplicate rejected",
                 artifact_id=artifact.artifact_id,
             )
 
