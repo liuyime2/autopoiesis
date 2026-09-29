@@ -690,3 +690,72 @@ and is behaviourally identical to `fixed-size-sell-001` apart from a `confidence
 value the signature correctly ignores. A strategy whose name claims one thing and
 whose rule does another is the failure mode "automatic detection of
 semantic/behavioral duplicate" exists to catch.
+
+## 19. Phase 5: shadow trading
+
+Withdrawn in §14, now built. `MIN_AGENT_SHADOW=1` replaces the final call to the
+broker and nothing else. Real market data, the real model, the real Guardian, the
+real journal — only the submission is replaced. That is the whole design: a shadow
+mode with its own simplified decision path would be grading a different system from
+the one that will trade, and could pass while the real path failed.
+
+It is a config flag, not a fourth `mode`, because `mode` already carries a hard
+safety meaning — anything but `paper` raises at config load. Overloading it with
+"paper but pretend" would blur the one line that must stay sharp.
+
+### 19.1 The safety property is negative, and it is the point
+
+A shadow order is **not** a fill. If one ever reached the PnL ledger as an executed
+trade, the account would book profit from money that was never risked and an
+unvalidated path would show up as the best one on record — the most dangerous bug
+this system could have, because the loop would lie while looking healthy.
+
+Three things prevent it, and a test proves the outcome rather than the intention:
+
+1. `status="SHADOWED"` is a distinct value, not a reuse of `SKIPPED`. Anything that
+   branches on the field and does not know it will not count it as executed — the
+   safe default.
+2. `order_id` is always `None`, so no reconciliation pass can match it to a broker
+   order. A real fill always has one.
+3. A journal of four shadow orders yields
+   `account_realized_or_reported_pnl is None`, `account_return_pct is None`,
+   `strategy_realized_pnl == {}`, `closed_lot_count == 0`, `linked_fill_count == 0`.
+
+A `make verify` check now enforces this across every production module: **no
+module may group `SHADOWED` with an executed status.** It is a gate rather than a
+test because it is a cross-cutting invariant, and a new `if` on `execution.status`
+is exactly when it would be reintroduced. The check is proven to fire by planting a
+grouping, and it was itself wrong on first run — it failed on the `Literal` that
+*declares* the statuses, which is how a gate earns a reputation for noise.
+
+### 19.2 Verified against the live journal
+
+A shadow intent written to the real journal produced: `status=SHADOWED`,
+`order_id=None`, one `SHADOW_ORDER_INTENT` event, **cycle count unchanged at
+920/920** — a shadow intent is not a cycle — and account realized PnL `None`. A
+`shadow-smoke` intent from this check is in the journal and is left there, labelled
+as it is; deleting it would falsify the record.
+
+### 19.3 Three mistakes, all the same shape as before
+
+* `append_event` takes a `JournalEvent`, not keyword arguments. Passing kwargs raised
+  `TypeError`, which a broad `except` ate, so **every shadow intent was silently
+  dropped** and the stage journalled nothing. That is the third time in this work
+  that a `JournalEvent`/dict confusion turned a wired path into a dead one.
+* The event type was missing from `JournalEventType`, raising `ValidationError` —
+  swallowed by the same `except`.
+* The sink-selection function was anchored on `def _build_loop(`, which does not
+  exist in `cli.py`, so both call sites were rewritten and the definition never
+  landed. The startup test caught it as an unbound name.
+
+The `except` itself is correct and stays — a journal fault must never escalate into a
+real order — but it now records the failure in `ShadowExecutor.journal_failures`
+instead of discarding it, because a swallowed exception is how the first two mistakes
+stayed invisible. A test asserts a healthy journal leaves it empty, so the counter
+cannot rot into a permanent no-op.
+
+The `shadow-live-consistency` check also reported "shadow mode NOT implemented" for
+the rest of this session, after shadow had been built, because the string in it was
+never updated. It now verifies that shadow is reachable from configuration, off by
+default, and that the switch is parsed strictly — `MIN_AGENT_SHADOW=flase` raises
+rather than silently enabling a flag that decides whether real orders reach a broker.

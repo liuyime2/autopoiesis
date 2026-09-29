@@ -18,6 +18,7 @@ from min_agent.config import AgentConfig
 from min_agent.daemon import AgentDaemon
 from min_agent.data_gateway import AlpacaDataGateway
 from min_agent.executor import AlpacaPaperExecutor
+from min_agent.shadow import ShadowExecutor
 from min_agent.guardian import Guardian
 from min_agent.health import HealthMonitor
 from min_agent.broker_evidence import latest_evidence_batch
@@ -138,6 +139,24 @@ def _check_env(config: AgentConfig) -> int:
     return 0
 
 
+def _execution_sink(config, client, journal):
+    """The one place the execution sink is chosen.
+
+    Shadow trading swaps the final call to the broker and nothing else, so the data,
+    the model, the Guardian and the journal above it are the same ones that will
+    trade for real. A shadow mode with its own decision path would be grading a
+    different system and could pass while the real path failed.
+
+    Anchored on a real function: an earlier attempt to insert this used
+    `def _build_loop(` as its anchor, which does not exist in this file, so the two
+    call sites were rewritten and the definition never landed. The startup test
+    caught it as an unbound name before it could run.
+    """
+    if config.shadow:
+        return ShadowExecutor(journal=journal)
+    return AlpacaPaperExecutor(client=client, base_url=config.alpaca_base_url)
+
+
 def _run_once(config: AgentConfig) -> int:
     missing = config.missing_alpaca_credentials()
     if missing:
@@ -172,7 +191,7 @@ def _run_once(config: AgentConfig) -> int:
             max_position_value=config.max_position_value,
             max_daily_loss=config.max_daily_loss,
         ),
-        executor=AlpacaPaperExecutor(client=client, base_url=config.alpaca_base_url),
+        executor=_execution_sink(config, client, JsonlJournal(config.journal_path)),
         journal=JsonlJournal(config.journal_path),
         mode=config.mode,
         trade_counter=TradeCounter(journal=JsonlJournal(config.journal_path)),
@@ -260,7 +279,7 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         data_gateway=AlpacaDataGateway(client=client),
         decision_engine=decision_engine,
         guardian=guardian,
-        executor=AlpacaPaperExecutor(client=client, base_url=config.alpaca_base_url),
+        executor=_execution_sink(config, client, journal),
         journal=journal,
         mode=config.mode,
         trade_counter=TradeCounter(journal=journal),

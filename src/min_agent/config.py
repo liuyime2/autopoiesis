@@ -32,6 +32,12 @@ class AgentConfig:
     # system by what it would really have paid; this is that assumption.
     assumed_round_trip_cost_pct: float = 0.05
     counterfactual_horizon_hours: float = 24.0
+    # Phase 5 shadow trading. A flag rather than a fourth `mode`, because
+    # `mode` carries a hard safety meaning: anything but 'paper' raises at
+    # load. Overloading it with 'paper but pretend' would blur the one line
+    # that must stay sharp. With this on, the real loop runs and the final
+    # broker call is replaced by a journalled intent.
+    shadow: bool = False
     max_daily_cycles: int = 288
     heartbeat_path: Path = Path("runtime/min_agent/heartbeat.json")
     pidfile_path: Path = Path("runtime/min_agent/daemon.pid")
@@ -82,6 +88,7 @@ class AgentConfig:
                 "MIN_AGENT_ASSUMED_ROUND_TRIP_COST_PCT", 0.05),
             counterfactual_horizon_hours=_positive_float(
                 "MIN_AGENT_COUNTERFACTUAL_HORIZON_HOURS", 24.0),
+            shadow=_flag("MIN_AGENT_SHADOW", False),
             max_daily_cycles=_positive_int("MIN_AGENT_MAX_DAILY_CYCLES", 288),
             heartbeat_path=Path(os.getenv("MIN_AGENT_HEARTBEAT", "runtime/min_agent/heartbeat.json")),
             pidfile_path=Path(os.getenv("MIN_AGENT_PIDFILE", "runtime/min_agent/daemon.pid")),
@@ -119,6 +126,26 @@ def _positive_int(name: str, default: int) -> int:
     if value <= 0:
         raise ValueError(f"{name} must be positive")
     return value
+
+
+def _flag(name: str, default: bool) -> bool:
+    """A boolean setting.
+
+    Only an exact `1` or `true` enables it. Truthiness is the wrong rule for a switch
+    that decides whether real orders reach a broker: `MIN_AGENT_SHADOW=0` must not
+    read as on, and a typo like `=flase` must not silently mean "on" either.
+    """
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(
+        f"{name}={raw!r} is not a boolean; use 1/0, true/false, yes/no or on/off"
+    )
 
 
 def _positive_float(name: str, default: float) -> float:

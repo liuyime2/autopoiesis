@@ -62,6 +62,10 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_research_backtest.py": (
         "point-in-time-no-leakage", "pnl-accounting", "lifecycle-invariants",
     ),
+    "test_shadow.py": (
+        "shadow-live-consistency", "guardian-bypass-prevention",
+        "pnl-accounting", "broker-reconciliation",
+    ),
     "test_fill_reconciler.py": ("broker-reconciliation",),
     "test_governance_invariants.py": (
         "guardian-bypass-prevention", "shadow-live-consistency",
@@ -286,6 +290,51 @@ def check_production_research_separation() -> Result:
     )
 
 
+#: The statuses that mean an order actually reached the broker.
+EXECUTED_STATUSES = {"SUBMITTED", "FILLED"}
+
+
+def check_shadow_cannot_count_as_executed() -> Result:
+    """No production module may treat a shadowed order as an executed trade.
+
+    A shadow order is not a fill. If any code path counted `SHADOWED` as executed,
+    the account would book profit from money that was never risked and an
+    unvalidated path would appear as the best one on record - the single most
+    dangerous bug this system could have, because it would make the loop lie while
+    looking healthy.
+
+    Checked as a gate rather than a test because it is a cross-cutting invariant over
+    every branch on `execution.status`, and a new branch added later is exactly when
+    it would be introduced.
+    """
+    problems: list[str] = []
+    for module in sorted((ROOT / "src" / "min_agent").glob("*.py")):
+        text = module.read_text()
+        for line_no, line in enumerate(text.splitlines(), 1):
+            code = line.split("#", 1)[0]
+            if "SHADOWED" not in code:
+                continue
+            # The Literal that declares the statuses lists them all together and is
+            # not a comparison. Without this exemption the check failed on its own
+            # type declaration, which is how a gate earns a reputation for noise.
+            if "Literal[" in code:
+                continue
+            # A comparison that groups SHADOWED with an executed status would let a
+            # shadow order through as a fill.
+            for executed in EXECUTED_STATUSES:
+                if f'"{executed}"' in code and "SHADOWED" in code:
+                    problems.append(
+                        f"{module.name}:{line_no} groups SHADOWED with {executed}"
+                    )
+    detail = (
+        "; ".join(problems) if problems else
+        "no module treats SHADOWED as an executed order"
+    )
+    return Result(
+        "shadow-not-executed", FAIL if problems else PASS, detail
+    )
+
+
 def check_data_integrity() -> Result:
     """Runtime state must parse, and every record must be internally consistent."""
     rc, out = _run([sys.executable, "tools/check_runtime_integrity.py"])
@@ -330,9 +379,55 @@ def check_shadow_live_consistency() -> Result:
     if rc != 0:
         problems.append(f"probation gate missing from strategy selection: {_tail(out)}")
 
+    # Shadow must exist *and* be reachable from configuration. A stage that is
+    # implemented but not switchable is the same as one that does not exist, and
+    # the first version of this check kept reporting "shadow mode NOT implemented"
+    # after shadow had been built, because the string was never updated. A check
+    # that prints a falsehood is worse than no check at all.
+    rc, out = _run([sys.executable, "-c", (
+        "import os, sys; sys.path.insert(0, 'src')\n"
+        "os.environ.update(ALPACA_API_KEY='k', ALPACA_SECRET_KEY='s',\n"
+        "                  MIN_AGENT_SHADOW='1')\n"
+        "from min_agent.config import AgentConfig\n"
+        "from min_agent.shadow import ShadowExecutor\n"
+        "from min_agent.executor import AlpacaPaperExecutor\n"
+        "from min_agent.cli import _execution_sink\n"
+        "cfg = AgentConfig.from_env()\n"
+        "assert cfg.shadow is True, 'MIN_AGENT_SHADOW=1 did not enable shadow'\n"
+        "sink = _execution_sink(cfg, object(), None)\n"
+        "assert isinstance(sink, ShadowExecutor), type(sink)\n"
+        "assert not isinstance(sink, AlpacaPaperExecutor)\n"
+        "os.environ['MIN_AGENT_SHADOW'] = '0'\n"
+        "assert AgentConfig.from_env().shadow is False\n"
+        "print('shadow reachable and off-by-default')\n"
+    )])
+    if rc != 0:
+        problems.append(f"shadow mode not reachable from config: {_tail(out)}")
+
+    # A boolean switch that decides whether real orders reach a broker must not be
+    # read by truthiness: MIN_AGENT_SHADOW=0 has to mean off.
+    rc, out = _run([sys.executable, "-c", (
+        "import os, sys; sys.path.insert(0, 'src')\n"
+        "from min_agent.config import AgentConfig, _flag\n"
+        "assert _flag('X', True) is True\n"
+        "os.environ['X'] = '0'\n"
+        "assert _flag('X', True) is False, '0 must read as off'\n"
+        "os.environ['X'] = 'false'\n"
+        "assert _flag('X', True) is False\n"
+        "os.environ['X'] = 'flase'\n"
+        "try:\n"
+        "    _flag('X', True)\n"
+        "    raise SystemExit('a typo must raise, not silently enable a broker switch')\n"
+        "except ValueError:\n"
+        "    pass\n"
+        "print('switch parses strictly')\n"
+    )])
+    if rc != 0:
+        problems.append(f"shadow switch is not strict: {_tail(out)}")
+
     detail = "; ".join(problems) if problems else (
-        "live mode hard-blocked; probation gate enforced; "
-        "shadow mode NOT implemented (recorded, not faked)"
+        "live mode hard-blocked; probation gate enforced; shadow implemented, "
+        "reachable by MIN_AGENT_SHADOW=1, off by default, strict boolean"
     )
     return Result(
         "shadow-live-consistency", FAIL if problems else PASS, detail,
@@ -571,6 +666,7 @@ def main() -> int:
     results.append(check_software_supply_chain())
     results.append(check_docs_not_stale())
     results.append(check_production_research_separation())
+    results.append(check_shadow_cannot_count_as_executed())
     results.append(check_syntax_import())
     results.append(check_data_integrity())
     results.append(check_shadow_live_consistency())

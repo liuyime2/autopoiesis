@@ -27,6 +27,7 @@ JournalEventType = Literal[
     "PNL_EVIDENCE_RECORDED",
     "PNL_EVIDENCE_FAILED",
     "COUNTERFACTUAL_EVALUATED",
+    "SHADOW_ORDER_INTENT",
     "OFFLINE_VALIDATION_COMPLETED",
     "PROFIT_TARGET_CHECKED",
     "STRATEGY_LIFECYCLE_UPDATED",
@@ -550,6 +551,10 @@ class EvaluationReport(BaseModel):
     submitted_orders: int = Field(ge=0)
     rejected_orders: int = Field(ge=0)
     skipped_orders: int = Field(ge=0)
+    #: Orders the loop would have submitted had shadow trading been off.
+    #: A count, never a PnL contribution: a shadow order proves the path ran,
+    #: not that money moved. Kept here so the stage is visibly exercised.
+    shadowed_orders: int = Field(default=0, ge=0)
     execution_errors: int = Field(ge=0)
     error_count: int = Field(ge=0)
     guardian_approved: int = Field(ge=0)
@@ -597,6 +602,10 @@ class StrategyResult(BaseModel):
     fees: float | None = None
     pnl_evidence: str = "missing_fill_price_and_broker_activity"
     trade_attempts: int = Field(default=0, ge=0)
+    #: Orders the loop would have submitted had shadow trading been off. Visible so
+    #: the stage can be seen working, and impossible to mistake for PnL: it is a
+    #: count, and it never reaches `realized_pnl`.
+    shadowed_orders: int = Field(default=0, ge=0)
     strategy_fault_rejections: int | None = None
 
 
@@ -749,7 +758,12 @@ class GuardianResult(BaseModel):
 class ExecutionResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    status: Literal["SKIPPED", "SUBMITTED", "REJECTED", "ERROR"]
+    # SHADOWED is a real outcome of a real cycle, and it is deliberately its own
+    # value rather than a reuse of SKIPPED. Anything that branches on this field and
+    # does not know SHADOWED will not count it as executed, which is the safe
+    # default; tests/min_agent/test_shadow.py proves the PnL ledger reports zero
+    # from shadow-only cycles, so a shadow order can never be mistaken for a fill.
+    status: Literal["SKIPPED", "SUBMITTED", "REJECTED", "ERROR", "SHADOWED"]
     order_id: str | None
     client_order_id: str | None = None
     filled_quantity: float = Field(ge=0)

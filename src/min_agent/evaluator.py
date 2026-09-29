@@ -71,6 +71,7 @@ class DeterministicEvaluator:
         filled_quantity = 0.0
         order_quantity = 0.0
         submitted_order_quantity = 0.0
+        shadowed = 0
 
         for record in records:
             status = record.execution.status
@@ -102,6 +103,12 @@ class DeterministicEvaluator:
                 submitted_order_quantity += record.decision.quantity
             elif status == "REJECTED":
                 rejected += 1
+            elif status == "SHADOWED":
+                # Counted, never valued. A shadow order proves the path ran; it
+                # proves no money moved. It must not reach the realized-PnL figure,
+                # and it must not be silently dropped either - the count is how
+                # anyone can see the stage is actually being exercised.
+                shadowed += 1
             elif status == "SKIPPED":
                 skipped += 1
             elif status == "ERROR":
@@ -145,6 +152,7 @@ class DeterministicEvaluator:
             submitted_orders=submitted,
             rejected_orders=rejected,
             skipped_orders=skipped,
+            shadowed_orders=shadowed,
             execution_errors=execution_errors,
             error_count=error_count,
             guardian_approved=guardian_approved,
@@ -204,6 +212,8 @@ class _StrategyBucket:
         if record.decision.action in ("BUY", "SELL") and record.snapshot.market_open:
             self.trade_attempts += 1
 
+        if record.execution.status == "SHADOWED":
+            return
         if record.execution.status == "SUBMITTED":
             self.submitted_orders += 1
             self.submitted_intended_notional += notional

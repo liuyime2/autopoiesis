@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790682376495,
-      "lastRequestTokens": 178494,
-      "lastInputTokens": 178070
+      "observedAt": 1790683133491,
+      "lastRequestTokens": 221699,
+      "lastInputTokens": 221447
     }
   },
   "runtimeFingerprint": {
@@ -43,10 +43,10 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 7,
-    "tokens": 624299,
+    "turns": 8,
+    "tokens": 626388,
     "cost": 0,
-    "runtimeMs": 79762,
+    "runtimeMs": 85570,
     "seenMessageIDs": [
       "msg_0ea911ff0001xqHQnFmbF3aICp",
       "msg_0ea980dc20015f3lGA67tXRaUK",
@@ -54,7 +54,8 @@
       "msg_0eaae9de0001Pl6Qy08lWTuxb3",
       "msg_0eabb114c0011swJz6bSgFfGwB",
       "msg_0eacd9dc0001NpvI0XwA252B4I",
-      "msg_0ecf211f5001nujl702C3l4B8b"
+      "msg_0ecf211f5001nujl702C3l4B8b",
+      "msg_0ecfd69670014qmYHmG3TDmCBH"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -64,8 +65,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 50,
-  "observedProgressRevision": 46,
+  "progressRevision": 56,
+  "observedProgressRevision": 51,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
     "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
@@ -116,45 +117,16 @@
     "shell-worktree:745a4f43e8c7f5a1f641744a4b4253c86df121a9b282fe9ea8ed52fe833f9d7c",
     "shell-worktree:bd1f141dddee67d62534511600f83d257170c065e4b0b4534d9dd758657be19f",
     "shell-worktree:8f30f89a45081ef3756681255a5cc3f3b7b64998906e5138a121db2831b0d3c1",
-    "shell-worktree:98b6b4b77218fb563c0aba8177335743a108a4c214119d0cf4e2505f59f770ca"
+    "shell-worktree:98b6b4b77218fb563c0aba8177335743a108a4c214119d0cf4e2505f59f770ca",
+    "shell-worktree:6c621c79d9e75bdf19779b13c277458892abe9c7f3d1dcbb7d8b65517c7b6fb8",
+    "file:src/min_agent/shadow.py:0359faca41b62382271d4536e69f5d56f3c60a9dd2db9f4b04ea5932d0acf8f8",
+    "shell-worktree:462b1c53d49b3160b4eaeca32fb0af605154e2206df9ccd4bef36fadffaf5d0f",
+    "shell-worktree:22ebebcdd5299966df6a8511e30b177a8ebaed247c7e9f1c600601fc44aa967d",
+    "shell-worktree:40cd98da06c6376b5402ef3df635a8773d5102a4b8623a602b030bf85f09276e",
+    "shell-worktree:177c9ffce2d63aaf137541bb2bdebfd7a7adbf00e0a98e8851cae991b89c36a2"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790642212797,
-      "summary": "Fact-level audit complete and written to docs/superpowers/SYSTEM_AUDIT.md. Classification of every component against real call paths, not names. Key findings: (1) the production chain is intact through fill and PnL attribution (+564.39, broker-confirmed) and stops dead after that - counterfactual evaluation, offline validation, shadow trading, experiment registry, champion-challenger, strategy lineage and cost accounting have zero source hits; (2) the knowledge base's strategy-relevance filter is dead logic - source_refs hold cycle UUIDs and tags hold generic words, so it can never match and the fallback feeds every decision the same 5 near-identical artifacts; (3) fees are 0.0 across all 24 fills, so the cost code path has never run with real data; (4) 27 strategies with 9 near-duplicate BUY variants, because duplicate detection only covers id and TREND_FOLLOW parameters. Deleted 24 files: src/voyager_quant (dead, contains exec() on model-generated Python), skill_library (its content), tools/legacy (10/12 unreferenced, full_ingest broken and aimed at the live journal), plus two never-read window-hash fields and two never-read submitted-order params. Merged three drifted copies of the evidence-batch reader into one. 405 passed, audit 91/91.",
-      "next": "Per the delete→merge→simplify→reuse→repair→add ordering, next is the ADD-last step the objective defines as the actual missing infrastructure: the counterfactual ledger for HOLD decisions (good hold / missed alpha / avoided loss / false trade), then a unified `make verify` gate covering the 13 named check classes with FAIL=0. Before that, the knowledge-base relevance filter needs either repairing so it matches or deleting with that stated, and the 9 near-duplicate BUY strategies need an evidence-based dedupe."
-    },
-    {
-      "time": 1790642274805,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790642414869,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790642750489,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790642799110,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790642808948,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790642990000,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790643026543,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -369,11 +341,46 @@
       "time": 1790682322407,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790682402777,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790682413851,
+      "summary": "Re-read the FULL objective (it had been truncated in earlier turns) and it changes the picture. Two things: (1) it names a Phase 0-8 ordering with a strict \"only enter a phase when the previous one's exit criteria are met\" rule, and Phase 4/5/6 are backtest+walk-forward+cost+leakage+stress+overfitting, then SHADOW TRADING, then evidence-gated probation. (2) I WITHDREW my earlier \"shadow is merged into probation\" decision — the reasoning was sound but it was wrong against this contract, which names shadow as its own phase. Shadow is recorded as missing; Phase 5 is outstanding. The underlying observation is kept as a constraint for when it is built: a shadow executor must swap only the execution sink, not fork the decision path. Phase 0-3 confirmed met; Phase 8 correctly not started. Crash recovery is now PROVEN rather than configured: SIGKILL with no cleanup, NRestarts 0->1, new MainPID, pidfile rewritten, 920 cycles + 5782 events re-read cleanly, journal re-parsed with zero corrupt lines, daemon resumed journalling within a minute. Phase 4 built in a separate src/min_agent/research/ package with a make verify check that FAILS if any production module imports it, so production/research separation is machine-checked rather than conventional. The backtest executes the declared StrategySpec rule (HOLD_BASELINE control, FIXED_SIZE, TREND_FOLLOW), long-only matching the production executor, cost charged both sides because the paper broker charged zero. Three of my own controls were wrong first time and the module says so: the leakage guard only watched the loop index go backwards (which no rule could do, so it could not have detected the only leak that matters) and now re-asks each rule truncated to its decision bar, with a test that plants a peek-ahead rule; the overfitting control computed threshold/trials where threshold=0.0 so 0.0/40=0.0 and searching 40 variants cost nothing, and now raises required independent OOS trades on a sqrt schedule; one jitter seed is not a stress test and the first seed made a long position BETTER (+28.97 vs +26.14 baseline) so the worst of five is kept and they span +8.74 to +39.61. \"Overfitted\" was being returned for strategies with one trade per fold, which claims generalisation without enough trades to generalise from, so thin data is now reported as thin first. Honest result over all 27 strategies and 467 distinct real observations: 27 of 27 INSUFFICIENT, 3 OOS trades against the 10 required for 27 trials — not one strategy in the registry has enough out-of-sample evidence to be called anything. That agrees with three independent lines of evidence already on record (3 strategies with verified PnL, hold quality 0.687, 27/27 statistically unproven). Also found a real dedupe blind spot: behavioural_signature returned None for every TREND_FOLLOW so no TREND_FOLLOW was ever compared to any other and the zoo check was blind to all twelve; it now returns a signature, exposing 14 redundant copies including three exact duplicates (trend-follow-20260611-001/-002/-003 at ref 100.0 thr 0.02, -004/-005 at 150.0/0.01), and a semantic duplicate — trend-follow-sell-002 is named \"Trend Following Sell Strategy\" but its kind is FIXED_SIZE with no threshold or reference price, so it does not trend-follow at all and is identical to fixed-size-sell-001 apart from a confidence value. Commit a3f0b61. make verify: 19 classes, 0 failed, 531 distinct tests, 91/91 audit, doctor OK, exit 0.",
+      "next": "Next in the objective's own order is Phase 5, shadow trading, which the contract names as a distinct stage before evidence-gated probation. Build it as a mode that reuses the existing loop and swaps only the execution sink, so the decision path being validated is the same path production uses rather than a divergent copy. Also still open from the full objective: champion-challenger (absent), strategy lineage (absent), failed-experiment/trial records (the experiment view shows admission verdicts but no attempt ledger), model-prediction-vs-actual alignment (absent), unrealized PnL and regime context, and the doc deliverables 5-8 (per-phase tasks and exit criteria, PnL cause attribution across signal/model/strategy/allocation/execution/cost/regime, proven-vs-design-target, and the next 1-3 changes). Phase 7 cannot complete without market hours."
+    },
+    {
+      "time": 1790682463383,
+      "summary": "[host:tool:write] Project file content changed: src/min_agent/shadow.py",
+      "next": ""
+    },
+    {
+      "time": 1790682481895,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790682807494,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790682832812,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790682917751,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 367,
+  "storageGeneration": 423,
   "createdAt": 1790641773516,
-  "updatedAt": 1790682376495,
+  "updatedAt": 1790683133491,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:d9b69ac2c1f8b0bbc90c47d5bb5615b71ffc238325b2b248340f3a260feb8032",
