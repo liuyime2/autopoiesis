@@ -59,6 +59,9 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_evaluator.py": ("pnl-accounting", "replay-determinism"),
     "test_executor.py": ("broker-reconciliation", "guardian-bypass-prevention"),
     "test_experiment_registry.py": ("lifecycle-invariants", "data-integrity"),
+    "test_lineage.py": (
+        "lifecycle-invariants", "data-integrity", "point-in-time-no-leakage",
+    ),
     "test_research_backtest.py": (
         "point-in-time-no-leakage", "pnl-accounting", "lifecycle-invariants",
     ),
@@ -333,6 +336,37 @@ def check_shadow_cannot_count_as_executed() -> Result:
     return Result(
         "shadow-not-executed", FAIL if problems else PASS, detail
     )
+
+
+def check_doctor_checks_are_all_reachable() -> Result:
+    """Every `_check_*` function must be called from the governance entry point.
+
+    Written after adding a doctor check whose function was defined and never
+    invoked - the anchor it was inserted against did not match, and nothing
+    complained. A check that is defined but not called is the "implemented but
+    unused" category the whole audit exists to eliminate, and it is invisible in
+    every other way: the module imports cleanly, the tests pass, and the report is
+    simply missing a line.
+    """
+    doctor = (SRC / "min_agent" / "doctor.py").read_text()
+    defined = set(re.findall(r"^def (_check_[A-Za-z0-9_]+)\(", doctor, re.M))
+    # A call site is any mention NOT preceded by `def `. Subtracting name *sets*
+    # cannot work here: every called name is also a defined name, so the two sets are
+    # identical and the subtraction empties to nothing - which is what the first
+    # version of this check did, and it reported all 17 checks as unreachable.
+    called = {
+        m.group(1)
+        for m in re.finditer(r"\b(_check_[A-Za-z0-9_]+)\(", doctor)
+        if not doctor[max(0, m.start() - 4):m.start()].endswith("def ")
+    }
+    unreachable = sorted(defined - called)
+
+    detail = (
+        f"all {len(defined)} doctor checks are called"
+        if not unreachable
+        else f"defined but never called: {unreachable}"
+    )
+    return Result("doctor-checks-reachable", FAIL if unreachable else PASS, detail)
 
 
 def check_data_integrity() -> Result:
@@ -667,6 +701,7 @@ def main() -> int:
     results.append(check_docs_not_stale())
     results.append(check_production_research_separation())
     results.append(check_shadow_cannot_count_as_executed())
+    results.append(check_doctor_checks_are_all_reachable())
     results.append(check_syntax_import())
     results.append(check_data_integrity())
     results.append(check_shadow_live_consistency())

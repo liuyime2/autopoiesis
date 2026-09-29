@@ -836,3 +836,80 @@ silently stop the lifecycle from ever advancing.
   may legitimately fire, so a test that conflates them passes for the wrong reason
   and hides which guard did the work. They now assert `new_lifecycle != "ACTIVE"`,
   which is the property the contract actually cares about.
+
+## 21. Lineage, search effort, champion–challenger
+
+Three requirements from the objective, none of which the system recorded.
+
+**Lineage did not exist.** `StrategySpec` has no lineage field at all — the fields are
+`strategy_id`, `name`, `kind`, `symbols`, `parameters`, `max_position_value`,
+`enabled`, `lifecycle`, `created_at`, `rationale` — so nothing linked a strategy back
+to the failure it was proposed to fix. The link does exist in the journal: the
+curriculum event carries the exploration summary that motivated the candidate and the
+`task_id` it came from, so the view can be derived rather than stored.
+
+**Search effort left no trace.** The live journal holds 69 proposals across 63 task
+ids, and `task-20260611-002` produced **three** variants. That is a search. Keeping
+the best of three and reporting it as though it were the only candidate is selection
+bias, and it is invisible unless the trial count is recorded. `search_effort` now
+reports proposals, distinct tasks, how many tasks searched, and the largest number of
+variants any single task produced.
+
+**No champion existed.** The registry held two ACTIVE strategies and no way to say
+which was the benchmark. The champion is now designated from **broker-verified
+strategy-level PnL only** — currently `fixed-size-buy-001` at +120.37, the highest of
+the two ACTIVE strategies carrying verified positive PnL. Naming one from cycles, or
+from an in-sample backtest, or from the model's opinion would be choosing a benchmark
+on the same evidence the system already distrusts, so with nothing verified the
+answer is `None` and the report says why.
+
+### 21.1 What it found on the live journal
+
+```
+champion: fixed-size-buy-001 (+120.37 verified, highest of 2 ACTIVE)
+candidates: 33 from 31 tasks; 1 task searched, max 3 variants
+33 of 33 candidates cannot state what observation motivated them
+```
+
+**Not one candidate in the system's history recorded the observation that produced
+it.** The proposal schema requires a free-text `rationale` and nothing else, so a
+candidate can be admitted while stating none of the four things the objective requires
+— what observed failure it addresses, how it differs from what exists, what data it
+used, and how many searches it went through. That gap is reported rather than
+backfilled: inventing a justification after the fact would be worse than recording
+that none was given.
+
+### 21.2 Four mistakes, three of them the same shape as before
+
+* The doctor check function was **defined and never called** — the anchor it was
+  inserted against did not match. That is the "implemented but unused" category this
+  audit exists to eliminate, created in the commit hunting for it. A new
+  `make verify` check now asserts every `_check_*` is called from the governance entry
+  point, so the shape cannot recur silently.
+* That reachability check was itself wrong twice. First its regex was double-escaped
+  and matched a literal backslash; then it subtracted name *sets*, which cannot work
+  because every called name is also a defined name, so the sets are identical and the
+  subtraction empties to nothing — it reported all 17 checks as unreachable. It now
+  distinguishes call sites by position rather than by name.
+* `ReflectionMemory` was **used but never imported** in `doctor.py`. The `NameError`
+  was swallowed by the check's own `except Exception`, leaving the results empty and
+  the report claiming `champion=NONE` while a champion was on file. A check that
+  reports "NONE" when the answer exists is worse than no check.
+* The champion reason read "the only such strategy on record" when two strategies
+  qualified. A health report that overstates its own case is the same defect as one
+  that understates it; the wording now counts the qualifiers and names the runner-up,
+  with a test.
+
+## 22. Phase status after this work
+
+| phase | status |
+| --- | --- |
+| 0 startup/restart/recovery/reconciliation | **met**, recovery proven by SIGKILL |
+| 1 real trading and PnL attribution | **met** — 24 orders, 23 closed lots, +564.39 |
+| 2 counterfactual and decision quality | **met** — hold quality 0.687 after cost |
+| 3 strategy/model/experiment registry | **met in part** — champion and lineage now exist; model registry does not |
+| 4 backtest/walk-forward/cost/leakage/stress/overfitting | **met** — 27 of 27 strategies INSUFFICIENT |
+| 5 shadow trading | **met** — real loop, shadow sink, zero PnL leakage |
+| 6 evidence-gated probation | **met** — both PROBATION strategies correctly blocked |
+| 7 prospective promote/pause/retire | **incomplete** — lifecycle runs on evidence, prospective duration not yet accumulated |
+| 8 regime-aware allocation, retraining, evolution | **not started**, correctly |

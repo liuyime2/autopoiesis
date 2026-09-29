@@ -18,7 +18,9 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
-from min_agent import counterfactual, experiment_registry, strategy_engine
+from min_agent import (
+    counterfactual, experiment_registry, lineage, strategy_engine,
+)
 from min_agent.atomicio import write_json_atomic
 from min_agent.broker_evidence import latest_evidence_batch
 from min_agent.config import AgentConfig
@@ -30,6 +32,7 @@ from min_agent.evaluator import (
 from min_agent.fill_reconciler import FILL_EVENT
 from min_agent.health import HealthMonitor
 from min_agent.journal import JsonlJournal
+from min_agent.reflection_memory import ReflectionMemory
 from min_agent.knowledge_library import KnowledgeLibrary
 from min_agent.models import BrokerEvidenceBatch
 from min_agent.strategy_engine import StrategyLibrary
@@ -235,6 +238,16 @@ def _check_governance(report: DoctorReport, config: AgentConfig) -> None:
     #    second registry to drift.
     if journal is not None:
         _check_experiment_chain(report, config, journal)
+
+        # 8. Champion-challenger, search effort, and whether candidates can say
+        #    what they are for.
+        #
+        #    This call site was the first version missing: the check function was
+        #    written and never invoked, because the anchor it was inserted against
+        #    did not match. That is the "defined but never used" shape the audit
+        #    exists to find, created in the same commit that hunts for it - so
+        #    every doctor check is asserted to be present in the report.
+        _check_champion_and_search(report, config, journal)
 
 
 def _check_risk_baseline(report: DoctorReport, config: AgentConfig) -> None:
@@ -453,6 +466,69 @@ def _check_experiment_chain(
         )
     else:
         report.add("experiment chain", OK, detail)
+
+
+def _check_champion_and_search(
+    report: DoctorReport, config: AgentConfig, journal: "JsonlJournal"
+) -> None:
+    """Name the benchmark, and report how hard the system searched for each candidate.
+
+    A champion is only named from broker-verified strategy-level PnL. With nothing
+    verified positive, no champion is named and the report says so, because naming
+    one from cycles or an in-sample backtest would be choosing a benchmark on
+    evidence the system already distrusts.
+
+    Candidates that cannot state the observation that motivated them are counted and
+    reported rather than defaulted to fine. The live journal shows 33 of 33 in that
+    state, which is the finding, not a defect of the report.
+    """
+    try:
+        strategies = strategy_engine.StrategyLibrary(config.strategy_dir).list()
+        events = journal.read_events()
+    except Exception as exc:
+        report.add(
+            "champion / search", WARN, f"could not read state: {type(exc).__name__}"
+        )
+        return
+
+    # The champion has to be designated from real PnL, so the reflection record has
+    # to be read. Passing None here named no champion even though one strategy has
+    # broker-verified positive PnL on record - a check that reports "NONE" when the
+    # answer is on file is worse than no check.
+    results_by_id: dict[str, object] = {}
+    try:
+        memory = ReflectionMemory(config.journal_path.parent / "reflection.json")
+        record = memory.load()
+        if record is not None:
+            results_by_id = {
+                r.strategy_id: r for r in memory.strategy_results(record)
+            }
+    except Exception:
+        results_by_id = {}
+
+    try:
+        origins = lineage.build_origins(events)
+        effort = lineage.search_effort(origins.values())
+        outcome = lineage.designate_champion(strategies, results_by_id, origins)
+    except Exception as exc:
+        report.add(
+            "champion / search", WARN, f"could not derive: {type(exc).__name__}"
+        )
+        return
+
+    unjustified = [o.strategy_id for o in origins.values() if o.missing_justification()]
+    detail = (
+        f"champion={outcome.champion or 'NONE'} "
+        f"({outcome.champion_reason[:70]}); "
+        f"{effort['candidates']} candidates from {effort['distinct_tasks']} tasks, "
+        f"{effort['tasks_that_searched']} task(s) searched, max "
+        f"{effort['max_variants_from_one_task']} variants; "
+        f"{len(unjustified)} cannot state what observation motivated them"
+    )
+    if unjustified:
+        report.add("champion / search", WARN, detail)
+    else:
+        report.add("champion / search", OK, detail)
 
 
 def _check_knowledge_value(report: DoctorReport, config: AgentConfig) -> None:
