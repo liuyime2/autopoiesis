@@ -223,7 +223,17 @@ def test_lifecycle_manager_promotes_probation_after_successful_exposure():
     strategy = make_spec(strategy_id="trial", kind="FIXED_SIZE", lifecycle="PROBATION", action="BUY", quantity=1)
     result = StrategyResult(strategy_id="trial", cycles=3, submitted_orders=3, rejected_orders=0, errors=0, score=1.0, evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=3)
 
-    [decision] = manager.review([strategy], [result])
+    # Phase 6: this strategy has acted and has clean operational metrics, but it has
+    # no verifiable outcome yet. It is not promoted - the contract requires evidence,
+    # not merely the absence of trouble. With decision evidence it is.
+    from min_agent.offline_validation import OfflineValidationResult
+    assert manager.review([strategy], [result]) == []
+
+    evidence = OfflineValidationResult(
+        strategy_id="trial", verdict="PASS_SCREENED", reason="screened",
+        decisions=12, scored=12, good_holds=9, good_hold_ratio=0.75,
+    )
+    [decision] = manager.review([strategy], [result], {"trial": evidence})
 
     assert decision.new_lifecycle == "ACTIVE"
 
@@ -699,12 +709,20 @@ def test_pnl_does_not_shorten_probation():
     assert StrategyLifecycleManager().review([strategy], [result]) == []
 
 
-def test_no_closed_lot_does_not_block_promotion_forever():
+def test_no_closed_lot_needs_decision_evidence_not_operational_metrics():
     """A strategy with nothing to close has no PnL to be judged on, so promotion
-    falls back to the operational metrics rather than leaving it in probation
-    indefinitely."""
+    needs the *other* verifiable evidence: the counterfactual verdicts for the
+    decisions it actually produced.
+
+    This test previously asserted the opposite. It claimed that with no closed lot
+    promotion "falls back to the operational metrics", which promoted a strategy for
+    having not errored - the exact promotion-without-evidence the objective forbids
+    in Phase 6. The concern that motivated it still holds and is asserted below: with
+    evidence present the strategy is promoted, so probation is a gate and not a freeze.
+    """
     from min_agent.evaluator import PNL_EVIDENCE_MISSING
     from min_agent.models import StrategyResult
+    from min_agent.offline_validation import OfflineValidationResult
     from min_agent.strategy_engine import StrategyLifecycleManager
 
     strategy = StrategySpec(
@@ -726,18 +744,23 @@ def test_no_closed_lot_does_not_block_promotion_forever():
         strategy_fault_rejections=0,
         pnl_evidence=PNL_EVIDENCE_MISSING,
     )
+    manager = StrategyLifecycleManager()
 
-    decisions = StrategyLifecycleManager().review([strategy], [result])
+    # Five submitted orders and zero errors is an absence of trouble, not evidence of
+    # value, so it does not promote.
+    assert manager.review([strategy], [result]) == []
+
+    # With decision-quality evidence the same strategy is promoted.
+    evidence = OfflineValidationResult(
+        strategy_id="no-lots", verdict="PASS_SCREENED",
+        reason="screened through", decisions=14, scored=14, good_holds=10,
+        good_hold_ratio=10 / 14,
+    )
+    decisions = manager.review([strategy], [result], {"no-lots": evidence})
 
     assert len(decisions) == 1
     assert decisions[0].new_lifecycle == "ACTIVE"
-    assert "362" not in decisions[0].reason
-
-
-# ---------------------------------------------------------------------------
-# The strategy zoo. Nine of thirteen selectable strategies were behaviourally
-# identical, so the library looked like a broad ensemble while being one strategy.
-# ---------------------------------------------------------------------------
+    assert "submitted order" in decisions[0].reason
 
 
 def _dup(strategy_id, *, kind="FIXED_SIZE", action="BUY", quantity=1,
@@ -937,3 +960,134 @@ def test_a_trend_follow_with_non_numeric_parameters_has_no_signature():
     broken = _trend("broken", 100.0)
     broken.parameters.pop("threshold_pct")
     assert behavioural_signature(broken) is None
+
+# --------------------------------------------------------------------------
+# Phase 6: promotion is evidence-gated
+# --------------------------------------------------------------------------
+
+def _probation_spec(strategy_id="p1", action="BUY"):
+    return make_spec(
+        strategy_id=strategy_id, kind="FIXED_SIZE", lifecycle="PROBATION",
+        action=action, quantity=1,
+    )
+
+
+def _clean_result(strategy_id="p1", **over):
+    from min_agent.models import StrategyResult
+    base = dict(
+        strategy_id=strategy_id, cycles=5, submitted_orders=5, rejected_orders=0,
+        skipped_orders=0, errors=0, score=1.0, trade_attempts=5,
+        strategy_fault_rejections=0,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+    base.update(over)
+    return StrategyResult(**base)
+
+
+def _evidence(verdict="PASS_SCREENED", scored=12, strategy_id="p1"):
+    from min_agent.offline_validation import OfflineValidationResult
+    return OfflineValidationResult(
+        strategy_id=strategy_id, verdict=verdict, reason="test",
+        decisions=scored, scored=scored, good_holds=max(0, scored - 3),
+        good_hold_ratio=(max(0, scored - 3) / scored) if scored else None,
+    )
+
+
+def test_a_strategy_that_never_traded_is_not_promoted_however_clean_it_looked():
+    """Five cycles, zero errors, zero rejections - and it never did anything. A
+    strategy with no orders has produced no evidence of value, and the absence of
+    trouble is not evidence."""
+    manager = StrategyLifecycleManager(min_active_cycles=3)
+    result = _clean_result(submitted_orders=0, trade_attempts=0)
+
+    decisions = manager.review([_probation_spec()], [result], {"p1": _evidence()})
+
+    # Asserting "not ACTIVE" rather than "no decision" on purpose: the degenerate
+    # exploration guard may legitimately fire here, and a test that conflates the two
+    # would pass for the wrong reason and hide which guard did the work.
+    assert all(d.new_lifecycle != "ACTIVE" for d in decisions), decisions
+
+
+def test_absent_evidence_blocks_promotion_rather_than_defaulting_to_it():
+    """The direction that matters. No verdict yet reads as 'not yet', never as
+    'assumed fine' - which is precisely what the version this replaced did."""
+    manager = StrategyLifecycleManager(min_active_cycles=3)
+    for kwargs in ({}, {"p1": _evidence(verdict="")}):
+        decisions = manager.review([_probation_spec()], [_clean_result()], kwargs or None)
+        assert all(d.new_lifecycle != "ACTIVE" for d in decisions), (kwargs, decisions)
+
+
+def test_an_inconclusive_verdict_does_not_promote():
+    """INCONCLUSIVE means the screen could not tell. Promoting on it would read
+    ignorance as a pass, which is the error this whole gate exists to prevent."""
+    manager = StrategyLifecycleManager(min_active_cycles=3)
+    verdict = "INCONCLUSIVE_INSUFFICIENT_EVIDENCE"
+    decisions = manager.review(
+        [_probation_spec()], [_clean_result()], {"p1": _evidence(verdict=verdict)}
+    )
+    assert all(d.new_lifecycle != "ACTIVE" for d in decisions), decisions
+
+
+def test_a_rejected_verdict_does_not_promote():
+    manager = StrategyLifecycleManager(min_active_cycles=3)
+    decisions = manager.review(
+        [_probation_spec()], [_clean_result()],
+        {"p1": _evidence(verdict="REJECT_POOR_DECISIONS")},
+    )
+    assert all(d.new_lifecycle != "ACTIVE" for d in decisions), decisions
+
+
+def test_too_few_scored_decisions_does_not_promote():
+    """A handful of decisions is not enough to judge, even when none of them was
+    wrong."""
+    manager = StrategyLifecycleManager(min_active_cycles=3)
+    decisions = manager.review(
+        [_probation_spec()], [_clean_result()], {"p1": _evidence(scored=3)}
+    )
+    assert all(d.new_lifecycle != "ACTIVE" for d in decisions), decisions
+
+
+def test_a_clean_strategy_with_evidence_is_promoted():
+    """The gate must be satisfiable. A gate that nothing can pass is a freeze, and
+    would silently stop the lifecycle from ever advancing."""
+    manager = StrategyLifecycleManager(min_active_cycles=3)
+    [decision] = manager.review(
+        [_probation_spec()], [_clean_result()], {"p1": _evidence()}
+    )
+
+    assert decision.new_lifecycle == "ACTIVE"
+    assert "submitted order" in decision.reason
+
+
+def test_the_gate_states_what_is_missing():
+    """A gate that can only say no leaves the journal unable to explain why a
+    strategy is stuck."""
+    manager = StrategyLifecycleManager(min_active_cycles=3)
+    reason = manager._promotion_evidence_gate(None)
+    assert reason and "no offline validation evidence" in reason
+
+    reason = manager._promotion_evidence_gate(
+        _evidence(verdict="INCONCLUSIVE_INSUFFICIENT_EVIDENCE")
+    )
+    assert reason and "not a pass" in reason
+
+
+def test_broker_verified_pnl_still_promotes_without_offline_evidence():
+    """The evidence gate supplements PnL, it does not replace it. A strategy with a
+    closed lot and verified PnL has the strongest evidence available and must not be
+    held back by a screen that has nothing to say."""
+    from min_agent.evaluator import PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+    from min_agent.models import StrategyResult
+
+    result = StrategyResult(
+        strategy_id="p1", cycles=5, submitted_orders=5, rejected_orders=0,
+        skipped_orders=0, errors=0, score=1.0, trade_attempts=5,
+        strategy_fault_rejections=0, realized_pnl=120.0,
+        pnl_evidence=PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+    manager = StrategyLifecycleManager(min_active_cycles=3)
+    [decision] = manager.review([_probation_spec()], [result])
+
+    assert decision.new_lifecycle == "ACTIVE"
+    assert "broker-verified realized PnL" in decision.reason

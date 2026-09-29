@@ -272,6 +272,36 @@ class AgentDaemon:
         if result.rejected:
             self._apply_offline_rejection(result)
 
+    def _offline_evidence_by_strategy(self) -> dict[str, object]:
+        """The latest offline validation result per strategy, read from the journal.
+
+        Read rather than recomputed so the lifecycle and the screen cannot disagree:
+        both are looking at the same journalled rows. A strategy with no verdict yet
+        is simply absent, and the gate reads that as "not yet" rather than as a pass.
+        """
+        if self.journal is None:
+            return {}
+        latest: dict[str, object] = {}
+        try:
+            events = self.journal.read_events("OFFLINE_VALIDATION_COMPLETED")
+        except Exception:
+            return {}
+        for event in events:
+            if not event.strategy_id:
+                continue
+            latest[event.strategy_id] = offline_validation.OfflineValidationResult(
+                strategy_id=event.strategy_id,
+                verdict=str(event.payload.get("verdict", "")),
+                reason=str(event.payload.get("reason", "")),
+                decisions=int(event.payload.get("decisions", 0) or 0),
+                scored=int(event.payload.get("scored", 0) or 0),
+                good_holds=int(event.payload.get("good_holds", 0) or 0),
+                missed_alpha=int(event.payload.get("missed_alpha", 0) or 0),
+                false_trades=int(event.payload.get("false_trades", 0) or 0),
+                good_hold_ratio=event.payload.get("good_hold_ratio"),
+            )
+        return latest
+
     def _screen_all_strategies(self) -> None:
         """Screen every strategy in the library, not just new candidates.
 
@@ -854,7 +884,14 @@ class AgentDaemon:
         if reflection is None:
             return
         results = self.reflection_memory.strategy_results(reflection)
-        for decision in self.lifecycle_manager.review(self.strategy_library.list(), results):
+        # Phase 6: promotion is evidence-gated, so the lifecycle review is given the
+        # offline validation verdict for each strategy. Without this the gate would
+        # see "no evidence" for everyone and block every promotion permanently -
+        # a gate that cannot be satisfied is not a gate, it is a freeze.
+        evidence = self._offline_evidence_by_strategy()
+        for decision in self.lifecycle_manager.review(
+            self.strategy_library.list(), results, evidence
+        ):
             old_lifecycle = decision.strategy.lifecycle
             payload = {
                 "old_lifecycle": old_lifecycle,

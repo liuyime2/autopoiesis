@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790683133491,
-      "lastRequestTokens": 221699,
-      "lastInputTokens": 221447
+      "observedAt": 1790683733888,
+      "lastRequestTokens": 252741,
+      "lastInputTokens": 252439
     }
   },
   "runtimeFingerprint": {
@@ -43,10 +43,10 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 8,
-    "tokens": 626388,
+    "turns": 9,
+    "tokens": 628412,
     "cost": 0,
-    "runtimeMs": 85570,
+    "runtimeMs": 96884,
     "seenMessageIDs": [
       "msg_0ea911ff0001xqHQnFmbF3aICp",
       "msg_0ea980dc20015f3lGA67tXRaUK",
@@ -55,7 +55,8 @@
       "msg_0eabb114c0011swJz6bSgFfGwB",
       "msg_0eacd9dc0001NpvI0XwA252B4I",
       "msg_0ecf211f5001nujl702C3l4B8b",
-      "msg_0ecfd69670014qmYHmG3TDmCBH"
+      "msg_0ecfd69670014qmYHmG3TDmCBH",
+      "msg_0ed08e47000190UwmUWfvjYtFw"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -65,8 +66,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 56,
-  "observedProgressRevision": 51,
+  "progressRevision": 61,
+  "observedProgressRevision": 57,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
     "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
@@ -123,40 +124,15 @@
     "shell-worktree:462b1c53d49b3160b4eaeca32fb0af605154e2206df9ccd4bef36fadffaf5d0f",
     "shell-worktree:22ebebcdd5299966df6a8511e30b177a8ebaed247c7e9f1c600601fc44aa967d",
     "shell-worktree:40cd98da06c6376b5402ef3df635a8773d5102a4b8623a602b030bf85f09276e",
-    "shell-worktree:177c9ffce2d63aaf137541bb2bdebfd7a7adbf00e0a98e8851cae991b89c36a2"
+    "shell-worktree:177c9ffce2d63aaf137541bb2bdebfd7a7adbf00e0a98e8851cae991b89c36a2",
+    "shell-worktree:6b626d04dd9a3d05249c56e027435f5e62a8e019ff32d827fecfaeaf0ec4ef84",
+    "shell-worktree:20c2de178caff92a82c52737352f4bc5cfd89e0042b5b295b23343595d34f20e",
+    "shell-worktree:35507bdcfb0e222e79b8b6aeedb19488928cc2b3bfd9bb7e1a83e29afcfb5d38",
+    "shell-worktree:63d5077df5656adb2927583cb1bb665501d58ad78a4d1c9a9118091af6166564",
+    "shell-worktree:c33c3edfd551dd20e8628a46025ff5c7f98b5b7b8df6045aa66bfd5a9536c9a4"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790643026543,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790643041282,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790643095581,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790643114523,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790643154627,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790643164334,
-      "summary": "Completed the delete→merge→simplify→repair phase of the objective's mandated ordering. Deleted 24 files (src/voyager_quant with exec() on model-generated code, skill_library, tools/legacy with 10/12 unreferenced and full_ingest broken); removed 2 dead state fields and 2 never-read params; merged 3 drifted copies of the evidence-batch reader into one. SIMPLIFY: introduced behavioural_signature() and collapsed the strategy zoo from 13 selectable to 5 - 9 were FIXED_SIZE/SPY/BUY/qty=1/5000 differing only in confidence 0.6-0.95, all emitting byte-identical orders; admission now refuses behavioural duplicates and the lifecycle manager retires the weaker copy by verifiable evidence (verified PnL > submitted orders > filled > cycles > oldest). REPAIR: removed the knowledge-base relevance filter that could never match (source_refs hold cycle UUIDs, tags hold generic words, so every decision got the same 5 near-identical lessons), and made content dedupe survive restarts (it was an in-memory set, which is how the library reached 11 artifacts holding 2 distinct statements). Two self-inflicted defects found and fixed: my lifecycle provenance check could not fail (it asked whether *any* decision produced a lifecycle, so one journalled retirement laundered 8 unjournalled ones) and the lifecycle write path saved the file before journalling, so a crash left a silent state change. 412 passed, audit 91/91, doctor RESULT OK.",
-      "next": "Only the ADD step remains. In the objective's order the first addition is the counterfactual ledger for HOLD (good hold / missed alpha / avoided loss / false trade), because 864 of 920 cycles are HOLD with no way to learn whether they were correct, then a unified `make verify` gate covering the 13 named check classes with FAIL=0. Market reopens 09:30 EDT; the daemon should trade a fresh round trip then, which is the first live test of the exposure-cap fix."
-    },
     {
       "time": 1790643224083,
       "summary": "[host:tool:write] Project file content changed: src/min_agent/counterfactual.py",
@@ -376,11 +352,41 @@
       "time": 1790682917751,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790683153781,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790683165540,
+      "summary": "Phase 5 built: shadow trading. MIN_AGENT_SHADOW=1 replaces the final broker call and nothing else - real data, real model, real Guardian, real journal, only submission replaced - so the path being validated is the same path that will trade. A config flag rather than a fourth `mode`, because `mode` already carries a hard safety meaning (anything but paper raises at load) and overloading it with \"paper but pretend\" would blur the line that must stay sharp. The safety property is negative and is the point: a shadow order is NOT a fill. status=SHADOWED is a distinct value rather than a reuse of SKIPPED so any branch that does not know it will not count it as executed; order_id is always None so no reconciliation can match it to a broker order; and a journal of four shadow orders yields realized PnL None, account_return_pct None, closed_lot_count 0, linked_fill_count 0. If a shadow order ever reached the PnL ledger as executed, the account would book profit from money never risked and an unvalidated path would look like the best on record - the most dangerous bug this system could have, because the loop would lie while looking healthy. A make verify check now enforces it across every production module (no module may group SHADOWED with an executed status) - a gate not a test because a new `if` on execution.status is exactly when it would be reintroduced; proven to fire by planting a grouping, and it was itself wrong first run, failing on the Literal that DECLARES the statuses, which is how a gate earns a reputation for noise. Verified against the live journal: SHADOWED, order_id None, one SHADOW_ORDER_INTENT event, cycle count unchanged 920/920 (a shadow intent is not a cycle), account realized PnL None. Three mistakes, all the same shape as before: append_event takes a JournalEvent not kwargs so TypeError was swallowed by a broad except and every shadow intent was silently dropped (third JournalEvent/dict confusion in this work); the event type was missing from JournalEventType raising ValidationError through the same except; and the sink-selection function was anchored on `def _build_loop(` which does not exist in cli.py so both call sites were rewritten and the definition never landed, caught by the startup test as an unbound name. The except is correct and stays (a journal fault must never escalate into a real order) but now records into ShadowExecutor.journal_failures instead of discarding, with a test asserting a healthy journal leaves it empty so the counter cannot rot. Also caught that shadow-live-consistency was still printing \"shadow mode NOT implemented\" after shadow was built because its string was never updated - a check that prints a falsehood is worse than no check; it now verifies shadow is reachable from config, off by default, and that the switch parses strictly (MIN_AGENT_SHADOW=flase raises rather than silently enabling a flag that decides whether real orders reach a broker). Commit 9703d9d. make verify: 20 classes, 0 failed, 545 distinct tests, 91/91 audit, doctor OK, exit 0.",
+      "next": "Phase 5 is now implemented, so the objective's ordering allows Phase 6: evidence-gated probation. Before that can be real, probation must consume the research evidence that now exists - the offline screen plus the walk-forward verdict - rather than a cycle count alone. Also still open from the full objective and not yet started: champion-challenger designation (absent), strategy lineage (absent), failed-experiment/trial records (the experiment view shows admission verdicts but no attempt ledger, so a search that tried 40 variants leaves no trace), model-prediction-vs-actual alignment (absent), unrealized PnL and regime context, and doc deliverables 5-8 (per-phase tasks/exit criteria, PnL cause attribution across signal/model/strategy/allocation/execution/cost/regime, proven-vs-design-target, next 1-3 changes). Note the honest constraint from Phase 4: all 27 strategies are INSUFFICIENT out-of-sample, so no strategy currently has the evidence to be scaled - probation gating should therefore tighten, not widen."
+    },
+    {
+      "time": 1790683209128,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790683255223,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790683294732,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790683453810,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 423,
+  "storageGeneration": 461,
   "createdAt": 1790641773516,
-  "updatedAt": 1790683133491,
+  "updatedAt": 1790683733888,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:d9b69ac2c1f8b0bbc90c47d5bb5615b71ffc238325b2b248340f3a260feb8032",

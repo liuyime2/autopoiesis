@@ -71,18 +71,31 @@ class StrategyLifecycleManager:
         max_error_rate: float = 0.25,
         max_rejection_rate: float = 0.5,
         severe_failure_rate: float = 0.75,
+        #: Scored decisions required before decision quality alone can promote a
+        #: strategy. Matches the offline screen's own minimum, so the two cannot
+        #: disagree about what counts as evidence.
+        min_promotion_scored_decisions: int = 10,
     ):
         self.min_active_cycles = min_active_cycles
         self.max_error_rate = max_error_rate
         self.max_rejection_rate = max_rejection_rate
         self.severe_failure_rate = severe_failure_rate
+        self.min_promotion_scored_decisions = min_promotion_scored_decisions
 
-    def review(self, strategies: list[StrategySpec], results: list[StrategyResult]) -> list[StrategyLifecycleDecision]:
+    def review(
+        self,
+        strategies: list[StrategySpec],
+        results: list[StrategyResult],
+        evidence: dict[str, object] | None = None,
+    ) -> list[StrategyLifecycleDecision]:
         result_by_id = {result.strategy_id: result for result in results}
+        evidence_by_id = dict(evidence or {})
         decisions = []
         for strategy in strategies:
             result = result_by_id.get(strategy.strategy_id)
-            decision = self._review_one(strategy, result)
+            decision = self._review_one(
+                strategy, result, evidence_by_id.get(strategy.strategy_id)
+            )
             if decision is not None:
                 decisions.append(decision)
         decisions.extend(self._retire_behavioural_duplicates(strategies, result_by_id))
@@ -164,7 +177,12 @@ class StrategyLifecycleManager:
                 )
         return decisions
 
-    def _review_one(self, strategy: StrategySpec, result: StrategyResult | None) -> StrategyLifecycleDecision | None:
+    def _review_one(
+        self,
+        strategy: StrategySpec,
+        result: StrategyResult | None,
+        evidence: object | None = None,
+    ) -> StrategyLifecycleDecision | None:
         if strategy.lifecycle in {"BASELINE", "PAUSED", "RETIRED"}:
             return None
         if result is None:
@@ -227,12 +245,80 @@ class StrategyLifecycleManager:
                         f"broker-verified realized PnL {result.realized_pnl:+.2f}"
                     ),
                 )
-            return StrategyLifecycleDecision(strategy, "ACTIVE", "probation completed with acceptable operational metrics")
+            # Phase 6: promotion must rest on verifiable evidence of having *acted*
+            # and of the outcome being *known*.
+            #
+            # The fallback this replaces returned ACTIVE with the reason "probation
+            # completed with acceptable operational metrics" - which means only that
+            # the strategy did not error and was not rejected much. A strategy that
+            # existed, never submitted an order, never opened a lot and therefore
+            # has no PnL of any kind was being promoted to ACTIVE on the grounds
+            # that it had not crashed. The objective requires every promotion to rest
+            # on verifiable evidence rather than on the absence of trouble, and a
+            # strategy with no orders has no evidence at all.
+            #
+            # The remaining path is decision-quality evidence: the counterfactual
+            # ledger's scored verdicts for the decisions this strategy actually
+            # produced. That is a real bar rather than an infinite probation - a
+            # long-only strategy may never close a lot, but its decisions are still
+            # scored against the market.
+            if result.submitted_orders <= 0:
+                return None
+            gate = self._promotion_evidence_gate(evidence)
+            if gate is not None:
+                return None
+            return StrategyLifecycleDecision(
+                strategy,
+                "ACTIVE",
+                (
+                    f"probation completed on {result.cycles} cycles with "
+                    f"{result.submitted_orders} submitted order(s) and decision "
+                    "quality that cleared the evidence gate"
+                ),
+            )
         # A promoted strategy that has stopped acting is just as stuck as one
         # that never started. This used to be checked only during PROBATION.
         if self._is_degenerate_no_exploration(strategy, result):
             return StrategyLifecycleDecision(strategy, "PAUSED", "no exploration evidence over the evaluation window")
         return None
+
+    def _promotion_evidence_gate(self, evidence: object | None) -> str | None:
+        """Why this strategy may not be promoted, or None if it may.
+
+        Returns a *reason* rather than a boolean so the lifecycle journal can say
+        what is missing. A gate that can only say no leaves an operator - or a later
+        reader of the journal - with a strategy stuck in probation and no account of
+        why.
+
+        Deliberately strict about the absent case. No evidence at all is treated as
+        "not yet", never as "assumed fine": this is the direction that is safe, and
+        it is the direction a previous version got wrong by defaulting to promotion.
+        """
+        if evidence is None:
+            return "no offline validation evidence has been computed for it yet"
+        verdict = getattr(evidence, "verdict", None)
+        scored = getattr(evidence, "scored", 0) or 0
+
+        # Volume is checked *before* the verdict. A PASS_SCREENED verdict carrying
+        # three scored decisions promoted a strategy on the first version of this
+        # gate, because the verdict short-circuited the count. The screen does not
+        # issue such a verdict - it requires ten - so the two were believed to agree.
+        # A gate that depends on an upstream invariant nobody documented is one
+        # refactor away from promoting on three data points.
+        if scored < self.min_promotion_scored_decisions:
+            return (
+                f"only {scored} scored decision(s), below the "
+                f"{self.min_promotion_scored_decisions} needed to judge"
+            )
+        if verdict == "PASS_SCREENED":
+            return None
+        if verdict == "REJECT_POOR_DECISIONS":
+            return "offline validation rejected its recorded decisions"
+        return (
+            f"offline validation verdict is {verdict!r}, which is not a pass; "
+            "promotion requires either broker-verified PnL from a closed lot or "
+            "decision quality that cleared the evidence gate"
+        )
 
     def _is_degenerate_no_exploration(self, strategy: StrategySpec, result: StrategyResult) -> bool:
         """A tradable strategy that never tried to trade is not working.

@@ -759,3 +759,80 @@ the rest of this session, after shadow had been built, because the string in it 
 never updated. It now verifies that shadow is reachable from configuration, off by
 default, and that the switch is parsed strictly — `MIN_AGENT_SHADOW=flase` raises
 rather than silently enabling a flag that decides whether real orders reach a broker.
+
+## 20. Phase 6: evidence-gated probation
+
+The promotion path contained this:
+
+```python
+return StrategyLifecycleDecision(strategy, "ACTIVE",
+                                 "probation completed with acceptable operational metrics")
+```
+
+"Acceptable operational metrics" means the strategy did not error and was not
+rejected much. So a strategy that existed, **never submitted an order, never opened a
+lot and therefore had no PnL of any kind** was promoted to ACTIVE on the grounds that
+it had not crashed. The objective requires every promotion to rest on verifiable
+evidence, not on the absence of trouble, and this was the clearest violation of that
+in the system.
+
+### 20.1 What promotion now requires
+
+A strategy leaves PROBATION for ACTIVE only on one of:
+
+1. **Broker-verified realized PnL from a closed lot** — unchanged, and still the
+   strongest evidence available. The gate supplements PnL, it does not replace it.
+2. **Decision-quality evidence** — at least 10 scored counterfactual verdicts for
+   decisions that strategy actually produced, with a non-rejecting verdict. This is
+   the path a long-only strategy takes, since it may never close a lot, so the gate
+   is not an infinite probation.
+
+And it must have **submitted at least one order**. Zero orders means no evidence of
+anything, however clean the operational record.
+
+Absent evidence reads as *not yet*, never as *assumed fine*. That is the direction
+that matters, and it is the direction the previous code got wrong by defaulting to
+promotion.
+
+### 20.2 A hole found in my own gate
+
+The first version of the gate checked the verdict before the evidence volume, so a
+`PASS_SCREENED` verdict carrying three scored decisions promoted a strategy. The
+offline screen does not issue such a verdict — it requires ten — so the two were
+believed to agree, and a test caught it. A gate that depends on an undocumented
+upstream invariant is one refactor away from promoting on three data points, so the
+volume is now checked first and a test pins it.
+
+The gate also states *why* it is refusing. A gate that can only say no leaves the
+journal unable to explain why a strategy is stuck, which is how a strategy sits in
+probation forever with no account of it.
+
+### 20.3 What the tightened gate does to the live registry
+
+Both PROBATION strategies are now blocked, each with the reason recorded:
+
+```
+trend-follow-20260612-006   PROBATION  0 orders  only 0 scored decision(s), below the 10 needed to judge
+trend-follow-sell-002      PROBATION  1 order   only 0 scored decision(s), below the 10 needed to judge
+```
+
+This is the correct and expected consequence. Phase 4 found all 27 strategies
+statistically unproven; Phase 6 now makes the lifecycle agree with that instead of
+promoting on operational tidiness. **The gate tightens rather than widens**, which
+is the only defensible direction given the evidence on record.
+
+The gate is satisfiable, and a daemon test proves it end to end: with no evidence
+journalled the gate refuses, and once an `OFFLINE_VALIDATION_COMPLETED` event exists
+the same strategy is promoted. A gate nothing can pass would be a freeze, and would
+silently stop the lifecycle from ever advancing.
+
+### 20.4 Two mistakes in the tests themselves
+
+* A string replace intended for one test matched three and rewrote all of them,
+  corrupting assertions about broker-verified negative PnL. The file was restored
+  from git and the edit redone by locating the function's exact line range.
+* The rewritten tests asserted `review(...) == []`, conflating "not promoted" with
+  "no decision at all". Other guards — notably the degenerate-exploration check —
+  may legitimately fire, so a test that conflates them passes for the wrong reason
+  and hides which guard did the work. They now assert `new_lifecycle != "ACTIVE"`,
+  which is the property the contract actually cares about.

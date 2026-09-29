@@ -529,6 +529,26 @@ def test_daemon_persists_lifecycle_updates(tmp_path):
 
     daemon.run(max_cycles=1)
 
+    # Phase 6: the daemon is what supplies the evidence the gate needs, so this test
+    # is the end-to-end proof that a promotion can actually happen. Without an
+    # OFFLINE_VALIDATION_COMPLETED event on the journal the gate correctly refuses,
+    # so one is written first - a daemon that could never promote anything would be a
+    # freeze, not a gate.
+    from min_agent.models import JournalEvent
+    from datetime import datetime as _dt, timezone as _tz
+    assert strategy_library.load("trial").lifecycle == "PROBATION", (
+        "no offline evidence was journalled, so the gate must refuse"
+    )
+    journal.append_event(JournalEvent(
+        event_id="cf-trial", event_type="OFFLINE_VALIDATION_COMPLETED",
+        timestamp=_dt.now(tz=_tz.utc), status="SUCCESS",
+        message="screened", strategy_id="trial",
+        payload={"strategy_id": "trial", "verdict": "PASS_SCREENED",
+                 "reason": "screened", "scored": 12, "good_holds": 9,
+                 "good_hold_ratio": 0.75},
+    ))
+    daemon._manage_strategy_lifecycle()
+
     assert strategy_library.load("trial").lifecycle == "ACTIVE"
     event = journal.read_events("STRATEGY_LIFECYCLE_UPDATED")[-1]
     assert event.strategy_id == "trial"
