@@ -1384,3 +1384,45 @@ small but not zero, and the criterion is written on the after-cost number.
 
 This does not change the conclusion in §4: the money is not the model's, and one
 historical window of one symbol is not a track record.
+
+## 31. The per-step contract
+
+The objective requires every step of the loop to have an explicit **input**,
+**output**, **responsibility boundary**, **failure behaviour**, **log**,
+**provenance** and **automated test**. `docs/superpowers/STEP_CONTRACT.md` is that
+table, derived from the code rather than from intent: the signatures are the real
+ones, the event types are the ones the journal actually receives, and the test files
+are the ones that exist.
+
+The **responsibility boundary** column is the one that earns its keep, because most
+of the defects in this audit were not bugs inside a stage — they were a stage doing
+another stage's job:
+
+| defect | boundary crossed |
+| --- | --- |
+| 29 shares sold that the agent never bought | the Guardian checked the **account's** holdings, not the agent's |
+| shadow orders could have been counted as fills | `SHADOWED` was not a distinct status |
+| offline validation could have promoted | no evidence gate on the lifecycle |
+| PnL reported gross | no cost term in the live ledger |
+| `strategy_realized_pnl` read as evidence for the model | the lot → order → source join was never made |
+| a doctor check defined but never called | wired in appearance only |
+
+### 31.1 The gaps the contract documents rather than hides
+
+* **Stage 2 ("understand") has no module of its own.** Capability coverage is computed
+  inside the curriculum path rather than as a separable stage. It works and it is
+  tested, but it could not be replaced independently.
+* **Unrealized PnL is proven only by test**, never against a live open position,
+  because the agent holds none.
+* **Cost is an assumption, not an observation.** The paper broker charged 0.00 on all
+  24 fills; the after-cost figure charges a configured 0.05% round trip and is
+  reported separately from the observed figure.
+* **33 of 33 candidates cannot state what observation motivated them.** The proposal
+  schema requires only free text. Reported in `doctor` rather than enforced, because
+  back-filling a justification after the fact would be worse than recording that none
+  was given.
+
+Every claim in the contract was re-checked against the code rather than written from
+memory — 38 Guardian tests, the `shadow-` client-order prefix, the admission
+write-if-absent guard, the absence of a `understand` module and the cost default all
+verified.

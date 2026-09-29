@@ -9,6 +9,13 @@ Every number here was produced by running the code against the live journal on
 2026-09-28. Nothing is estimated, and where a number is unavailable it says so
 rather than carrying a placeholder.
 
+Companion documents:
+
+* [`../SYSTEM_AUDIT.md`](../SYSTEM_AUDIT.md) — the fact-level audit and the
+  component classification
+* [`STEP_CONTRACT.md`](STEP_CONTRACT.md) — per-step input, output, responsibility
+  boundary, failure behaviour, log, provenance and test for every stage
+
 ---
 
 ## 1. Phase status, with verification results
