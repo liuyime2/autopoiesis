@@ -214,3 +214,40 @@ def test_severity_distinguishes_not_yet_traded_from_traded_and_failed(tmp_path):
         "a model that opened lots and contributed nothing to a positive total is a "
         "real failure and must not be downgraded to keep the gate green"
     )
+
+
+def test_the_cost_cause_reports_the_assumption_rather_than_claiming_no_cost():
+    """The row said 'not a factor' while the ledger charged nothing, and was true.
+    The moment the assumption was added the same row became false - a health report
+    contradicting the number printed beside it."""
+    records = [_cycle("o1", "baseline")]
+    pnl = {
+        "closed_lots": [_lot("o1", 100.0)],
+        "assumed_cost": {"s1": 1.25},
+        "assumed_cost_pct": 0.05,
+        "net_after_assumed_cost": 98.75,
+    }
+    result = attribution.attribute(records, pnl)
+    cost = next(c for c in result.causes if c.cause == "cost")
+
+    assert cost.verdict == "ATTRIBUTABLE"
+    assert "98.75" in cost.evidence
+    assert "not an observation" in cost.evidence
+    assert result.cost_headline().startswith("+98.75 after an assumed")
+
+
+def test_the_after_cost_figure_is_the_one_reported():
+    """The objective's criterion is after-cost. Reporting the gross figure as the
+    headline answers a question nobody asked."""
+    records = [_cycle("o1", "baseline")]
+    pnl = {
+        "closed_lots": [_lot("o1", 564.39)],
+        "assumed_cost": {"s1": 8.67},
+        "assumed_cost_pct": 0.05,
+        "net_after_assumed_cost": 555.72,
+    }
+    payload = attribution.to_payload(attribution.attribute(records, pnl))
+
+    assert payload["after_cost_pnl"] == 555.72
+    assert payload["cost_headline"].startswith("+555.72")
+    assert payload["observed_fees"] == 0.0

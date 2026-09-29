@@ -64,6 +64,13 @@ class Attribution:
     #: conclusion gets drawn from the measurable minority.
     by_regime: dict[str, float] = field(default_factory=dict)
     lots_by_regime: dict[str, int] = field(default_factory=dict)
+    #: Observed broker fees and the configured cost assumption, kept apart. On paper
+    #: the observed figure is 0.00, so the assumption is the only cost in the live
+    #: ledger at all.
+    observed_fees: float = 0.0
+    assumed_cost: float = 0.0
+    assumed_cost_pct: float = 0.0
+    after_cost_pnl: float | None = None
     causes: list[CauseRow] = field(default_factory=list)
 
     @property
@@ -89,6 +96,28 @@ class Attribution:
             f"{self.total_realized_pnl:+.2f} across {self.closed_lots} closed "
             f"lot(s), of which the model contributed {self.model_pnl:+.2f} and the "
             f"baseline {self.baseline_pnl:+.2f}"
+        )
+
+    def cost_headline(self) -> str:
+        """The after-cost figure, or an explanation of why there is not one.
+
+        The objective's criterion is *after-cost* net PnL, so the gross number is not
+        the headline. On paper the broker charges nothing, so this assumption is the
+        only cost that appears in the live ledger at all, and a report that led with
+        the gross figure was reporting a number the criterion does not ask for.
+        """
+        if self.after_cost_pnl is None:
+            return "no after-cost figure: the open side could not be priced"
+        if self.assumed_cost == 0.0:
+            return (
+                f"{self.after_cost_pnl:+.2f} after cost, but no cost assumption is "
+                "configured, so this is the gross figure"
+            )
+        return (
+            f"{self.after_cost_pnl:+.2f} after an assumed "
+            f"{self.assumed_cost_pct:g}% round-trip cost "
+            f"({self.assumed_cost:.2f}); observed broker fees "
+            f"{self.observed_fees:.2f}"
         )
 
     def _top_source(self) -> str:
@@ -123,6 +152,13 @@ def attribute(
         "broker cumulative profit_loss for the WHOLE account over all time, "
         "including non-agent positions such as BIL and TLT"
     )
+    result.observed_fees = sum((pnl_payload.get("strategy_fees") or {}).values())
+    result.assumed_cost_pct = float(pnl_payload.get("assumed_cost_pct") or 0.0)
+    result.assumed_cost = sum(
+        (pnl_payload.get("assumed_cost") or {}).values()
+    )
+    after = pnl_payload.get("net_after_assumed_cost")
+    result.after_cost_pnl = None if after is None else float(after)
 
     by_order = {
         record.execution.order_id: record
@@ -200,12 +236,25 @@ def _classify(a: Attribution) -> list[CauseRow]:
             f"{top[0]} at {top[1]:+.2f}",
         ))
 
-    if a.fees == 0.0 and a.closed_lots:
+    # Reported against the after-cost figure, not the gross one. While the ledger
+    # charged no cost at all this row said "not a factor" and was true; the moment
+    # the assumption was added the same row became false and would have been a
+    # health report contradicting the number printed beside it.
+    if a.assumed_cost > 0.0 and a.closed_lots:
+        rows.append(CauseRow(
+            "cost", "ATTRIBUTABLE",
+            f"an assumed {a.assumed_cost_pct:g}% round-trip cost of "
+            f"{a.assumed_cost:.2f} takes {a.total_realized_pnl:+.2f} gross to "
+            f"{a.after_cost_pnl:+.2f}. The paper broker charged "
+            f"{a.observed_fees:.2f}, so the assumption stands in for what a live "
+            "venue would charge and is not an observation",
+        ))
+    elif a.closed_lots:
         rows.append(CauseRow(
             "cost", "NOT A FACTOR HERE",
-            f"the paper broker charged {a.fees:.2f} in fees across {a.closed_lots} "
-            "closed lots, so this figure is gross of real trading costs and "
-            "overstates what a live venue would have paid",
+            f"the paper broker charged {a.observed_fees:.2f} in fees and no cost "
+            "assumption is configured, so the figure is gross and overstates what a "
+            "live venue would have paid",
         ))
 
     # Every cause the objective names appears, whether or not there is data for it.
@@ -286,6 +335,11 @@ def to_payload(a: Attribution) -> dict:
             "not a loss and must not be read as one."
         ),
         "fees": round(a.fees, 4),
+        "observed_fees": round(a.observed_fees, 4),
+        "assumed_cost": round(a.assumed_cost, 4),
+        "assumed_cost_pct": a.assumed_cost_pct,
+        "after_cost_pnl": a.after_cost_pnl,
+        "cost_headline": a.cost_headline(),
         "by_regime": {k: round(v, 2) for k, v in sorted(a.by_regime.items())},
         "lots_by_regime": a.lots_by_regime,
         "causes": [

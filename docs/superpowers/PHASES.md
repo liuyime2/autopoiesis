@@ -104,13 +104,19 @@ have occurred anywhere inside it.
 | **model** | **NOT THE CAUSE** | **0.00** of +564.39 came from an `llm` or `fallback` decision. All 23 lots were opened by the `baseline` source, on 2026-06-11, 06-12 and 06-18. The LLM path's first decision was 2026-09-28 11:20 — 2.5 months after the last profitable lot |
 | signal | attributable | all 23 lots came from the `baseline` rule, so the PnL belongs to that rule, not to anything the model inferred |
 | strategy | attributable | 3 strategies carry it; largest `tiny-fixed-size-001` at +362.66 |
-| cost | **not a factor here** | the paper broker charged **0.00** across 23 lots. The figure is gross and overstates what a live venue would have paid |
+| cost | **attributable** | an assumed 0.05% round-trip cost of **8.67** takes **+564.39 gross → +555.72 after cost**. The paper broker charged 0.00, so the assumption is not an observation; it is what stands in for a live venue. The after-cost figure is the headline, because that is the criterion the objective states |
 | allocation | partly attributable | 36 orders were refused, so the PnL is what got through, not what was wanted |
 | execution | not a factor here | fill ratio 1.00 — submitted quantity filled in full |
 | regime | **cannot attribute** | §3 |
 
-**The headline profit is not evidence that the model works.** That is the most
-important single statement in this document.
+**The headline profit is not evidence that the model works**, and it is not
+after-cost either. Two separate qualifications on the same number:
+
+* **+564.39 is gross.** After an assumed 0.05% round-trip cost it is **+555.72**. The
+  paper broker charged 0.00 on every fill, so without the assumption the live ledger
+  contained no cost at all and the objective's after-cost criterion was not being
+  measured where it matters.
+* **None of it came from the model.** All 23 lots were opened by the `baseline` source.
 
 The two PnL numbers in the payload are **not** a reconciliation and must never be
 subtracted from each other:
@@ -147,7 +153,7 @@ Different scopes, different periods. The 970.93 difference is not a loss.
 | **that the model adds value** | 0.00 of realized PnL; 67 decisions, **0 scored**, mean confidence 0.276 |
 | **that any strategy has an edge** | 27 of 27 `INSUFFICIENT` out-of-sample |
 | **that hold quality generalises** | 0.687 is 350 in-sample-scored decisions with no walk-forward confirmation |
-| **long-term after-cost risk-adjusted live PnL** | 1 clean session of prospective data; costs are 0.00 because paper |
+| **long-term after-cost risk-adjusted live PnL** | after-cost is now computed live (+555.72 on a single historical window), but 1 clean session of prospective data is not "long-term" and the cost is an assumption, not an observation |
 | **regime awareness** | measured, unusable on this data |
 | **champion–challenger performance** | champion `fixed-size-buy-001` (+120.37) exists; no challenger has been measured against it |
 | **model provenance for the 920 existing decisions** | the field was added after they were written, so all 920 report `UNATTRIBUTED`. They are deliberately **not** back-filled: assigning them the currently configured model would assert a fact about the past that is not known, and would make every future comparison look like evidence for a model that never ran |

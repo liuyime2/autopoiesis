@@ -1329,3 +1329,58 @@ are updated to pass the quantity, with new tests pinning both the refusal and th
 that a SELL within the agent's own holding is still permitted. Blocking every exit
 would be its own kind of danger, so the permission path is tested as deliberately as
 the refusal.
+
+## 30. The live PnL was gross: the after-cost criterion was not being measured
+
+The objective's success criterion is *after-cost* net PnL. Cost was implemented in the
+research backtest and **absent from the live ledger**:
+
+```
+grep -n "commission|slippage|cost_pct" src/min_agent/evaluator.py   ->  no matches
+lots=23  buy_fees=0.0  sell_fees=0.0  total=0.0
+realized (gross of any assumed cost): +564.39
+```
+
+So the number the system reported as its result was gross, and on paper the broker
+charges nothing, so **nothing in the data would ever have revealed it**. The
+backtest's cost model and the counterfactual's cost assumption both existed and both
+looked like cost accounting; the live PnL simply had none.
+
+### 30.1 Observed and assumed are now reported separately
+
+```
+observed fees (paper)    : {}   <- broker says 0.00
+assumed cost pct         : 0.05
+assumed cost            : {'tiny-fixed-size-001': 4.89, 'fixed-size-buy-001': 2.27,
+                           'trend-follow-buy-001': 1.51}
+realized (gross)         : +564.39
+net of observed fees     : +564.39
+AFTER ASSUMED COST       : +555.72
+```
+
+`net_of_fees` and `net_after_assumed_cost` are separate fields on purpose. On paper the
+observed fee is 0.00, and a number called "net" that silently means "gross, because
+the broker is free" is a label that outlives its assumption. On a live venue both
+would apply, and reporting one number would hide which did the work.
+
+The cost is charged on the notional actually traded, both sides, attributed to the
+strategy that opened the lot — the same attribution rule the realized side uses.
+
+### 30.2 A cause row that became false
+
+The attribution's `cost` row said **NOT A FACTOR HERE**, justified by "the paper
+broker charged 0.00, so this figure is gross and overstates what a live venue would
+have paid". That was true while the ledger charged nothing, and the moment the
+assumption was added it became **false** — a health report contradicting the number
+printed beside it. It now reports against the after-cost figure and says plainly that
+the assumption "is not an observation".
+
+### 30.3 The after-cost number is the headline
+
+`doctor` now leads with `AFTER COST: +555.72 after an assumed 0.05% round-trip cost
+(8.67); observed broker fees 0.00`, because +564.39 answers a question the objective
+does not ask. The cost is 8.67 on 564.39 of profit — **1.5% of the gain** — which is
+small but not zero, and the criterion is written on the after-cost number.
+
+This does not change the conclusion in §4: the money is not the model's, and one
+historical window of one symbol is not a track record.

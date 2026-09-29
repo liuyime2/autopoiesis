@@ -384,7 +384,19 @@ class PnLEvidence(BaseModel):
     #: when the open side cannot be priced.
     unrealized_pnl: float | None = None
     net_pnl: float | None = None
+    #: Realized PnL after the *observed* broker fees only. Kept separate from
+    #: `net_after_assumed_cost` because on paper the observed fee is 0.00, and a
+    #: number called "net" that silently means "gross, because the broker is free"
+    #: is the kind of label that outlives its assumption.
     net_of_fees: float | None = None
+    #: Cost charged on top of the observed fees, from an explicit configured
+    #: assumption rather than from the broker. Percent of notional, both sides.
+    assumed_cost_pct: float = 0.0
+    assumed_cost: dict[str, float] = Field(default_factory=dict)
+    #: Realized + unrealized - observed fees - assumed cost. This is the after-cost
+    #: figure the objective's success criterion is written against, so it is
+    #: computed here rather than left to a reader to reconstruct.
+    net_after_assumed_cost: float | None = None
 
     @field_validator("evidence_source")
     @classmethod

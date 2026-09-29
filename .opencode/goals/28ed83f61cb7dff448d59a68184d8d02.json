@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790687556086,
-      "lastRequestTokens": 401404,
-      "lastInputTokens": 400970
+      "observedAt": 1790688176099,
+      "lastRequestTokens": 418065,
+      "lastInputTokens": 417016
     }
   },
   "runtimeFingerprint": {
@@ -43,10 +43,10 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 17,
-    "tokens": 645010,
+    "turns": 18,
+    "tokens": 647699,
     "cost": 0,
-    "runtimeMs": 232664,
+    "runtimeMs": 250086,
     "seenMessageIDs": [
       "msg_0ea911ff0001xqHQnFmbF3aICp",
       "msg_0ea980dc20015f3lGA67tXRaUK",
@@ -64,7 +64,8 @@
       "msg_0ed31340e0018ojfky00M5AEmr",
       "msg_0ed371fe6001uCkJGb0EunDrTW",
       "msg_0ed3bd978001egR6VkgRH6xVaf",
-      "msg_0ed4516840013fEr5QZWpECHPr"
+      "msg_0ed4516840013fEr5QZWpECHPr",
+      "msg_0ed4c981a001awyjYLZkpinIkA"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -74,8 +75,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 92,
-  "observedProgressRevision": 88,
+  "progressRevision": 100,
+  "observedProgressRevision": 93,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
     "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
@@ -168,55 +169,18 @@
     "shell-worktree:234127e868ec3b3efe26220dca50a29577857329ae04991800c05c1203a69a2b",
     "shell-worktree:ca0cea7215c843c16ad846dd56b41484e93dba1c239e0fc66fb959a78ec27996",
     "shell-worktree:0eb7549e485972f7475d222e38551e0e68c8e07f16b7cbab570985713cb2edbe",
-    "shell-worktree:2d6919447448796ba1ff2743b5cf22b29f3a5c13cccd6f246abd12fcefa0af5a"
+    "shell-worktree:2d6919447448796ba1ff2743b5cf22b29f3a5c13cccd6f246abd12fcefa0af5a",
+    "shell-worktree:7a9bcf0853eb37ee174fe50b20923945f09069c3e50ab952d28f52990356b12c",
+    "shell-worktree:5b285184b461d5fde6cd1909dbdb4e65d7e167b83d494fb737ef03665dda3562",
+    "shell-worktree:326385f36790025089c224ecf96ba375102188ea32775cc0b32b84cc1ef9984d",
+    "shell-worktree:ee212a84e54f60d7895b31db83dcca50a1a013737fb91d9ce37464820cadea8e",
+    "shell-worktree:34615b2df4e11b6710ca5241d5295de28e2ab998032fff04bc33fcf89ba08217",
+    "shell-worktree:070210e9c5e7d6a2c081611f8e16dc10a91260174cc8158a780c52b551a0ede2",
+    "shell-worktree:6467b3fd1d70d22549055054dc7c3308a2f8eab44de964dfacdab9a96a2aa136",
+    "shell-worktree:1440cae193423c7c1c82df753515541706ba7674fce224abc3a281b24bbc4691"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790682413851,
-      "summary": "Re-read the FULL objective (it had been truncated in earlier turns) and it changes the picture. Two things: (1) it names a Phase 0-8 ordering with a strict \"only enter a phase when the previous one's exit criteria are met\" rule, and Phase 4/5/6 are backtest+walk-forward+cost+leakage+stress+overfitting, then SHADOW TRADING, then evidence-gated probation. (2) I WITHDREW my earlier \"shadow is merged into probation\" decision — the reasoning was sound but it was wrong against this contract, which names shadow as its own phase. Shadow is recorded as missing; Phase 5 is outstanding. The underlying observation is kept as a constraint for when it is built: a shadow executor must swap only the execution sink, not fork the decision path. Phase 0-3 confirmed met; Phase 8 correctly not started. Crash recovery is now PROVEN rather than configured: SIGKILL with no cleanup, NRestarts 0->1, new MainPID, pidfile rewritten, 920 cycles + 5782 events re-read cleanly, journal re-parsed with zero corrupt lines, daemon resumed journalling within a minute. Phase 4 built in a separate src/min_agent/research/ package with a make verify check that FAILS if any production module imports it, so production/research separation is machine-checked rather than conventional. The backtest executes the declared StrategySpec rule (HOLD_BASELINE control, FIXED_SIZE, TREND_FOLLOW), long-only matching the production executor, cost charged both sides because the paper broker charged zero. Three of my own controls were wrong first time and the module says so: the leakage guard only watched the loop index go backwards (which no rule could do, so it could not have detected the only leak that matters) and now re-asks each rule truncated to its decision bar, with a test that plants a peek-ahead rule; the overfitting control computed threshold/trials where threshold=0.0 so 0.0/40=0.0 and searching 40 variants cost nothing, and now raises required independent OOS trades on a sqrt schedule; one jitter seed is not a stress test and the first seed made a long position BETTER (+28.97 vs +26.14 baseline) so the worst of five is kept and they span +8.74 to +39.61. \"Overfitted\" was being returned for strategies with one trade per fold, which claims generalisation without enough trades to generalise from, so thin data is now reported as thin first. Honest result over all 27 strategies and 467 distinct real observations: 27 of 27 INSUFFICIENT, 3 OOS trades against the 10 required for 27 trials — not one strategy in the registry has enough out-of-sample evidence to be called anything. That agrees with three independent lines of evidence already on record (3 strategies with verified PnL, hold quality 0.687, 27/27 statistically unproven). Also found a real dedupe blind spot: behavioural_signature returned None for every TREND_FOLLOW so no TREND_FOLLOW was ever compared to any other and the zoo check was blind to all twelve; it now returns a signature, exposing 14 redundant copies including three exact duplicates (trend-follow-20260611-001/-002/-003 at ref 100.0 thr 0.02, -004/-005 at 150.0/0.01), and a semantic duplicate — trend-follow-sell-002 is named \"Trend Following Sell Strategy\" but its kind is FIXED_SIZE with no threshold or reference price, so it does not trend-follow at all and is identical to fixed-size-sell-001 apart from a confidence value. Commit a3f0b61. make verify: 19 classes, 0 failed, 531 distinct tests, 91/91 audit, doctor OK, exit 0.",
-      "next": "Next in the objective's own order is Phase 5, shadow trading, which the contract names as a distinct stage before evidence-gated probation. Build it as a mode that reuses the existing loop and swaps only the execution sink, so the decision path being validated is the same path production uses rather than a divergent copy. Also still open from the full objective: champion-challenger (absent), strategy lineage (absent), failed-experiment/trial records (the experiment view shows admission verdicts but no attempt ledger), model-prediction-vs-actual alignment (absent), unrealized PnL and regime context, and the doc deliverables 5-8 (per-phase tasks and exit criteria, PnL cause attribution across signal/model/strategy/allocation/execution/cost/regime, proven-vs-design-target, and the next 1-3 changes). Phase 7 cannot complete without market hours."
-    },
-    {
-      "time": 1790682463383,
-      "summary": "[host:tool:write] Project file content changed: src/min_agent/shadow.py",
-      "next": ""
-    },
-    {
-      "time": 1790682481895,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790682807494,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790682832812,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790682917751,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790683153781,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790683165540,
-      "summary": "Phase 5 built: shadow trading. MIN_AGENT_SHADOW=1 replaces the final broker call and nothing else - real data, real model, real Guardian, real journal, only submission replaced - so the path being validated is the same path that will trade. A config flag rather than a fourth `mode`, because `mode` already carries a hard safety meaning (anything but paper raises at load) and overloading it with \"paper but pretend\" would blur the line that must stay sharp. The safety property is negative and is the point: a shadow order is NOT a fill. status=SHADOWED is a distinct value rather than a reuse of SKIPPED so any branch that does not know it will not count it as executed; order_id is always None so no reconciliation can match it to a broker order; and a journal of four shadow orders yields realized PnL None, account_return_pct None, closed_lot_count 0, linked_fill_count 0. If a shadow order ever reached the PnL ledger as executed, the account would book profit from money never risked and an unvalidated path would look like the best on record - the most dangerous bug this system could have, because the loop would lie while looking healthy. A make verify check now enforces it across every production module (no module may group SHADOWED with an executed status) - a gate not a test because a new `if` on execution.status is exactly when it would be reintroduced; proven to fire by planting a grouping, and it was itself wrong first run, failing on the Literal that DECLARES the statuses, which is how a gate earns a reputation for noise. Verified against the live journal: SHADOWED, order_id None, one SHADOW_ORDER_INTENT event, cycle count unchanged 920/920 (a shadow intent is not a cycle), account realized PnL None. Three mistakes, all the same shape as before: append_event takes a JournalEvent not kwargs so TypeError was swallowed by a broad except and every shadow intent was silently dropped (third JournalEvent/dict confusion in this work); the event type was missing from JournalEventType raising ValidationError through the same except; and the sink-selection function was anchored on `def _build_loop(` which does not exist in cli.py so both call sites were rewritten and the definition never landed, caught by the startup test as an unbound name. The except is correct and stays (a journal fault must never escalate into a real order) but now records into ShadowExecutor.journal_failures instead of discarding, with a test asserting a healthy journal leaves it empty so the counter cannot rot. Also caught that shadow-live-consistency was still printing \"shadow mode NOT implemented\" after shadow was built because its string was never updated - a check that prints a falsehood is worse than no check; it now verifies shadow is reachable from config, off by default, and that the switch parses strictly (MIN_AGENT_SHADOW=flase raises rather than silently enabling a flag that decides whether real orders reach a broker). Commit 9703d9d. make verify: 20 classes, 0 failed, 545 distinct tests, 91/91 audit, doctor OK, exit 0.",
-      "next": "Phase 5 is now implemented, so the objective's ordering allows Phase 6: evidence-gated probation. Before that can be real, probation must consume the research evidence that now exists - the offline screen plus the walk-forward verdict - rather than a cycle count alone. Also still open from the full objective and not yet started: champion-challenger designation (absent), strategy lineage (absent), failed-experiment/trial records (the experiment view shows admission verdicts but no attempt ledger, so a search that tried 40 variants leaves no trace), model-prediction-vs-actual alignment (absent), unrealized PnL and regime context, and doc deliverables 5-8 (per-phase tasks/exit criteria, PnL cause attribution across signal/model/strategy/allocation/execution/cost/regime, proven-vs-design-target, next 1-3 changes). Note the honest constraint from Phase 4: all 27 strategies are INSUFFICIENT out-of-sample, so no strategy currently has the evidence to be scaled - probation gating should therefore tighten, not widen."
-    },
-    {
-      "time": 1790683209128,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790683255223,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -421,121 +385,142 @@
       "time": 1790687400028,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790687577702,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790687592287,
+      "summary": "Diagnosed the 29 unmatched shares and found the most serious defect in the project. Traced back: the agent bought 23 shares, the account held 52, and a single SELL of 52 was approved and filled - liquidating 29 shares, 56%, of a pre-existing SPY position belonging to the account owner. The check that existed was necessary but not sufficient: \"cannot sell more than known holdings\" used the ACCOUNT's holdings, and the account did hold 52. It bounded selling to the account's book - the owner's book plus the agent's - and said nothing about which of those the agent had any right to sell. This is an asymmetry in my own earlier fix: bounding max_total_exposure to the allowlist was justified as \"the agent can only increase exposure by buying allowlist symbols, so bounding the allowlist book bounds everything it is able to do.\" True for increasing, plainly false for decreasing - the agent can reduce the owner's position without limit by selling shares it never bought. Worse, the scoping change made that path MORE reachable, because a symbol the agent had never traded was previously not in its book at all. Everything the reasoning predicted held, which is what makes a one-directional error so hard to notice. Fixed: a SELL is now bounded by what the agent holds, computed in the loop from ORDER_FILL_CONFIRMED events rather than from the account snapshot (the account snapshot being exactly the number that let this happen). When the agent's holding is unknown - no journal, unreadable journal - the SELL is REFUSED, and that direction is deliberate: a missed exit is recoverable since the next cycle retries and the position is unchanged, whereas liquidating someone's position is not. An unreadable journal is recorded in loop._agent_holding_errors rather than swallowed, because a silent None is indistinguishable from a legitimate \"the agent holds nothing\" - exactly the reading that allowed this. BUY is untouched: a probe with no holding yet is the normal case and refusing it would stop the agent ever opening anything. Four existing Guardian tests encoded the old contract, calling review() for a SELL without the agent's holding and asserting approval; they were correct when written and are updated, with new tests pinning both the refusal and the fact that a SELL within the agent's own holding is still permitted, because blocking every exit would be its own kind of danger. Commit e7de021. make verify: 21 classes, 0 failed, 643 distinct tests, 91/91 audit, doctor OK, exit 0.",
+      "next": "Every code item is now done and the two previously-open investigations are resolved: the 29 unmatched shares were diagnosed (not a fill-linkage defect but the agent selling the owner's position, now fixed) and unrealized PnL is implemented. What remains is not code. (1) The market has been closed since 2026-09-28 15:59 EDT, so nothing downstream can advance: Phase 7 prospective promote/pause/retire, the 67 pending llm decisions, the 27-of-27 INSUFFICIENT walk-forward results, and the first model-provenance-stamped decisions all need market hours. (2) The daemon must survive to produce them - the units live at FragmentPath=/run/user/29424/... which is tmpfs and empty after a reboot, and mkdir ~/.config/systemd fails with \"Disk quota exceeded\" despite df showing 1.8T free, because $HOME holds 11G against a per-user quota (.cache 835M, .local 707M). Freeing either would let minictrl install-service write permanent units. Both of those are user actions: freeing the quota and confirming the daemon may run unattended through the 09:30 EDT open. A requirement-by-requirement audit against the objective should be performed once the market has reopened and there is at least one provenance-stamped session on record."
+    },
+    {
+      "time": 1790687704589,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790687761451,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790687929772,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790687994950,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790688061573,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790688098999,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790688172714,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 672,
+  "storageGeneration": 708,
   "createdAt": 1790641773516,
-  "updatedAt": 1790687556086,
+  "updatedAt": 1790688176099,
   "todoPlan": {
     "goalRevision": 1,
-    "digest": "sha256:50db704ffb6165080f608490fb9c3dec3169a964a635f79ba2a709a2180fe16f",
-    "total": 12,
+    "digest": "sha256:c3cb3254c518367f1c8cd88244e84bcbd83597fa1d10bffb8cee3387f57fdc53",
+    "total": 10,
     "pending": 5,
     "inProgress": 1,
-    "completed": 6,
+    "completed": 4,
     "cancelled": 0,
-    "observedAt": 1790685829100,
+    "observedAt": 1790687631142,
     "items": [
       {
-        "key": "todo:ec83ecf52a2016ba18ca3226:1",
-        "content": "Phase 0-2: startup/recovery, real trading + PnL attribution, counterfactual + decision quality",
+        "key": "todo:3761065e3acb83b5ad1cf327:1",
+        "content": "Phase 0-6: all met (recovery, trading, PnL, counterfactual, registries, backtest, shadow, gated probation)",
         "status": "completed",
         "priority": "high",
         "order": 0
       },
       {
-        "key": "todo:7d701460bf05e8cc6923e8cb:1",
-        "content": "Phase 3: strategy registry, derived experiment view, lineage, champion-challenger",
+        "key": "todo:a2a2894f4521c2e7e2d929d5:1",
+        "content": "Deliverables 1-8: architecture, classification, phases, 7-cause attribution, proven-vs-target, next changes",
         "status": "completed",
         "priority": "high",
         "order": 1
       },
       {
-        "key": "todo:73b5fb9c4729452ecc9900a3:1",
-        "content": "Phase 4: backtest + walk-forward OOS + cost + leakage + stress + overfitting control",
+        "key": "todo:15d99a7f3c2e74e889e16323:1",
+        "content": "Diagnose 29 unmatched shares; bound SELL by the agent's own holding (most serious defect found)",
         "status": "completed",
         "priority": "high",
         "order": 2
       },
       {
-        "key": "todo:359d61a8672031a622c21d33:1",
-        "content": "Phase 5: shadow trading reusing the real loop, swapping only the execution sink",
+        "key": "todo:24f63a686e97687091141a81:1",
+        "content": "Unrealized PnL + model provenance registry (last two code items)",
         "status": "completed",
         "priority": "high",
         "order": 3
       },
       {
-        "key": "todo:e1168a60b6de58eaf127e6d6:1",
-        "content": "Phase 6: evidence-gated probation (both PROBATION strategies correctly blocked)",
-        "status": "completed",
+        "key": "todo:63ca5b35a11431311b06b92c:1",
+        "content": "Requirement-by-requirement audit: verify each loop step has input/output/responsibility/failure-behaviour/log/provenance/test",
+        "status": "in_progress",
         "priority": "high",
         "order": 4
       },
       {
-        "key": "todo:c4b4345828814779da37a24e:1",
-        "content": "Deliverable 6: PnL cause attribution across all 7 causes + regime context",
-        "status": "completed",
+        "key": "todo:52e263ca3fc05fe68a67a51b:1",
+        "content": "Check the objective's per-step contract (input, output, responsibility, failure behaviour, log, provenance, test)",
+        "status": "pending",
         "priority": "high",
         "order": 5
       },
       {
-        "key": "todo:4295f75693bd8e1bd20ad2e1:1",
-        "content": "Quantify data sparseness as the binding constraint: cycle interval, uptime, usable observations",
-        "status": "in_progress",
+        "key": "todo:ad9297b9532920d19d548e79:1",
+        "content": "Check fees/slippage/cost accounting is explicit in the live PnL path, not only the backtest",
+        "status": "pending",
         "priority": "high",
         "order": 6
       },
       {
-        "key": "todo:e09e8443e0accc4513fbf848:1",
-        "content": "Deliverable 5: per-phase tasks, dependencies, test methods, exit criteria, verification results",
+        "key": "todo:f6dab7bca55e7552a4866bc3:1",
+        "content": "Record failed-experiment trail for research trials (currently only admission rejections)",
         "status": "pending",
-        "priority": "high",
+        "priority": "medium",
         "order": 7
       },
       {
-        "key": "todo:67fe61af8b8614bfc7e509f1:1",
-        "content": "Deliverable 7: proven capability vs design target",
+        "key": "todo:57d722b25c0951308183665c:1",
+        "content": "Phase 7 + all market-dependent measurements (needs 09:30 EDT open)",
         "status": "pending",
         "priority": "high",
         "order": 8
       },
       {
-        "key": "todo:885d71ca0c3cdc32d031ac2a:1",
-        "content": "Deliverable 8: the next 1-3 highest-value changes only",
+        "key": "todo:7cdec2ce3fc43da143598704:1",
+        "content": "User actions: free $HOME quota for reboot-persistent units; confirm unattended run",
         "status": "pending",
         "priority": "high",
         "order": 9
-      },
-      {
-        "key": "todo:0f2067090be5893c1a3caee6:1",
-        "content": "Unrealized PnL: open lots contribute nothing to the account picture today",
-        "status": "pending",
-        "priority": "medium",
-        "order": 10
-      },
-      {
-        "key": "todo:1500fa54970d6773ff190048:1",
-        "content": "Phase 7: prospective promote/pause/retire (needs market hours)",
-        "status": "pending",
-        "priority": "high",
-        "order": 11
       }
     ],
     "anomalies": [
       {
         "kind": "substantial_replacement",
-        "summary": "Native Todo plan changed substantially in the same Goal revision: 10 removed, 12 added, 0 retained.",
+        "summary": "Native Todo plan changed substantially in the same Goal revision: 12 removed, 10 added, 0 retained.",
         "itemKeys": [
-          "todo:3f238e59da95191ad53a4174:1",
-          "todo:1b55d8e57be7fee61fc29811:1",
-          "todo:92f6a5bbc445e4ec32105b9f:1",
-          "todo:b6e66d6c2e61214807ee91e7:1",
-          "todo:76c7694091b4f41834725996:1",
-          "todo:ae61b2f9e2a84c2f3b7e9b5c:1",
-          "todo:4d0464b762242d0fede32658:1",
-          "todo:3bdb4d39873b4875839436c8:1",
-          "todo:0c1658c60bcb52672f0ad313:1",
-          "todo:de73ca3d0d72b54fd09f2a1f:1",
           "todo:ec83ecf52a2016ba18ca3226:1",
           "todo:7d701460bf05e8cc6923e8cb:1",
           "todo:73b5fb9c4729452ecc9900a3:1",
@@ -547,9 +532,20 @@
           "todo:67fe61af8b8614bfc7e509f1:1",
           "todo:885d71ca0c3cdc32d031ac2a:1",
           "todo:0f2067090be5893c1a3caee6:1",
-          "todo:1500fa54970d6773ff190048:1"
+          "todo:1500fa54970d6773ff190048:1",
+          "todo:3761065e3acb83b5ad1cf327:1",
+          "todo:a2a2894f4521c2e7e2d929d5:1",
+          "todo:15d99a7f3c2e74e889e16323:1",
+          "todo:24f63a686e97687091141a81:1",
+          "todo:63ca5b35a11431311b06b92c:1",
+          "todo:52e263ca3fc05fe68a67a51b:1",
+          "todo:ad9297b9532920d19d548e79:1",
+          "todo:f6dab7bca55e7552a4866bc3:1",
+          "todo:57d722b25c0951308183665c:1",
+          "todo:7cdec2ce3fc43da143598704:1"
         ]
       }
     ]
-  }
+  },
+  "stopReason": "Recovering from provider_retry infrastructure failure; automatic retry scheduled. OpenCode reported session.status=retry for an active Goal turn."
 }

@@ -647,7 +647,8 @@ def _check_pnl_attribution(
     elif net is not None:
         total = f" (net {net:+.2f})"
     detail = (
-        f"{result.headline()}{total} | {causes} | by regime: "
+        f"{result.headline()}{total} | AFTER COST: {result.cost_headline()} "
+        f"| {causes} | by regime: "
         f"{ {k: round(v, 2) for k, v in result.by_regime.items()} }"
     )
     if pnl.get("unmatched_sell_quantity"):

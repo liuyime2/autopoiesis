@@ -311,10 +311,19 @@ def evaluate_cycles(records: list[CycleRecord]) -> EvaluationReport:
     return DeterministicEvaluator().evaluate(records)
 
 
+#: Charged on both sides of a closed lot, as a percent of notional, when no explicit
+#: value is supplied. The paper broker reported 0.00 commission on all 24 fills, so
+#: without an assumption the live PnL is gross and the objective's *after-cost*
+#: criterion is not being measured in the live path at all. This is an assumption,
+#: not an observation, and it is reported separately from the observed fees.
+DEFAULT_ASSUMED_ROUND_TRIP_COST_PCT = 0.05
+
+
 def _pnl_evidence(
     records: list[CycleRecord],
     evidence: BrokerEvidenceBatch | None,
     seeded_fills: Sequence[BrokerFillActivity] = (),
+    assumed_round_trip_cost_pct: float = DEFAULT_ASSUMED_ROUND_TRIP_COST_PCT,
 ) -> PnLEvidence:
     """Attribute broker fills to strategies and match closed lots FIFO.
 
@@ -435,6 +444,11 @@ def _pnl_evidence(
     )
     realized_total = sum(strategy_realized.values()) if strategy_realized else 0.0
     fees_total = sum(strategy_fees.values()) if strategy_fees else 0.0
+    # Charged on the notional actually traded, both sides, per owning strategy. On
+    # paper the observed fees are 0.00, so this is the only cost that appears in the
+    # live ledger at all - and omitting it is what made the headline figure gross.
+    assumed_cost = _assumed_cost_for_lots(closed_lots, assumed_round_trip_cost_pct)
+    assumed_total = sum(assumed_cost.values())
     net = None if unrealized is None else round(realized_total + unrealized, 6)
     net_of_fees = None if net is None else round(net - fees_total, 6)
 
@@ -498,6 +512,11 @@ def _pnl_evidence(
         unrealized_pnl=None if unrealized is None else round(unrealized, 6),
         net_pnl=net,
         net_of_fees=net_of_fees,
+        assumed_cost_pct=assumed_round_trip_cost_pct,
+        assumed_cost=assumed_cost,
+        net_after_assumed_cost=(
+            None if net is None else round(net - fees_total - assumed_total, 6)
+        ),
     )
 
 
@@ -702,6 +721,24 @@ def _open_lots(
                 )
             )
     return tuple(out)
+
+
+def _assumed_cost_for_lots(
+    closed_lots: Sequence[ClosedLotAttribution],
+    pct: float,
+) -> dict[str, float]:
+    """Configured cost charged on the notional actually traded, both sides.
+
+    Separate from the broker's observed fees, which are 0.00 on paper. On a live venue
+    both would apply, and reporting one number for "net" would hide which of them did
+    the work.
+    """
+    out: dict[str, float] = {}
+    for lot in closed_lots:
+        notional = (float(lot.buy_price) + float(lot.sell_price)) * float(lot.quantity)
+        key = lot.strategy_id or "unattributed"
+        out[key] = round(out.get(key, 0.0) + notional * pct / 200.0, 6)
+    return out
 
 
 def _open_lot_quantity(ledger: _LotLedger) -> dict[str, float]:
