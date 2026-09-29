@@ -670,15 +670,27 @@ def _check_pnl_attribution(
     #
     # Downgrading the first case to a warning to turn the gate green would be
     # masking, so the distinction is drawn on evidence rather than on convenience.
+    # Closed lots AND open lots. Counting only closed lots reported "the model has
+    # opened no lots" on the day the model opened ten of them and closed none,
+    # because realized PnL is 0.00 for a position that has not been sold.
     model_lots = sum(
         n for source, n in result.lots_by_source.items()
         if source in {"llm", "fallback_policy_engine"}
     )
+    model_open = result.model_open_quantity
     if result.closed_lots and model_lots > 0 and result.model_pnl <= 0.0:
         report.add(
             "pnl attribution", FAIL,
             detail + f"; the model opened {model_lots} lot(s) and contributed "
             f"{result.model_pnl:+.2f} to a total of {result.total_realized_pnl:+.2f}",
+        )
+    elif result.closed_lots and result.model_pnl == 0.0 and model_open > 0:
+        report.add(
+            "pnl attribution", WARN,
+            detail + f"; the model has {model_open:g} share(s) OPEN and none closed, "
+            "so its realized contribution is 0.00 by construction rather than "
+            "because it did nothing - the closed-lot figure above belongs entirely "
+            "to the baseline rule",
         )
     elif result.closed_lots and result.model_pnl == 0.0:
         report.add(

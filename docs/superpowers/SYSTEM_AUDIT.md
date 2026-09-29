@@ -1549,3 +1549,104 @@ delete this class of file. They are **not** deleted here: `runtime/` is the syst
 evidence store, and a file called `daemon.out.crashed-1324` is the record of a crash
 having happened. Removing evidence because it is unreferenced is exactly the wrong
 instinct, and the fact that nothing reads it is a reason to leave it, not to remove it.
+
+## 33. Day one: the model traded for the first time
+
+The first full session after the reopen. Everything below is a measurement, not a
+projection.
+
+```
+today: 67 cycles  09:30 -> 15:57   median gap 5.5 min   (configured 300s = 5 min)
+actions : 48 HOLD, 19 BUY
+sources : 67 llm
+models  : 67 qwen3.8:27b
+execution: 48 SKIPPED, 10 SUBMITTED, 9 REJECTED
+price   : 766.825 -> 764.18
+llm confidence: n=67 mean=0.626 max=0.82
+```
+
+The cadence fix is confirmed sustained at **5.5 minutes** against a configured 5.
+The model traded for the first time in the system's history: **10 single-share BUYs**
+between 13:59 and 15:04, all under `fixed-size-buy-001`, all at confidence 0.6.
+
+**The Guardian stopped it.** Nine subsequent orders were refused with `max trades per
+day reached` — the daily limit of 10 held, exactly as configured. Orders submitted
+rose 24 → 34, shares filled 75 → 85.
+
+### 33.1 The first live open position, and it proved the machinery
+
+The account now holds **10 SPY shares** — the first position the agent has ever held
+across a cycle boundary. The unrealized-PnL machinery, previously proven only by
+test, was exercised against a real one:
+
+```
+10 open lots, qty 10.0, entries 764.52 - 765.03, marked at 764.18
+unrealized total: +1.05
+net = 564.39 realized + 1.05 unrealized = 565.44
+AFTER COST: +556.77
+```
+
+The sum of the individual lots equals the reported total, and the marking is
+conservative where it should be: a lot whose price is unknown is reported unpriced
+rather than valued at cost.
+
+### 33.2 The first calibration verdict was misleading, and it flattered the model
+
+Calibration moved off `INSUFFICIENT` for the first time and immediately produced
+**`SIGNAL`**:
+
+```
+scored 63  correct 61  base_rate 0.968
+top bucket (0.4-0.6): 97.1%   base rate: 96.8%   margin: +0.3 points
+Brier 0.589                 (a constant 0.5 claim scores 0.25)
+```
+
+`SIGNAL` was wrong. A 0.3-point margin on a 96.8% base rate is rounding, and the
+**Brier of 0.589 is 2.4x worse than always claiming 0.5** — the model's stated
+confidence is not uninformative, it is *worse than useless*: it is right 97% of the
+time while claiming 0.5–0.6, and its one genuinely confident call (0.7) was wrong.
+
+The verdict logic now checks the Brier first and requires a 5-point margin before
+accuracy can produce a `SIGNAL`. Current reading:
+
+```
+MIS-CALIBRATED: Brier 0.589 against the 0.25 a constant 0.5 claim scores, so the
+stated confidence is worse than useless
+```
+
+Two existing tests asserted the weaker, incomplete statement and were updated. One
+claimed `0.9` and `0.6` while being right half the time — that is BOTH "does not
+separate" and "is mis-calibrated", and the Brier branch reports the stronger truth.
+The other fixture used confidence 0.5 on a 97%-accurate model, which is genuinely
+mis-calibrated and correctly tripped that branch first, so it never reached the
+margin test it was written for.
+
+### 33.3 "The model has opened no lots" was false, and the cause was a real gap
+
+`doctor` reported the model as having opened no lots on the day it opened ten. The
+cause was a provenance hole: **`OpenLotAttribution` carried no `buy_order_id`**, so an
+open position could not be traced to the order that created it — the same gap that
+let 29 shares be sold with no BUY to account for.
+
+Open lots now carry `buy_order_id`, `buy_fill_id` and `buy_client_order_id`, and the
+report reads:
+
+> the model has 10 share(s) OPEN and none closed, so its realized contribution is
+> 0.00 **by construction rather than because it did nothing**
+
+That distinction is the whole finding. `0.00` realized meant two very different
+things before this, and the system could not tell them apart.
+
+### 33.4 Where the objective's criterion now stands
+
+| | |
+| --- | --- |
+| after-cost net PnL | **+556.77**, of which the model has contributed **0.00 realized** and **+1.05 unrealized** |
+| the model's first live evidence | 67 decisions, 63 scored, **MIS-CALIBRATED** |
+| decisions | 48 HOLD, 19 BUY proposed, 10 executed, 9 correctly refused by the Guardian |
+| trading days of record | 11 |
+
+The model has now demonstrably *acted* for the first time. It has not yet
+demonstrably *earned* anything: one day, one symbol, one share per order, no closed
+lot, and a confidence that is worse than useless. The honest summary of the day's
+result is that the loop worked and the model has not yet proved it can.

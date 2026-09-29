@@ -42,6 +42,16 @@ MIN_SCORED_DECISIONS = 30
 #: member in it that then reads as a 100% accurate stratum.
 BUCKET_WIDTH = 0.2
 
+#: The top bucket must beat the base rate by this much to count as separating.
+#: Without it, a 96.8% base rate and a 97.1% bucket produce "SIGNAL" on a 0.3 point
+#: difference, which is rounding noise dressed as a finding.
+MIN_MATERIAL_MARGIN = 0.05
+
+#: A Brier score at or above this is worse than always claiming 0.5, which scores
+#: exactly 0.25. Beyond it the stated confidence is not merely uninformative, it is
+#: actively misleading, and the verdict must say so whatever the accuracy says.
+BRIER_UNINFORMATIVE = 0.25
+
 
 @dataclass(frozen=True)
 class CalibrationRow:
@@ -243,8 +253,39 @@ def calibrate(
             f"cleared confidence {min_confidence}, too few to judge whether "
             "confidence means anything"
         )
+    elif report.brier is not None and report.brier >= BRIER_UNINFORMATIVE:
+        # Checked before the accuracy comparison on purpose. A model can be right
+        # almost always and still be badly calibrated, and when the base rate is
+        # extreme the accuracy comparison cannot discriminate at all: the first
+        # non-INSUFFICIENT verdict this system produced was "SIGNAL" on a 0.3 point
+        # margin over a 96.8% base rate, with a Brier of 0.589 - which is 2.4x worse
+        # than always claiming 0.5. The accuracy said nothing; the Brier said the
+        # stated confidence is worse than useless.
+        margin = None
+        if report.top_bucket_accuracy is not None and report.base_rate is not None:
+            margin = report.top_bucket_accuracy - report.base_rate
+        report.verdict = (
+            f"MIS-CALIBRATED: Brier {report.brier:.3f} against the {BRIER_UNINFORMATIVE:.2f} "
+            "a constant 0.5 claim scores, so the stated confidence is worse than "
+            f"useless. Accuracy is {report.base_rate:.1%} and the most confident "
+            f"bucket is {report.top_bucket_accuracy:.1%} (margin "
+            f"{margin:+.1%} if positive), which on a base rate that high cannot "
+            "discriminate anything"
+        )
     elif (
         report.top_bucket_accuracy is not None
+        and report.base_rate is not None
+        and report.top_bucket_accuracy - report.base_rate < MIN_MATERIAL_MARGIN
+    ):
+        report.verdict = (
+            f"NO_SIGNAL: the most confident bucket was right "
+            f"{report.top_bucket_accuracy:.1%} against a {report.base_rate:.1%} base "
+            f"rate, a margin below the {MIN_MATERIAL_MARGIN:.0%} needed to be "
+            "distinguishable from noise"
+        )
+    elif (
+        report.top_bucket_accuracy is not None
+        and report.base_rate is not None
         and report.top_bucket_accuracy <= report.base_rate
     ):
         top = report.top_bucket["range"] if report.top_bucket else "?"

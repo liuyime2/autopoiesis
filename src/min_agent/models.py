@@ -319,6 +319,12 @@ class OpenLotAttribution(BaseModel):
     unrealized_pnl_pct: float | None = None
     opened_at: datetime
     as_of: datetime | None = None
+    #: Which order opened this lot. Without it an open position cannot be traced
+    #: to the decision that created it, which is the same gap that let 29 shares be
+    #: sold with no BUY to account for - an order nobody could follow back.
+    buy_order_id: str | None = None
+    buy_fill_id: str | None = None
+    buy_client_order_id: str | None = None
 
 
 class ClosedLotAttribution(BaseModel):

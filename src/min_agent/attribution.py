@@ -64,6 +64,12 @@ class Attribution:
     #: conclusion gets drawn from the measurable minority.
     by_regime: dict[str, float] = field(default_factory=dict)
     lots_by_regime: dict[str, int] = field(default_factory=dict)
+    #: Open lots by decision source. Separate from `lots_by_source`, which counts
+    #: only *closed* lots. A strategy that has opened ten positions and closed none
+    #: has zero closed lots, and reading that as "it never traded" is the opposite
+    #: of the truth - which is exactly what the model did on its first live day.
+    open_lots_by_source: dict[str, int] = field(default_factory=dict)
+    unrealized_pnl: float | None = None
     #: Observed broker fees and the configured cost assumption, kept apart. On paper
     #: the observed figure is 0.00, so the assumption is the only cost in the live
     #: ledger at all.
@@ -72,6 +78,18 @@ class Attribution:
     assumed_cost_pct: float = 0.0
     after_cost_pnl: float | None = None
     causes: list[CauseRow] = field(default_factory=list)
+
+    @property
+    def model_open_quantity(self) -> float:
+        """Shares the model has open, counted from open lots rather than closed.
+
+        `model_pnl` is realized only, so a model holding ten unsold positions shows
+        0.00 there and looked, to `doctor`, as though it had never traded at all.
+        """
+        return sum(
+            qty for key, qty in self.open_lots_by_source.items()
+            if key.startswith("llm:") or key.startswith("fallback_policy_engine:")
+        )
 
     @property
     def model_pnl(self) -> float:
@@ -191,6 +209,16 @@ def attribute(
             label = observed.label if observed is not None else "NO_BAR"
         result.by_regime[label] = result.by_regime.get(label, 0.0) + realized
         result.lots_by_regime[label] = result.lots_by_regime.get(label, 0) + 1
+
+    for lot in pnl_payload.get("open_lots") or ():
+        opener = by_order.get(lot.get("buy_order_id"))
+        source = opener.decision.decision_source if opener is not None else "UNLINKED"
+        key = str(lot.get("strategy_id") or "UNATTRIBUTED")
+        result.open_lots_by_source[f"{source}:{key}"] = (
+            result.open_lots_by_source.get(f"{source}:{key}", 0)
+            + float(lot.get("quantity") or 0.0)
+        )
+    result.unrealized_pnl = pnl_payload.get("unrealized_pnl")
 
     result.causes = _classify(result)
     return result
@@ -326,6 +354,9 @@ def to_payload(a: Attribution) -> dict:
         "baseline_pnl": round(a.baseline_pnl, 2),
         "by_source": {k: round(v, 2) for k, v in sorted(a.by_source.items())},
         "lots_by_source": a.lots_by_source,
+        "open_lots_by_source": a.open_lots_by_source,
+        "model_open_quantity": a.model_open_quantity,
+        "unrealized_pnl": a.unrealized_pnl,
         "by_strategy": {k: round(v, 2) for k, v in sorted(a.by_strategy.items())},
         "account_pnl": a.account_pnl,
         "account_pnl_scope": a.account_pnl_scope,

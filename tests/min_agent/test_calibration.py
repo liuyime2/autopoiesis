@@ -157,9 +157,15 @@ def test_confidence_that_does_not_separate_good_from_bad_reports_no_signal():
             [(0.6, i % 2 == 0) for i in range(20)]
     report = _calibrated(specs)
 
-    assert report.verdict.startswith("NO_SIGNAL")
+    # Claiming 0.9 and 0.6 while being right half the time is BOTH true at once:
+    # confidence does not separate good from bad, and it is worse than a constant
+    # 0.5 claim. The Brier is checked first because it is the stronger and more
+    # actionable statement. This test previously asserted NO_SIGNAL, which was true
+    # but incomplete - it ignored that the confidences were also lying about the
+    # level, not just the ordering.
+    assert report.verdict.startswith("MIS-CALIBRATED")
     assert report.top_bucket_accuracy == pytest.approx(report.base_rate)
-    assert "most confident bucket" in report.verdict
+    assert report.brier > calibration.BRIER_UNINFORMATIVE
 
 
 def test_confidence_that_actually_separates_reports_a_signal():
@@ -252,3 +258,74 @@ def test_a_decision_with_no_verdict_at_all_is_marked_unscored():
     rows = calibration.build_rows(records, {}, source="llm")
     assert rows[0].verdict == "UNSCORED"
     assert rows[0].informative is False
+
+
+# --------------------------------------------------------------------------
+# the first real verdict, and the two ways it could have lied
+# --------------------------------------------------------------------------
+
+def test_a_brier_worse_than_a_constant_claim_is_reported_as_mis_calibrated():
+    """Right almost always, and still badly calibrated.
+
+    The first non-INSUFFICIENT verdict this system ever produced was "SIGNAL": the
+    most confident bucket was 97.1% against a 96.8% base rate, and the test passed
+    because the bucket was higher. The Brier was 0.589 - 2.4x worse than always
+    claiming 0.5 - which says the stated confidence is worse than useless. Accuracy
+    said nothing because the base rate was that high; the Brier said everything.
+    """
+    rows = [
+        calibration.CalibrationRow(
+            cycle_id=f"c{i}", confidence=0.5, action="HOLD",
+            verdict=calibration.GOOD_HOLD, decision_source="llm",
+        )
+        for i in range(100)
+    ]
+    rows.append(calibration.CalibrationRow(
+        cycle_id="bad", confidence=0.9, action="HOLD",
+        verdict=calibration.MISSED_ALPHA, decision_source="llm",
+    ))
+    report = calibration.calibrate(rows)
+
+    assert report.base_rate > 0.95
+    assert report.brier > calibration.BRIER_UNINFORMATIVE
+    assert report.verdict.startswith("MIS-CALIBRATED")
+    assert "worse than useless" in report.verdict
+
+
+def test_a_margin_below_noise_is_not_a_signal():
+    """0.3 points on a 96.8% base rate is rounding, not evidence."""
+    # Well calibrated - confidence tracks the 97% accuracy - so the Brier is fine
+    # and the margin is the only thing left to judge. An earlier fixture used
+    # confidence 0.5 for a 97%-accurate model, which is genuinely mis-calibrated and
+    # correctly tripped that branch first, so it never reached this one.
+    rows = [
+        calibration.CalibrationRow(
+            cycle_id=f"c{i}", confidence=0.97, action="HOLD",
+            verdict=calibration.GOOD_HOLD, decision_source="llm",
+        )
+        for i in range(97)
+    ]
+    rows += [
+        calibration.CalibrationRow(
+            cycle_id=f"m{i}", confidence=0.03, action="HOLD",
+            verdict=calibration.MISSED_ALPHA, decision_source="llm",
+        )
+        for i in range(3)
+    ]
+    report = calibration.calibrate(rows)
+
+    assert report.brier < calibration.BRIER_UNINFORMATIVE
+    margin = report.top_bucket_accuracy - report.base_rate
+    assert 0 < margin < calibration.MIN_MATERIAL_MARGIN
+    assert report.verdict.startswith("NO_SIGNAL")
+    assert "distinguishable from noise" in report.verdict
+
+
+def test_a_genuinely_separating_model_still_reports_a_signal():
+    """Tightening must not make a real signal unreachable, or the fix is just a
+    refusal with a better vocabulary."""
+    specs = [(0.9, True) for _ in range(20)] + [(0.1, False) for _ in range(20)]
+    report = _calibrated(specs)
+
+    assert report.verdict.startswith("SIGNAL")
+    assert report.brier < calibration.BRIER_UNINFORMATIVE

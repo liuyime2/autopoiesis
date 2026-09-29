@@ -718,6 +718,9 @@ def _open_lots(
                     unrealized_pnl_pct=None if pct is None else round(pct, 6),
                     opened_at=lot.opened_at,
                     as_of=as_of,
+                    buy_order_id=lot.order_id,
+                    buy_fill_id=lot.fill_id,
+                    buy_client_order_id=lot.client_order_id,
                 )
             )
     return tuple(out)
