@@ -1,0 +1,59 @@
+{
+  "_about": "State discrepancies that are real, already happened, and cannot be honestly reconstructed. Each entry is an exception list read by tools/check_runtime_integrity.py. An entry excuses exactly the named strategy_id and nothing else, so a new occurrence of the same class of failure still fails the gate. Entries are not permission to repeat a defect.",
+  "found_by": "tools/check_runtime_integrity.py",
+  "found_on": "2026-09-28",
+  "known_missing": [
+    {
+      "strategy_id": "strategy-20260610-002",
+      "class": "admitted-then-absent",
+      "evidence": "STRATEGY_ADMISSION_REVIEWED accepted=true in runtime/min_agent/journal.jsonl; no file in runtime/min_agent/strategies/; no STRATEGY_LIFECYCLE_UPDATED with new_lifecycle=RETIRED naming it.",
+      "cause": "UNKNOWN. runtime/ is gitignored, so there is no commit history to reconstruct when or why the file was removed. Recording a cause here would be a fabrication.",
+      "cannot_recur_because": "strategy_admission.admit() writes the spec atomically (write_text_atomic under a file lock) BEFORE returning accepted=True, and the daemon journals the event only after admit() returns. A journalled acceptance therefore implies a durable file."
+    },
+    {
+      "strategy_id": "strategy-20260611-001",
+      "class": "admitted-then-absent",
+      "evidence": "STRATEGY_ADMISSION_REVIEWED accepted=true; no registry file; no recorded retirement.",
+      "cause": "UNKNOWN, as above.",
+      "cannot_recur_because": "As above."
+    },
+    {
+      "strategy_id": "strategy-20260611-004",
+      "class": "admitted-then-absent",
+      "evidence": "STRATEGY_ADMISSION_REVIEWED accepted=true; no registry file; no recorded retirement.",
+      "cause": "UNKNOWN, as above.",
+      "cannot_recur_because": "As above."
+    },
+    {
+      "strategy_id": "strategy-20260611-005",
+      "class": "admitted-then-absent",
+      "evidence": "STRATEGY_ADMISSION_REVIEWED accepted=true; no registry file; no recorded retirement.",
+      "cause": "UNKNOWN, as above.",
+      "cannot_recur_because": "As above."
+    },
+    {
+      "strategy_id": "strategy-20260611-006",
+      "class": "admitted-then-absent",
+      "evidence": "STRATEGY_ADMISSION_REVIEWED accepted=true; no registry file; no recorded retirement.",
+      "cause": "UNKNOWN, as above.",
+      "cannot_recur_because": "As above."
+    },
+    {
+      "strategy_id": "strategy-20260611-007",
+      "class": "admitted-then-absent",
+      "evidence": "STRATEGY_ADMISSION_REVIEWED accepted=true; no registry file; no recorded retirement.",
+      "cause": "UNKNOWN, as above.",
+      "cannot_recur_because": "As above."
+    }
+  ],
+  "not_a_finding": [
+    {
+      "thing": "five strategies journalled only as CURRICULUM_PROPOSED and STRATEGY_ADMISSION_REVIEWED accepted=false",
+      "why": "A rejected proposal correctly has no registry file. An earlier version of the integrity check flagged these as missing, which was the check being wrong, not the data."
+    },
+    {
+      "thing": "journal events carrying a cycle_id",
+      "why": "A cycle_id on a reflection or evaluation event is a foreign key, not a duplicate cycle. An earlier version counted these as double-writes and reported 228 phantom duplicates."
+    }
+  ]
+}

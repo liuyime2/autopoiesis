@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790643612426,
-      "lastRequestTokens": 473913,
-      "lastInputTokens": 472687
+      "observedAt": 1790644446782,
+      "lastRequestTokens": 30955,
+      "lastInputTokens": 30644
     }
   },
   "runtimeFingerprint": {
@@ -43,14 +43,15 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 3,
-    "tokens": 422448,
+    "turns": 4,
+    "tokens": 443049,
     "cost": 0,
-    "runtimeMs": 41025,
+    "runtimeMs": 45208,
     "seenMessageIDs": [
       "msg_0ea911ff0001xqHQnFmbF3aICp",
       "msg_0ea980dc20015f3lGA67tXRaUK",
-      "msg_0eaa68606001KGUnxDEOmPxiG6"
+      "msg_0eaa68606001KGUnxDEOmPxiG6",
+      "msg_0eaae9de0001Pl6Qy08lWTuxb3"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -60,8 +61,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 20,
-  "observedProgressRevision": 16,
+  "progressRevision": 28,
+  "observedProgressRevision": 21,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
     "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
@@ -82,7 +83,15 @@
     "file:src/min_agent/counterfactual.py:d0478b7a2ea17e7801b4ae58fc9d59aec80d836c654d08734eb0b446791df088",
     "shell-worktree:235ba7265ae3dd363ba0c0194b0f6cb5ce7bf70372b7a4fbc7d2d7d4141fb1c8",
     "shell-worktree:1373ef1968795c162a278c74751753ccb7b3de1f3719f33b29cab2184bb28cdd",
-    "shell-worktree:f7d63d7ce89c2b40941bf1465836493f4c09bc1ff28821ef96a6ff1d68235ac3"
+    "shell-worktree:f7d63d7ce89c2b40941bf1465836493f4c09bc1ff28821ef96a6ff1d68235ac3",
+    "shell-worktree:16653c5f3e918230e4c0d012e812ae45f276debade76ca23c0ffd155103a0819",
+    "shell-worktree:4b97c8eb18b64d52b383fcd3ca04d0635ea3329ac02cf7370965575b46844f92",
+    "shell-worktree:6d088cc054ee107c2d983f33f255b4eda1606fd3b5578b59366d999a792ed77a",
+    "shell-worktree:7e9265540580b709d0770e1322b7ed78caa409e0ad5423058365e87e1ff8f938",
+    "shell-worktree:b23180f03b5cbe42f7454ba05caee2c104ee434dc6425dce5be102de0349d3fe",
+    "shell-worktree:b78de038034e2a118359969391e3b5a1f04deaa1a0ee6222cadfba546ae03a22",
+    "shell-worktree:ed9c56e9680159ca25ebcd48fc93b9a097504431ae57561aa52986aff5108301",
+    "shell-worktree:17919b56ab07e2d837b4301b2cb54b6cf13f7a5c6e4713d8fdf2a8ab999915b1"
   ],
   "stalledTurns": 0,
   "progressNotes": [
@@ -195,11 +204,56 @@
       "time": 1790643610847,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790643642913,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790643653240,
+      "summary": "First ADD step done: the counterfactual ledger. Every decision is now scored against the first real broker quote at or after a wall-clock horizon, classified GOOD_HOLD / MISSED_ALPHA / NEUTRAL / FALSE_TRADE, after an explicit configured cost assumption (the paper broker reports zero commission, so a gross figure would flatter the system by exactly what it would really have paid). Wired into daemon maintenance - 467 rows journaled live - and surfaced in doctor. Two things the first cut got wrong, caught by reading the journal rather than the code: a cycle-count horizon spanned a median of 8 minutes and a maximum of 97 days (the system was dead for 97 days), so it is now wall-clock with gaps beyond max_gap_hours refused rather than scored; and 49% of consecutive quotes are byte-identical because the gateway repeats the last trade when nothing traded, so repeats are now collapsed (920 quotes -> 467 observations). That corrected an earlier bogus number: the cycle-counted version reported hold quality 0.295, an artifact of 3-minute noise. At a real 24h horizon the live journal gives hold_quality 0.687 over 350 scored - 224 good holds, 95 missed alpha, 24 neutral, 7 false trades, 67 pending, 50 refused as gaps. 421 passed, audit 91/91, doctor RESULT OK.",
+      "next": "The second ADD step: a unified `make verify` gate covering the 13 check classes the objective names - software, syntax/import, unit/integration, data integrity, point-in-time/no-leakage, PnL accounting, lifecycle invariants, Guardian bypass prevention, replay determinism, crash recovery, broker reconciliation, shadow/live consistency - with FAIL=0 and no fallback able to mask a failure. Nothing exists today: no Makefile, and the checks are scattered across pytest, tools/audit_defects.py and doctor. Market reopens 09:30 EDT for the first live test of the exposure-cap fix and of a fresh round trip feeding the new counterfactual."
+    },
+    {
+      "time": 1790643776454,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790643820949,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790643861969,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790643884587,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790644093364,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790644124105,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790644267234,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 135,
+  "storageGeneration": 196,
   "createdAt": 1790641773516,
-  "updatedAt": 1790643612426,
+  "updatedAt": 1790644446782,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:110298eb2bd110e097590b04ce9fcdecb8385efa056e8aa45e888b9482e76060",

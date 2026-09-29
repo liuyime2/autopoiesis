@@ -229,3 +229,93 @@ Applying `delete → merge → simplify → reuse → repair → add` strictly:
 
 **Not started:** counterfactual evaluation, experiment registry, offline
 validation, walk-forward, shadow trading, champion–challenger, regime awareness.
+
+---
+
+## 7. The verification gate (`make verify`)
+
+Added 2026-09-28. Before this, the checks were scattered across `pytest`,
+`tools/audit_defects.py` and `doctor`, and nothing ran all of them, so "the tests
+pass" was never the same claim as "the system is verified". `make verify` runs
+every class and counts them:
+
+| class | what it proves |
+| --- | --- |
+| `software-supply-chain` | no credential is committed; no tracked env file |
+| `syntax-import` | every module byte-compiles and every module imports |
+| `unit-integration` | the general test surface |
+| `data-integrity` | runtime state parses; journal and registry agree |
+| `point-in-time-no-leakage` | nothing is scored with a price from the future |
+| `pnl-accounting` | account-level FIFO, opener/closer attribution, cost |
+| `lifecycle-invariants` | admission, dedupe, promote/pause/retire, knowledge value |
+| `guardian-bypass-prevention` | the risk envelope is machine-checked, not assumed |
+| `replay-determinism` | the same inputs reproduce the same outputs |
+| `crash-recovery` | torn writes, restarts, journal-first ordering |
+| `broker-reconciliation` | orders, fills, and evidence against the broker |
+| `shadow-live-consistency` | live mode is hard-blocked; probation is enforced |
+| `decision-outcome-counterfactual` | holds are scored, and refusals are not counted as scores |
+
+Two supporting classes guard the gate itself: `test-coverage-map` fails if any test
+file is not assigned to a class, and `class-coverage` fails if a declared class has
+no tests behind it. Without them, adding a test quietly moves the system from
+"verified" to "not checked".
+
+### The gate can fail
+
+`make verify-self-test` breaks the gate on purpose and asserts it reports failure:
+a failing test, a test importing a name that does not exist, a class with no tests,
+an unclassified test file, and a class with every test file removed. A verification
+command that cannot fail is believed rather than run.
+
+The self-test caught a flaw in itself: it added the canary to the class map in its
+first step, so the later "unclassified file" assertion could never fire and reported
+a false pass. Each check now puts the system into the state it claims to test.
+
+Current: **17 classes, 0 failed, 447 distinct tests, 91/91 defect audit,
+doctor RESULT OK.**
+
+## 8. Findings from building the gate
+
+### 8.1 Six admitted strategies have no file and no recorded retirement
+
+`tools/check_runtime_integrity.py` found that six strategies were journalled
+`STRATEGY_ADMISSION_REVIEWED accepted=true` but have no file in the strategy
+registry and no `RETIRED` lifecycle event naming them. The journal and the registry
+are two sources of truth about the same thing, and for these six they disagree.
+
+`runtime/` is gitignored, so there is no commit history from which to reconstruct
+when or why the files were removed. The cause is recorded as **UNKNOWN** in
+`docs/superpowers/known_state_findings.json` rather than guessed, and no synthetic
+retirement event was written — inventing one would put a false claim into the audit
+trail that the whole system is meant to rest on.
+
+This cannot recur: `strategy_admission.admit()` writes the spec atomically, under a
+file lock, *before* returning `accepted=True`, and the daemon journals the event only
+after `admit()` returns. A journalled acceptance therefore implies a durable file.
+
+### 8.2 Shadow trading does not exist
+
+The objective names shadow/probation as a lifecycle stage. Probation is real: a
+strategy needs `min_probation_cycles=3` before it is tradable. **Shadow is not** —
+the word appears in docstrings and a plan, and nowhere in code. The
+`shadow-live-consistency` class therefore asserts the two things that do exist (live
+mode is hard-blocked at config load, probation is enforced) and prints that shadow
+mode is not implemented, rather than passing a check that cannot yet be written.
+
+### 8.3 A checker that cries wolf is worse than no checker
+
+The first three versions of the integrity checker reported failures that did not
+exist, each from inventing a schema instead of reading it:
+
+* it required `entry_rules`/`exit_rules`/`risk_rules`, which `StrategySpec` has
+  never had — the schema is `kind` + `parameters`;
+* it treated a journal *event* carrying a `cycle_id` foreign key as a duplicate
+  cycle, reporting 228 phantom double-writes;
+* it rejected `BASELINE`/`PROBATION` as unknown lifecycles and required
+  `parameters` to be non-empty, when a `HOLD_BASELINE` legitimately has none.
+
+It also crashed with `ValueError` when the runtime tree sat outside the repo. Every
+rule is now named against the model field it derives from, and
+`tests/min_agent/test_runtime_integrity.py` plants each violation to prove the
+checker still fails — including a *new* admitted-without-file strategy, so the
+exception list cannot become a blanket disable.
