@@ -319,3 +319,115 @@ rule is now named against the model field it derives from, and
 `tests/min_agent/test_runtime_integrity.py` plants each violation to prove the
 checker still fails — including a *new* admitted-without-file strategy, so the
 exception list cannot become a blanket disable.
+
+## 9. The two loop stages that did not exist
+
+Auditing all sixteen named stages against the code found exactly two missing, and
+one of them was missing in a way that would have been expensive to add wrongly.
+
+### 9.1 Offline validation — missing, and the obvious implementation would have been fake
+
+The chain named `hypothesis -> candidate -> offline validation -> shadow/probation
+-> live validation` had no middle. A candidate went from admission straight into
+PROBATION and then traded real (paper) orders, with the Guardian as the only gate.
+
+The natural implementation is to replay the strategy's own rule against historical
+prices. That would have been theatre, and the reason is worth recording: **in this
+system a strategy is not an executable rule.** `parameters["action"]` is never
+checked on the execution path, and TREND_FOLLOW's `reference_price` and
+`threshold_pct` are read only by validation and admission, never at trade time. The
+selected strategy is handed to the model as context and the model decides. A
+rule-replay would therefore have graded a rule the live system never runs and
+produced a confident number about the wrong object.
+
+What is real is the decision the strategy actually produced. Every action has
+already been scored by the counterfactual ledger against the first real broker
+quote at or after the horizon, so `offline_validation.py` screens each strategy on
+those journalled verdicts. It cannot be fitted, there is no rule to overfit, and
+every number traces to a journalled row.
+
+Three properties keep it honest:
+
+* **It can only reject.** Promotion to ACTIVE still requires prospective live
+  cycles. A test enumerates the verdict space to prove there is no code path that
+  promotes, because a screen that can promote would short-circuit live evidence.
+* **It cannot manufacture evidence.** Too few informative decisions returns
+  `INCONCLUSIVE_INSUFFICIENT_EVIDENCE`, not a pass. With the live journal most
+  candidates are exactly that, which is the truthful answer and the reason this is
+  a screen rather than a decision.
+* **NEUTRAL is silence, not failure.** The first cut counted NEUTRAL in the
+  denominator and rejected `tiny-fixed-size-001` on 15 neutral decisions — the
+  largest PnL contributor on record at +362.66. A move that did not clear the cost
+  taught us nothing either way. Pinned by two tests.
+
+Against the live journal: 4 screened through, 2 rejected, 10 inconclusive. The two
+rejected (`trend-follow-20260611-003` at 0/10, `-006` at 4/10) were independently
+**already PAUSED** by the lifecycle manager on operational metrics, so the screen
+reached the same verdict by a different route. `trend-follow-20260611-001` screens
+*well* yet is PAUSED on operational metrics; both are true and the screen is
+deliberately not permitted to promote it back.
+
+Screening at admission time alone would have been structurally incapable of
+rejecting anything — a new candidate has no history and always returns
+INCONCLUSIVE. The screen therefore also runs across the whole library each
+maintenance pass, which is the only place a verdict can have teeth.
+
+### 9.2 Experiment registry — implemented as a view, deliberately not as a store
+
+Every link of the chain is already journalled: `CURRICULUM_PROPOSED`,
+`STRATEGY_ADMISSION_REVIEWED`, `OFFLINE_VALIDATION_COMPLETED`,
+`STRATEGY_LIFECYCLE_UPDATED`, `STRATEGY_EVALUATION_RECORDED`. So no registry needed
+to exist, and building a persisted one would have created a *second* source of truth
+about the same thing — precisely the drift this refactor has been removing
+everywhere else. `experiment_registry.py` derives the per-strategy chain and writes
+nothing; a test asserts the module exposes no save/write/append.
+
+A broken chain is reported rather than omitted. Current: 35 strategies, 23 admitted,
+15 with an incomplete chain, all but one of them historical — strategies that predate
+the offline screen. The one live exception is `trend-follow-20260612-006`, a
+brand-new PROBATION that has not yet completed an evaluation window, which `doctor`
+surfaces as a warning rather than a pass.
+
+### 9.3 Three wiring bugs the tests caught before production saw them
+
+The screen was "wired" on the first attempt in a way that would never have run:
+
+* it called `strategy_library.get`, which does not exist. The `AttributeError` was
+  swallowed by the caller's broad `except`, so every run journalled `FAILED` and no
+  strategy was ever paused — wired in appearance, dead in practice;
+* it called `event.get("payload")` on `JournalEvent` **models** returned by
+  `read_events`, not dicts, so the same broad except hid another total failure;
+* `_apply_offline_rejection` trusted its caller to check the verdict, so calling it
+  directly paused a first-cycle candidate that had been told `INCONCLUSIVE`. The
+  guard now lives in the method, because a method that corrupts state when misused
+  should be safe when misused.
+
+And the registry view reported "0 admitted, 27 unscreened" at first, because it was
+handed cycle records where the chain lives in events; and it reported ACTIVE
+strategies as having no evaluation evidence because the per-strategy data is in
+`payload["strategy_metrics"]`, not the event's own `strategy_id` field.
+
+## 10. Loop stage status after this work
+
+| stage | status |
+| --- | --- |
+| observe | active — `data_gateway`, real broker quotes |
+| understand | active — capability coverage feeds the curriculum prompt |
+| generate decision | active — qwen3.8, schema-constrained |
+| risk check | active — `guardian`, machine-checked, immutable |
+| execute → broker fill | active — 24 orders submitted, 24 fills broker-confirmed |
+| reconcile | active — order and fill reconcilers |
+| PnL attribution | active — account-level FIFO, +564.39 across 3 strategies |
+| counterfactual evaluation | active — hold quality 0.687 over 350 scored, after cost |
+| reflection | active — 663 events, output loaded back into the curriculum prompt |
+| hypothesis → candidate | active — curriculum, admission with behavioural dedupe |
+| **offline validation** | **active — added; decision-level screen, reject-only** |
+| probation | active — 3 cycles before a strategy is tradable |
+| **shadow** | **missing — not implemented anywhere; recorded, not faked** |
+| live validation | active — probation trades real paper orders |
+| promote/scale/pause/retire | active — journal-first lifecycle, PnL-ranked |
+| experiment registry | active — derived view, no second store |
+
+Two things remain genuinely unproven, and neither is a code defect: the final
+after-cost, prospective, risk-adjusted live net PnL, and a shadow-trading mode,
+which is recorded as missing rather than simulated.

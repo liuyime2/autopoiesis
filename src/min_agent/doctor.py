@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
-from min_agent import counterfactual
+from min_agent import counterfactual, experiment_registry, strategy_engine
 from min_agent.atomicio import write_json_atomic
 from min_agent.broker_evidence import latest_evidence_batch
 from min_agent.config import AgentConfig
@@ -231,6 +231,11 @@ def _check_governance(report: DoctorReport, config: AgentConfig) -> None:
     #    that can say whether they were right.
     _check_decision_quality(report, config, records)
 
+    # 7. The chain the objective names, derived from the journal so there is no
+    #    second registry to drift.
+    if journal is not None:
+        _check_experiment_chain(report, config, journal)
+
 
 def _check_risk_baseline(report: DoctorReport, config: AgentConfig) -> None:
     current = {
@@ -384,6 +389,70 @@ def _check_decision_quality(
         )
     else:
         report.add("decision quality", OK, detail)
+
+
+def _check_experiment_chain(
+    report: DoctorReport, config: AgentConfig, journal: "JsonlJournal"
+) -> None:
+    """Report whether each strategy's journey is fully accounted for.
+
+    A strategy is only understandable if proposal, admission, offline screen and
+    evaluation evidence all exist for it. The bulk of the incomplete chains are
+    historical - strategies that predate the offline screen - so the count is
+    reported rather than failed, but a *tradable* strategy with no evaluation
+    evidence at all is a genuine hole and is called out separately.
+    """
+    try:
+        strategies = strategy_engine.StrategyLibrary(
+            config.strategy_dir
+        ).list()
+    except Exception as exc:
+        report.add(
+            "experiment chain", WARN, f"strategy library unreadable: {type(exc).__name__}"
+        )
+        return
+
+    # The chain lives entirely in *events*. `read_all()` returns cycle records
+    # only, so passing those in reported "0 admitted, 27 unscreened" for a library
+    # where 23 strategies were in fact admitted - a check that was structurally
+    # incapable of seeing the thing it checked.
+    try:
+        events = journal.read_events()
+    except Exception as exc:
+        report.add(
+            "experiment chain", WARN, f"journal events unreadable: {type(exc).__name__}"
+        )
+        return
+    try:
+        experiments = experiment_registry.build(events, strategies)
+    except Exception as exc:
+        report.add(
+            "experiment chain", WARN, f"could not derive the chain: {type(exc).__name__}"
+        )
+        return
+    if not experiments:
+        report.add("experiment chain", WARN, "no strategies to account for")
+        return
+
+    summary = experiment_registry.summarize(experiments)
+    tradable_without_evidence = [
+        e.strategy_id for e in experiments
+        if e.lifecycle in {"ACTIVE", "PROBATION"}
+        and not e.evaluations
+    ]
+    detail = (
+        f"{summary['strategies']} strategies, {summary['admitted']} admitted, "
+        f"{summary['incomplete_chains']} with an incomplete chain; "
+        f"screens: {summary['by_offline_verdict']}"
+    )
+    if tradable_without_evidence:
+        report.add(
+            "experiment chain", WARN,
+            f"{detail}; tradable with no evaluation evidence: "
+            f"{tradable_without_evidence}",
+        )
+    else:
+        report.add("experiment chain", OK, detail)
 
 
 def _check_knowledge_value(report: DoctorReport, config: AgentConfig) -> None:

@@ -47,12 +47,15 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_config.py": ("unit-integration", "shadow-live-consistency"),
     "test_counterfactual.py": ("decision-outcome-counterfactual",),
     "test_curriculum.py": ("unit-integration", "lifecycle-invariants"),
-    "test_daemon.py": ("unit-integration", "crash-recovery"),
+    "test_daemon.py": (
+        "unit-integration", "crash-recovery", "lifecycle-invariants",
+    ),
     "test_data_gateway.py": ("unit-integration", "broker-reconciliation"),
     "test_doctor.py": ("unit-integration", "replay-determinism"),
     "test_durability.py": ("crash-recovery", "replay-determinism"),
     "test_evaluator.py": ("pnl-accounting", "replay-determinism"),
     "test_executor.py": ("broker-reconciliation", "guardian-bypass-prevention"),
+    "test_experiment_registry.py": ("lifecycle-invariants", "data-integrity"),
     "test_fill_reconciler.py": ("broker-reconciliation",),
     "test_governance_invariants.py": (
         "guardian-bypass-prevention", "shadow-live-consistency",
@@ -70,6 +73,9 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_llm_provenance.py": ("replay-determinism", "crash-recovery"),
     "test_loop.py": ("unit-integration", "guardian-bypass-prevention"),
     "test_models.py": ("unit-integration", "data-integrity"),
+    "test_offline_validation.py": (
+        "lifecycle-invariants", "decision-outcome-counterfactual",
+    ),
     "test_order_reconciler.py": ("broker-reconciliation", "crash-recovery"),
     "test_point_in_time.py": ("point-in-time-no-leakage",),
     "test_policy_engine.py": ("unit-integration",),

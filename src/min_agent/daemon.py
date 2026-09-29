@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from min_agent.atomicio import file_lock, write_text_atomic
 from min_agent.broker_evidence import latest_evidence_batch
-from min_agent import counterfactual
+from min_agent import counterfactual, offline_validation
 from min_agent.config import AgentConfig
 from min_agent.curriculum import StructuredCurriculumAgent
 from min_agent.evaluator import (
@@ -237,6 +237,119 @@ class AgentDaemon:
                 payload={"error_type": type(exc).__name__},
             )
 
+    def _screen_candidate(self, strategy_id: str, *, _events=None) -> None:
+        """Screen a candidate on the decisions it has actually produced.
+
+        Read from the journalled counterfactual verdicts, so this cannot disagree
+        with what was recorded and cannot manufacture evidence. It can only
+        report; promotion stays with prospective live cycles.
+        """
+        if self.journal is None:
+            return
+        try:
+            decisions = offline_validation.collect_decisions(
+                self.journal.read_events("COUNTERFACTUAL_EVALUATED")
+                if _events is None else _events,
+                strategy_id,
+            )
+            result = offline_validation.validate(decisions, strategy_id=strategy_id)
+        except Exception as exc:
+            self._append_event(
+                "OFFLINE_VALIDATION_COMPLETED",
+                status="FAILED",
+                message=f"{type(exc).__name__}: {exc}",
+                strategy_id=strategy_id,
+                payload={"strategy_id": strategy_id, "verdict": "FAILED"},
+            )
+            return
+        self._append_event(
+            "OFFLINE_VALIDATION_COMPLETED",
+            status="SUCCESS",
+            message=result.reason,
+            strategy_id=strategy_id,
+            payload=result.to_payload(),
+        )
+        if result.rejected:
+            self._apply_offline_rejection(result)
+
+    def _screen_all_strategies(self) -> None:
+        """Screen every strategy in the library, not just new candidates.
+
+        The admission-time screen is structurally incapable of rejecting anything:
+        a candidate is brand new, so it has no recorded decisions and always comes
+        back INCONCLUSIVE. Judging a strategy requires a history, and history
+        only exists for strategies that have already been running - so this is
+        where the stage has to live to mean anything.
+
+        Verdicts are journalled for every strategy, including the INCONCLUSIVE
+        ones, because "we cannot tell yet" is a result worth having on the record
+        and it is what stops a thin strategy from being treated as validated.
+        """
+        if self.journal is None or self.strategy_library is None:
+            return
+        events = self.journal.read_events("COUNTERFACTUAL_EVALUATED")
+        for spec in self.strategy_library.list():
+            if spec.lifecycle in {"RETIRED"}:
+                continue
+            self._screen_candidate(spec.strategy_id, _events=events)
+
+    def _apply_offline_rejection(self, result) -> None:
+        """Pause a strategy whose own recorded decisions were bad.
+
+        Same journal-first discipline as `_manage_strategy_lifecycle`: intent is
+        journalled, then the file is written, then the outcome is journalled. The
+        worst case is therefore an event for a transition that did not happen,
+        which is visible and harmless - not a silent state change with no record,
+        which is how eight duplicate retirements once landed here unnoticed.
+
+        The verdict is re-checked here rather than trusted from the caller. The
+        guard lived only in the caller, so calling this method directly paused a
+        first-cycle candidate that had been told INCONCLUSIVE - silence was being
+        read as failure. A method that corrupts state when misused should be safe
+        when misused.
+        """
+        if result is None or not result.rejected:
+            return
+        if self.strategy_library is None or result.strategy_id is None:
+            return
+        # `load`, not `get`: the library has no `get`. The first cut called
+        # `get`, which raised AttributeError inside the caller's broad `except`,
+        # so the rejection path would have journalled FAILED forever and never
+        # paused anything - wired in appearance, dead in practice.
+        spec = self.strategy_library.try_load(result.strategy_id)
+        if spec is None or spec.lifecycle in {"RETIRED", "PAUSED"}:
+            return
+        old = spec.lifecycle
+        reason = f"offline validation rejected this strategy: {result.reason}"
+        event_id = self._append_event(
+            "STRATEGY_LIFECYCLE_UPDATED",
+            status="SUCCESS",
+            message=reason,
+            strategy_id=spec.strategy_id,
+            payload={
+                "old_lifecycle": old,
+                "new_lifecycle": "PAUSED",
+                "reason": reason,
+                "phase": "decided",
+                "source": "offline_validation",
+            },
+        )
+        self.strategy_library.save(spec.model_copy(update={"lifecycle": "PAUSED"}))
+        self._append_event(
+            "STRATEGY_LIFECYCLE_UPDATED",
+            status="SUCCESS",
+            message=reason,
+            strategy_id=spec.strategy_id,
+            payload={
+                "old_lifecycle": old,
+                "new_lifecycle": "PAUSED",
+                "reason": reason,
+                "phase": "applied",
+                "decided_event_id": event_id,
+                "source": "offline_validation",
+            },
+        )
+
     def _record_counterfactuals(self) -> None:
         """Score every decision against what the market actually did next.
 
@@ -399,6 +512,18 @@ class AgentDaemon:
                     task_id=task.task_id,
                     payload={"accepted": result.accepted, "reason": result.reason},
                 )
+                # Offline validation runs on the candidate's *existing* recorded
+                # decisions, not on a replay of its rule. In this system a strategy
+                # is context handed to the model, not an executable rule, so a
+                # rule-replay would grade something the live system never runs.
+                #
+                # A brand-new candidate has no history, so this returns
+                # INCONCLUSIVE for it. That is correct but useless on its own,
+                # which is why `_screen_all_strategies` runs the same screen over
+                # the whole library every maintenance pass: that is the only place
+                # a verdict can have teeth, because only existing strategies have
+                # recorded decisions to be judged by.
+                self._screen_candidate(result.strategy_id)
             self.last_curriculum_at = self.now()
         except Exception as exc:
             self._append_event(
@@ -419,6 +544,7 @@ class AgentDaemon:
             self._record_pnl_evidence(evidence)
             self._verify_profit_target(evidence)
             self._record_counterfactuals()
+            self._screen_all_strategies()
         if self.reflection_memory is not None and self._due(self.last_reflection_at, self.config.reflection_interval_seconds):
             self._reflect(evidence=evidence)
         if self.curriculum_agent is not None and self.reflection_memory is not None and self._due(self.last_curriculum_at, self.config.curriculum_interval_seconds):

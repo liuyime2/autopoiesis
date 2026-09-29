@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790644446782,
-      "lastRequestTokens": 30955,
-      "lastInputTokens": 30644
+      "observedAt": 1790645433892,
+      "lastRequestTokens": 89939,
+      "lastInputTokens": 89194
     }
   },
   "runtimeFingerprint": {
@@ -43,15 +43,16 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 4,
-    "tokens": 443049,
+    "turns": 5,
+    "tokens": 445302,
     "cost": 0,
-    "runtimeMs": 45208,
+    "runtimeMs": 52901,
     "seenMessageIDs": [
       "msg_0ea911ff0001xqHQnFmbF3aICp",
       "msg_0ea980dc20015f3lGA67tXRaUK",
       "msg_0eaa68606001KGUnxDEOmPxiG6",
-      "msg_0eaae9de0001Pl6Qy08lWTuxb3"
+      "msg_0eaae9de0001Pl6Qy08lWTuxb3",
+      "msg_0eabb114c0011swJz6bSgFfGwB"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -61,8 +62,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 28,
-  "observedProgressRevision": 21,
+  "progressRevision": 37,
+  "observedProgressRevision": 29,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
     "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
@@ -91,7 +92,16 @@
     "shell-worktree:b23180f03b5cbe42f7454ba05caee2c104ee434dc6425dce5be102de0349d3fe",
     "shell-worktree:b78de038034e2a118359969391e3b5a1f04deaa1a0ee6222cadfba546ae03a22",
     "shell-worktree:ed9c56e9680159ca25ebcd48fc93b9a097504431ae57561aa52986aff5108301",
-    "shell-worktree:17919b56ab07e2d837b4301b2cb54b6cf13f7a5c6e4713d8fdf2a8ab999915b1"
+    "shell-worktree:17919b56ab07e2d837b4301b2cb54b6cf13f7a5c6e4713d8fdf2a8ab999915b1",
+    "shell-worktree:33983215113d464ffe9d01a141af9f4a5fd9f7fa8ea029b93c905ef5c6799c42",
+    "shell-worktree:3ba0cad94a59e4f6c726b3b44c51cec522b28097bb661fb97a0399d0dd7a2786",
+    "shell-worktree:5ab4926d463a09b4a03f0ca4fd487749d1b4230ea0411726774a822fb7e2c806",
+    "shell-worktree:119975b2a60dfc94264cb1a54c3a8f0026a138fe7eac9f2b964b659b753ec127",
+    "shell-worktree:7e548f98eb3c00478097f89ba30dbad2fba7a711d226dbe379253ea8691beac7",
+    "shell-worktree:7aac42860620ddd2bda663b5ed81a664d0e395f56fd760b5549377ce79f8f5fe",
+    "shell-worktree:49e6ee4290ed47dbefe15b992f080eeb9d5bdebbc1883683d598575f1cdbc086",
+    "shell-worktree:4ff61fae87843f40fd9bd11f6daff798574a783f170bd884de5dcf53ec56c7ea",
+    "shell-worktree:b32072121b350530f9b8dac28af23a2598c4de8f0709e1203f3c63682f0ff127"
   ],
   "stalledTurns": 0,
   "progressNotes": [
@@ -249,96 +259,147 @@
       "time": 1790644267234,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790644470104,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790644512131,
+      "summary": "Second ADD step done: `make verify`, the single gate the objective asks for, with 13 check classes plus two guards on the gate itself (test-coverage-map fails if a test file is unassigned, class-coverage fails if a class has no tests). 17 classes, 0 failed, 447 distinct tests, 91/91 audit, doctor RESULT OK, exit 0. Two previously-uncovered classes were real gaps I had to close first: point-in-time/no-leakage had NO test at all in the most leak-prone code in the system (added 6 tests asserting a decision is never paired with a price at or before its own timestamp, pre-horizon quotes are unused, out-of-order records sort by time, and late decisions stay pending — then run over the live journal), and replay determinism is now asserted (evaluation does not mutate input; journalled verdicts recompute from the journal). Committed ba85123. The gate found three things: (1) six strategies were admitted (journal accepted=true) but have no registry file and no recorded retirement — journal and registry disagree; cause recorded as UNKNOWN in docs/superpowers/known_state_findings.json because runtime/ is gitignored and no synthetic retirement event was fabricated; cannot recur since admit() writes atomically before returning accepted. (2) Shadow trading does NOT exist — probation is real (3 cycles) and live mode is hard-blocked, but \"shadow\" is docstring-only, so the class asserts what exists and prints the gap. (3) The integrity checker was wrong three times first: invented entry_rules/exit_rules/risk_rules that StrategySpec never had, treated journal events carrying a cycle_id foreign key as duplicate cycles (228 phantom double-writes), rejected BASELINE/PROBATION as unknown lifecycles, required non-empty parameters when HOLD_BASELINE legitimately has none, and crashed when runtime is outside the repo. It is now guarded by 16 tests that plant each violation, including a NEW admitted-without-file strategy so the exception list cannot become a blanket disable. make verify-self-test proves the gate can fail on 5 conditions and caught a flaw in itself first time (it registered the canary in the map, so the unclassified-file assertion never fired — a false pass). The gate also produced two false failures that were its own bugs, now fixed: probation asserted against StrategyEngine instead of StrategySelector, and minictrl run through the Python interpreter. Daemon active, 920 cycles, last cycle 2026-09-28 15:59:59 EDT, HOLD via llm at 765.49, market open.",
+      "next": "Rebuild the stale native Todo manifest against actual state (it still lists simplify/repair as pending and has no counterfactual or verify items), then reconcile the remaining gaps the gate itself surfaced rather than adding features: the objective's experiment registry and offline validation path are not implemented (search for experiment/registry shows no such module), and `MIN_AGENT_MAX_ACCOUNT_VALUE` still needs the one real full-corpus run after 09:30 EDT to confirm the non-allowlist BIL/TLT exposure no longer blocks a BUY — earlier budget-limited checks only tested SPY alone. Also update STATUS.md with the verify gate."
+    },
+    {
+      "time": 1790644633534,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790644656637,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790644666535,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790644746248,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790645180649,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790645201972,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790645270560,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790645334104,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 196,
+  "storageGeneration": 263,
   "createdAt": 1790641773516,
-  "updatedAt": 1790644446782,
+  "updatedAt": 1790645433892,
   "todoPlan": {
     "goalRevision": 1,
-    "digest": "sha256:110298eb2bd110e097590b04ce9fcdecb8385efa056e8aa45e888b9482e76060",
-    "total": 9,
-    "pending": 4,
+    "digest": "sha256:d9b69ac2c1f8b0bbc90c47d5bb5615b71ffc238325b2b248340f3a260feb8032",
+    "total": 10,
+    "pending": 3,
     "inProgress": 1,
-    "completed": 4,
+    "completed": 6,
     "cancelled": 0,
-    "observedAt": 1790642236685,
+    "observedAt": 1790644530440,
     "items": [
       {
-        "key": "todo:d84e69e5a9e13ba82045c2d2:1",
-        "content": "Fact-level audit with used/unused/broken/missing classification",
+        "key": "todo:3f238e59da95191ad53a4174:1",
+        "content": "Fact-level audit: classify every component actively used / partial / unused / obsolete / duplicated / broken / missing",
         "status": "completed",
         "priority": "high",
         "order": 0
       },
       {
-        "key": "todo:bb693a35b89dd9adc151560e:1",
-        "content": "Trace the single real end-to-end flow and document where the loop breaks",
+        "key": "todo:1b55d8e57be7fee61fc29811:1",
+        "content": "delete: remove src/voyager_quant, skill_library, tools/legacy (24 files)",
         "status": "completed",
         "priority": "high",
         "order": 1
       },
       {
-        "key": "todo:26d4188b74fd5a161b1797ea:1",
-        "content": "Delete dead/obsolete paths (voyager_quant, skill_library, tools/legacy, dead fields)",
+        "key": "todo:92f6a5bbc445e4ec32105b9f:1",
+        "content": "simplify: single data/state flow, merge drift, strategy dedupe 13->5, lifecycle by verified PnL",
         "status": "completed",
         "priority": "high",
         "order": 2
       },
       {
-        "key": "todo:f28fde70723f9ccb6656123a:1",
-        "content": "Merge the three drifted copies of the evidence-batch reader",
+        "key": "todo:b6e66d6c2e61214807ee91e7:1",
+        "content": "repair: PnL ledger, Guardian, curriculum, exposure cap, doctor, durability, governance",
         "status": "completed",
         "priority": "high",
         "order": 3
       },
       {
-        "key": "todo:51a8c8080269d38deec4e9b5:1",
-        "content": "SIMPLIFY: stop the strategy zoo accreting — semantic/behavioral duplicate detection + evidence-based retirement of the 9 near-duplicate BUYs",
-        "status": "in_progress",
+        "key": "todo:76c7694091b4f41834725996:1",
+        "content": "ADD counterfactual ledger: score every decision vs first real quote at/after wall-clock horizon, after cost",
+        "status": "completed",
         "priority": "high",
         "order": 4
       },
       {
-        "key": "todo:87790c13a6401a6cd025ed29:1",
-        "content": "REPAIR: the dead knowledge-base relevance filter (must match or be deleted, stated)",
-        "status": "pending",
+        "key": "todo:ae61b2f9e2a84c2f3b7e9b5c:1",
+        "content": "ADD make verify: 13 check classes, FAIL=0, self-test proving the gate can fail",
+        "status": "completed",
         "priority": "high",
         "order": 5
       },
       {
-        "key": "todo:ae5e5a73097a9b63cfb2ed26:1",
-        "content": "ADD: counterfactual ledger for HOLD (good hold / missed alpha / avoided loss / false trade)",
-        "status": "pending",
+        "key": "todo:4d0464b762242d0fede32658:1",
+        "content": "Audit all 16 loop stages against reality; find stages that are named but not implemented",
+        "status": "in_progress",
         "priority": "high",
         "order": 6
       },
       {
-        "key": "todo:0fd39a6e2684cd9a3280f308:1",
-        "content": "ADD: unified `make verify` covering the 13 named check classes, FAIL=0",
+        "key": "todo:3bdb4d39873b4875839436c8:1",
+        "content": "Implement offline validation + experiment registry if genuinely missing from the loop",
         "status": "pending",
         "priority": "high",
         "order": 7
       },
       {
-        "key": "todo:885e246877a68ae4bafca8d1:1",
-        "content": "Update SYSTEM_AUDIT.md to reflect the post-refactor state",
+        "key": "todo:0c1658c60bcb52672f0ad313:1",
+        "content": "Run one real full-corpus cycle after 09:30 EDT to confirm non-allowlist BIL/TLT no longer blocks a BUY",
+        "status": "pending",
+        "priority": "high",
+        "order": 8
+      },
+      {
+        "key": "todo:de73ca3d0d72b54fd09f2a1f:1",
+        "content": "Update STATUS.md and SYSTEM_AUDIT.md with verify gate and loop-stage findings",
         "status": "pending",
         "priority": "medium",
-        "order": 8
+        "order": 9
       }
     ],
     "anomalies": [
       {
         "kind": "substantial_replacement",
-        "summary": "Native Todo plan changed substantially in the same Goal revision: 6 removed, 9 added, 0 retained.",
+        "summary": "Native Todo plan changed substantially in the same Goal revision: 9 removed, 10 added, 0 retained.",
         "itemKeys": [
-          "todo:0d8337b0e0bdc1d16d43a773:1",
-          "todo:27eb29fe995eda95eae2425a:1",
-          "todo:0a01d7f5a2ca1aaaebfb0a71:1",
-          "todo:9a627f3e59e22e63535a55d4:1",
-          "todo:7c0327e4f97a6bc5ce3447cc:1",
-          "todo:c0c150bad8d866dc9c0b3d44:1",
           "todo:d84e69e5a9e13ba82045c2d2:1",
           "todo:bb693a35b89dd9adc151560e:1",
           "todo:26d4188b74fd5a161b1797ea:1",
@@ -347,7 +408,17 @@
           "todo:87790c13a6401a6cd025ed29:1",
           "todo:ae5e5a73097a9b63cfb2ed26:1",
           "todo:0fd39a6e2684cd9a3280f308:1",
-          "todo:885e246877a68ae4bafca8d1:1"
+          "todo:885e246877a68ae4bafca8d1:1",
+          "todo:3f238e59da95191ad53a4174:1",
+          "todo:1b55d8e57be7fee61fc29811:1",
+          "todo:92f6a5bbc445e4ec32105b9f:1",
+          "todo:b6e66d6c2e61214807ee91e7:1",
+          "todo:76c7694091b4f41834725996:1",
+          "todo:ae61b2f9e2a84c2f3b7e9b5c:1",
+          "todo:4d0464b762242d0fede32658:1",
+          "todo:3bdb4d39873b4875839436c8:1",
+          "todo:0c1658c60bcb52672f0ad313:1",
+          "todo:de73ca3d0d72b54fd09f2a1f:1"
         ]
       }
     ]

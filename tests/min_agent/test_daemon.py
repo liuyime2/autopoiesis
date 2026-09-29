@@ -534,3 +534,143 @@ def test_daemon_persists_lifecycle_updates(tmp_path):
     assert event.strategy_id == "trial"
     assert event.payload["old_lifecycle"] == "PROBATION"
     assert event.payload["new_lifecycle"] == "ACTIVE"
+
+
+def _spec(strategy_id, lifecycle="PROBATION", action="BUY"):
+    return StrategySpec(
+        strategy_id=strategy_id,
+        name=strategy_id,
+        kind="FIXED_SIZE",
+        symbols=("SPY",),
+        parameters={"action": action, "quantity": 1, "confidence": 0.8},
+        max_position_value=1000,
+        lifecycle=lifecycle,
+        created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        rationale="test",
+    )
+
+
+def _cf_event(strategy_id, verdicts):
+    from min_agent.models import JournalEvent
+    return JournalEvent(
+        event_id=f"cf-{strategy_id}-{len(verdicts)}",
+        event_type="COUNTERFACTUAL_EVALUATED",
+        timestamp=datetime(2026, 6, 2, tzinfo=timezone.utc),
+        status="SUCCESS",
+        payload={
+            "rows": [
+                {
+                    "cycle_id": f"{strategy_id}-c{i}",
+                    "strategy_id": strategy_id,
+                    "action": "HOLD",
+                    "verdict": verdict,
+                    "net_return_pct": -1.0 if verdict == "GOOD_HOLD" else 1.0,
+                }
+                for i, verdict in enumerate(verdicts)
+            ]
+        },
+    )
+
+
+def test_offline_rejection_actually_pauses_the_strategy(tmp_path):
+    """The screen has to reach the registry or it is another unused function. The
+    first cut of this called `strategy_library.get`, which does not exist: the
+    AttributeError was swallowed by the caller's broad except, so the path
+    journalled FAILED and never paused anything."""
+    cfg = config(tmp_path)
+    journal = JsonlJournal(cfg.journal_path)
+    journal.append(_cf_event("loser", ["FALSE_TRADE"] * 12))
+    library = StrategyLibrary(cfg.strategy_dir)
+    library.save(_spec("loser"))
+
+    daemon = AgentDaemon(
+        config=cfg, journal=journal, strategy_library=library, loop=FakeLoop()
+    )
+    from min_agent import offline_validation
+
+    decisions = offline_validation.collect_decisions(
+        journal.read_events("COUNTERFACTUAL_EVALUATED"), "loser"
+    )
+    result = offline_validation.validate(decisions, strategy_id="loser")
+    assert result.rejected
+
+    daemon._apply_offline_rejection(result)
+
+    assert library.try_load("loser").lifecycle == "PAUSED"
+    events = journal.read_events("STRATEGY_LIFECYCLE_UPDATED")
+    phases = [e.payload.get("phase") for e in events if e.strategy_id == "loser"]
+    assert phases == ["decided", "applied"], (
+        "the transition must be journalled before and after the write, so a "
+        "crash leaves a visible event rather than a silent state change"
+    )
+
+
+def test_offline_screening_never_promotes_a_strategy(tmp_path):
+    """A strategy that screened well must still be waiting for live evidence."""
+    cfg = config(tmp_path)
+    journal = JsonlJournal(cfg.journal_path)
+    journal.append(_cf_event("sound", ["GOOD_HOLD"] * 12))
+    library = StrategyLibrary(cfg.strategy_dir)
+    library.save(_spec("sound", lifecycle="PROBATION"))
+
+    daemon = AgentDaemon(
+        config=cfg, journal=journal, strategy_library=library, loop=FakeLoop()
+    )
+    from min_agent import offline_validation
+
+    decisions = offline_validation.collect_decisions(
+        journal.read_events("COUNTERFACTUAL_EVALUATED"), "sound"
+    )
+    result = offline_validation.validate(decisions, strategy_id="sound")
+    assert result.verdict == offline_validation.PASS_SCREENED
+
+    daemon._apply_offline_rejection(result)
+
+    assert library.try_load("sound").lifecycle == "PROBATION", (
+        "screening through must not promote; only prospective live cycles can"
+    )
+
+
+def test_a_first_cycle_candidate_is_never_touched(tmp_path):
+    """A brand-new candidate has no history, so the screen returns INCONCLUSIVE and
+    must leave it in PROBATION rather than reading silence as failure."""
+    cfg = config(tmp_path)
+    journal = JsonlJournal(cfg.journal_path)
+    library = StrategyLibrary(cfg.strategy_dir)
+    library.save(_spec("fresh", lifecycle="PROBATION"))
+
+    daemon = AgentDaemon(
+        config=cfg, journal=journal, strategy_library=library, loop=FakeLoop()
+    )
+    from min_agent import offline_validation
+
+    result = offline_validation.validate([], strategy_id="fresh")
+    assert result.verdict == offline_validation.INCONCLUSIVE
+
+    daemon._apply_offline_rejection(result)
+
+    assert library.try_load("fresh").lifecycle == "PROBATION"
+    assert journal.read_events("STRATEGY_LIFECYCLE_UPDATED") == []
+
+
+def test_an_already_retired_strategy_is_not_resurrected_or_rewritten(tmp_path):
+    cfg = config(tmp_path)
+    journal = JsonlJournal(cfg.journal_path)
+    journal.append(_cf_event("dead", ["FALSE_TRADE"] * 12))
+    library = StrategyLibrary(cfg.strategy_dir)
+    library.save(_spec("dead", lifecycle="RETIRED"))
+
+    daemon = AgentDaemon(
+        config=cfg, journal=journal, strategy_library=library, loop=FakeLoop()
+    )
+    from min_agent import offline_validation
+
+    decisions = offline_validation.collect_decisions(
+        journal.read_events("COUNTERFACTUAL_EVALUATED"), "dead"
+    )
+    daemon._apply_offline_rejection(
+        offline_validation.validate(decisions, strategy_id="dead")
+    )
+
+    assert library.try_load("dead").lifecycle == "RETIRED"
+    assert journal.read_events("STRATEGY_LIFECYCLE_UPDATED") == []
