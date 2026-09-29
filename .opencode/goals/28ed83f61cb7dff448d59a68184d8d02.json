@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790645627932,
-      "lastRequestTokens": 89939,
-      "lastInputTokens": 89194
+      "observedAt": 1790646045373,
+      "lastRequestTokens": 150916,
+      "lastInputTokens": 150221
     }
   },
   "runtimeFingerprint": {
@@ -43,16 +43,17 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 5,
-    "tokens": 445302,
+    "turns": 6,
+    "tokens": 447746,
     "cost": 0,
-    "runtimeMs": 52901,
+    "runtimeMs": 62805,
     "seenMessageIDs": [
       "msg_0ea911ff0001xqHQnFmbF3aICp",
       "msg_0ea980dc20015f3lGA67tXRaUK",
       "msg_0eaa68606001KGUnxDEOmPxiG6",
       "msg_0eaae9de0001Pl6Qy08lWTuxb3",
-      "msg_0eabb114c0011swJz6bSgFfGwB"
+      "msg_0eabb114c0011swJz6bSgFfGwB",
+      "msg_0eacd9dc0001NpvI0XwA252B4I"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -62,8 +63,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 40,
-  "observedProgressRevision": 29,
+  "progressRevision": 44,
+  "observedProgressRevision": 41,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
     "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
@@ -104,7 +105,11 @@
     "shell-worktree:b32072121b350530f9b8dac28af23a2598c4de8f0709e1203f3c63682f0ff127",
     "shell-worktree:a7b5a9e80a95119b4684ac285654f18843d1d26b9cb017ec071d8726823a523b",
     "shell-worktree:c72fc77a6de81370e9d83af08c94a4d93d4e5743cf586550797fb0875849db07",
-    "shell-worktree:a8bc8f10f3b099041c50250fd09697b7ac4e9549ed7024a4f8f53eed6167f9d5"
+    "shell-worktree:a8bc8f10f3b099041c50250fd09697b7ac4e9549ed7024a4f8f53eed6167f9d5",
+    "shell-worktree:a664e84849cbe0e8438caecea475690ac06deb9a8cb8e3e51bc8a33b31e92d3a",
+    "shell-worktree:006002640b8e9dae34247cc8516ab530a221eff0a7bdd17961464aad6eb1612c",
+    "shell-worktree:e3bd223134b349d3e9cb5b5480d152b542bf326858f179f485b0f5d432e302b3",
+    "shell-worktree:a1bb59e15919230e8857bf637447a291e1b523350077123960bc1953c703767f"
   ],
   "stalledTurns": 0,
   "progressNotes": [
@@ -327,11 +332,36 @@
       "time": 1790645483789,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790645645740,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790645726371,
+      "summary": "Third ADD step: the two loop stages that did not exist, found by auditing all 16 named stages against code. (1) Offline validation was missing — candidates went from admission straight into PROBATION and traded real paper orders. The obvious implementation (replay the strategy's rule against history) would have been theatre, because a strategy is NOT an executable rule in this system: parameters[\"action\"] is never checked on the execution path and TREND_FOLLOW's reference_price/threshold_pct are read only by validation and admission, never at trade time. So offline_validation.py screens each strategy on the counterfactual verdicts of the decisions it actually produced — unfittable, no rule to overfit, every number traceable to a journalled row. It can only reject, never promote (a test enumerates the verdict space to prove no promoting path). Live: 4 screened through, 2 rejected, 10 inconclusive; both rejected strategies were independently already PAUSED by the lifecycle manager. Screening at admission time alone was structurally incapable of rejecting anything (new candidates have no history), so it also runs across the whole library each maintenance pass. (2) Experiment registry implemented as a derived VIEW, not a store — every link is already journalled, so a persisted registry would be a second source of truth. A test asserts it exposes no save/write/append. 35 strategies, 23 admitted, 15 incomplete chains (all but one historical). Three wiring bugs caught by tests before production, all the same shape — code that looked connected and was not: strategy_library.get does not exist (AttributeError swallowed by a broad except, so every run journalled FAILED and nothing was ever paused); event.get(\"payload\") called on JournalEvent models rather than dicts; and _apply_offline_rejection trusted its caller to check the verdict, so calling it directly paused a first-cycle candidate just told INCONCLUSIVE. Also found NEUTRAL was being counted as failure, which rejected tiny-fixed-size-001 on 15 neutral decisions — the largest PnL contributor on record (+362.66); silence is not failure. Shadow trading is NOT missing: it is merged into probation deliberately. Evidence — trend-follow-sell-002 is in PROBATION now and has already submitted a real broker order through the full path; tiny-fixed-size-001 (13 orders), fixed-size-buy-001 (6), trend-follow-buy-001 (4) all traded and all passed through probation. In a paper-only system with live mode hard-blocked, probation already exercises the complete real execution path, and a separate shadow executor would be a second execution truth that drifts from the real one. Exposure rules verified against the REAL account rather than a fixture: 5 positions worth $37,082, all outside the allowlist; a BUY of 5 SPY is APPROVED (scoping fix works); the $20,000 cap still binds on the agent's own book ($15k approves, $19k rejects naming agent exposure); the optional max_account_value backstop rejects correctly; the $5,000 per-position limit is what refuses larger single orders. make verify: 17 classes, 0 failed, 472 distinct tests, 91/91 audit, doctor OK, exit 0; verify-self-test green on 5 conditions. Commits 15eaa91, c9409a5, e6ec14f.",
+      "next": "Two things remain, and neither is a new feature. First, close the one live incomplete experiment chain: trend-follow-20260612-006 is in PROBATION with zero evaluation evidence — it needs a reflection window to complete, which is market-time dependent, so it should be re-checked after the next open rather than forced. Second, and the only genuine gap left in the chain, is the one shadow could not supply: prospective live evidence that a candidate deserves to be trusted at size. That is the final success criterion (long-term, prospective, after-cost, risk-adjusted live net PnL) and it cannot be manufactured — it requires accumulated market time. The honest next engineering step is therefore not more code but confirming the system keeps a clean, auditable record while that time passes: re-run make verify after the next session opens, confirm the counterfactual grows on new cycles, and confirm trend-follow-20260612-006 acquires evaluation evidence. A full requirement-by-requirement audit against the objective should then be performed before any completion claim."
+    },
+    {
+      "time": 1790645824250,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790645883662,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790645940862,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 284,
+  "storageGeneration": 313,
   "createdAt": 1790641773516,
-  "updatedAt": 1790645627932,
+  "updatedAt": 1790646045373,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:d9b69ac2c1f8b0bbc90c47d5bb5615b71ffc238325b2b248340f3a260feb8032",

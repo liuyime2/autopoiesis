@@ -461,3 +461,62 @@ What is genuinely missing is not shadow execution but **shadow's purpose**: proo
 that a candidate should be trusted at a larger size. That is live prospective
 evidence, and it is exactly what the final success criterion requires and what
 cannot yet be claimed.
+
+## 11. Closing the remaining drift: config, entry points, and documents
+
+The objective asks that the run entry point be unified and that configuration,
+functions, tests and documentation existing never be mistaken for the capability
+being real. Three checks close what was still open.
+
+### 11.1 Configuration that cannot affect anything
+
+`AgentConfig` has 34 fields. A new test proves every one is either read in
+production code or populated from the environment, and proves the rule itself can
+reject a dead field — the same discipline `make verify-self-test` applies to the
+gate. It checks the inverse drift too: every `MIN_AGENT_*` variable set in the
+shipped runtime env must be read by the loader, because a setting an operator
+believes is in force and is not is worse than an absent one.
+
+Current state: no dead fields, no unread operator knobs. An earlier version of that
+test contained `assert ... or True`, which always passed while looking like an
+assertion — the exact "looks like a check but checks nothing" shape this audit has
+been removing, caught here in the check that was supposed to prevent it.
+
+### 11.2 Run entry points
+
+There is one: `minictrl` → `python -m min_agent.cli`. The systemd unit and the
+watchdog both go through the same module. `auto_reviewer.py` can write to the
+repository and was a genuine second control path while scheduled; it is now in
+neither crontab nor a systemd timer and is not running, and it has been changed to
+warn rather than overwrite lifecycle decisions that were made from real evidence.
+It remains an operator-run tool referenced by the governance tests, not a live
+path. Deleted paths (`voyager_quant`, `skill_library`, `tools/legacy`) are
+referenced nowhere in code; the only remaining mentions are in historical
+documents.
+
+### 11.3 A plan document that contradicted the tree
+
+`docs/superpowers/plans/2026-09-28-quantgroup-recovery-and-refactor.md` still
+carried the header "Awaiting approval — no source file has been modified yet" 51
+commits in, and instructed the reader to **restore `skill_library/` from its `.bak`
+file** — a directory deleted on purpose after being found to hold only
+near-duplicate variants of a single sentence. An operator following that plan as
+written would have undone the work.
+
+It is now marked SUPERSEDED with a verified table of what each item turned out to
+be, and a new `docs-not-stale` gate fails on any plan document that asserts an
+unacted state without that marker. The gate proves it can fail: the self-test
+plants an unmarked stale plan and asserts FAIL, then the same text marked
+SUPERSEDED and asserts PASS.
+
+## 12. Component classification, refreshed
+
+| classification | members |
+| --- | --- |
+| actively used | `data_gateway`, `loop`, `guardian`, `executor`, `fill_reconciler`, `order_reconciler`, `evaluator`, `broker_evidence`, `reflection_memory`, `curriculum`, `strategy_admission`, `knowledge_admission`, `knowledge_library`, `policy_engine`, `llm_decision`, `strategy_engine`, `scheduler`, `health`, `doctor`, `journal`, `atomicio`, `config`, `models`, `counterfactual`, `offline_validation`, `experiment_registry`, `daemon`, `cli` |
+| partially wired | `offline_validation` (screens and can pause, but promotion stays manual and live — by design); `max_account_value` (implemented, deliberately off) |
+| implemented but unused | `auto_reviewer.py` (operator tool, unscheduled); `tools/alpaca_smoke.py` (manual smoke test) |
+| obsolete | `docs/superpowers/plans/2026-09-28-…` (superseded, retained as history) |
+| duplicated | none remaining — the three evidence readers were merged into `latest_evidence_batch()`; the experiment registry is a view rather than a second store |
+| broken | none open; six wiring defects found and fixed this session (`strategy_library.get`, `JournalEvent` vs dict, missing verdict guard, `INFORMATIVE` ordering, `relative_to` crash, NEUTRAL-as-failure) |
+| missing | nothing in the chain. Shadow trading is **merged into probation** (10.1) rather than added, and prospective live evidence is time, not code |

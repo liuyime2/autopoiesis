@@ -45,6 +45,9 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_cli.py": ("unit-integration",),
     "test_cli_startup.py": ("syntax-import",),
     "test_config.py": ("unit-integration", "shadow-live-consistency"),
+    "test_config_wiring.py": (
+        "unit-integration", "data-integrity", "shadow-live-consistency",
+    ),
     "test_counterfactual.py": ("decision-outcome-counterfactual",),
     "test_curriculum.py": ("unit-integration", "lifecycle-invariants"),
     "test_daemon.py": (
@@ -195,6 +198,50 @@ def check_syntax_import() -> Result:
     if rc != 0:
         return Result("syntax-import", FAIL, _tail(out))
     return Result("syntax-import", PASS, _tail(out, 1))
+
+
+#: Phrases that assert a plan is not yet acted on. Any of these appearing in a
+#: plan document means the document is describing a tree that no longer exists.
+STALE_STATUS_CLAIMS = (
+    "no source file has been modified",
+    "awaiting approval",
+    "status: draft",
+)
+
+
+def check_docs_not_stale() -> Result:
+    """A plan document that contradicts the tree is worse than no document.
+
+    The recovery plan still carried "Awaiting approval - no source file has been
+    modified yet" 51 commits in, and told an operator to restore `skill_library/`
+    from a `.bak` file - a directory that had been deleted on purpose after being
+    found to hold only near-duplicate artifacts. Following it as written would
+    have undone the work.
+
+    A plan may only keep these claims if it is explicitly marked SUPERSEDED, which
+    is the state this check put it into.
+    """
+    plans = sorted((ROOT / "docs" / "superpowers" / "plans").glob("*.md"))
+    if not plans:
+        return Result("docs-not-stale", SKIP, "no plan documents to check")
+
+    problems: list[str] = []
+    for plan in plans:
+        text = plan.read_text(errors="ignore").lower()
+        stale = [c for c in STALE_STATUS_CLAIMS if c in text]
+        if not stale:
+            continue
+        if "superseded" in text[:2000]:
+            continue  # explicitly marked as a historical record
+        problems.append(
+            f"{plan.relative_to(ROOT)} still claims {stale[0]!r} and is not "
+            "marked SUPERSEDED"
+        )
+
+    detail = "; ".join(problems) if problems else (
+        f"{len(plans)} plan document(s), none asserting an unacted state"
+    )
+    return Result("docs-not-stale", FAIL if problems else PASS, detail)
 
 
 def check_data_integrity() -> Result:
@@ -409,6 +456,34 @@ def self_test() -> int:
             print("  ok  a class with no tests is detected by class-coverage")
         TEST_CLASS_MAP.update({n: c for n, c in saved.items() if n in stripped})
 
+        # 6. A plan document that contradicts the tree must fail, and the same text
+        #    marked SUPERSEDED must pass. A doc check that cannot fail is how the
+        #    recovery plan sat at "Awaiting approval" for 51 commits while telling
+        #    an operator to restore a directory that had been deleted on purpose.
+        probe = ROOT / "docs" / "superpowers" / "plans" / "zz_stale_probe.md"
+        stale_text = (
+            "# Probe\nStatus: **Awaiting approval** - no source file has been "
+            "modified yet.\n"
+        )
+        try:
+            probe.write_text(stale_text)
+            result = check_docs_not_stale()
+            if result.status != FAIL:
+                failures.append("a plan claiming an unacted state did not fail")
+            else:
+                print("  ok  a stale plan document fails the docs check")
+
+            probe.write_text(
+                "# Probe\nStatus: SUPERSEDED - historical record only.\n" + stale_text
+            )
+            result = check_docs_not_stale()
+            if result.status != PASS:
+                failures.append("a plan explicitly marked SUPERSEDED was failed")
+            else:
+                print("  ok  the same plan marked SUPERSEDED passes")
+        finally:
+            probe.unlink(missing_ok=True)
+
     finally:
         restore()
 
@@ -418,7 +493,7 @@ def self_test() -> int:
             print(f"  - {f}")
         return 1
     print("\nSELF-TEST PASSED: the gate detects failing tests, missing names,")
-    print("empty classes and unclassified test files.")
+    print("empty classes, unclassified test files and stale plan documents.")
     return 0
 
 
@@ -452,6 +527,7 @@ def main() -> int:
     results.append(check_all_tests_classified())
     results.append(check_known_classes_run())
     results.append(check_software_supply_chain())
+    results.append(check_docs_not_stale())
     results.append(check_syntax_import())
     results.append(check_data_integrity())
     results.append(check_shadow_live_consistency())

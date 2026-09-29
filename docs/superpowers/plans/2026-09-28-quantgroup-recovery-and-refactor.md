@@ -1,9 +1,37 @@
 # QuantGroup Recovery & Refactor Plan
 
 Date: 2026-09-28
-Status: **Awaiting approval** — no source file has been modified yet.
+Status: **SUPERSEDED — do not work from this document.**
 Baseline commit for rollback: `4092bc4`
 Scope: `/localscratch/liuyime2/QuantGroup`
+
+> **This plan is kept as a historical record only.** Its header said "Awaiting
+> approval - no source file has been modified yet", which stopped being true
+> almost immediately: 51 commits later the work in it is largely done, plus
+> several stages it never anticipated (the counterfactual ledger, `make verify`,
+> offline validation, the experiment chain).
+>
+> **The authoritative record is [`../SYSTEM_AUDIT.md`](../SYSTEM_AUDIT.md)** and
+> the code itself. The unchecked boxes below were never ticked as the work
+> landed, so they are not a status report.
+>
+> Verified against the current tree on 2026-09-28:
+>
+> | plan item | reality |
+> | --- | --- |
+> | `pytest.ini` `testpaths` | done |
+> | `MIN_AGENT_MAX_TOTAL_EXPOSURE` | done, and scoped to the allowlist |
+> | `CYCLE_FAILED` event | done |
+> | `test_data_gateway.py`, `test_health.py` | done |
+> | `tools/alpaca_smoke.py` | done |
+> | health liveness + staleness | done |
+> | `check_real_alpaca.py`, root `test_alpaca.py` | gone, replaced |
+> | `history_version/`, `screenlog.0` | gone |
+> | **"Restore `skill_library/` from `.bak`"** | **REVERSED - deliberately deleted, do not restore** |
+>
+> That last row is the dangerous one: following this plan as written would
+> recreate `skill_library/`, which was deleted after it was found to hold only
+> near-duplicate artifacts of a single sentence.
 
 ---
 
