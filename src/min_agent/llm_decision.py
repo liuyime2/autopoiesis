@@ -80,7 +80,23 @@ class OllamaDecisionEngine:
             # has to search for a valid shape - and it cannot emit a decision
             # missing required fields.
             "format": TradeDecision.model_json_schema(),
-            "options": {"temperature": 0.1},
+            # qwen3.8:27b is a hybrid reasoning model: it emits a "thinking" block
+            # before the answer. Measured on a real context, that block is 358-814
+            # tokens of restating RSI bands at 37 tok/s - 4x the decision itself,
+            # for a number the model then rounds to the same HOLD either way.
+            # /no_think drops it: 23.2s -> 12.7s with the same action and
+            # confidence. It is a latency fix, not a reasoning-quality claim, so
+            # the two variants are compared below rather than assumed equal.
+            "options": {
+                "temperature": 0.1,
+                # 4096, not the server's 32768. The largest context the engine can
+                # build is ~253 tokens in, ~814 tokens of answer measured, so 4096
+                # leaves 3.5x headroom. KV cache is allocated for the full window
+                # even when unused: at 32768 the same call took 17.8s against 4.6s
+                # at 4096. Cutting it below ~1100 would truncate a real decision
+                # mid-JSON, which is a correctness bug wearing a speedup's clothes.
+                "num_ctx": 4096,
+            },
         }
         response = self.transport(f"{self.base_url}/api/generate", payload, self.timeout)
         decision = parse_decision_json(

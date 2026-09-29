@@ -1725,3 +1725,122 @@ the gate to go red:
 The FATAL message in `systemd_unit_dir.sh` was also wrong and told the operator to
 free $HOME, which would not have helped. It now names the directories actually
 searched and says plainly that the quota is not this system's cause.
+
+## 35. One model, one slot, resident: and the two wrong claims it exposed
+
+The operator instruction was to stop using two models and serve only
+`qwen3.8:27b` as fast as possible. Chasing that turned up two things I had stated
+plainly and wrongly earlier in this same session.
+
+### 35.1 The model was on the GPU the whole time
+
+I reported that the model "was not running on the GPU at all" and that zero
+utilisation proved it. That was wrong. Startup logs show:
+
+```
+GPU-0d16a3ed  library=CUDA  compute=7.5  Quadro RTX 8000  total=45.0 GiB
+GPULayers:37[ID:GPU-...  Layers:37(0..36)]   FlashAttention:true  Parallel:1
+```
+
+All 37 layers offloaded, flash attention on, one device. `CUDA_VISIBLE_DEVICES=0`
+works. The zero utilisation I saw was simply an idle GPU: the model had been
+unloaded after the 30-minute keep-alive expired, because the market was closed and
+nothing was asking for it. Grepping the ollama binary for the string
+`CUDA_VISIBLE_DEVICES` returns nothing, which is expected - it is honoured in the
+CUDA layer, not by ollama's own parser. Absence of the string was not evidence.
+
+### 35.2 The 120s timeouts were a cold-load problem, not a slow model
+
+Warm, the model answers a real decision in 10-24s. Unloaded, the next call must
+first read 16.33 GiB of weights off `/localscratch` - about three minutes, against
+a 120s client timeout. So the recorded `CURRICULUM_FAILED` timeouts have the
+signature of a cold model, not a slow one, and they appear off-hours. Fix:
+
+| setting | before | after | why |
+| --- | --- | --- | --- |
+| `OLLAMA_MAX_LOADED_MODELS` | 2 | 1 | The agent pins one model. A second slot let another model evict it, and two 27B-class models do not fit in 45 GiB beside KV cache. |
+| `OLLAMA_KEEP_ALIVE` | 30m | -1 | One model, one dedicated card: do not unload. Removes the three-minute cold path entirely. |
+| `num_ctx` | 32768 (server default) | 4096 | KV cache is allocated for the whole window even when unused. |
+| `OLLAMA_NUM_PARALLEL` | 1 | 1 | Deliberate: single-threaded client, one device. Parallel slots only split the same VRAM. |
+
+Measured on a real context: **52.2s → 19.5s** for the identical call, and on the
+synthetic shortest context **17.8s → 4.6s**.
+
+`num_ctx=4096` is safe by measurement, not taste: the largest context the engine can
+build is ~253 tokens in (account, positions, open orders, full selected strategy
+spec) and the longest measured answer is 814 tokens, so 4096 leaves 3.5x headroom.
+Cutting it to 2048 would fit this workload *today* and truncate the first context
+that grows a few open orders - a correctness bug dressed as a speedup.
+
+I also tried `num_predict` capping. It is a trap: at 160/256/384 tokens the
+response came back **empty** with `done_reason=length`, because the model's thinking
+block consumed the budget before the JSON started. The fix for the timeouts is
+residency, not truncation.
+
+`/no_think` was **not** adopted. It halves latency (23.2s → 12.7s, same action and
+confidence) and was tempting, but on a near-daily-limit context it changed
+confidence from 0.72 to 0.55. Suppressing the reasoning of a hybrid model to save
+wall-clock is a decision-quality change dressed as an infrastructure change, and
+there is no evidence here that it is safe. Not adopted; recorded as a lever if
+latency ever becomes the binding constraint.
+
+### 35.3 The units were installed where systemd never looks
+
+The single worst find, and it invalidates two of my own claims from earlier today.
+
+`minictrl install-service` wrote units to `$XDG_CONFIG_HOME/systemd/user`
+(`/localscratch/liuyime2/ohome/.config/...`). The systemd **user manager** resolves
+unit paths from its own start-time environment, which has no `XDG_CONFIG_HOME` -
+`systemctl --user show-environment` returns only `HOME=/home/liuyime2`. So the
+manager searches `$HOME/.config/systemd/user` and the tmpfs runtime dir, and never
+opens the files minictrl had just written. Consequences, all of which reported
+success:
+
+- `FragmentPath` was `/run/user/29424/systemd/user/ollama.service` - the **tmpfs**
+  copy left over from an earlier session.
+- `systemctl is-enabled` said `enabled`, because the symlink existed, even though it
+  pointed at `/run/user/...`.
+- `/run` is tmpfs. After a reboot those symlinks are **dangling** and the units
+  would simply never start.
+- The ollama edits I made this session had **no effect on the running process**,
+  which still had `KEEP_ALIVE=30m` and `MAX_LOADED_MODELS=2` - which is exactly how
+  the first restart appeared to do nothing.
+
+So two earlier claims were wrong: that the quota "was never the blocker", and that
+the units "survive a reboot". The quota **was** blocking the only durable location
+(`$HOME/.config/systemd/user` could not be created), and the units were **not**
+reboot-persistent.
+
+Fixed: `systemd_unit_dir.sh` now asks the manager (`show-environment`) instead of
+trusting the shell, and treats `$XDG_RUNTIME_DIR` as a last resort that is refused
+unless `MIN_AGENT_ALLOW_RUNTIME_UNITS=1`. Units installed to
+`$HOME/.config/systemd/user`; `FragmentPath` now points there; all three enablement
+links point at that durable path; zero links into `/run`.
+
+This does reintroduce a `$HOME` dependency - four small unit files and three
+symlinks, a few KB - and it is unavoidable: a reboot-persistent *user* unit cannot
+live anywhere else when the manager has no `XDG_CONFIG_HOME`. The repository stays
+the source of truth (`tools/*.service.in`); `$HOME` holds only the deployment. The
+`home-independence` check still passes because it governs what the **daemon
+writes**, and no runtime state is under `$HOME`.
+
+### 35.4 Two new gates, because both bugs were invisible
+
+A unit that systemd cannot find reports `enabled`. A unit enabled through a tmpfs
+link reports `enabled` until the reboot it never comes back from. Neither produces
+an error, so both are now checks:
+
+```
+[PASS] units-where-systemd-looks  every --user unit loads from a durable path
+                                  and is enabled without a tmpfs link
+```
+
+Self-test condition 8 creates a real tmpfs enablement link and requires the gate to
+go red. Self-test condition 7 covers `$HOME` paths in production code. Four
+`llm_decision` tests now pin `num_ctx` and its headroom, including one that walks
+each `/api/generate` call site and fails if any of them does not set the window -
+which is how the curriculum transport in `cli.py` was found still on the server
+default. The first version of that test flagged its own explanatory comment, and
+the second walked back a fixed number of lines; both are now structural.
+
+`make verify`: **24 classes, 0 failed, 1031 test executions, doctor OK.**

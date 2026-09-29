@@ -1,18 +1,40 @@
 #!/usr/bin/env bash
-# Print a directory the systemd user manager will actually search.
+# Print a directory the systemd user manager will actually search, preferring one
+# that survives a reboot.
 #
-# The manager resolves unit paths from its own start-time environment, which on
-# this host has no XDG_CONFIG_HOME. So it searches $HOME/.config/systemd/user -
-# and /home is at user quota, so that cannot be created. Try the paths in
-# priority order and report clearly when none is usable, rather than writing
-# units somewhere that will never be read.
+# The bug this replaces: the previous version trusted the *shell's*
+# XDG_CONFIG_HOME. The systemd user manager resolves unit paths from its own
+# start-time environment, which on this host has no XDG_CONFIG_HOME, so it
+# searched $HOME/.config/systemd/user and $XDG_RUNTIME_DIR/systemd/user. The
+# old script "succeeded" by writing to $XDG_CONFIG_HOME - a directory systemd
+# never reads - so the deployed units were dead files, the running daemon kept
+# executing stale copies out of /run, and `systemctl is-enabled` cheerfully
+# reported "enabled" while the enablement symlink pointed into tmpfs.
+#
+# So: ask the manager, do not assume.
 set -uo pipefail
+
+# What the manager itself believes. Falls back to $HOME/.config, which is the
+# documented default when XDG_CONFIG_HOME is unset in the manager environment.
+manager_config_home() {
+  local env_home
+  env_home="$(systemctl --user show-environment 2>/dev/null \
+    | sed -n 's/^XDG_CONFIG_HOME=//p' | head -1)"
+  if [ -n "$env_home" ]; then
+    echo "$env_home"
+  else
+    echo "$HOME/.config"
+  fi
+}
+
+# $XDG_RUNTIME_DIR is tmpfs: anything installed there is gone after a reboot, and
+# an enablement symlink into it becomes a dangling link. It is a last resort,
+# never a first choice.
+runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/systemd/user"
 
 candidates=(
   "${MIN_AGENT_UNIT_DIR:-}"
-  "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-  "$HOME/.config/systemd/user"
-  "/run/user/$(id -u)/systemd/user"
+  "$(manager_config_home)/systemd/user"
 )
 
 for dir in "${candidates[@]}"; do
@@ -28,22 +50,36 @@ for dir in "${candidates[@]}"; do
   fi
 done
 
-cat >&2 <<'MSG'
-FATAL: no writable systemd user unit directory.
+# Nothing durable worked. Say so, and name the tmpfs fallback explicitly instead
+# of silently producing a configuration that dies at the next reboot.
+if [ "${MIN_AGENT_ALLOW_RUNTIME_UNITS:-0}" = "1" ] && [ -d "$runtime_dir" ] && [ -w "$runtime_dir" ]; then
+  echo "$runtime_dir" >&2
+  echo "$runtime_dir"
+  exit 0
+fi
 
-None of the candidate directories was writable. Checked, in order:
-  ${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
-  $HOME/.config/systemd/user
-  any writable path named by MIN_AGENT_UNIT_DIR
+cat >&2 <<MSG
+FATAL: no durable writable systemd user unit directory.
 
-On this host XDG_CONFIG_HOME is set to /localscratch/liuyime2/ohome/.config,
-which is off $HOME, so the first candidate normally succeeds and $HOME's quota
-is irrelevant. If that stops being true, the quota on $HOME - not this system -
-is the cause.
+Checked, in order:
+  \${MIN_AGENT_UNIT_DIR}
+  $(manager_config_home)/systemd/user   <- where the manager actually looks
+  $runtime_dir                            <- REJECTED: tmpfs, dies on reboot
+
+The manager's own environment reports:
+$(systemctl --user show-environment 2>/dev/null | grep -E '^(HOME|XDG_CONFIG_HOME)=' | sed 's/^/  /')
+
+Most likely cause on this host: \$HOME is at user quota, so
+$HOME/.config/systemd/user cannot be created. Note that this is the *manager's*
+path: setting XDG_CONFIG_HOME in your shell does not affect it, and writing units
+to \$XDG_CONFIG_HOME produces files systemd never reads.
 
 Fix one of:
-  1. check XDG_CONFIG_HOME is set and writable, then: minictrl install-service
+  1. free a few MB under \$HOME so $HOME/.config/systemd/user can be created
+     (this is the only location a reboot-persistent *user* unit can live)
   2. export MIN_AGENT_UNIT_DIR=/some/writable/path before installing
-  3. run without systemd: nohup ./run_forever.sh &   (crash-loop guarded)
+  3. export MIN_AGENT_ALLOW_RUNTIME_UNITS=1 to accept tmpfs units that will NOT
+     survive a reboot
+  4. run without systemd: nohup ./run_forever.sh &   (crash-loop guarded)
 MSG
 exit 2

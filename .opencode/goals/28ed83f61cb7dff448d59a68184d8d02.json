@@ -32,7 +32,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790721757495,
+      "observedAt": 1790725296100,
       "lastRequestTokens": 478163,
       "lastInputTokens": 477699
     }
@@ -198,11 +198,6 @@
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790685571858,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790685764725,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -447,11 +442,16 @@
       "time": 1790715934076,
       "summary": "Checked the system after a full session and it worked - but two of my own instruments reported something FALSE about the day, and both are now fixed. The session: 67 cycles 09:30-15:57 at median gap 5.5 min against a configured 300s, so the cadence fix is confirmed sustained. The model traded for the first time in the system's history: 10 single-share BUYs between 13:59 and 15:04, all under fixed-size-buy-001 at confidence 0.6, and the Guardian then refused nine more with \"max trades per day reached\" - the daily limit held exactly as configured. Orders submitted 24 to 34, shares filled 75 to 85. The account now holds 10 SPY shares, the first position the agent has ever held across a cycle boundary, which exercised the unrealized-PnL machinery against a real one for the first time: 10 open lots, entries 764.52-765.03 marked at 764.18, unrealized +1.05, net 565.44, after cost 556.77, and the individual lots sum correctly to the reported total. First false report: calibration moved off INSUFFICIENT for the first time and immediately produced SIGNAL - the most confident bucket 97.1% against a 96.8% base rate. A 0.3-point margin on a base rate that high is rounding, and the Brier of 0.589 is 2.4x worse than always claiming 0.5: the model is right 97% of the time while claiming 0.5-0.6, and its one genuinely confident call (0.7) was wrong. The verdict now checks the Brier first and requires a 5-point margin before accuracy can produce a SIGNAL; current reading is MIS-CALIBRATED. Second false report: doctor said the model had \"opened no lots\" on the day it opened ten, because OpenLotAttribution carried no buy_order_id - so an open position could not be traced to the order that created it, which is the same provenance gap that let 29 shares be sold with no BUY to account for. Open lots now carry buy_order_id, buy_fill_id and buy_client_order_id, and the report reads \"the model has 10 share(s) OPEN and none closed, so its realized contribution is 0.00 by construction rather than because it did nothing\" - that distinction is the whole finding, because 0.00 realized meant two different things and the system could not tell them apart. Two existing tests asserted the weaker incomplete statement and were updated. Hold quality also rose 0.687 to 0.736 over 416 scored (285 good, 95 missed alpha, 11 false trades). Commit 94839c0. make verify: 22 classes, 0 failed, 666 distinct tests, 91/91 audit, doctor OK, exit 0.",
       "next": "The honest position after day one: the model has now demonstrably ACTED for the first time - 10 executed orders, the Guardian correctly refusing 9 more at the daily limit, a real open position being marked to market by machinery previously proven only by test. It has not yet demonstrably EARNED anything: one day, one symbol, one share per order, no closed lot, 0.00 realized, and a confidence that the system now correctly reports as worse than useless (Brier 0.589). After-cost net is +556.77 but that remains the baseline rule's money. The measurement that matters now needs time rather than code: 70 llm decisions are still pending a 24h horizon, so calibration will keep accruing evidence; a closed lot requires a SELL, and the position is only worth +1.05 unrealized; and 27 of 27 strategies remain INSUFFICIENT out-of-sample. The single outstanding user action is unchanged - free $HOME quota so the units become reboot-persistent, since they live in /run/user/29424/... which is tmpfs and the watchdog cannot survive a reboot."
+    },
+    {
+      "time": 1790721816806,
+      "summary": "Operator instruction was: clear the $HOME quota (cache and local), then make everything use only the project folder rather than HOME. Both done, but the reason I had recorded for the first part was WRONG and the correction is the substance. The quota was never what stopped the services: XDG_CONFIG_HOME on this host is /localscratch/liuyime2/ohome/.config, which is not under $HOME, and tools/systemd_unit_dir.sh searches that first, so install-service would have succeeded with a full quota. What the quota actually blocked was $HOME/.config, a path this system does not use - I had conflated the two because both failed with the same error at the same moment. All three units are now enabled AND active (survive reboot); quant-watchdog.timer is the real change, because a timer that is not installed does not fire. Cleared, all re-downloadable: ~/.cache/pip 697M, ~/.cache/ms-playwright-go 128M, and two of three stale CLI versions under ~/.local/share/claude/versions. ~/.cache 835M->220K, ~/.local 707M->233M, $HOME 11G->8.8G. Deliberately untouched: the conda env, because ~/miniconda3 is a symlink to /localscratch and never consumed quota at all, and ~/.config, which belongs to the desktop and not to this system. The empty ~/.config/systemd/user I created during the cleanup was removed again (0 files, mine). Confirmed the running service has ZERO $HOME dependency: the unit's PATH is /localscratch/liuyime2/conda_env/llm/bin, not ~/miniconda3; that symlink is only used by my interactive convenience shell. Ollama weights already at /localscratch/liuyime2/ollama_local/models. $HOME-independence is now a gate rather than a promise, because verified by hand once it decays into a comment the first time someone writes a Path.home() in a maintenance routine. New home-independence check scans production code and the entry point for expanduser, Path.home(), getenv(\"HOME\") and ~/, and also fails if any XDG root is set back inside $HOME - the subtler failure, where the code stays clean while the environment moves the journal somewhere that disappears under quota. Self-test condition 7 writes a real ~/ path into a production module and requires the gate to go red. The FATAL message in systemd_unit_dir.sh was also wrong and told the operator to free $HOME, which would not have helped; it now names the directories actually searched and says plainly the quota is not this system's cause. make verify: 23 classes, 0 failed, 1027 test executions, 91/91 audit, doctor OK, exit 0. Commit 10b0291.",
+      "next": "System is now reboot-persistent and entirely off $HOME, so the operator blocker is closed and there is no user action outstanding. What remains is market time, not code: 70 llm decisions pending a 24h horizon, 10 SPY shares open and unrealized, no closed model lot, 27/27 strategies INSUFFICIENT out-of-sample, and after-cost net +556.77 still entirely the baseline rule's money. Next real checkpoint is 2026-09-30 09:30 when the market reopens and the pending counterfactuals can begin scoring."
     }
   ],
-  "storageGeneration": 843,
+  "storageGeneration": 937,
   "createdAt": 1790641773516,
-  "updatedAt": 1790721757495,
+  "updatedAt": 1790725296100,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:c3cb3254c518367f1c8cd88244e84bcbd83597fa1d10bffb8cee3387f57fdc53",

@@ -28,9 +28,22 @@ Environment=CUDA_VISIBLE_DEVICES=0
 # back to CPU entirely.
 Environment=OLLAMA_VULKAN=0
 
-Environment=OLLAMA_KEEP_ALIVE=30m
-Environment=OLLAMA_MAX_LOADED_MODELS=2
+# One model, one slot, resident forever. The agent uses qwen3.8:27b and nothing
+# else (src/min_agent/config.py:76 pins it), so there is no second model to make
+# room for. MAX_LOADED_MODELS=2 was what let a second model evict the first: two
+# 27B-class models do not fit in 45 GiB alongside KV cache, so the agent's model
+# was being unloaded and cold-reloaded mid-session.
+Environment=OLLAMA_MAX_LOADED_MODELS=1
+# NUM_PARALLEL=1 is deliberate. The agent is single-threaded per cycle on one
+# device; parallel slots only split the same VRAM between contexts.
 Environment=OLLAMA_NUM_PARALLEL=1
+# Keep the model resident. Unloaded, the next call must first read ~16.3 GiB of
+# weights off /localscratch, measured at ~3 minutes of load against a 120s client
+# timeout - so an off-hours call reliably timed out, which is exactly the shape of
+# the recorded CURRICULUM_FAILED timeouts. Resident, the same call takes 10-30s.
+# -1 means "do not unload", which is what one dedicated model on a dedicated card
+# wants.
+Environment=OLLAMA_KEEP_ALIVE=-1
 
 Restart=always
 RestartSec=10

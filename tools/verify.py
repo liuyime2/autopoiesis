@@ -26,7 +26,9 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
+import tempfile
 import sys
 import time
 from dataclasses import dataclass, field
@@ -357,6 +359,65 @@ def check_home_independence() -> Result:
         "home-independence",
         FAIL if violations else PASS,
         "; ".join(violations[:5]) if violations else detail,
+    )
+
+
+def check_units_are_where_systemd_looks() -> Result:
+    """A --user unit is only reboot-persistent if it lives where the manager reads.
+
+    This host's systemd user manager has no XDG_CONFIG_HOME in its start-time
+    environment, so it searches $HOME/.config/systemd/user and the tmpfs runtime
+    dir - never the shell's XDG_CONFIG_HOME. Installing to the latter produces
+    files systemd never opens, while `systemctl is-enabled` still answers
+    "enabled" because the symlink exists. Worse, an enablement link pointing into
+    /run is a dangling link the moment the machine reboots, so the unit silently
+    never comes back and nothing reports an error.
+
+    Both failure modes were live here: units deployed to a directory the manager
+    ignored, and enablement symlinks targeting /run/user/... . Both are checked.
+    """
+    if not shutil.which("systemctl"):
+        return Result("units-where-systemd-looks", SKIP, "no systemd on this host")
+
+    runtime = f"/run/user/{os.getuid()}"
+    problems: list[str] = []
+
+    for unit in ("min-agent.service", "ollama.service", "quant-watchdog.timer"):
+        try:
+            proc = subprocess.run(
+                ["systemctl", "--user", "show", unit, "-p", "FragmentPath", "--value"],
+                capture_output=True, text=True, timeout=15,
+            )
+        except Exception as exc:  # pragma: no cover
+            problems.append(f"{unit}: could not query ({exc})")
+            continue
+        path = proc.stdout.strip()
+        if proc.returncode != 0 or not path:
+            continue  # unit not installed here; not this check's business
+        if path.startswith(runtime):
+            problems.append(f"{unit} is loaded from tmpfs {path} - gone on reboot")
+
+    # Enablement links must not target the runtime dir either.
+    for base in (os.environ.get("XDG_CONFIG_HOME", ""), os.path.expanduser("~/.config")):
+        wants = Path(base) / "systemd" / "user" / "default.target.wants" if base else None
+        if wants is None or not wants.is_dir():
+            continue
+        for link in wants.iterdir():
+            try:
+                target = os.readlink(link)
+            except OSError:
+                continue
+            if target.startswith(runtime):
+                problems.append(
+                    f"{link.name} is enabled via a link into tmpfs ({target}) - "
+                    "dangling after reboot"
+                )
+
+    return Result(
+        "units-where-systemd-looks",
+        FAIL if problems else PASS,
+        "; ".join(problems[:4]) if problems else
+        "every --user unit loads from a durable path and is enabled without a tmpfs link",
     )
 
 
@@ -771,6 +832,29 @@ def self_test() -> int:
         finally:
             src_probe.unlink(missing_ok=True)
 
+        # 8. A unit loaded from tmpfs, or enabled through a link into tmpfs, must
+        #    fail. Both were live on this host while `systemctl is-enabled` said
+        #    "enabled" the whole time - the exact shape of failure where the check
+        #    that exists to catch it reports success.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "systemd" / "user" / "default.target.wants").mkdir(parents=True)
+            link = root / "systemd" / "user" / "default.target.wants" / "x.service"
+            link.symlink_to(f"/run/user/{os.getuid()}/systemd/user/x.service")
+            saved_cfg = os.environ.get("XDG_CONFIG_HOME")
+            os.environ["XDG_CONFIG_HOME"] = str(root)
+            try:
+                result = check_units_are_where_systemd_looks()
+                if result.status != FAIL:
+                    failures.append("a tmpfs enablement link did not fail")
+                else:
+                    print("  ok  a tmpfs enablement link fails units-where-systemd-looks")
+            finally:
+                if saved_cfg is None:
+                    os.environ.pop("XDG_CONFIG_HOME", None)
+                else:
+                    os.environ["XDG_CONFIG_HOME"] = saved_cfg
+
     finally:
         restore()
 
@@ -780,8 +864,8 @@ def self_test() -> int:
             print(f"  - {f}")
         return 1
     print("\nSELF-TEST PASSED: the gate detects failing tests, missing names,")
-    print("empty classes, unclassified test files, stale plan documents and")
-    print("$HOME paths in production code.")
+    print("empty classes, unclassified test files, stale plan documents,")
+    print("$HOME paths in production code, and units systemd cannot find.")
     return 0
 
 
@@ -818,6 +902,7 @@ def main() -> int:
     results.append(check_docs_not_stale())
     results.append(check_production_research_separation())
     results.append(check_home_independence())
+    results.append(check_units_are_where_systemd_looks())
     results.append(check_shadow_cannot_count_as_executed())
     results.append(check_research_trial_ledger())
     results.append(check_doctor_checks_are_all_reachable())

@@ -324,7 +324,14 @@ def _ollama_curriculum_transport(config: AgentConfig):
             "prompt": prompt,
             "stream": False,
             "format": schema,
-            "options": {"temperature": 0.1},
+            # Same window as the decision engine, and for the same reason: the
+            # server default of 32768 allocates KV cache for the whole window even
+            # when unused, measured 17.8s against 4.6s at 4096 on an identical
+            # call. This is also the path that recorded the 120s read timeouts, so
+            # tuning only the decision engine would have left the timeout site
+            # untouched. tests/min_agent/test_llm_decision.py asserts every
+            # /api/generate call site pins this.
+            "options": {"temperature": 0.1, "num_ctx": 4096},
         }
         response = engine.transport(f"{engine.base_url}/api/generate", payload, engine.timeout)
         return str(response.get("response", ""))
