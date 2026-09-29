@@ -1254,3 +1254,78 @@ The first `doctor` implementation formatted `unrealized:+.2f` unconditionally. E
 stored `PNL_EVIDENCE_RECORDED` event predates the field, so the report would have
 raised `TypeError` on its own history — the same shape as reading a `JournalEvent` as a
 dict. It now tolerates a payload without the fields and degrades to `net` alone.
+
+## 29. The 29 unmatched shares: the agent sold the account owner's position
+
+§28 recorded `unmatched_sell_quantity: {'trend-follow-sell-002': 29.0}` and declined
+to guess at it. Traced back, it is worse than an unexplained number.
+
+```
+agent BUY fills total : 23 shares
+account SPY at SELL   : 52 shares
+SELL submitted        : 52 shares  (guardian: approved)
+of which agent's own  : 23  (44%)
+OWNER'S SHARES SOLD   : 29  (56%)
+```
+
+**The agent bought 23 shares and sold 52.** It liquidated 29 shares — 56% — of a
+pre-existing SPY position belonging to the account owner, and the Guardian approved
+it.
+
+### 29.1 The check that existed was necessary and not sufficient
+
+```python
+if decision.action == "SELL" and not self._has_position(snapshot, decision.symbol, decision.quantity):
+    return GuardianResult(approved=False, reason="cannot sell more than known holdings")
+```
+
+`known holdings` meant the **account's** holdings. The account did hold 52, so the
+check passed. It bounded selling to the account's book, which is the owner's book plus
+the agent's, and said nothing about which of those the agent had any right to sell.
+
+### 29.2 An asymmetry in my own earlier fix
+
+Bounding `max_total_exposure` to the allowlist was justified in these terms: *"The
+agent can only increase exposure by buying allowlist symbols, so bounding the
+allowlist book bounds everything it is able to do."*
+
+That is true for **increasing** exposure and plainly false for **decreasing** it. The
+agent can reduce the owner's position without limit by selling shares it never bought,
+and the scoping change made that path *more* reachable, because a symbol the agent
+had never traded was previously not in its book at all. The reasoning was sound and
+the conclusion was wrong in one direction, which is the hardest kind of error to
+notice because everything it predicted held.
+
+### 29.3 The fix, and the direction it fails
+
+A SELL is now bounded by what **the agent** holds, computed in the loop from
+`ORDER_FILL_CONFIRMED` events — from what this agent did, not from what the account
+happens to hold:
+
+```
+cannot sell 52 SPY; the agent holds 23. The account may hold more, but those
+shares are not the agent's to sell
+```
+
+When the agent's own holding is **unknown** — no journal, unreadable journal — the
+SELL is **refused**. That direction is deliberate and worth stating: a missed exit is
+recoverable, since the next cycle retries and the position is unchanged, whereas
+liquidating someone's position is not. The risk of being wrong here is an exit that
+does not happen, so the reason string says so plainly rather than looking like a
+routine rejection.
+
+An unreadable journal is recorded in `loop._agent_holding_errors` rather than
+swallowed, because a silent `None` is indistinguishable from a legitimate "the agent
+holds nothing" — which is exactly the reading that let this happen.
+
+The rule does not touch BUY: a probe with no holding yet is the normal case, and
+refusing it would stop the agent ever opening anything.
+
+### 29.4 Four existing tests encoded the old contract
+
+Four Guardian tests called `review()` for a SELL without the agent's holding and
+asserted approval. They were not wrong when written — the rule did not exist — and they
+are updated to pass the quantity, with new tests pinning both the refusal and the fact
+that a SELL within the agent's own holding is still permitted. Blocking every exit
+would be its own kind of danger, so the permission path is tested as deliberately as
+the refusal.

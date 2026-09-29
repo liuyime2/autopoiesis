@@ -77,7 +77,8 @@ class FakeGuardian:
     def __init__(self):
         self.trades_today = None
 
-    def review(self, decision, snapshot, mode="paper", trades_today=0):
+    def review(self, decision, snapshot, mode="paper", trades_today=0,
+               agent_position_quantity=None):
         self.trades_today = trades_today
         return GuardianResult(approved=True, reason="approved")
 

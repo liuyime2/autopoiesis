@@ -39,6 +39,7 @@ class Guardian:
         mode: str = "paper",
         trades_today: int = 0,
         now: datetime | None = None,
+        agent_position_quantity: float | None = None,
     ) -> GuardianResult:
         if mode.strip().lower() != "paper":
             return GuardianResult(approved=False, reason="only paper mode is allowed")
@@ -88,6 +89,43 @@ class Guardian:
 
         if decision.action == "SELL" and not self._has_position(snapshot, decision.symbol, decision.quantity):
             return GuardianResult(approved=False, reason="cannot sell more than known holdings")
+
+        # A SELL must also be bounded by what *the agent* holds, not only by what the
+        # account holds. The account check above is necessary and not sufficient: the
+        # agent bought 23 shares, the account held 52, and a single SELL of 52 was
+        # approved and filled - liquidating 29 shares of a pre-existing position the
+        # agent never bought, which is 56% of the owner's holding.
+        #
+        # This is an asymmetry in the earlier exposure-scoping work: bounding the
+        # allowlist book was justified because "the agent cannot increase" exposure
+        # outside it. It plainly can *decrease* it, without limit, by selling the
+        # owner's shares.
+        #
+        # When the agent's own holding is unknown the answer is to refuse, not to
+        # allow. Refusing a SELL is recoverable - the next cycle retries, and the
+        # position is unchanged - whereas liquidating someone's position is not. The
+        # cost of this rule being wrong is a missed exit, which is why the reason
+        # states it plainly.
+        if decision.action == "SELL":
+            if agent_position_quantity is None:
+                return GuardianResult(
+                    approved=False,
+                    reason=(
+                        "the agent's own holding of "
+                        f"{decision.symbol} is unknown, so a SELL cannot be "
+                        "bounded; refusing rather than risk selling the account "
+                        "owner's shares"
+                    ),
+                )
+            if decision.quantity > agent_position_quantity:
+                return GuardianResult(
+                    approved=False,
+                    reason=(
+                        f"cannot sell {decision.quantity} {decision.symbol}; the "
+                        f"agent holds {agent_position_quantity:g}. The account may "
+                        "hold more, but those shares are not the agent's to sell"
+                    ),
+                )
 
         if self._has_conflicting_open_order(snapshot, decision):
             return GuardianResult(approved=False, reason="conflicting open order exists")

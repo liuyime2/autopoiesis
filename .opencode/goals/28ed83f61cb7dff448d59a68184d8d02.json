@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790687066107,
-      "lastRequestTokens": 383726,
-      "lastInputTokens": 383250
+      "observedAt": 1790687556086,
+      "lastRequestTokens": 401404,
+      "lastInputTokens": 400970
     }
   },
   "runtimeFingerprint": {
@@ -43,10 +43,10 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 16,
-    "tokens": 642932,
+    "turns": 17,
+    "tokens": 645010,
     "cost": 0,
-    "runtimeMs": 218835,
+    "runtimeMs": 232664,
     "seenMessageIDs": [
       "msg_0ea911ff0001xqHQnFmbF3aICp",
       "msg_0ea980dc20015f3lGA67tXRaUK",
@@ -63,7 +63,8 @@
       "msg_0ed2b4e1e0018nBmzkG9RoYLWI",
       "msg_0ed31340e0018ojfky00M5AEmr",
       "msg_0ed371fe6001uCkJGb0EunDrTW",
-      "msg_0ed3bd978001egR6VkgRH6xVaf"
+      "msg_0ed3bd978001egR6VkgRH6xVaf",
+      "msg_0ed4516840013fEr5QZWpECHPr"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -73,8 +74,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 87,
-  "observedProgressRevision": 83,
+  "progressRevision": 92,
+  "observedProgressRevision": 88,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
     "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
@@ -162,40 +163,15 @@
     "shell-worktree:21d8bf18796361783de615fdc895d7c99e9f1301347dd09e3d43fde877a88581",
     "shell-worktree:70971dbedc73f9043a5269139b19d8f19b63d2bdb9e2a7dce03dd4fa293ae66e",
     "shell-worktree:f75452a998b27423963a0aafaa58fb5212e4a76b9fc558e73e1280a0c4c4b0c6",
-    "shell-worktree:84db7afb1fbc74e6190ebd126a397188f153118ce1b50f7bb219293286f147d0"
+    "shell-worktree:84db7afb1fbc74e6190ebd126a397188f153118ce1b50f7bb219293286f147d0",
+    "shell-worktree:8262b28b408ff8744ac2580f1fa9490cbf99379635efa3a1a33704c25479fc2d",
+    "shell-worktree:234127e868ec3b3efe26220dca50a29577857329ae04991800c05c1203a69a2b",
+    "shell-worktree:ca0cea7215c843c16ad846dd56b41484e93dba1c239e0fc66fb959a78ec27996",
+    "shell-worktree:0eb7549e485972f7475d222e38551e0e68c8e07f16b7cbab570985713cb2edbe",
+    "shell-worktree:2d6919447448796ba1ff2743b5cf22b29f3a5c13cccd6f246abd12fcefa0af5a"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790646190042,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790681900648,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790682165573,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790682287381,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790682322407,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790682402777,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790682413851,
       "summary": "Re-read the FULL objective (it had been truncated in earlier turns) and it changes the picture. Two things: (1) it names a Phase 0-8 ordering with a strict \"only enter a phase when the previous one's exit criteria are met\" rule, and Phase 4/5/6 are backtest+walk-forward+cost+leakage+stress+overfitting, then SHADOW TRADING, then evidence-gated probation. (2) I WITHDREW my earlier \"shadow is merged into probation\" decision — the reasoning was sound but it was wrong against this contract, which names shadow as its own phase. Shadow is recorded as missing; Phase 5 is outstanding. The underlying observation is kept as a constraint for when it is built: a shadow executor must swap only the execution sink, not fork the decision path. Phase 0-3 confirmed met; Phase 8 correctly not started. Crash recovery is now PROVEN rather than configured: SIGKILL with no cleanup, NRestarts 0->1, new MainPID, pidfile rewritten, 920 cycles + 5782 events re-read cleanly, journal re-parsed with zero corrupt lines, daemon resumed journalling within a minute. Phase 4 built in a separate src/min_agent/research/ package with a make verify check that FAILS if any production module imports it, so production/research separation is machine-checked rather than conventional. The backtest executes the declared StrategySpec rule (HOLD_BASELINE control, FIXED_SIZE, TREND_FOLLOW), long-only matching the production executor, cost charged both sides because the paper broker charged zero. Three of my own controls were wrong first time and the module says so: the leakage guard only watched the loop index go backwards (which no rule could do, so it could not have detected the only leak that matters) and now re-asks each rule truncated to its decision bar, with a test that plants a peek-ahead rule; the overfitting control computed threshold/trials where threshold=0.0 so 0.0/40=0.0 and searching 40 variants cost nothing, and now raises required independent OOS trades on a sqrt schedule; one jitter seed is not a stress test and the first seed made a long position BETTER (+28.97 vs +26.14 baseline) so the worst of five is kept and they span +8.74 to +39.61. \"Overfitted\" was being returned for strategies with one trade per fold, which claims generalisation without enough trades to generalise from, so thin data is now reported as thin first. Honest result over all 27 strategies and 467 distinct real observations: 27 of 27 INSUFFICIENT, 3 OOS trades against the 10 required for 27 trials — not one strategy in the registry has enough out-of-sample evidence to be called anything. That agrees with three independent lines of evidence already on record (3 strategies with verified PnL, hold quality 0.687, 27/27 statistically unproven). Also found a real dedupe blind spot: behavioural_signature returned None for every TREND_FOLLOW so no TREND_FOLLOW was ever compared to any other and the zoo check was blind to all twelve; it now returns a signature, exposing 14 redundant copies including three exact duplicates (trend-follow-20260611-001/-002/-003 at ref 100.0 thr 0.02, -004/-005 at 150.0/0.01), and a semantic duplicate — trend-follow-sell-002 is named \"Trend Following Sell Strategy\" but its kind is FIXED_SIZE with no threshold or reference price, so it does not trend-follow at all and is identical to fixed-size-sell-001 apart from a confidence value. Commit a3f0b61. make verify: 19 classes, 0 failed, 531 distinct tests, 91/91 audit, doctor OK, exit 0.",
@@ -415,11 +391,41 @@
       "time": 1790686943528,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790687087854,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790687108026,
+      "summary": "Implemented unrealized PnL - the last code item from deliverable 8. Only realized PnL was attributed, so a position the agent was holding contributed nothing to its own record and the account figure and the agent figure could never be reconciled even in principle: one measured closed trades, the other measured everything, and the gap could only be explained away. PnLEvidence now carries open_lots, unrealized_pnl, net_pnl and net_of_fees, with open lots keeping the strategy that opened them to match the realized side's rule (the strategy that opens a lot is the one expected to realize its PnL, which may not be the strategy that eventually sells it). Verified by the daemon writing it rather than by a script: realized 564.39, open lots empty, unrealized 0.0, net 564.39, net of fees 564.39 - the agent holds no SPY (account positions are BIL, TLT, XLB, XLE, XLF) so unrealized is 0 and net equals realized, which is the correct answer and not a stub, and the machinery is proven only by test against a live position because there is no live position. The refusal that matters: an open lot whose price is unknown is reported with current_price None and unrealized_pnl None, never valued at its entry price, because marking a position at its own cost reports it as worth exactly nothing - a fabricated number wearing the appearance of a measurement. This surfaced a real finding now visible in doctor: 29 shares were sold under trend-follow-sell-002 that no linked BUY can account for. The account holds no SPY so those shares came from somewhere the fill linkage cannot see - a pre-existing position, a fill whose client_order_id never linked, or a lot opened before the journal began. The 23 closed lots carrying the +564.39 are all fully linked so the verified figure is unaffected, but 29 shares of unexplained selling belongs in a health report rather than a payload field. It is explicitly NOT diagnosed: it needs the ORDER_FILL_CONFIRMED events for that strategy traced back, which is real work and not something to guess at. A test also caught the doctor implementation formatting unrealized unconditionally, which would have raised TypeError on its own history since every stored PNL event predates the field - the same shape as reading a JournalEvent as a dict; it now degrades to net alone. Commit 20704da. make verify: 21 classes, 0 failed, 636 distinct tests, 91/91 audit, doctor OK, exit 0.",
+      "next": "All code items from deliverable 8 are now done, and every phase except 7 is met or correctly not started. Two things remain, and neither is a code change. (1) The 29 unmatched shares under trend-follow-sell-002 are undiagnosed: no linked BUY accounts for them while the account holds no SPY, so the next step is tracing the ORDER_FILL_CONFIRMED events for that strategy back to find whether the BUY was never linked, preceded the journal, or the client_order_id did not match - that is real investigative work, not a guess, and it may reveal a fill-linkage defect that would matter for every future SELL. (2) Everything else is gated on elapsed market time: Phase 7 prospective promote/pause/retire, the model calibration verdict (67 pending llm decisions), the 27 of 27 INSUFFICIENT walk-forward results, and the first model-provenance-stamped decisions. Two user actions unblock that accumulation: freeing $HOME quota (.cache 835M or .local 707M, since mkdir ~/.config/systemd fails with \"Disk quota exceeded\" despite df showing 1.8T free) so the units can be made reboot-persistent, and confirming the daemon may run unattended through the 09:30 EDT open."
+    },
+    {
+      "time": 1790687194567,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790687243669,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790687336396,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790687400028,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 644,
+  "storageGeneration": 672,
   "createdAt": 1790641773516,
-  "updatedAt": 1790687066107,
+  "updatedAt": 1790687556086,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:50db704ffb6165080f608490fb9c3dec3169a964a635f79ba2a709a2180fe16f",

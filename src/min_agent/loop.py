@@ -12,9 +12,46 @@ class TradingLoop:
         self.decision_engine = decision_engine
         self.guardian = guardian
         self.executor = executor
+        #: Failures reading the agent's own holdings. A SELL is refused while this
+        #: is non-empty, so a broken journal cannot silently widen what may be sold.
+        self._agent_holding_errors: list[str] = []
         self.journal = journal
         self.mode = mode
         self.trade_counter = trade_counter
+
+    def _agent_holding(self, symbol: str) -> float | None:
+        """Shares of `symbol` the agent itself bought and has not sold.
+
+        Computed from ORDER_FILL_CONFIRMED events, so it reflects only what this
+        agent did. `None` when the journal is unavailable, which makes the Guardian
+        refuse a SELL rather than fall back to the account's figure - the safe
+        direction, since a missed exit is recoverable and selling the owner's shares
+        is not.
+        """
+        if self.journal is None:
+            return None
+        try:
+            quantity = 0.0
+            for event in self.journal.read_events("ORDER_FILL_CONFIRMED"):
+                payload = event.payload or {}
+                if payload.get("symbol") != symbol:
+                    continue
+                filled = payload.get("filled_quantity")
+                if filled is None:
+                    continue
+                side = str(payload.get("side", "")).upper()
+                if side == "BUY":
+                    quantity += float(filled)
+                elif side == "SELL":
+                    quantity -= float(filled)
+        except Exception as exc:
+            # An unreadable journal means the holding is genuinely unknown, and
+            # unknown is exactly the case the Guardian refuses. Recorded rather than
+            # swallowed, because a silent `None` here looks identical to a
+            # legitimate "the agent holds nothing".
+            self._agent_holding_errors.append(f"{type(exc).__name__}: {exc}")
+            return None
+        return quantity if quantity > 1e-9 else 0.0
 
     def run_once(self, symbol: str) -> CycleRecord | None:
         cycle_id = str(uuid4())
@@ -56,7 +93,18 @@ class TradingLoop:
                     rationale="fail-closed HOLD after trade counter error",
                     strategy_id=decision.strategy_id,
                 )
-        guardian_result = self.guardian.review(decision, snapshot, mode=self.mode, trades_today=trades_today)
+        guardian_result = self.guardian.review(
+            decision,
+            snapshot,
+            mode=self.mode,
+            trades_today=trades_today,
+            # What the agent itself holds, so a SELL cannot reach the account
+            # owner's pre-existing shares. Derived from the journal's own confirmed
+            # fills rather than from the account snapshot, because the account
+            # snapshot is exactly the number that let 29 shares of someone else's
+            # position be sold.
+            agent_position_quantity=self._agent_holding(decision.symbol),
+        )
         execution = self.executor.execute(decision, guardian_result, cycle_id=cycle_id)
         record = CycleRecord(
             cycle_id=cycle_id,

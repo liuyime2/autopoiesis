@@ -149,7 +149,9 @@ def test_guardian_approves_sell_with_sufficient_holdings():
     positions = (PositionSnapshot(symbol="SPY", quantity=10, market_value=1000),)
     decision = TradeDecision(symbol="SPY", action="SELL", quantity=5, confidence=0.8, rationale="exit")
 
-    result = guardian.review(decision, snapshot(positions=positions))
+    result = guardian.review(
+        decision, snapshot(positions=positions), agent_position_quantity=10
+    )
 
     assert result.approved is True
 
@@ -159,7 +161,10 @@ def test_guardian_allows_sell_to_reduce_oversized_position():
     positions = (PositionSnapshot(symbol="SPY", quantity=100, market_value=10_000),)
     decision = TradeDecision(symbol="SPY", action="SELL", quantity=50, confidence=0.8, rationale="reduce exposure")
 
-    result = guardian.review(decision, snapshot(positions=positions, last_price=100))
+    result = guardian.review(
+        decision, snapshot(positions=positions, last_price=100),
+        agent_position_quantity=100,
+    )
 
     assert result.approved is True
 
@@ -171,7 +176,7 @@ def test_guardian_allows_sell_of_held_symbol_outside_allowlist():
     snap = snapshot(positions=positions).model_copy(update={"symbol": "TLT"})
     decision = decision.model_copy(update={"symbol": "TLT"})
 
-    result = guardian.review(decision, snap)
+    result = guardian.review(decision, snap, agent_position_quantity=20)
 
     assert result.approved is True
 
@@ -274,7 +279,10 @@ def test_total_exposure_cap_allows_a_buy_that_stays_under_it():
     held = (PositionSnapshot(symbol="QQQ", quantity=10, market_value=3_000),)
     decision = TradeDecision(symbol="SPY", action="BUY", quantity=5, confidence=0.9, rationale="probe")
 
-    assert guardian.review(decision, snapshot(last_price=500, positions=held)).approved is True
+    assert guardian.review(
+        decision, snapshot(last_price=500, positions=held),
+        agent_position_quantity=10,
+    ).approved is True
 
 
 def test_per_order_cap_does_not_bound_aggregate_exposure_without_the_total_cap():
@@ -289,7 +297,10 @@ def test_per_order_cap_does_not_bound_aggregate_exposure_without_the_total_cap()
     held = (PositionSnapshot(symbol="SPY", quantity=40, market_value=20_000),)
     decision = TradeDecision(symbol="SPY", action="BUY", quantity=5, confidence=0.9, rationale="probe")
 
-    assert guardian.review(decision, snapshot(last_price=500, positions=held)).approved is True
+    assert guardian.review(
+        decision, snapshot(last_price=500, positions=held),
+        agent_position_quantity=10,
+    ).approved is True
 
 
 def test_sell_is_permitted_once_the_position_book_is_read():
@@ -297,7 +308,10 @@ def test_sell_is_permitted_once_the_position_book_is_read():
     guardian = Guardian(allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500)
     decision = TradeDecision(symbol="SPY", action="SELL", quantity=4, confidence=0.9, rationale="exit")
 
-    assert guardian.review(decision, snapshot(last_price=500, positions=held)).approved is True
+    assert guardian.review(
+        decision, snapshot(last_price=500, positions=held),
+        agent_position_quantity=10,
+    ).approved is True
 
 
 def test_unmeasured_day_start_equity_fails_closed_on_buy():
@@ -502,3 +516,145 @@ def test_the_account_backstop_bounds_the_whole_book_when_the_owner_asks_for_it()
     assert result.approved is False
     assert "account total" in result.reason
     assert "30000.00 account limit" in result.reason
+
+
+# --------------------------------------------------------------------------
+# A SELL is bounded by what the AGENT holds, not only by what the account holds
+# --------------------------------------------------------------------------
+
+def test_a_sell_cannot_reach_the_account_owners_shares():
+    """The real incident, as numbers. The agent bought 23 shares; the account held
+    52; one SELL of 52 was approved and filled, liquidating 29 shares - 56% - of a
+    pre-existing position the agent never bought.
+
+    The account-level check that does exist is necessary and not sufficient: the
+    account did hold 52.
+    """
+    guardian = Guardian(
+        allowlist={"SPY", "QQQ"}, max_position_value=5_000, max_daily_loss=500,
+    )
+    held = (PositionSnapshot(symbol="SPY", quantity=52, market_value=52_000),)
+    decision = TradeDecision(
+        symbol="SPY", action="SELL", quantity=52, confidence=0.9, rationale="exit",
+    )
+
+    result = guardian.review(
+        decision, snapshot(last_price=1000, positions=held),
+        agent_position_quantity=23,
+    )
+
+    assert result.approved is False
+    assert "the agent holds 23" in result.reason
+    assert "not the agent's to sell" in result.reason
+
+
+def test_a_sell_within_what_the_agent_holds_is_still_permitted():
+    """The rule must not block the agent's own exits. Refusing every SELL would stop
+    it reducing risk, which is its own kind of danger."""
+    guardian = Guardian(
+        allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500,
+    )
+    held = (PositionSnapshot(symbol="SPY", quantity=52, market_value=52_000),)
+    decision = TradeDecision(
+        symbol="SPY", action="SELL", quantity=23, confidence=0.9, rationale="exit",
+    )
+
+    result = guardian.review(
+        decision, snapshot(last_price=1000, positions=held),
+        agent_position_quantity=23,
+    )
+
+    assert result.approved is True
+
+
+def test_an_unknown_agent_holding_refuses_the_sell_rather_than_allowing_it():
+    """Failing closed is the deliberate direction. A missed exit is recoverable - the
+    next cycle retries and the position is unchanged - whereas liquidating the
+    account owner's position is not."""
+    guardian = Guardian(
+        allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500,
+    )
+    held = (PositionSnapshot(symbol="SPY", quantity=52, market_value=52_000),)
+    decision = TradeDecision(
+        symbol="SPY", action="SELL", quantity=10, confidence=0.9, rationale="exit",
+    )
+
+    result = guardian.review(decision, snapshot(last_price=1000, positions=held))
+
+    assert result.approved is False
+    assert "unknown" in result.reason
+    assert "refusing" in result.reason
+
+
+def test_an_agent_holding_of_zero_refuses_any_sell():
+    guardian = Guardian(
+        allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500,
+    )
+    held = (PositionSnapshot(symbol="SPY", quantity=52, market_value=52_000),)
+    decision = TradeDecision(
+        symbol="SPY", action="SELL", quantity=1, confidence=0.9, rationale="exit",
+    )
+
+    result = guardian.review(
+        decision, snapshot(last_price=1000, positions=held),
+        agent_position_quantity=0,
+    )
+
+    assert result.approved is False
+
+
+def test_a_buy_is_unaffected_by_the_agent_holding_rule():
+    """The rule is about SELL. A BUY must not start being refused because the agent
+    holds nothing of that symbol yet - which is the normal case."""
+    guardian = Guardian(
+        allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500,
+    )
+    decision = TradeDecision(
+        symbol="SPY", action="BUY", quantity=1, confidence=0.9, rationale="probe",
+    )
+
+    result = guardian.review(decision, snapshot(last_price=1000))
+
+    assert result.approved is True
+
+
+def test_the_loop_supplies_the_agents_holding_from_its_own_fills(tmp_path):
+    """End to end: the quantity comes from ORDER_FILL_CONFIRMED events, so it
+    reflects what this agent did rather than what the account happens to hold."""
+    from min_agent.journal import JsonlJournal
+    from min_agent.models import JournalEvent
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    for i, (side, qty) in enumerate((("BUY", 10), ("BUY", 5), ("SELL", 3))):
+        journal.append_event(JournalEvent(
+            event_id=f"f{i}", event_type="ORDER_FILL_CONFIRMED",
+            timestamp=datetime.now(tz=timezone.utc), status="SUCCESS", message="m",
+            payload={"symbol": "SPY", "side": side, "filled_quantity": qty,
+                     "fill_price": 100.0},
+        ))
+
+    class _Loop:
+        from min_agent.loop import TradingLoop as _T
+    loop = _Loop._T.__new__(_Loop._T)
+    loop.journal = journal
+    loop._agent_holding_errors = []
+
+    assert loop._agent_holding("SPY") == 12
+    assert loop._agent_holding("QQQ") == 0
+
+
+def test_an_unreadable_journal_is_recorded_and_fails_closed(tmp_path):
+    """A silent `None` here would be indistinguishable from a legitimate 'the agent
+    holds nothing', which is the reading that lets the owner's shares be sold."""
+    from min_agent.loop import TradingLoop
+
+    class Broken:
+        def read_events(self, *a, **k):
+            raise RuntimeError("disk gone")
+
+    loop = TradingLoop.__new__(TradingLoop)
+    loop.journal = Broken()
+    loop._agent_holding_errors = []
+
+    assert loop._agent_holding("SPY") is None
+    assert loop._agent_holding_errors, "the failure must be recorded, not swallowed"
