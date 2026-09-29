@@ -255,6 +255,7 @@ def _check_governance(report: DoctorReport, config: AgentConfig) -> None:
         #     be attributed to a model change.
         _check_model_registry(report, config, records)
 
+
         # 8. Champion-challenger, search effort, and whether candidates can say
         #    what they are for.
         #

@@ -72,6 +72,9 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_model_registry.py": ("data-integrity", "lifecycle-invariants"),
     "test_unrealized_pnl.py": ("pnl-accounting", "data-integrity"),
     "test_cost_accounting.py": ("pnl-accounting", "decision-outcome-counterfactual"),
+    "test_research_trials.py": (
+        "lifecycle-invariants", "data-integrity", "unit-integration",
+    ),
     "test_research_backtest.py": (
         "point-in-time-no-leakage", "pnl-accounting", "lifecycle-invariants",
     ),
@@ -377,6 +380,39 @@ def check_doctor_checks_are_all_reachable() -> Result:
         else f"defined but never called: {unreachable}"
     )
     return Result("doctor-checks-reachable", FAIL if unreachable else PASS, detail)
+
+
+def check_research_trial_ledger() -> Result:
+    """Every research trial, including the failures, must be on the record.
+
+    Lives here and not in `doctor` on purpose. `doctor` is production, and production
+    must not read the research layer - that is the invariant the
+    production-research-separation check exists to hold. The first version of this
+    check was added to `doctor`, and that gate caught it immediately: a health report
+    that imports the thing it is meant to be independent of.
+
+    A backtest that failed used to leave no trace at all, so a search could run, fail,
+    and leave no evidence that it had happened. `trials_run` is also the denominator
+    the multiple-testing gate divides by, so a report that omits it hides its own
+    selection bias.
+    """
+    sys.path.insert(0, str(SRC))
+    from min_agent.research import trials
+
+    path = ROOT / "runtime" / "min_agent" / "research_trials.jsonl"
+    recorded = trials.read_trials(path)
+    if not recorded:
+        return Result(
+            "research-trial-ledger", FAIL,
+            f"no research trial is recorded in {path.name}; a failed search would "
+            "leave no evidence that it ran",
+        )
+    summary = trials.summarise(recorded)
+    return Result(
+        "research-trial-ledger", PASS,
+        f"{summary['trials_run']} trial(s), {summary['passed']} passed, "
+        f"{summary['failed']} failed; {summary['by_verdict']}",
+    )
 
 
 def check_data_integrity() -> Result:
@@ -711,6 +747,7 @@ def main() -> int:
     results.append(check_docs_not_stale())
     results.append(check_production_research_separation())
     results.append(check_shadow_cannot_count_as_executed())
+    results.append(check_research_trial_ledger())
     results.append(check_doctor_checks_are_all_reachable())
     results.append(check_syntax_import())
     results.append(check_data_integrity())

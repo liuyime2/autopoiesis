@@ -183,6 +183,36 @@ class WalkForwardResult:
             "and cannot promote anything."
         )
 
+    def trial_payload(self) -> dict:
+        """What a trial log needs: the verdict and the numbers behind it.
+
+        The verdict alone is not enough. "OVERFIT" with no figures cannot be
+        re-examined, and a record that cannot be re-examined is a log rather than
+        evidence.
+        """
+        return {
+            "kind": "walk_forward",
+            "strategy_id": self.strategy_id,
+            "strategy_kind": self.kind,
+            # The verdict is split into a code and a detail. Keyed on the whole
+            # sentence, two identical outcomes landed in different buckets because
+            # their trade counts differed, which defeats the only thing the grouping
+            # is for.
+            "verdict": self.verdict().split(":", 1)[0],
+            "verdict_detail": self.verdict(),
+            "trials": self.trials,
+            "bars": self.bars,
+            "folds": len(self.folds),
+            "in_sample_return_pct": round(self.in_sample_return_pct, 6),
+            "out_of_sample_return_pct": round(self.oos_return_pct, 6),
+            "out_of_sample_trades": self.oos_trades,
+            "required_trades": self.required_trades(),
+            "threshold": round(self.threshold(), 6),
+            "leakage_violations": self.leakage_violations,
+            "stress_survivors": sum(1 for s in self.stress if s.survived),
+            "stress_total": len(self.stress),
+        }
+
     def to_payload(self) -> dict:
         return {
             "strategy_id": self.strategy_id,
