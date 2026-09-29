@@ -161,7 +161,7 @@ def test_strategy_selector_returns_none_if_no_enabled():
 
 
 def test_strategy_selector_gives_probation_strategy_exposure_before_baseline():
-    selector = StrategySelector(min_probation_cycles=3, min_probation_submitted_orders=1)
+    selector = StrategySelector(min_probation_cycles=3)
     baseline = make_spec(strategy_id="baseline", kind="HOLD_BASELINE", lifecycle="BASELINE")
     probation = make_spec(strategy_id="probation", kind="FIXED_SIZE", lifecycle="PROBATION", action="BUY", quantity=1)
     results = [
@@ -185,7 +185,7 @@ def test_strategy_selector_ignores_paused_and_retired_strategies():
 
 
 def test_strategy_selector_does_not_force_orders_for_mature_probation():
-    selector = StrategySelector(min_probation_cycles=3, min_probation_submitted_orders=1)
+    selector = StrategySelector(min_probation_cycles=3)
     old = make_spec(strategy_id="old", kind="TREND_FOLLOW", lifecycle="PROBATION")
     new = make_spec(
         strategy_id="new",
@@ -219,7 +219,7 @@ def test_strategy_selector_prefers_tradable_over_baseline_after_probation():
 
 
 def test_lifecycle_manager_promotes_probation_after_successful_exposure():
-    manager = StrategyLifecycleManager(min_active_cycles=3, min_active_submitted_orders=1)
+    manager = StrategyLifecycleManager(min_active_cycles=3)
     strategy = make_spec(strategy_id="trial", kind="FIXED_SIZE", lifecycle="PROBATION", action="BUY", quantity=1)
     result = StrategyResult(strategy_id="trial", cycles=3, submitted_orders=3, rejected_orders=0, errors=0, score=1.0, evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=3)
 

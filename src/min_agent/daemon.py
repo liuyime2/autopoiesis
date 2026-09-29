@@ -10,6 +10,7 @@ from typing import Callable
 from uuid import uuid4
 
 from min_agent.atomicio import file_lock, write_text_atomic
+from min_agent.broker_evidence import latest_evidence_batch
 from min_agent.config import AgentConfig
 from min_agent.curriculum import StructuredCurriculumAgent
 from min_agent.evaluator import (
@@ -87,10 +88,6 @@ class AgentDaemon:
         # Profit target state — only emit PROFIT_TARGET_CHECKED on transitions
         # to avoid flooding the journal with identical "not satisfied" events.
         self._last_profit_target_status: str | None = None
-        # Window stability — skip reflection/curriculum writes when the journal
-        # window hasn't changed since last run (e.g. weekend maintenance).
-        self._last_reflection_window_hash: str | None = None
-        self._last_curriculum_window_hash: str | None = None
 
     def run(self, *, max_cycles: int | None = None) -> int:
         self._acquire_lock()
@@ -500,15 +497,7 @@ class AgentDaemon:
         )
 
     def _latest_evidence_batch(self) -> BrokerEvidenceBatch | None:
-        if self.journal is None:
-            return None
-        events = self.journal.read_events("BROKER_EVIDENCE_INGESTED")
-        if not events:
-            return None
-        try:
-            return BrokerEvidenceBatch.model_validate(events[-1].payload)
-        except Exception:
-            return None
+        return latest_evidence_batch(self.journal)
 
     def _recent_exploration_summary(self) -> dict[str, object]:
         if self.journal is None:

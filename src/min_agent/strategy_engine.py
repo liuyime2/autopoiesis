@@ -68,13 +68,11 @@ class StrategyLifecycleManager:
         self,
         *,
         min_active_cycles: int = 5,
-        min_active_submitted_orders: int = 1,
         max_error_rate: float = 0.25,
         max_rejection_rate: float = 0.5,
         severe_failure_rate: float = 0.75,
     ):
         self.min_active_cycles = min_active_cycles
-        self.min_active_submitted_orders = min_active_submitted_orders
         self.max_error_rate = max_error_rate
         self.max_rejection_rate = max_rejection_rate
         self.severe_failure_rate = severe_failure_rate
@@ -180,11 +178,9 @@ class StrategySelector:
         self,
         *,
         min_probation_cycles: int = 3,
-        min_probation_submitted_orders: int = 1,
         exploration_floor_cycles: int = 5,
     ):
         self.min_probation_cycles = min_probation_cycles
-        self.min_probation_submitted_orders = min_probation_submitted_orders
         self.exploration_floor_cycles = exploration_floor_cycles
 
     def select(

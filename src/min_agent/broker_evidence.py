@@ -239,3 +239,23 @@ def _datetime(value) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def latest_evidence_batch(journal) -> BrokerEvidenceBatch | None:
+    """The most recent broker evidence batch the journal holds, or None.
+
+    This lived in three copies - daemon._latest_evidence_batch, cli's module-level
+    function, and inline in doctor's proof check - and they had already drifted:
+    the daemon's swallowed parse errors, the CLI's did not, and doctor's was
+    inline. A state reader that can disagree with itself is how a health check
+    ends up reporting a different world from the one the system is running in.
+    """
+    if journal is None:
+        return None
+    events = journal.read_events("BROKER_EVIDENCE_INGESTED")
+    if not events:
+        return None
+    try:
+        return BrokerEvidenceBatch.model_validate(events[-1].payload)
+    except Exception:
+        return None

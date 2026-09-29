@@ -20,6 +20,7 @@ from min_agent.data_gateway import AlpacaDataGateway
 from min_agent.executor import AlpacaPaperExecutor
 from min_agent.guardian import Guardian
 from min_agent.health import HealthMonitor
+from min_agent.broker_evidence import latest_evidence_batch
 from min_agent.evaluator import (
     PNL_EVIDENCE_ACCOUNT_VERIFIED,
     PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
@@ -491,10 +492,7 @@ def _verify_profit_target(config: AgentConfig) -> int:
 
 
 def _latest_evidence_batch(journal: JsonlJournal) -> BrokerEvidenceBatch | None:
-    events = journal.read_events("BROKER_EVIDENCE_INGESTED")
-    if not events:
-        return None
-    return BrokerEvidenceBatch.model_validate(events[-1].payload)
+    return latest_evidence_batch(journal)
 
 
 def _paper_client(config: AgentConfig):

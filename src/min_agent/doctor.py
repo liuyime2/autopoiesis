@@ -19,6 +19,7 @@ from enum import Enum
 from pathlib import Path
 
 from min_agent.atomicio import write_json_atomic
+from min_agent.broker_evidence import latest_evidence_batch
 from min_agent.config import AgentConfig
 from min_agent.evaluator import (
     PNL_EVIDENCE_MISSING,
@@ -568,12 +569,7 @@ def _check_proof(report: DoctorReport, config: AgentConfig) -> None:
     # had broker-verified closed-lot PnL totalling 564.39 - the same batch the
     # daemon records and the CLI report reads. A health check that cannot see the
     # proof it is meant to certify is worse than no check.
-    evidence_events = journal.read_events("BROKER_EVIDENCE_INGESTED")
-    evidence = (
-        BrokerEvidenceBatch.model_validate(evidence_events[-1].payload)
-        if evidence_events
-        else None
-    )
+    evidence = latest_evidence_batch(journal)
     evaluation = DeterministicEvaluator().evaluate(
         records,
         evidence=evidence,

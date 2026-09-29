@@ -1,0 +1,231 @@
+# Fact-level system audit — QuantGroup `min_agent`
+
+Audited 2026-09-29 against the working tree at `ae7e78a`+ and the live runtime
+under `runtime/min_agent/`. Every claim below was checked against code or against
+the real journal, not inferred from names.
+
+**Rule applied throughout:** existence ≠ effectiveness. A module, function, config
+key, test or document is *not* counted as working unless it demonstrably changes
+production behaviour. Claims that could not be verified are marked
+**UNVERIFIED** rather than assumed.
+
+---
+
+## 1. The single real end-to-end flow
+
+One process. `cli.py:main` → `_run_daemon` → `AgentDaemon.run()` (`daemon.py:95`).
+
+```
+run():
+  _acquire_lock(); SIGTERM/SIGINT handlers
+  _startup_reconcile()                      # orders in flight vs broker
+  loop:
+    _reset_daily_count_if_needed()
+    _maintenance()                          # every 900s
+      _resolve_pending_fills()              # journal SUBMITTED -> broker poll
+      _ingest_broker_evidence()             # every 3600s
+      _record_pnl_evidence(evidence)        # -> PnL_EVIDENCE_RECORDED
+      _verify_profit_target(evidence)       # -> PROFIT_TARGET_CHECKED
+      _reflect(evidence)                    # -> REFLECTION_GENERATED
+      _curriculum_proposal()                # -> CURRICULUM_PROPOSED
+      _manage_strategy_lifecycle()          # -> STRATEGY_LIFECYCLE_UPDATED
+    if market closed: sleep, continue
+    for symbol in config.symbols:           # currently ('SPY',)
+      _run_symbol(symbol) -> TradingLoop.run_once()
+        data_gateway.snapshot(symbol)       # real broker positions/orders/account
+        decision_engine.decide_snapshot()   # HybridDecisionEngine -> OllamaDecisionEngine
+        guardian.review(decision, snapshot) # 14 gates, immutable
+        executor.execute(...)               # AlpacaPaperExecutor
+        journal.append(CycleRecord)
+    sleep(interval 300s)
+```
+
+**Execution truth is the broker.** `data_gateway.py` raises rather than degrading
+to an empty position book, and `fill_reconciler` re-polls orders to a terminal
+fill state. The journal is the record; the broker is the truth; `doctor` compares
+them.
+
+---
+
+## 2. Component classification
+
+### Actively used (verified changing production behaviour)
+
+| Component | Evidence |
+|---|---|
+| `models.py` | every record type; 920 cycles parse from the live journal |
+| `journal.py` | 19.6 MB append-only, 23 test files reference it |
+| `data_gateway.py` | real positions/orders; 6 positions, 0 open orders read live |
+| `loop.py` | the only cycle path |
+| `guardian.py` | 14 gates; has actually rejected 36 orders in the live record |
+| `executor.py` | 24 SUBMITTED orders, 24 broker-confirmed fills |
+| `evaluator.py` | produced the 3-strategy per-strategy PnL, `+564.39` total |
+| `fill_reconciler.py` | converted the 52-share SELL to a confirmed fill at 766.57 |
+| `broker_evidence.py` | `status: SUCCESS`, portfolio history verified |
+| `strategy_engine.py` | 27 strategies, 11 lifecycle decisions journaled |
+| `llm_decision.py` | 67 `source=llm` decisions in the live record |
+| `curriculum.py` | 222 proposals; the model closed its own SELL capability gap |
+| `strategy_admission.py` | 5 accepted, rest rejected with reasons |
+| `reflection_memory.py` | drives the lifecycle manager's input |
+| `config.py` / `cli.py` / `daemon.py` / `health.py` / `atomicio.py` | the loop itself |
+| `trade_counter.py` / `scheduler.py` / `order_reconciler.py` | wired into `cli.py` |
+| `knowledge_admission.py` / `knowledge_library.py` | write path fires (see #3 for the read path) |
+
+### Partially wired
+
+| Component | What works | What does not |
+|---|---|---|
+| `policy_engine.py` | selector + fallback decision path | `relevant_lessons()` filter is **dead** — see #3 |
+| `knowledge_*` | artifacts written and admitted | 11 artifacts, all near-identical; carry ~zero information |
+| `doctor.py` | 25 checks incl. the 4 new governance checks | no `make verify`; not invoked by any gate |
+
+### Implemented but unused / dead
+
+| Item | Evidence | Classification |
+|---|---|---|
+| **`src/voyager_quant/`** (8 files) | **zero** references outside itself; `main.py:93` does `exec(code, ...)` on LLM-generated Python | **OBSOLETE + dangerous** — delete |
+| `tools/legacy/*` (12 files) | 10 of 12 referenced by nothing; all import, `full_ingest` is **broken** (`append_event()` kwarg mismatch, would write the live journal) | **OBSOLETE** — delete |
+| `daemon.py:92-93` `_last_reflection_window_hash` / `_last_curriculum_window_hash` | declared, never read or assigned. The "skip when the window hasn't changed" behaviour the comment describes **does not exist** | **DEAD STATE** — delete |
+| `strategy_engine.py:70,148` `min_active_submitted_orders` / `min_probation_submitted_orders` | assigned, never read; tests pass them as if enforced | **DEAD PARAMETER** — delete |
+| `cli.py:493` + `daemon.py:502` `_latest_evidence_batch` | two independent copies of the same function | **DUPLICATED** — merge |
+| `doctor.py:571` | third inline copy of the same read | **DUPLICATED** — merge |
+| `minictrl` / `min-agent.service.in` model pin | were divergent from `config.py`; now test-guarded | **REPAIRED** |
+
+### Broken
+
+| Item | Evidence |
+|---|---|
+| `tools/legacy/full_ingest.py` | `TypeError: JsonlJournal.append_event() got an unexpected keyword argument`. `tools/README.md` claims it appends to the production journal — **the README is wrong** |
+| `policy_engine.relevant_lessons` | never matches (see #3); silently falls through to a fixed set |
+
+### Missing (nothing exists at all)
+
+Grepped for each; **no source, no test, no doc**:
+
+- **Counterfactual evaluation.** `counterfactual`, `good_hold`, `missed_alpha`,
+  `avoided_loss`, `false_trade`, `hypothetical` → 0 hits. There is no way to ask
+  whether a HOLD was correct.
+- **Slippage / commission.** `slippage`, `commission` → 0 hits. Live fees across
+  all 24 fills sum to **0.0**, so the cost code path has never executed with a
+  non-zero value in production.
+- **Experiment / trial registry.** `experiment`, `trial`, `walk_forward`, `oos`,
+  `out_of_sample`, `backtest` → 0 hits outside the word "trial" in a comment.
+- **Champion–challenger.** 0 hits.
+- **Strategy lineage.** 0 hits.
+- **Semantic duplicate detection.** Only *id* duplication (`strategy_admission.py:39`)
+  and *parameter* duplication for TREND_FOLLOW (`:146`). Two FIXED_SIZE strategies
+  differing only in `quantity` both pass.
+- **Point-in-time / leakage guard.** No check that a decision used only data
+  available when it was made.
+- **`make verify`.** No Makefile exists. The objective names 13 check classes;
+  they are scattered across pytest, `tools/audit_defects.py`, and `doctor`.
+
+---
+
+## 3. The three findings that matter most
+
+### 3.1 The knowledge base's relevance filter is dead logic
+
+`policy_engine.py:78-84` keeps an artifact when
+`strategy_id in artifact.source_refs or strategy_id in artifact.tags`.
+
+Checked against the live library:
+
+```
+source_refs that are strategy_ids : NONE
+tags that are strategy_ids        : NONE
+distinct tags : ['all-hold', 'exploration', 'lifecycle', 'probation']
+```
+
+`source_refs` hold cycle UUIDs and `tags` hold generic words. The condition can
+**never** be true, so `relevant` is always empty and the fallback fires every
+time: *every decision sees the same first 5 artifacts regardless of strategy.* The
+11 accepted artifacts are all variants of "No-exploration window detected", so
+what actually reaches the model is five near-identical sentences.
+
+This is the "configured but not effective" case the objective warns about.
+
+### 3.2 The strategy zoo is accreting, and the duplication check is too narrow
+
+27 strategies: 2 ACTIVE, 10 PROBATION, 10 PAUSED, 4 RETIRED, 1 BASELINE.
+13 selectable, of which **9 are FIXED_SIZE/BUY** — near-duplicates differing only
+in `quantity` and `confidence`. `capability_coverage` only counts an action as a
+gap when one strategy supplies it, so once SELL was covered the engine saw no
+further gap and the curriculum kept proposing BUY variants.
+
+Nothing deduplicates semantically or behaviourally.
+
+### 3.3 Cost accounting has never been exercised
+
+`fees` is threaded correctly through the lot ledger and prorated across split
+fills, but every broker-reported fee in the live record is `0.0`. So the cost
+branch is *implemented and unproven*, and any claim about net-of-cost PnL today
+is a claim about a code path that has never run with real data.
+
+---
+
+## 4. Where the loop actually breaks
+
+The production chain is intact through to `fill → PnL attribution` (proven:
++564.39 across 3 strategies). It breaks in three places, in order of severity:
+
+1. **After PnL attribution.** The objective's chain continues
+   `→ counterfactual evaluation → reflection → hypothesis → candidate →
+   offline validation → shadow → probation → promote`. **None of
+   counterfactual evaluation, offline validation, or shadow trading exists.**
+   So the loop currently stops at a number and restarts, which is why 864 of 920
+   cycles are HOLD with no way to learn whether they were right.
+
+2. **Reflection carries no hypothesis.** `ReflectionRecord` is a metrics blob
+   (`models.py:650-662`): counts, scores, per-strategy metrics. There is no field
+   for a diagnosis, a hypothesis, or a trial, and no LLM ever authors a
+   `KnowledgeArtifact` — the only constructor in `src/` is `daemon.py:605`, with
+   content drawn from five hard-coded strings.
+
+3. **Lifecycle transitions are not evidence-gated on the counterfactual the
+   objective requires.** The only PnL-driven transition is verified-realized-PnL
+   sign; everything else keys on cycle counts and rejection rates.
+
+---
+
+## 5. Disposition: delete / merge / simplify / repair / keep
+
+Applying `delete → merge → simplify → reuse → repair → add` strictly:
+
+| Action | Target | Rationale |
+|---|---|---|
+| **DELETE** | `src/voyager_quant/` (8 files) | zero references; contains `exec()` on model-generated code; a live capability that nothing uses and that violates the no-code-execution constraint |
+| **DELETE** | `tools/legacy/` (12 files) | 10/12 unreferenced; `full_ingest` broken and aimed at the live journal; all superseded by `minictrl`/`doctor` |
+| **DELETE** | `daemon.py` two window-hash fields | dead state whose comment describes behaviour that does not exist |
+| **DELETE** | two dead `min_*_submitted_orders` params | assigned, never read; tests imply they are enforced |
+| **MERGE** | three copies of `_latest_evidence_batch` | one function, one place |
+| **MERGE** | `_run_daemon` + `minictrl` entry points | more than one runtime entry point is how the model pin diverged before |
+| **REPAIR** | `relevant_lessons` | make the filter actually match, or delete it and say so |
+| **REPAIR** | `tools/README.md` claim about `full_ingest` | factually wrong |
+| **SIMPLIFY** | the 9 near-duplicate BUY strategies | a dedupe rule at admission, then retire the duplicates by evidence |
+| **REUSE** | the existing `PnLEvidence`/`ClosedLotAttribution` structure | it is the one genuinely good substrate; counterfactual work should extend it, not rebuild it |
+| **KEEP** | `guardian.py` unchanged | immutable, 14 gates, machine-checked bypass prevention |
+| **ADD (last)** | counterfactual ledger, then `make verify` | per the stated ordering: close the loop, then correctness, then research, then autonomy, then capital |
+
+---
+
+## 6. Honest statement of what is proven vs designed
+
+**Proven by real broker evidence:**
+- 24 submitted orders, 24 broker-confirmed fills, `fill_quantity_ratio` 1.0
+- 23 closed lots; per-strategy realized PnL `tiny-fixed-size-001 +362.66`,
+  `fixed-size-buy-001 +120.37`, `trend-follow-buy-001 +81.36`
+- The self-evolution chain ran unattended: curriculum proposed a SELL strategy →
+  admission accepted it → selector served it → LLM emitted SELL 52 → Guardian
+  approved → broker filled at 766.57 → lots closed → PnL attributed
+
+**Designed but not proven:**
+- That any of it is *profitable after costs* — fees have never been non-zero, so
+  "net" is unmeasured
+- That the HOLDs are correct — no counterfactual exists
+- That the 27 strategies are distinct — only id/parameter duplication is checked
+- That the model reasons better than the fallback — 67 LLM decisions vs 2 fallback
+  are not a comparison
+
+**Not started:** counterfactual evaluation, experiment registry, offline
+validation, walk-forward, shadow trading, champion–challenger, regime awareness.

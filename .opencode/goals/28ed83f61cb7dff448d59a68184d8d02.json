@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "id": "0153656d-bad5-4673-b7bc-f0755877476a",
+  "sessionID": "ses_f18220003ffeb5piJeUeqBD14K",
+  "objective": "请对当前 Quant 系统进行一次**从真实可运行闭环出发的全面审查、重构、验证与持续优化**，最终目标不是增加更多模块、策略、Agent 或“自我进化”概念，而是建立一个能够在严格风险约束下，从真实市场数据出发，完成 **observe → understand → generate decision → risk check → execute → broker fill → reconcile → PnL attribution → counterfactual evaluation → reflection → hypothesis → candidate strategy/model → offline validation → shadow/probation → live validation → promote/scale/pause/retire → repeat** 的完整自动闭环，并最终用长期、prospective、after-cost、risk-adjusted live net PnL 判断系统是否真正产生价值。第一步不要继续开发新功能，而是从代码、配置、数据库、journal、strategy registry、模型、文档和实际运行路径出发，对整个 repository 做一次事实级审查：明确每一个已经设计、实现或文档中声明的组件到底是否被真实调用、是否影响生产决策、是否有数据输入输出、是否存在只写了但从未使用的 dead code / unused feature / unused strategy / unused model / unused reflection / unused lifecycle / unused risk rule / duplicated abstraction / wrapper / historical path，并将所有能力分类为 **actively used / partially wired / implemented but unused / obsolete / duplicated / broken / missing**；特别检查“看起来已经有”但实际上没有进入真实交易闭环的功能，禁止把配置存在、函数存在、测试存在或文档存在等同于功能真正有效。随后以**最小可靠闭环优先**为原则进行重构，严格执行 **delete → merge → simplify → reuse → repair → only then add**：先删除或隔离无效和重复路径，统一唯一的数据流、控制流、状态来源、PnL ledger、strategy lifecycle、experiment registry、execution truth 和运行入口，确保主系统能够稳定完成一轮真实 end-to-end cycle，并为每一步建立明确输入、输出、责任边界、失败行为、日志、provenance 和自动测试。优先补齐当前真正决定系统能否学习的基础设施，包括完整 fill/trade/position/strategy/model attribution、realized/unrealized/net PnL、fees/slippage/cost accounting、BUY/SELL/HOLD counterfactual ledger、market/regime context、strategy lineage、experiment ledger、失败实验记录、模型预测与实际结果对齐，以及 lifecycle 的显式 state-machine invariants；任何 promotion、mutation 或自主修改都必须基于这些可验证证据，而不是 LLM 主观总结。将生产系统与研究/进化系统彻底分离：生产层只负责 data → decision → allocation → immutable Guardian → execution → reconciliation，学习层负责 diagnosis → hypothesis → candidate generation → backtest → walk-forward OOS → robustness → multiple-testing/overfitting control → shadow → small-capital probation → promotion/retirement；LLM 可以用于 reasoning、failure diagnosis、hypothesis generation、strategy proposal 和 research orchestration，但不得直接修改 Guardian、global risk limits、broker credentials、kill switch、audit rules 或未经验证直接修改 production behavior。不要把“交易次数更多”“HOLD rate 更低”“策略数量更多”“LLM 自己改代码”作为成功标准；先解释每一次 decision 是否正确，特别是对 HOLD 计算未来 counterfactual outcome，区分 good hold、missed alpha、avoided loss 和 false trade。对所有已有 strategy/model 建立 champion–challenger 和统一 StrategySpec，自动检测 semantic/behavioral duplicate，阻止 strategy zoo 无限制膨胀；新 candidate 必须说明它解决了什么已经观察到的 failure、与已有策略有什么本质区别、用了什么数据、经过了多少次搜索，并记录所有失败 trial，避免自动 data mining 和 selection bias。整个优化过程必须遵循“**先跑通闭环，再提高正确性，再提高研究能力，再增加自主性，最后才扩大资金**”的顺序：Phase 0 先做到 syntax/import/tests/service startup/restart/recovery/broker reconciliation 全部 PASS；Phase 1 完成真实交易和 PnL attribution；Phase 2 完成 counterfactual 与 decision-quality evaluation；Phase 3 建立 strategy/model/experiment registry；Phase 4 建立严格 offline backtest、walk-forward、cost、leakage、stress 和 overfitting validation；Phase 5 完成 shadow trading；Phase 6 才允许 evidence-gated probation；Phase 7 根据 prospective live evidence 自动 promote/pause/retire；Phase 8 再加入 regime-aware portfolio allocation、model retraining 和 strategy evolution；只有前一阶段 exit criteria 全部满足才能进入下一阶段。每次修改后都必须运行统一的 `make verify` 或等价命令，至少验证 software、syntax/import、unit/integration、data integrity、point-in-time/no-leakage、PnL accounting、lifecycle invariants、Guardian bypass prevention、replay determinism、crash recovery、broker reconciliation、shadow/live consistency，并要求 `FAIL=0`；任何失败不能被 warning 或 fallback 掩盖。最终请输出并持续维护一份事实级系统文档，明确：① 当前真实运行架构和唯一 end-to-end data/control flow；② 所有组件的 used/unused/broken/missing 审查表；③ 当前闭环在哪里真正断裂；④ 哪些模块应该删除、合并、修复或保留；⑤ 每个阶段的具体实现任务、依赖关系、测试方法、exit criteria 和验证结果；⑥ 当前赚钱或亏钱到底由 signal、model、strategy、allocation、execution、cost 还是 regime 导致；⑦ 当前系统哪些能力已经有证据证明，哪些只是设计目标；⑧ 下一轮只选择对“真实 after-cost risk-adjusted live profitability”最有价值的 1–3 个改动执行。整个项目的最高原则是：**不要优化一个尚未闭环的系统，不要让无法归因的结果驱动学习，不要让未经验证的学习结果进入生产，不要用复杂度代替能力；先让每一条数据、每一个决策、每一个订单、每一美元 PnL 和每一次策略变化都可以追踪、解释、复现和验证，再逐步让系统自动学习和自动进化。最终唯一有效的外部成功标准是：在固定风险边界和真实交易成本下，系统能否持续产生可复现、可归因、经样本外和 prospective live trading 验证的正净收益，而不是回测数字、策略数量或自治程度本身。**",
+  "constraints": [],
+  "revision": 1,
+  "status": "active",
+  "requirements": [
+    {
+      "id": "75292639-336f-4f1f-9a91-89daaefb24d5",
+      "text": "Objective achieved: 请对当前 Quant 系统进行一次**从真实可运行闭环出发的全面审查、重构、验证与持续优化**，最终目标不是增加更多模块、策略、Agent 或“自我进化”概念，而是建立一个能够在严格风险约束下，从真实市场数据出发，完成 **observe → understand → generate decision → risk check → execute → broker fill → reconcile → PnL attribution → counterfactual evaluation → reflection → hypothesis → candidate strategy/model → offline validation → shadow/probation → live validation → promote/scale/pause/retire → repeat** 的完整自动闭环，并最终用长期、prospective、after-cost、risk-adjusted live net PnL 判断系统是否真正产生价值。第一步不要继续开发新功能，而是从代码、配置、数据库、journal、strategy registry、模型、文档和实际运行路径出发，对整个 repository 做一次事实级审查：明确每一个已经设计、实现或文档中声明的组件到底是否被真实调用、是否影响生产决策、是否有数据输入输出、是否存在只写了但从未使用的 dead code / unused feature / unused strategy / unused model / unused reflection / unused lifecycle / unused risk rule / duplicated abstraction / wrapper / historical path，并将所有能力分类为 **actively used / partially wired / implemented but unused / obsolete / duplicated / broken / missing**；特别检查“看起来已经有”但实际上没有进入真实交易闭环的功能，禁止把配置存在、函数存在、测试存在或文档存在等同于功能真正有效。随后以**最小可靠闭环优先**为原则进行重构，严格执行 **delete → merge → simplify → reuse → repair → only then add**：先删除或隔离无效和重复路径，统一唯一的数据流、控制流、状态来源、PnL ledger、strategy lifecycle、experiment registry、execution truth 和运行入口，确保主系统能够稳定完成一轮真实 end-to-end cycle，并为每一步建立明确输入、输出、责任边界、失败行为、日志、provenance 和自动测试。优先补齐当前真正决定系统能否学习的基础设施，包括完整 fill/trade/position/strategy/model attribution、realized/unrealized/net PnL、fees/slippage/cost accounting、BUY/SELL/HOLD counterfactual ledger、market/regime context、strategy lineage、experiment ledger、失败实验记录、模型预测与实际结果对齐，以及 lifecycle 的显式 state-machine invariants；任何 promotion、mutation 或自主修改都必须基于这些可验证证据，而不是 LLM 主观总结。将生产系统与研究/进化系统彻底分离：生产层只负责 data → decision → allocation → immutable Guardian → execution → reconciliation，学习层负责 diagnosis → hypothesis → candidate generation → backtest → walk-forward OOS → robustness → multiple-testing/overfitting control → shadow → small-capital probation → promotion/retirement；LLM 可以用于 reasoning、failure diagnosis、hypothesis generation、strategy proposal 和 research orchestration，但不得直接修改 Guardian、global risk limits、broker credentials、kill switch、audit rules 或未经验证直接修改 production behavior。不要把“交易次数更多”“HOLD rate 更低”“策略数量更多”“LLM 自己改代码”作为成功标准；先解释每一次 decision 是否正确，特别是对 HOLD 计算未来 counterfactual outcome，区分 good hold、missed alpha、avoided loss 和 false trade。对所有已有 strategy/model 建立 champion–challenger 和统一 StrategySpec，自动检测 semantic/behavioral duplicate，阻止 strategy zoo 无限制膨胀；新 candidate 必须说明它解决了什么已经观察到的 failure、与已有策略有什么本质区别、用了什么数据、经过了多少次搜索，并记录所有失败 trial，避免自动 data mining 和 selection bias。整个优化过程必须遵循“**先跑通闭环，再提高正确性，再提高研究能力，再增加自主性，最后才扩大资金**”的顺序：Phase 0 先做到 syntax/import/tests/service startup/restart/recovery/broker reconciliation 全部 PASS；Phase 1 完成真实交易和 PnL attribution；Phase 2 完成 counterfactual 与 decision-quality evaluation；Phase 3 建立 strategy/model/experiment registry；Phase 4 建立严格 offline backtest、walk-forward、cost、leakage、stress 和 overfitting validation；Phase 5 完成 shadow trading；Phase 6 才允许 evidence-gated probation；Phase 7 根据 prospective live evidence 自动 promote/pause/retire；Phase 8 再加入 regime-aware portfolio allocation、model retraining 和 strategy evolution；只有前一阶段 exit criteria 全部满足才能进入下一阶段。每次修改后都必须运行统一的 `make verify` 或等价命令，至少验证 software、syntax/import、unit/integration、data integrity、point-in-time/no-leakage、PnL accounting、lifecycle invariants、Guardian bypass prevention、replay determinism、crash recovery、broker reconciliation、shadow/live consistency，并要求 `FAIL=0`；任何失败不能被 warning 或 fallback 掩盖。最终请输出并持续维护一份事实级系统文档，明确：① 当前真实运行架构和唯一 end-to-end data/control flow；② 所有组件的 used/unused/broken/missing 审查表；③ 当前闭环在哪里真正断裂；④ 哪些模块应该删除、合并、修复或保留；⑤ 每个阶段的具体实现任务、依赖关系、测试方法、exit criteria 和验证结果；⑥ 当前赚钱或亏钱到底由 signal、model、strategy、allocation、execution、cost 还是 regime 导致；⑦ 当前系统哪些能力已经有证据证明，哪些只是设计目标；⑧ 下一轮只选择对“真实 after-cost risk-adjusted live profitability”最有价值的 1–3 个改动执行。整个项目的最高原则是：**不要优化一个尚未闭环的系统，不要让无法归因的结果驱动学习，不要让未经验证的学习结果进入生产，不要用复杂度代替能力；先让每一条数据、每一个决策、每一个订单、每一美元 PnL 和每一次策略变化都可以追踪、解释、复现和验证，再逐步让系统自动学习和自动进化。最终唯一有效的外部成功标准是：在固定风险边界和真实交易成本下，系统能否持续产生可复现、可归因、经样本外和 prospective live trading 验证的正净收益，而不是回测数字、策略数量或自治程度本身。**",
+      "required": true,
+      "status": "pending",
+      "evidenceIDs": [],
+      "verification": "semantic",
+      "source": "objective",
+      "updatedAt": 1790641773516
+    }
+  ],
+  "evidence": [],
+  "checks": [],
+  "execution": {
+    "agent": "build",
+    "model": {
+      "providerID": "opencode",
+      "modelID": "space-bunny-free"
+    },
+    "variant": "max",
+    "modelContext": {
+      "contextLimit": 1048576,
+      "inputLimit": 524288,
+      "outputLimit": 524288,
+      "autoCompaction": true,
+      "observedAt": 1790642189455,
+      "lastRequestTokens": 420031,
+      "lastInputTokens": 419636
+    }
+  },
+  "runtimeFingerprint": {
+    "goalVersion": "1.3.37",
+    "goalBuild": "sha256:cb27484076897dc0286034e66575a678561871fbeabb64080c18db8c7a4442bc",
+    "pluginApiVersion": "1.18.33"
+  },
+  "usage": {
+    "turns": 1,
+    "tokens": 418129,
+    "cost": 0,
+    "runtimeMs": 9914,
+    "seenMessageIDs": [
+      "msg_0ea911ff0001xqHQnFmbF3aICp"
+    ]
+  },
+  "revisionTurnBaseline": 0,
+  "budget": {
+    "maxTurns": 0,
+    "maxTokens": 0,
+    "maxCost": 0,
+    "maxRuntimeMs": 0
+  },
+  "progressRevision": 4,
+  "observedProgressRevision": 0,
+  "progressFingerprints": [
+    "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
+    "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
+    "shell-worktree:b0ca9582d43b0b4b67e7f0142e387b150b1e130f2ce944d4aeefd1b15a43293a",
+    "shell-worktree:09b1c7fb586006a7a12e6656cfa2927aed35051065845d220cb4a04e15bb061b"
+  ],
+  "stalledTurns": 0,
+  "progressNotes": [
+    {
+      "time": 1790642078423,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790642102766,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790642120461,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790642150165,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    }
+  ],
+  "storageGeneration": 39,
+  "createdAt": 1790641773516,
+  "updatedAt": 1790642189455,
+  "todoPlan": {
+    "goalRevision": 1,
+    "digest": "sha256:37e2ae6150590c2a0d0e1955d47cd8a16720f4e27b6c52534ff8654339568b60",
+    "total": 6,
+    "pending": 5,
+    "inProgress": 1,
+    "completed": 0,
+    "cancelled": 0,
+    "observedAt": 1790641784037,
+    "items": [
+      {
+        "key": "todo:0d8337b0e0bdc1d16d43a773:1",
+        "content": "Fact-level audit: classify every component as actively used / partially wired / implemented but unused / obsolete / duplicated / broken / missing, with real call-path evidence",
+        "status": "in_progress",
+        "priority": "high",
+        "order": 0
+      },
+      {
+        "key": "todo:27eb29fe995eda95eae2425a:1",
+        "content": "Trace the single real end-to-end data/control flow and document where the loop actually breaks",
+        "status": "pending",
+        "priority": "high",
+        "order": 1
+      },
+      {
+        "key": "todo:0a01d7f5a2ca1aaaebfb0a71:1",
+        "content": "Delete/merge/simplify dead and duplicated paths per delete→merge→simplify→reuse→repair→add",
+        "status": "pending",
+        "priority": "high",
+        "order": 2
+      },
+      {
+        "key": "todo:9a627f3e59e22e63535a55d4:1",
+        "content": "Unify one data flow, one state source, one PnL ledger, one lifecycle, one execution truth, one entry point",
+        "status": "pending",
+        "priority": "high",
+        "order": 3
+      },
+      {
+        "key": "todo:7c0327e4f97a6bc5ce3447cc:1",
+        "content": "Build the unified `make verify` gate covering all 13 named check classes, FAIL=0",
+        "status": "pending",
+        "priority": "high",
+        "order": 4
+      },
+      {
+        "key": "todo:c0c150bad8d866dc9c0b3d44:1",
+        "content": "Author the fact-level system document (architecture, usage table, break points, phase plan, PnL attribution)",
+        "status": "pending",
+        "priority": "high",
+        "order": 5
+      }
+    ]
+  }
+}

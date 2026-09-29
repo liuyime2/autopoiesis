@@ -523,7 +523,7 @@ def test_daemon_persists_lifecycle_updates(tmp_path):
         journal=journal,
         reflection_memory=reflection_memory,
         strategy_library=strategy_library,
-        lifecycle_manager=StrategyLifecycleManager(min_active_cycles=1, min_active_submitted_orders=0),
+        lifecycle_manager=StrategyLifecycleManager(min_active_cycles=1),
         reflect_every=1,
     )
 
