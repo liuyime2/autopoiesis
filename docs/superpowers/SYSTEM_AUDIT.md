@@ -973,3 +973,64 @@ produced a one-member bucket that read as a 100% accurate stratum.
 beat the base rate on at least 30 scored decisions. Until the market supplies
 outcomes, the check is a warning — and a warning here is the truthful state, not a
 defect in the report.
+
+## 24. Objective deliverable ⑥: what actually caused the PnL
+
+The objective asks which of signal, model, strategy, allocation, execution, cost or
+regime produced the profit or loss. The answer is not the one the headline number
+suggests, and it was reachable from data the system already held.
+
+**The +564.39 is not the model's money. All 23 closed lots were opened by the
+`baseline` decision source, on 2026-06-11, 06-12 and 06-18. The LLM path produced its
+first decision on 2026-09-28 — two and a half months after the last profitable lot —
+and opened none of them. The model's contribution to realized PnL is 0.00.**
+
+Both halves of that join were always recorded: the lot names the order that opened it
+(`buy_order_id`) and the cycle names the decision source that issued that order. Nothing
+joined them, so `strategy_realized_pnl` was read as evidence that the decision engine
+worked, when it is evidence about the baseline rule.
+
+### 24.1 The two numbers in one payload are not a reconciliation
+
+| number | what it is |
+| --- | --- |
+| `strategy_realized_pnl` **+564.39** | the agent's **closed** lots, SPY only, opened 2026-06-11 to 06-18 |
+| `account_realized_or_reported_pnl` **−406.54** | the broker's **cumulative** `profit_loss` for the whole account, all time, BIL and TLT included |
+
+Different scopes, different periods. The 970.93 difference is **not** a loss, and a
+reader seeing both in the same payload would reasonably conclude the agent lost against
+its own accounting. `attribution.py` states the scopes and says explicitly that they
+must not be reconciled.
+
+### 24.2 Cause by cause, from the record
+
+| cause | verdict | evidence |
+| --- | --- | --- |
+| model | **NOT THE CAUSE** | 0.00 of +564.39 came from an llm or fallback decision |
+| signal | attributable | all 23 lots came from the `baseline` source, so the PnL belongs to that rule |
+| strategy | attributable | 3 strategies carry it; largest is `tiny-fixed-size-001` at +362.66 |
+| cost | **not a factor here** | the paper broker charged 0.00 across 23 lots, so this is gross and overstates what a live venue would pay |
+| allocation | partly attributable | 36 orders were refused; the PnL is what got through, not what was wanted |
+| execution | not a factor here | fill ratio 1.00 — submitted quantity filled in full |
+| regime | **cannot attribute** | no regime context is computed or recorded |
+
+All seven causes are always reported. A row absent when the data is missing is a
+silent gap, and a reader cannot tell "not a factor" from "nobody looked".
+
+### 24.3 Severity, and refusing to mask it
+
+The doctor check could have been made green by downgrading the model finding, and that
+would have been masking. The split is drawn on evidence instead:
+
+* model opened **no lots** → the figure belongs entirely to the baseline rule and the
+  model has neither helped nor hurt. A fact waiting on market hours: **WARN**.
+* model opened lots and contributed **≤ 0** while the total is positive → a model
+  trading and failing to beat the baseline: **FAIL**.
+
+A test pins both branches. Writing that test found a further gap: the first version
+tested `model_pnl == 0.0`, so a model that opened a lot and **lost** 20.00 while the
+account was up reported `OK`. The rule is now `<= 0.0`, which is the same defect as the
+original one caught one level down.
+
+This is the single most important open finding in the project: **the system's headline
+profit is not evidence that the model works.**

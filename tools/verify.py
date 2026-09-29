@@ -65,6 +65,7 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_calibration.py": (
         "decision-outcome-counterfactual", "point-in-time-no-leakage",
     ),
+    "test_attribution.py": ("pnl-accounting", "data-integrity"),
     "test_research_backtest.py": (
         "point-in-time-no-leakage", "pnl-accounting", "lifecycle-invariants",
     ),

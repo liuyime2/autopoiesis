@@ -19,8 +19,8 @@ from enum import Enum
 from pathlib import Path
 
 from min_agent import (
-    calibration, counterfactual, experiment_registry, lineage,
-    strategy_engine,
+    attribution, calibration, counterfactual, experiment_registry,
+    lineage, strategy_engine,
 )
 from min_agent.atomicio import write_json_atomic
 from min_agent.broker_evidence import latest_evidence_batch
@@ -244,6 +244,11 @@ def _check_governance(report: DoctorReport, config: AgentConfig) -> None:
         #    on every decision, used as a gate, and never once compared against an
         #    outcome.
         _check_model_calibration(report, config, journal, records)
+
+        # 10. Which of signal/model/strategy/allocation/execution/cost/regime
+        #     actually produced the PnL. The objective asks this directly and the
+        #     answer is not the one the headline number suggests.
+        _check_pnl_attribution(report, config, journal, records)
 
         # 8. Champion-challenger, search effort, and whether candidates can say
         #    what they are for.
@@ -577,6 +582,72 @@ def _check_model_calibration(
         detail += f", Brier {result.brier:.3f}, base rate {result.base_rate:.1%}"
     level = OK if result.verdict.startswith("SIGNAL") else WARN
     report.add("model calibration", level, detail)
+
+
+def _check_pnl_attribution(
+    report: DoctorReport,
+    config: AgentConfig,
+    journal: "JsonlJournal",
+    records: list,
+) -> None:
+    """State which cause produced the PnL, and refuse to guess where the data cannot.
+
+    This exists because a number in a payload was being read as evidence about the
+    model. The lots record which order opened them and the cycles record which
+    decision source issued that order; nothing joined the two, so
+    `strategy_realized_pnl` looked like a result for the decision engine when it is a
+    result for the baseline rule.
+    """
+    try:
+        events = [
+            e for e in journal.read_events("PNL_EVIDENCE_RECORDED")
+            if (e.payload.get("pnl") or {}).get("closed_lots")
+        ]
+    except Exception as exc:
+        report.add("pnl attribution", WARN, f"journal unreadable: {type(exc).__name__}")
+        return
+    if not events:
+        report.add(
+            "pnl attribution", WARN,
+            "no closed lots on record, so no PnL can be attributed to any cause",
+        )
+        return
+
+    latest = events[-1]
+    result = attribution.attribute(records, latest.payload["pnl"], latest.payload)
+    causes = "; ".join(f"{c.cause}={c.verdict}" for c in result.causes)
+    detail = f"{result.headline()} | {causes}"
+
+    # Severity follows a distinction that has to be stated, because it decides
+    # whether this is a code fault or a fact about the data:
+    #
+    # * model_pnl == 0 because the model has opened no lots at all - that is
+    #   "not traded yet", which is a fact waiting on market hours, and it is
+    #   reported as a warning that cannot be missed;
+    # * model_pnl == 0 while the model HAS opened lots and the total is positive -
+    #   that is the model trading and failing to beat the baseline, which is a real
+    #   problem and fails the gate.
+    #
+    # Downgrading the first case to a warning to turn the gate green would be
+    # masking, so the distinction is drawn on evidence rather than on convenience.
+    model_lots = sum(
+        n for source, n in result.lots_by_source.items()
+        if source in {"llm", "fallback_policy_engine"}
+    )
+    if result.closed_lots and model_lots > 0 and result.model_pnl <= 0.0:
+        report.add(
+            "pnl attribution", FAIL,
+            detail + f"; the model opened {model_lots} lot(s) and contributed "
+            f"{result.model_pnl:+.2f} to a total of {result.total_realized_pnl:+.2f}",
+        )
+    elif result.closed_lots and result.model_pnl == 0.0:
+        report.add(
+            "pnl attribution", WARN,
+            detail + "; the model has opened no lots, so it has neither helped nor "
+            "hurt - the figure above belongs entirely to the baseline rule",
+        )
+    else:
+        report.add("pnl attribution", OK, detail)
 
 
 def _check_knowledge_value(report: DoctorReport, config: AgentConfig) -> None:

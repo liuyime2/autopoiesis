@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790684775564,
-      "lastRequestTokens": 297797,
-      "lastInputTokens": 297228
+      "observedAt": 1790685384870,
+      "lastRequestTokens": 314974,
+      "lastInputTokens": 314167
     }
   },
   "runtimeFingerprint": {
@@ -43,10 +43,10 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 11,
-    "tokens": 631922,
+    "turns": 12,
+    "tokens": 634324,
     "cost": 0,
-    "runtimeMs": 132194,
+    "runtimeMs": 153082,
     "seenMessageIDs": [
       "msg_0ea911ff0001xqHQnFmbF3aICp",
       "msg_0ea980dc20015f3lGA67tXRaUK",
@@ -58,7 +58,8 @@
       "msg_0ecfd69670014qmYHmG3TDmCBH",
       "msg_0ed08e47000190UwmUWfvjYtFw",
       "msg_0ed120ec4001dPLWY1B1573bAi",
-      "msg_0ed1baed1001D2QQ3NSpiGKKKG"
+      "msg_0ed1baed1001D2QQ3NSpiGKKKG",
+      "msg_0ed220d8b001TXoxGTrA4BRdkF"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -68,8 +69,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 67,
-  "observedProgressRevision": 65,
+  "progressRevision": 71,
+  "observedProgressRevision": 68,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
     "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
@@ -137,35 +138,14 @@
     "shell-worktree:49bab1d1e9b42a2607c1bf720330135944d620c1ef92a37d6a2828957a7a6ebd",
     "shell-worktree:0f113096d0fce9d8a8655144bf9b244c75f8e02d48100dc95da56a04a3bb8175",
     "shell-worktree:a85fcc43ff4fd64a72ed69a2f60287e205ece77e40c23ae5e0ecefac47999e72",
-    "shell-worktree:0f6722d441776250c6be9ca90fcdc5879f431121ca8c7a679705d44f778f2af5"
+    "shell-worktree:0f6722d441776250c6be9ca90fcdc5879f431121ca8c7a679705d44f778f2af5",
+    "shell-worktree:43961ce5729ebc54f5ac2fecbeee3e49938803157805966e728eca0df9a5d8f5",
+    "shell-worktree:79d9144990e5455bb05115846a06cf541ac20c62f3918cb53f49cca8cdc64fb4",
+    "shell-worktree:e2c205691aa490acb17de3a9efdb19e1e022c9562691119145369c358ef864e7",
+    "shell-worktree:4289558b807a71756df3dc339c8131a87aee20695fe54a6f52fbecc75d286ad5"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790643820949,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790643861969,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790643884587,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790644093364,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790644124105,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790644267234,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -390,11 +370,36 @@
       "time": 1790684772517,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790684796949,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790684812524,
+      "summary": "Model-prediction-vs-actual alignment implemented (the highest-value remaining item from the full objective). The system recorded a confidence on every decision and never once compared it to an outcome - confidence was used only as a gate (min_confidence deciding whether an order may be sent), never as a testable claim, so a model that is confidently wrong was indistinguishable from one that is right. calibration.py joins the two things that already exist: each decision's confidence and the counterfactual ledger's scored verdict. The finding is the important part: 67 llm decisions, 0 scored, 67 awaiting an outcome. They all fall between 11:20 and 15:59 on 2026-09-28, a single session, and the 24h horizon needs a quote from 2026-09-29 11:20 onward which does not exist because the market has been closed. Mean llm confidence 0.276. So the honest reading is not \"the model is bad\" but \"we do not know yet\" - the report says INSUFFICIENT with a note that the value is unmeasured rather than good, and the doctor check stays a warning until the verdict starts with SIGNAL. Scoring rules: only a hold that avoided a loss is correct; MISSED_ALPHA and FALSE_TRADE are both incorrect, because scoring a missed rally as \"correct caution\" would give any model that never trades a perfect curve for free, which is the easiest way to manufacture good calibration; NEUTRAL is excluded since a move that did not clear the cost is silence. Two of my own mistakes: the first metric compared gate-clearing accuracy against the base rate, but with min_confidence at 0.5 both a 0.6 and a 0.9 clear the gate so the comparison measured almost every decision and could not distinguish a model that separates good from bad from one that does not - a test failed for the right reason with the wrong metric, so the comparison is now the most confident populated bucket against the base rate, with a test pinning the gate comparison's weakness so it is not reintroduced. And the bucket width matters: 0.2 wide so 0.95 and 1.0 land together, since splitting them produced a one-member bucket reading as a 100% accurate stratum. Commit 0b6d19e. make verify: 21 classes, 0 failed, 588 distinct tests, 91/91 audit, doctor OK, exit 0.",
+      "next": "Remaining from the full objective, in rough value order. (1) Doc deliverables 5-8, which the objective states explicitly and which are still missing: per-phase implementation tasks/dependencies/test methods/exit criteria/verification results; PnL cause attribution across signal/model/strategy/allocation/execution/cost/regime (which of these actually caused the +564.39?); proven-capability vs design-target; and the next 1-3 highest-value changes. (2) Unrealized PnL - only realized is attributed, so open lots contribute nothing to the account picture. (3) Regime context - referenced in curriculum prose but never computed or recorded, so the PnL attribution in (1) cannot yet separate regime from signal. (4) Phase 7 needs market hours, and the model calibration verdict needs outcomes that only accrue once the market reopens. One thing worth flagging: the objective's ordering rule says a phase may only be entered once the prior phase's exit criteria are met, and Phase 3 is still only met in part (no model registry), so the honest sequencing is to close the model-registry gap and the doc deliverables before any further capability work."
+    },
+    {
+      "time": 1790685058450,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790685125770,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790685382106,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 511,
+  "storageGeneration": 544,
   "createdAt": 1790641773516,
-  "updatedAt": 1790684775564,
+  "updatedAt": 1790685384870,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:d9b69ac2c1f8b0bbc90c47d5bb5615b71ffc238325b2b248340f3a260feb8032",
