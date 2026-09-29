@@ -1465,7 +1465,19 @@ slower accumulation of the 68 unscoreable decisions the whole system is waiting 
 `while open: min(default_interval, max_sleep)`; `while closed: sleep until the next
 open, capped`, so maintenance still runs overnight.
 
-### 31b.1 A test that had encoded the defect
+### 31b.1 Confirmed sustained, not just two cycles
+
+```
+today's cycles: 3
+timestamps: 09:30:00, 09:47:17, 09:52:42
+last gaps (min): [17.3, 5.4]
+```
+
+The 17.3-minute gap is the pre-fix window. After the restart the loop is cycling
+every **5.4 minutes** against a configured 300 seconds — the interval is now live
+during trading hours, which is the whole point.
+
+### 31b.2 A test that had encoded the defect
 
 `test_scheduler_caps_sleep_at_max_sleep` asserted that with the market open and the
 close 500 seconds away, the loop would sleep 60 seconds against a **configured 30**.
