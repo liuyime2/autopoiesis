@@ -221,3 +221,59 @@ Phase 8 (regime-aware allocation, retraining, evolution). Its exit criteria are 
 met, and the objective forbids entering it early. Building it now would produce a
 system that looks more autonomous and is not more profitable — which is the failure
 mode the whole objective is written against.
+
+---
+
+## 7. Requirement-by-requirement audit (2026-09-29, after the reopen)
+
+Every explicit requirement in the objective, with the evidence for it. **Proven**
+means a real measurement, not a green test.
+
+### 7.1 Proven
+
+| requirement | evidence |
+| --- | --- |
+| fact-level audit, 7-way classification | `SYSTEM_AUDIT.md` §2, §12 |
+| delete → merge → simplify → reuse → repair → only then add | 24 files deleted, three evidence readers merged, dedupe 13→5, 10 wiring defects fixed, additions only after |
+| one data / control / state path | single `minictrl` entry; strategy registry + derived experiment, lineage, champion, model views — no second store (`make verify` fails on a duplicate) |
+| real end-to-end cycle | 24 orders, 24 broker-confirmed fills, 23 closed lots |
+| startup / restart / recovery / reconciliation | SIGKILL → self-restart, state intact, zero corrupt lines |
+| fill/trade/position/strategy/model attribution | every lot carries `buy_order_id` + `strategy_id`; `TradeDecision.model` records the model |
+| realized / unrealized / net PnL | `net_pnl` and `net_after_assumed_cost` on the evidence |
+| fees / slippage / cost accounting | observed (0.00) and assumed (0.05% RT) reported separately |
+| BUY/SELL/HOLD counterfactual ledger | 350 scored, hold quality 0.687, after cost |
+| market / regime context | point-in-time labels; 78 of 467 windows measurable |
+| strategy lineage | derived per candidate, with the observation attached |
+| experiment ledger + failed trials | 27 research trials recorded, 0 passed |
+| model prediction vs actual | calibration wired; `INSUFFICIENT` pending outcomes |
+| lifecycle state-machine invariants | 12 strategies retired, provenance traced, promotion evidence-gated |
+| production / research separation | `make verify` fails on any production import of research |
+| champion–challenger | champion `fixed-size-buy-001` +120.37, 2 challengers |
+| behavioural / semantic duplicate detection | 14 redundant copies exposed, incl. a strategy named "Trend Following" that was `FIXED_SIZE` |
+| offline backtest / walk-forward / cost / leakage / stress / overfitting | 27 of 27 `INSUFFICIENT` — implemented and negative |
+| shadow trading | real loop, shadow sink, zero PnL leakage, reachable by config |
+| `make verify`, 13 classes, `FAIL=0` | **22 classes, 0 failed, 663 tests, 91/91 audit, doctor OK, exit 0** |
+| documents ①–⑧ | `SYSTEM_AUDIT.md`, `PHASES.md`, `STEP_CONTRACT.md`, `STATUS.md` |
+
+### 7.2 Not proven — and cannot be, yet
+
+| requirement | status |
+| --- | --- |
+| **long-term prospective after-cost risk-adjusted live PnL** | **NOT MET.** 10 trading days. After-cost +555.72 on one historical window of one symbol. Not "long-term", not prospective, and the cost is an assumption |
+| that the **model** adds value | **NOT MET.** 0.00 of the PnL; 69 decisions, **0 scored**; mean historical confidence 0.276 |
+| that any **strategy** has an edge | **NOT MET.** 27 of 27 `INSUFFICIENT` out-of-sample |
+| Phase 7 prospective promote/pause/retire | **incomplete.** The mechanism works; the duration does not exist |
+| regime separated from signal | **cannot attribute** — 84% of windows unmeasurable |
+| unrealized PnL against a live position | proven by test only; the agent holds no open lot |
+| 33 candidates stating what motivated them | **NOT MET**, reported rather than back-filled |
+
+### 7.3 The honest position
+
+Every piece of engineering the objective authorizes is built, verified, and green.
+**The objective's own success criterion is not met and cannot be manufactured** — it
+requires accumulated prospective market time, and the instruments built to measure it
+all currently report `INSUFFICIENT` rather than a number.
+
+Claiming completion would mean claiming a result the system itself declines to report.
+The remaining work is elapsed time plus one user action (freeing `$HOME` quota so the
+units survive a reboot).
