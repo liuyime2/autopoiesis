@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
+from min_agent.atomicio import write_json_atomic
 from min_agent.config import AgentConfig
 from min_agent.evaluator import (
     PNL_EVIDENCE_MISSING,
@@ -155,10 +156,196 @@ def run_doctor(config: AgentConfig, *, client=None, skip_broker: bool = False) -
     _check_strategy_library(report, config)
     _check_knowledge(report, config)
     _check_proof(report, config)
+    _check_governance(report, config)
     return report
 
 
 # --- individual checks -------------------------------------------------------
+
+
+# The safety envelope the agent cannot cross, checked rather than assumed.
+#
+# Everything below is enforced today only by there being no code that does the
+# thing. A reflection layer is about to be given authority to change the system on
+# its own, and an invariant that holds because nobody wrote the violating line is
+# not an invariant - it is an absence that one commit can remove. Each check below
+# fails loudly if that absence ever ends, and each one reads the journal rather
+# than the code, so it catches a hand-edited file or a stray script just as well as
+# a new in-tree writer.
+RISK_BASELINE_PATH = "risk_baseline.json"
+
+
+def _check_governance(report: DoctorReport, config: AgentConfig) -> None:
+    journal = _journal(config)
+    records = _records(journal) if journal is not None else []
+
+    # 1. No order may exist without Guardian approving it. `executor.execute`
+    #    refuses to submit an unapproved decision, but nothing ever checked that it
+    #    did, and a reflection layer reads these same records.
+    bypasses = [
+        record
+        for record in records
+        if record.execution.status == "SUBMITTED" and not record.guardian.approved
+    ]
+    if bypasses:
+        report.add(
+            "guardian bypass",
+            FAIL,
+            f"{len(bypasses)} order(s) submitted without Guardian approval",
+            "this must be zero; every SUBMITTED order needs guardian.approved=True",
+        )
+    elif records:
+        approved = sum(
+            1
+            for record in records
+            if record.execution.status == "SUBMITTED" and record.guardian.approved
+        )
+        report.add("guardian bypass", OK, f"0 bypasses across {approved} submitted order(s)")
+
+    # 2. Risk limits must not have moved upward. `risk limits` above prints the
+    #    values and compares them to nothing, so 5000 and 500000 report
+    #    identically. The first run records the baseline; later runs flag any
+    #    increase, which is the one direction that matters.
+    _check_risk_baseline(report, config)
+
+    # 3. Every lifecycle on disk must be traceable to a decision the manager made.
+    #    PAUSED and RETIRED are terminal by ordering inside one function, not by any
+    #    gate, so a hand-edit or a new writer would revive a retired strategy and
+    #    make the selectable count go *up* - which reads as healthier, not worse.
+    if journal is not None:
+        _check_lifecycle_provenance(report, config, journal)
+
+    # 4. A strategy file that was not written through admission is a strategy the
+    #    gates never saw.
+    if journal is not None:
+        _check_admission_provenance(report, config, journal)
+
+
+def _check_risk_baseline(report: DoctorReport, config: AgentConfig) -> None:
+    current = {
+        "max_position_value": config.max_position_value,
+        "max_daily_loss": config.max_daily_loss,
+        "max_total_exposure": config.max_total_exposure,
+        "max_account_value": config.max_account_value,
+        "max_trades_per_day": config.max_trades_per_day,
+        "min_confidence": config.min_confidence,
+        "allowlist": sorted(config.allowlist),
+    }
+    path = Path(config.journal_path).parent / RISK_BASELINE_PATH
+    if not path.exists():
+        try:
+            write_json_atomic(path, {"recorded_at": _now_iso(), "limits": current})
+            report.add(
+                "risk limits vs baseline", WARN,
+                "no baseline on disk; recorded the current limits as the baseline",
+                "re-run doctor to compare future changes against it",
+            )
+        except Exception as exc:
+            report.add("risk limits vs baseline", WARN,
+                       f"could not record a baseline: {type(exc).__name__}")
+        return
+
+    try:
+        recorded = json.loads(path.read_text()).get("limits", {})
+    except Exception as exc:
+        report.add("risk limits vs baseline", FAIL,
+                   f"baseline unreadable: {type(exc).__name__}",
+                   f"delete {path} to re-record it")
+        return
+
+    loosened = []
+    for key, value in current.items():
+        before = recorded.get(key)
+        if isinstance(value, (int, float)) and isinstance(before, (int, float)):
+            if value > before:
+                loosened.append(f"{key} {before} -> {value}")
+        elif value != before:
+            loosened.append(f"{key} {before} -> {value}")
+    if loosened:
+        report.add(
+            "risk limits vs baseline", FAIL,
+            "; ".join(loosened),
+            "a risk limit was raised or the allowlist widened; that is a human decision",
+        )
+    else:
+        report.add("risk limits vs baseline", OK, "unchanged since the recorded baseline")
+
+
+def _check_lifecycle_provenance(
+    report: DoctorReport, config: AgentConfig, journal: JsonlJournal
+) -> None:
+    decided: dict[str, str] = {}
+    for event in journal.read_events("STRATEGY_LIFECYCLE_UPDATED"):
+        strategy_id = event.strategy_id or event.payload.get("strategy_id")
+        new_lifecycle = event.payload.get("new_lifecycle")
+        if isinstance(strategy_id, str) and isinstance(new_lifecycle, str):
+            decided[strategy_id] = new_lifecycle
+
+    library = StrategyLibrary(config.strategy_dir)
+    unaccounted = []
+    for strategy in library.list():
+        if strategy.lifecycle in decided.values():
+            continue
+        if not decided.get(strategy.strategy_id) and strategy.lifecycle not in {
+            "PROBATION", "BASELINE", "ACTIVE"
+        }:
+            unaccounted.append(f"{strategy.strategy_id}={strategy.lifecycle}")
+    if unaccounted:
+        report.add(
+            "lifecycle provenance", FAIL,
+            f"{len(unaccounted)} strategy/ies reached a gated state with no recorded "
+            f"decision: {', '.join(unaccounted[:6])}",
+            "PAUSED/RETIRED are terminal; only the lifecycle manager may set them",
+        )
+    else:
+        report.add(
+            "lifecycle provenance", OK,
+            f"{len(decided)} lifecycle decision(s) all traceable to the journal",
+        )
+
+
+def _check_admission_provenance(
+    report: DoctorReport, config: AgentConfig, journal: JsonlJournal
+) -> None:
+    accepted = {
+        event.strategy_id
+        for event in journal.read_events("STRATEGY_ADMISSION_REVIEWED")
+        if event.status == "ACCEPTED" and event.strategy_id
+    }
+    library = StrategyLibrary(config.strategy_dir)
+    if not accepted:
+        # Pre-existing library from before the admission gate was journaled.
+        report.add("admission provenance", WARN,
+                   "no accepted admissions in the journal to compare the library against")
+        return
+    missing = [s.strategy_id for s in library.list() if s.strategy_id not in accepted]
+    if missing:
+        report.add(
+            "admission provenance", WARN,
+            f"{len(missing)} strategy file(s) have no accepted admission event: "
+            f"{', '.join(missing[:6])}",
+            "legacy from before admission was journalled, or written outside the gate",
+        )
+    else:
+        report.add("admission provenance", OK, f"all {len(accepted)} file(s) traceable to admission")
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _journal(config: AgentConfig) -> JsonlJournal | None:
+    try:
+        return JsonlJournal(config.journal_path)
+    except Exception:
+        return None
+
+
+def _records(journal: JsonlJournal):
+    try:
+        return journal.read_all()
+    except Exception:
+        return []
 
 
 def _check_environment(report: DoctorReport, config: AgentConfig) -> None:
