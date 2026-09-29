@@ -520,3 +520,34 @@ SUPERSEDED and asserts PASS.
 | duplicated | none remaining — the three evidence readers were merged into `latest_evidence_batch()`; the experiment registry is a view rather than a second store |
 | broken | none open; six wiring defects found and fixed this session (`strategy_library.get`, `JournalEvent` vs dict, missing verdict guard, `INFORMATIVE` ordering, `relative_to` crash, NEUTRAL-as-failure) |
 | missing | nothing in the chain. Shadow trading is **merged into probation** (10.1) rather than added, and prospective live evidence is time, not code |
+
+## 13. Production event log: what the noise was
+
+A scan of all 5037 journalled events for non-success statuses, to check the loop was
+not quietly failing. Four distinct signals, three of which are correct behaviour and
+one of which was a real defect that is already fixed:
+
+| count | event | reading |
+| --- | --- | --- |
+| 1193 | `PNL_EVIDENCE_FAILED` / "profit target not satisfied" | **mislabeled, historical, fixed** — see below |
+| 44 | `CURRICULUM_FAILED` / Ollama read timeout | mostly historical: 31 on 2026-06-11 under the old model. Recent rate is ~1/day against ~24 proposals/day, and each self-recovers on the next attempt |
+| 24 | `CURRICULUM_PROPOSED` / SKIPPED | honest — an explicitly labelled `deterministic fallback (not LLM output)`, so a degraded hypothesis stage is never passed off as model output |
+| 35 | `PROFIT_TARGET_CHECKED` / SKIPPED | correct — written only on a status *transition*, so a routine "not satisfied" does not flood the log |
+| 3 | `ORDER_RECONCILIATION_REVIEWED` / FAILED | transient broker network errors, self-recovering |
+
+### 13.1 The 1193 "FAILED" records that meant "not yet"
+
+Every one of the 1193 `PNL_EVIDENCE_FAILED` events carries the message "profit
+target not satisfied" and none occurs after **2026-06-23**. The profit target is a
+promotion criterion, not PnL evidence: the old code conflated the two and wrote a
+`FAILED` event each time the target was unmet. A signal channel where 1193 records
+say FAILED to mean "no" is a broken signal — a real failure would have been invisible
+among them.
+
+The current code is correct: `_record_pnl_evidence` reports only the four
+`PNL_EVIDENCE_*` evidence states, and `_verify_profit_target` writes a distinct
+`PROFIT_TARGET_CHECKED` event, and only when the status actually transitions.
+
+The historical records are **left as they are**. Rewriting the journal to remove
+misleading entries would falsify the audit trail, which is the one thing the whole
+system rests on. The correction belongs here, in the record, not in the data.
