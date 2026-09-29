@@ -423,11 +423,41 @@ strategies as having no evaluation evidence because the per-strategy data is in
 | hypothesis → candidate | active — curriculum, admission with behavioural dedupe |
 | **offline validation** | **active — added; decision-level screen, reject-only** |
 | probation | active — 3 cycles before a strategy is tradable |
-| **shadow** | **missing — not implemented anywhere; recorded, not faked** |
+| shadow | **merged into probation, deliberately — see 10.1** |
 | live validation | active — probation trades real paper orders |
 | promote/scale/pause/retire | active — journal-first lifecycle, PnL-ranked |
 | experiment registry | active — derived view, no second store |
 
-Two things remain genuinely unproven, and neither is a code defect: the final
-after-cost, prospective, risk-adjusted live net PnL, and a shadow-trading mode,
-which is recorded as missing rather than simulated.
+One thing remains genuinely unproven, and it is not a code defect: the final
+after-cost, prospective, risk-adjusted live net PnL. Shadow trading is accounted for
+in 10.1.
+
+## 10.1 Shadow trading: merged into probation rather than added
+
+Shadow trading is named in the chain and does not exist as code — the word appears
+in docstrings only. The obvious move is to implement it. The better move is to
+notice it is already there under another name.
+
+Evidence from the live journal: `trend-follow-sell-002` is in `PROBATION` right now
+and has already submitted a real broker order through the full path — snapshot,
+Guardian, executor, reconciler, broker fill. `tiny-fixed-size-001` (13 orders),
+`fixed-size-buy-001` (6) and `trend-follow-buy-001` (4) all traded and all passed
+through probation on the way to their current lifecycle.
+
+So probation already *is* the shadow stage in a paper-only system: a candidate
+exercises the complete real execution path against the real broker before it is
+trusted with a larger size, and live mode is hard-blocked at config load so there is
+no real money anywhere in the system to protect with a simulation.
+
+A separate shadow executor would therefore be a **second execution truth** — a
+parallel path that submits nothing while pretending to be the one that does, and
+which would drift from the real path and then be trusted. The objective asks for one
+unified execution truth, and `delete → merge → simplify → repair → add` is an
+ordering, not a checklist to satisfy literally. Merging the stage is the correct
+application of it; adding a module that duplicates the executor would have been
+adding a surface, which is the thing the objective warns against.
+
+What is genuinely missing is not shadow execution but **shadow's purpose**: proof
+that a candidate should be trusted at a larger size. That is live prospective
+evidence, and it is exactly what the final success criterion requires and what
+cannot yet be claimed.

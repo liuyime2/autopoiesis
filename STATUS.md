@@ -252,3 +252,19 @@ before returning `accepted=True`.
 **Shadow trading is still not implemented.** Probation is real and live mode is
 hard-blocked, but "shadow" appears only in docstrings. Recorded as missing rather
 than simulated.
+
+**Shadow trading is merged into probation, not missing.** `trend-follow-sell-002` is
+in PROBATION now and has already submitted a real broker order through the full
+path; `tiny-fixed-size-001` (13 orders), `fixed-size-buy-001` (6) and
+`trend-follow-buy-001` (4) all traded and all passed through probation. In a
+paper-only system with live mode hard-blocked, probation already exercises the
+complete real execution path before a candidate is trusted at size. A separate
+shadow executor would be a second execution truth that drifts from the real one.
+
+**Verified against the real account, not a fixture.** The account holds 5 positions
+worth $37,082, all outside the allowlist (BIL, TLT, XLB, XLE, XLF). At that state a
+BUY of 5 SPY is APPROVED — the scoping fix works. The $20,000 cap still binds on the
+agent's own book: $15,000 held approves, $19,000 held rejects with
+`agent exposure 19000.00 + 3827.45 exceeds the 20000.00 limit`. The optional
+`max_account_value` backstop also rejects correctly when enabled. The per-position
+$5,000 limit is what refuses larger single orders, not the account total.
