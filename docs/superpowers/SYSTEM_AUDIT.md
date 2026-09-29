@@ -1034,3 +1034,70 @@ original one caught one level down.
 
 This is the single most important open finding in the project: **the system's headline
 profit is not evidence that the model works.**
+
+## 25. Regime context, and what it actually shows
+
+`attribution.py` reported `regime: CANNOT ATTRIBUTE` because nothing computed or
+recorded a regime. `regime.py` closes the **measurement** half of that. It
+deliberately does not allocate by regime — allocation is Phase 8, and starting it
+before the earlier phases finish would be entering a phase out of order.
+
+### 25.1 What the data supports, and what it does not
+
+Only one `last_price` per cycle is available: no OHLC, no volume, no VIX. So the
+regime is derived from the realized price series, and the limitation is stated rather
+than buried — these are last-trade prints sampled on a 5-minute cycle, not exchange
+bars. Volatility from them is noisier and slightly inflated by whatever happened
+inside each interval, and a gap between samples reads as a move that may have occurred
+anywhere within it.
+
+### 25.2 The result on the live journal is mostly "cannot tell"
+
+```
+467 bars
+UNKNOWN           391 bars (84%)
+TRENDING_DOWN      76 bars (16%)
+current regime: UNKNOWN - the last 78 bars span a gap over 30 minutes
+contiguous windows: 78 of 467
+```
+
+Only **78 of 467 bars** have a contiguous window. The journal is far sparser than a
+5-minute cycle should produce, and the current regime cannot be labelled at all.
+
+This is why a window spanning a gap is **refused** rather than classified: the live
+journal contains a 97-day outage, and a "recent volatility" computed across it would
+describe two different months as one market.
+
+### 25.3 And the PnL cannot be separated into regime
+
+```
+PnL by the regime at the moment each lot was opened:
+   UNKNOWN   23 lots   +564.39
+```
+
+**Every one of the 23 profitable lots was opened in a window that cannot be
+labelled.** So the regime row is no longer `CANNOT ATTRIBUTE` because the code was
+missing — it is `CANNOT ATTRIBUTE` because it was *measured* and came back unusable.
+That is a different and much better position: the loop now knows it cannot answer
+this, rather than not knowing that it could not.
+
+The unmeasurable bucket is reported rather than dropped. A bucket that silently
+vanishes is how a conclusion gets drawn from the measurable minority.
+
+### 25.4 Two properties enforced rather than assumed
+
+**Point-in-time.** A label at bar *i* uses bars up to *i* only. The test that matters
+is that appending future bars cannot change an earlier label — a regime label attached
+to a past decision is exactly the kind of context that leaks, and it would leak
+silently.
+
+**Volatility can override direction.** A steep decline is `UNSTABLE`, not
+`TRENDING_DOWN`. Filing a violent decline as a calm downtrend would understate the
+risk of trading through it. A test caught my own fixture making this mistake: a
+-2.0-per-bar series was expected to be `TRENDING_DOWN`, and the classifier was right
+to call it `UNSTABLE` while the test was wrong.
+
+The same test also showed the classifier is describing *the window it is given*: with
+the default 78-bar window a series that rose then fell is `TRENDING_UP`, because the
+rise dominates. That is correct behaviour, and the test now isolates the decline with
+a 30-bar window rather than expecting the classifier to see through its own window.

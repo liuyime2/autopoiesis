@@ -20,7 +20,7 @@ from pathlib import Path
 
 from min_agent import (
     attribution, calibration, counterfactual, experiment_registry,
-    lineage, strategy_engine,
+    lineage, regime, strategy_engine,
 )
 from min_agent.atomicio import write_json_atomic
 from min_agent.broker_evidence import latest_evidence_batch
@@ -614,9 +614,21 @@ def _check_pnl_attribution(
         return
 
     latest = events[-1]
-    result = attribution.attribute(records, latest.payload["pnl"], latest.payload)
+    # Point-in-time regime labels, so a lot is attributed to the market it was opened
+    # in rather than to a regime computed over the whole history.
+    labels = {
+        ts: r for ts, r in regime.regime_timeline(
+            regime.bars_from_records(records)
+        )
+    }
+    result = attribution.attribute(
+        records, latest.payload["pnl"], latest.payload, regime_labels=labels
+    )
     causes = "; ".join(f"{c.cause}={c.verdict}" for c in result.causes)
-    detail = f"{result.headline()} | {causes}"
+    detail = (
+        f"{result.headline()} | {causes} | by regime: "
+        f"{ {k: round(v, 2) for k, v in result.by_regime.items()} }"
+    )
 
     # Severity follows a distinction that has to be stated, because it decides
     # whether this is a code fault or a fact about the data:

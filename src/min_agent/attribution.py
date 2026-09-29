@@ -29,7 +29,7 @@ exists so that nobody has to guess which is which.
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 #: The seven causes the objective names. Reported as a table with an explicit
@@ -58,6 +58,12 @@ class Attribution:
     fees: float = 0.0
     fill_ratio: float | None = None
     rejected_orders: int = 0
+    #: Realized PnL grouped by the regime at the moment each lot was opened, plus
+    #: the labels that could not be measured. The unmeasurable bucket is reported
+    #: rather than dropped, because a bucket that silently vanishes is how a
+    #: conclusion gets drawn from the measurable minority.
+    by_regime: dict[str, float] = field(default_factory=dict)
+    lots_by_regime: dict[str, int] = field(default_factory=dict)
     causes: list[CauseRow] = field(default_factory=list)
 
     @property
@@ -91,12 +97,22 @@ class Attribution:
         return max(self.by_source.items(), key=lambda kv: abs(kv[1]))[0]
 
 
-def attribute(records: list, pnl_payload: dict, window: dict | None = None) -> Attribution:
-    """Join closed lots to the decision that opened them.
+def attribute(
+    records: list,
+    pnl_payload: dict,
+    window: dict | None = None,
+    regime_labels: dict | None = None,
+) -> Attribution:
+    """Join closed lots to the decision that opened them, and to the regime at the time.
 
     The lot records `buy_order_id`; the cycle records carry `execution.order_id`. That
     join is the whole analysis, and it is the join that was never made - which is why
     a number in a payload was read as evidence about the model.
+
+    `regime_labels` maps a snapshot timestamp to a point-in-time `regime.Regime`. It
+    is optional so the attribution still works when no regime history exists; in that
+    case every lot lands in `UNMEASURED` and the regime row says so, which is the
+    correct state for a system that has never computed one.
     """
     result = Attribution(
         account_pnl=pnl_payload.get("account_realized_or_reported_pnl"),
@@ -132,6 +148,13 @@ def attribute(records: list, pnl_payload: dict, window: dict | None = None) -> A
         )
         result.by_source[source] = result.by_source.get(source, 0.0) + realized
         result.lots_by_source[source] = result.lots_by_source.get(source, 0) + 1
+
+        label = "UNMEASURED"
+        if regime_labels is not None and opener is not None:
+            observed = regime_labels.get(opener.snapshot.timestamp)
+            label = observed.label if observed is not None else "NO_BAR"
+        result.by_regime[label] = result.by_regime.get(label, 0.0) + realized
+        result.lots_by_regime[label] = result.lots_by_regime.get(label, 0) + 1
 
     result.causes = _classify(result)
     return result
@@ -212,11 +235,32 @@ def _classify(a: Attribution) -> list[CauseRow]:
             "no fill ratio is on record for this window",
         ))
 
-    rows.append(CauseRow(
-        "regime", "CANNOT ATTRIBUTE",
-        "no regime context is computed or recorded, so no part of the PnL can be "
-        "separated into regime versus signal",
-    ))
+    measured = {
+        k: v for k, v in a.lots_by_regime.items()
+        if k not in {"UNMEASURED", "NO_BAR", "UNKNOWN"}
+    }
+    unmeasured = a.closed_lots - sum(measured.values())
+    if not a.lots_by_regime:
+        rows.append(CauseRow(
+            "regime", "CANNOT ATTRIBUTE",
+            "no regime history was supplied, so no share of the PnL can be "
+            "separated into regime versus signal",
+        ))
+    elif not measured:
+        rows.append(CauseRow(
+            "regime", "CANNOT ATTRIBUTE",
+            f"all {a.closed_lots} lot(s) were opened in windows that cannot be "
+            "labelled: the surrounding bars are not contiguous, so a regime label "
+            "would describe no market. This is measured, not merely absent",
+        ))
+    else:
+        top = max(measured.items(), key=lambda kv: kv[1])
+        rows.append(CauseRow(
+            "regime", "PARTLY ATTRIBUTABLE",
+            f"{sum(measured.values())} of {a.closed_lots} lot(s) opened in a "
+            f"labelled regime (largest bucket {top[0]}); {unmeasured} could not be "
+            "measured",
+        ))
 
     missing = [c for c in CAUSES if c not in {r.cause for r in rows}]
     for cause in missing:
@@ -242,6 +286,8 @@ def to_payload(a: Attribution) -> dict:
             "not a loss and must not be read as one."
         ),
         "fees": round(a.fees, 4),
+        "by_regime": {k: round(v, 2) for k, v in sorted(a.by_regime.items())},
+        "lots_by_regime": a.lots_by_regime,
         "causes": [
             {"cause": c.cause, "verdict": c.verdict, "evidence": c.evidence}
             for c in a.causes
