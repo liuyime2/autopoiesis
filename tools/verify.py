@@ -306,6 +306,60 @@ def check_production_research_separation() -> Result:
     )
 
 
+#: Path-construction patterns that silently bind the system to $HOME. $HOME is
+#: user-quota'd on this host, and anything written there fails mid-run rather than
+#: at startup, so a dependency on it is a latent outage rather than a preference.
+HOME_BINDS = (
+    "expanduser",
+    "Path.home(",
+    'getenv("HOME',
+    'environ["HOME',
+    "~/",
+)
+
+
+def check_home_independence() -> Result:
+    """No production code, entry point or unit may write into $HOME.
+
+    Every piece of state this system owns - config, credentials, journal, strategies,
+    credentials, unit files - must resolve under the repository or under the XDG
+    roots, all of which live off $HOME on this host. A single expanduser() in a
+    maintenance routine is enough to put the journal somewhere that disappears under
+    quota pressure, and the failure looks like data loss rather than a bad path.
+    """
+    violations: list[str] = []
+    targets = sorted((SRC / "min_agent").rglob("*.py"))
+    targets += [ROOT / "tools" / "minictrl"] if (ROOT / "tools" / "minictrl").exists() else []
+    for path in targets:
+        for line_no, line in enumerate(path.read_text().splitlines(), 1):
+            code = line.split("#", 1)[0]
+            if any(b in code for b in HOME_BINDS):
+                violations.append(f"{path.name}:{line_no}: {line.strip()[:80]}")
+
+    # The XDG roots the system actually reads must not point back into $HOME.
+    home = str(Path.home())
+    xdg = []
+    for var in ("XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME"):
+        value = os.environ.get(var)
+        if not value:
+            continue
+        xdg.append(f"{var}={'INSIDE $HOME' if value.startswith(home) else 'outside'}")
+        if value.startswith(home):
+            violations.append(f"{var} points inside $HOME: {value}")
+
+    detail = (
+        f"{len(targets)} production file(s) with no $HOME path construction; "
+        + "; ".join(xdg)
+        if xdg
+        else f"{len(targets)} production file(s) with no $HOME path construction"
+    )
+    return Result(
+        "home-independence",
+        FAIL if violations else PASS,
+        "; ".join(violations[:5]) if violations else detail,
+    )
+
+
 #: The statuses that mean an order actually reached the broker.
 EXECUTED_STATUSES = {"SUBMITTED", "FILLED"}
 
@@ -701,6 +755,22 @@ def self_test() -> int:
         finally:
             probe.unlink(missing_ok=True)
 
+        # 7. A single ~/ path in a maintenance routine must fail the gate. $HOME
+        #    is quota'd on this host, so a path that resolves there fails mid-run
+        #    rather than at startup, and the symptom is a journal that silently
+        #    stops growing. Verified once by hand it would just be a comment; only
+        #    a probe that is proven to fail keeps the claim honest.
+        src_probe = SRC / "min_agent" / "zz_home_probe.py"
+        try:
+            src_probe.write_text('x = "~/somewhere"\n')
+            result = check_home_independence()
+            if result.status != FAIL:
+                failures.append("a $HOME path in production code did not fail")
+            else:
+                print("  ok  a $HOME path in production code fails home-independence")
+        finally:
+            src_probe.unlink(missing_ok=True)
+
     finally:
         restore()
 
@@ -710,7 +780,8 @@ def self_test() -> int:
             print(f"  - {f}")
         return 1
     print("\nSELF-TEST PASSED: the gate detects failing tests, missing names,")
-    print("empty classes, unclassified test files and stale plan documents.")
+    print("empty classes, unclassified test files, stale plan documents and")
+    print("$HOME paths in production code.")
     return 0
 
 
@@ -746,6 +817,7 @@ def main() -> int:
     results.append(check_software_supply_chain())
     results.append(check_docs_not_stale())
     results.append(check_production_research_separation())
+    results.append(check_home_independence())
     results.append(check_shadow_cannot_count_as_executed())
     results.append(check_research_trial_ledger())
     results.append(check_doctor_checks_are_all_reachable())

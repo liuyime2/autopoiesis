@@ -31,13 +31,18 @@ done
 cat >&2 <<'MSG'
 FATAL: no writable systemd user unit directory.
 
-The systemd user manager searches $HOME/.config/systemd/user unless it was
-started with XDG_CONFIG_HOME set. /home is at user quota here, so that path
-cannot be created, and the manager's environment does not include
-XDG_CONFIG_HOME.
+None of the candidate directories was writable. Checked, in order:
+  ${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
+  $HOME/.config/systemd/user
+  any writable path named by MIN_AGENT_UNIT_DIR
+
+On this host XDG_CONFIG_HOME is set to /localscratch/liuyime2/ohome/.config,
+which is off $HOME, so the first candidate normally succeeds and $HOME's quota
+is irrelevant. If that stops being true, the quota on $HOME - not this system -
+is the cause.
 
 Fix one of:
-  1. free a few MB under $HOME, then: minictrl install-service
+  1. check XDG_CONFIG_HOME is set and writable, then: minictrl install-service
   2. export MIN_AGENT_UNIT_DIR=/some/writable/path before installing
   3. run without systemd: nohup ./run_forever.sh &   (crash-loop guarded)
 MSG

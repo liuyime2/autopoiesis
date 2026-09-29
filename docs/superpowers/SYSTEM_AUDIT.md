@@ -1650,3 +1650,78 @@ The model has now demonstrably *acted* for the first time. It has not yet
 demonstrably *earned* anything: one day, one symbol, one share per order, no closed
 lot, and a confidence that is worse than useless. The honest summary of the day's
 result is that the loop worked and the model has not yet proved it can.
+
+## 34. Nothing runs out of $HOME, and a gate now proves it
+
+The operator instruction was to clear the $HOME quota and move the system entirely
+onto the project directory. Both are true, but the reason I had recorded for the
+first was wrong, and the correction matters more than the cleanup.
+
+### 34.1 The quota was never what stopped the services
+
+I had written that the units could not be installed because `/home` was at quota.
+That was wrong. `XDG_CONFIG_HOME` on this host is
+`/localscratch/liuyime2/ohome/.config`, which is **not under $HOME**, and
+`tools/systemd_unit_dir.sh` searches that first. `install-service` would have
+succeeded with a full quota.
+
+What the quota actually blocked was `$HOME/.config`, a path this system does not
+use. The two were conflated because both failed with the same error at the same
+time. After cleanup:
+
+```
+ollama.service        enabled  active
+min-agent.service     enabled  active
+quant-watchdog.timer  enabled  active
+```
+
+`quant-watchdog.timer` is the substantive change - the watchdog was not running,
+because a timer that is not installed does not fire.
+
+### 34.2 What was actually under $HOME
+
+| path | before | after | what it was |
+| --- | --- | --- | --- |
+| `~/.cache/pip` | 697M | gone | pip download cache, re-downloadable |
+| `~/.cache/ms-playwright-go` | 128M | gone | browser binaries, re-downloadable |
+| `~/.local/share/claude/versions` | 697M | 233M | three CLI versions; the two older removed, the running one kept |
+| `~/.cache` total | 835M | 220K | |
+| `~/.local` total | 707M | 233M | |
+| `$HOME` total | 11G | 8.8G | |
+
+Two things were **not** touched, deliberately:
+
+- `~/miniconda3` is a **symlink** to `/localscratch/liuyime2/miniconda3`, so the
+  environment never consumed $HOME quota at all. It is 0 bytes of $HOME.
+- `~/.config` is the desktop environment's (chrome, xfce4, pulse), not the trading
+  system's. An empty `~/.config/systemd/user` that I had created during this
+  cleanup was removed again - 0 files, unused, and mine.
+
+Ollama's model weights were already at `/localscratch/liuyime2/ollama_local/models`.
+
+### 34.3 The property is now a check, not a promise
+
+Verified by hand once, `$HOME`-independence would decay into a comment the first
+time someone wrote a `Path.home()` in a maintenance routine. So it is a gate:
+
+```
+[PASS] home-independence   40 production file(s) with no $HOME path construction;
+                           XDG_CONFIG_HOME=outside; XDG_STATE_HOME=outside;
+                           XDG_DATA_HOME=outside
+```
+
+It scans production code and the entry point for `expanduser`, `Path.home()`,
+`getenv("HOME")` and `~/`, **and** it fails if any XDG root is ever set back inside
+`$HOME` - which is the subtler failure, because the code stays clean while the
+environment quietly moves the journal somewhere that disappears under quota.
+
+Self-test condition 7 writes a real `~/` path into a production module and requires
+the gate to go red:
+
+```
+  ok  a $HOME path in production code fails home-independence
+```
+
+The FATAL message in `systemd_unit_dir.sh` was also wrong and told the operator to
+free $HOME, which would not have helped. It now names the directories actually
+searched and says plainly that the quota is not this system's cause.
