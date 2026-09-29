@@ -249,17 +249,27 @@ recorded as UNKNOWN in `docs/superpowers/known_state_findings.json` and no synth
 retirement was written. It cannot recur — `admit()` writes the file atomically
 before returning `accepted=True`.
 
-**Shadow trading is still not implemented.** Probation is real and live mode is
-hard-blocked, but "shadow" appears only in docstrings. Recorded as missing rather
-than simulated.
+**Shadow trading is implemented** (Phase 5) and the per-phase document lives at
+`docs/superpowers/PHASES.md`.
 
-**Shadow trading is merged into probation, not missing.** `trend-follow-sell-002` is
-in PROBATION now and has already submitted a real broker order through the full
-path; `tiny-fixed-size-001` (13 orders), `fixed-size-buy-001` (6) and
-`trend-follow-buy-001` (4) all traded and all passed through probation. In a
-paper-only system with live mode hard-blocked, probation already exercises the
-complete real execution path before a candidate is trusted at size. A separate
-shadow executor would be a second execution truth that drifts from the real one.
+Two earlier notes on shadow are **withdrawn as wrong**, and are kept here because a
+withdrawn claim left standing is worse than one never made:
+
+1. *"Shadow appears only in docstrings and is recorded as missing."* True when
+   written, false now. `MIN_AGENT_SHADOW=1` swaps the final broker call and nothing
+   else — real data, real model, real Guardian, real journal.
+2. *"Shadow is merged into probation, not missing."* The reasoning was sound and the
+   conclusion was wrong: the objective names shadow trading as **Phase 5**, separate
+   from evidence-gated probation in **Phase 6**, so it is a stage in its own right
+   rather than something probation already covers. A shadow executor must still swap
+   only the execution sink and never fork the decision path, which was the one
+   durable insight in the withdrawn argument.
+
+**The model has contributed 0.00 to the PnL.** All 23 closed lots — the whole
++564.39 — were opened by the `baseline` decision source on 2026-06-11, 06-12 and
+06-18. The LLM path's first decision was 2026-09-28 11:20, two and a half months
+after the last profitable lot. The headline profit is not evidence that the model
+works. Details and the full cause breakdown are in `docs/superpowers/PHASES.md` §4.
 
 **Verified against the real account, not a fixture.** The account holds 5 positions
 worth $37,082, all outside the allowlist (BIL, TLT, XLB, XLE, XLF). At that state a

@@ -1101,3 +1101,60 @@ The same test also showed the classifier is describing *the window it is given*:
 the default 78-bar window a series that rose then fell is `TRENDING_UP`, because the
 rise dominates. That is correct behaviour, and the test now isolates the decline with
 a 30-bar window rather than expecting the classifier to see through its own window.
+
+## 26. The binding constraint, and deliverables ⑤⑦⑧
+
+`docs/superpowers/PHASES.md` is the per-phase document the objective asks for:
+implementation tasks, dependencies, test methods, exit criteria and verification
+results; what is proven versus what is only a design target; and the next one to
+three changes.
+
+### 26.1 Three findings, one cause: data volume
+
+The model contributing 0.00, all 67 LLM decisions being unscoreable, and only 78 of
+467 bars having a contiguous window looked like three separate problems. They are one.
+
+```
+distinct observations : 467
+journal spans         : 2026-06-09 -> 2026-09-28  (111.4 days)
+distinct trading days : 10          <- 9% of elapsed days
+mean interval         : 344 min     against a configured 300 s
+gap percentiles       : p50 5 min   p90 15 min   p99 1050 min   max 140841 min (97.8 days)
+```
+
+The **median** gap is 5 minutes — exactly `daemon_interval_seconds`. The sampling rate
+is correct. The daemon simply did not run: 10 of 111 days, with a 97.8-day gap at one
+point. On the days it ran, coverage was a full session, and the most recent day shows
+1-minute granularity.
+
+**This is not a configuration defect and there is nothing to fix in the code.** Ten
+trading days cannot support an out-of-sample claim, a calibration verdict or a regime
+attribution, and every instrument built this session now says so rather than guessing.
+
+### 26.2 The systemd blocker, checked rather than assumed
+
+The units are at `FragmentPath=/run/user/29424/systemd/user/min-agent.service` —
+`/run` is a tmpfs and is empty after a reboot, so they are not reboot-persistent.
+
+The cause was re-tested rather than repeated. `df -h ~` reports **1.8T free** on
+`/home`, which looks like there is no problem at all — and is misleading, because
+`df` shows the filesystem while the limit that bites is a per-user quota. `mkdir
+~/.config/systemd` still fails with **`Disk quota exceeded`**. `$HOME` holds 11G, of
+which `.cache` is 835M and `.local` is 707M; freeing either would lift the quota and
+let `minictrl install-service` write a permanent unit.
+
+This is the third time in this project a plausible-looking signal turned out to be the
+wrong one — `df`, a `grep` for "backtest" matching a docstring, and a doctor check
+printing a claim that had gone stale.
+
+### 26.3 A contradiction in STATUS.md, found by checking my own edit
+
+A pointer edit to `STATUS.md` created two lines that contradicted each other and a
+withdrawn claim that was still standing three lines below: "shadow is implemented" and
+"shadow is merged into probation, not missing" in the same document. Both earlier
+notes are now recorded as **withdrawn**, with the reason, because a withdrawn claim
+left standing is worse than one never made.
+
+The earlier edit also silently did nothing on the first attempt because it targeted a
+line that no longer existed — the same "looks applied but isn't" shape this audit has
+been removing all session, this time in my own tooling.
