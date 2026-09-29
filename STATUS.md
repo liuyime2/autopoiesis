@@ -213,3 +213,42 @@ because `$HOME` is at user quota, so the manager cannot create
 
 **The key pair was pasted into a conversation and should be rotated** in the
 Alpaca UI.
+
+## 2026-09-28 — verification gate and the two missing loop stages
+
+**`make verify` is the single gate.** 17 check classes, 0 failed, 472 distinct
+tests, 91/91 defect audit, `doctor` RESULT OK, exit 0. Per-class re-runs:
+`make verify CLASS=pnl-accounting`. `make verify-self-test` breaks the gate on
+purpose and asserts it reports failure, because a verification command that cannot
+fail is believed rather than run.
+
+**Offline validation now exists, and the obvious implementation would have been
+fake.** A candidate used to go from admission straight into PROBATION and trade
+paper orders. Replaying the strategy's own rule against history would have graded a
+rule the system never executes — `parameters["action"]` is never checked on the
+execution path and TREND_FOLLOW's `threshold_pct` never is either; the strategy is
+context handed to the model. The screen instead reads the counterfactual verdicts of
+the decisions the strategy actually produced. It can only reject, never promote.
+Live: 4 screened through, 2 rejected, 10 inconclusive. Both rejected strategies were
+already PAUSED by the lifecycle manager, so the screen agreed independently.
+
+**Hold quality is 0.687 over 350 scored decisions, after cost** — 224 good holds, 95
+missed alpha, 24 neutral, 7 false trades, 67 pending, 50 refused as gaps. An earlier
+figure of 0.295 was an artifact of a cycle-counted horizon spanning 3 minutes to 97
+days; the horizon is wall-clock now and repeated quotes are collapsed.
+
+**The experiment registry is a view, not a store.** Every link of the chain is
+already journalled, so a persisted registry would be a second source of truth. It
+derives the per-strategy chain and writes nothing. 35 strategies, 23 admitted, 15
+with an incomplete chain — all but one historical, the live one a brand-new PROBATION
+awaiting its first evaluation window.
+
+**Six strategies were admitted and have no registry file and no recorded
+retirement.** `runtime/` is gitignored so the cause cannot be reconstructed; it is
+recorded as UNKNOWN in `docs/superpowers/known_state_findings.json` and no synthetic
+retirement was written. It cannot recur — `admit()` writes the file atomically
+before returning `accepted=True`.
+
+**Shadow trading is still not implemented.** Probation is real and live mode is
+hard-blocked, but "shadow" appears only in docstrings. Recorded as missing rather
+than simulated.
