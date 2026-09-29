@@ -34,11 +34,48 @@ def test_scheduler_uses_next_open_for_closed_sleep():
     assert 1 <= seconds <= 120
 
 
-def test_scheduler_caps_sleep_at_max_sleep():
+def test_the_cycle_interval_governs_while_the_market_is_open():
+    """The configured interval must actually be the interval.
+
+    This test previously asserted the opposite: with the market open and the close
+    500s away it expected a 60s sleep against a configured 30s. That is the defect -
+    the loop slept until the close, capped by `max_sleep`, so the shipped
+    configuration of 300s against a 900s cap produced one cycle every 15 minutes
+    during a session instead of every 5. `daemon_interval_seconds` was inert
+    exactly when it mattered, and nothing reported it: the heartbeat stayed fresh and
+    the loop looked healthy.
+    """
     next_close = datetime.now(tz=timezone.utc) + timedelta(seconds=500)
     scheduler = MarketScheduler(clock_provider=lambda: Clock(True, next_close=next_close))
 
-    assert scheduler.sleep_seconds(default_interval=30, max_sleep=60) == 60
+    assert scheduler.sleep_seconds(default_interval=30, max_sleep=60) == 30
+
+
+def test_the_shipped_configuration_cycles_at_the_configured_rate_while_open():
+    """The numbers that were actually running: 300s interval, 900s cap."""
+    next_close = datetime.now(tz=timezone.utc) + timedelta(hours=6)
+    scheduler = MarketScheduler(clock_provider=lambda: Clock(True, next_close=next_close))
+
+    assert scheduler.sleep_seconds(default_interval=300, max_sleep=900) == 300
+
+
+def test_max_sleep_still_caps_the_interval():
+    """A cap below the interval is honoured, so a test or a tight run can shorten it."""
+    next_close = datetime.now(tz=timezone.utc) + timedelta(seconds=500)
+    scheduler = MarketScheduler(clock_provider=lambda: Clock(True, next_close=next_close))
+
+    assert scheduler.sleep_seconds(default_interval=300, max_sleep=60) == 60
+
+
+def test_a_closed_market_sleeps_until_the_next_open_but_still_wakes_for_maintenance():
+    """Sleeping overnight at the cycle rate would wake 288 times a session for
+    nothing. Sleeping until the open, capped, is the right behaviour when closed."""
+    next_open = datetime.now(tz=timezone.utc) + timedelta(hours=8)
+    scheduler = MarketScheduler(
+        clock_provider=lambda: Clock(False, next_open=next_open)
+    )
+
+    assert scheduler.sleep_seconds(default_interval=300, max_sleep=900) == 900
 
 
 def test_scheduler_fails_closed_when_the_clock_raises():

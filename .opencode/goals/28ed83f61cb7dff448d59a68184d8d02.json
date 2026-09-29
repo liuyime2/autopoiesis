@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790689031151,
-      "lastRequestTokens": 448061,
-      "lastInputTokens": 447534
+      "observedAt": 1790689580385,
+      "lastRequestTokens": 460856,
+      "lastInputTokens": 460290
     }
   },
   "runtimeFingerprint": {
@@ -43,10 +43,10 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 20,
-    "tokens": 651870,
+    "turns": 21,
+    "tokens": 654135,
     "cost": 0,
-    "runtimeMs": 280953,
+    "runtimeMs": 302546,
     "seenMessageIDs": [
       "msg_0ea911ff0001xqHQnFmbF3aICp",
       "msg_0ea980dc20015f3lGA67tXRaUK",
@@ -67,7 +67,8 @@
       "msg_0ed4516840013fEr5QZWpECHPr",
       "msg_0ed4c981a001awyjYLZkpinIkA",
       "msg_0ed55f7b0001u6RGuOWFU9HQzC",
-      "msg_0ed5de605001C0118sq40BmNc1"
+      "msg_0ed5de605001C0118sq40BmNc1",
+      "msg_0ed62e887001SFx8kKIqPkBw7h"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -77,8 +78,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 107,
-  "observedProgressRevision": 106,
+  "progressRevision": 110,
+  "observedProgressRevision": 108,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
     "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
@@ -186,30 +187,13 @@
     "shell-worktree:e73b3db3f059f158e88c333f004aba9e0178f5c6587d200225640043d7676e21",
     "shell-worktree:aef535eb08cc822002d53e8e4a10f35ed24c0540fd67ad1802b94b93c19bcdb3",
     "shell-worktree:a142e02c26982d9506cb135d04312c9029838ee35a4a4eed60e28a68edbea396",
-    "shell-worktree:78ac8ae6362f9228cc198b981b0fa54a957f1778dbf039159412809ea2a18443"
+    "shell-worktree:78ac8ae6362f9228cc198b981b0fa54a957f1778dbf039159412809ea2a18443",
+    "shell-worktree:19de4034e7d2f397e948c5b2b7fd5d426ed226aea3ad622a4837590b0d80072d",
+    "shell-worktree:a1d6a60b45f36b66f4383c68d033048f726c18c5dddc2244bff007ed3227a004",
+    "shell-worktree:a45ae49f22ab1ea8ca8353ed340581fce0566860b0fff91085e42f18e65d8fcb"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790684772517,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790684796949,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790684812524,
-      "summary": "Model-prediction-vs-actual alignment implemented (the highest-value remaining item from the full objective). The system recorded a confidence on every decision and never once compared it to an outcome - confidence was used only as a gate (min_confidence deciding whether an order may be sent), never as a testable claim, so a model that is confidently wrong was indistinguishable from one that is right. calibration.py joins the two things that already exist: each decision's confidence and the counterfactual ledger's scored verdict. The finding is the important part: 67 llm decisions, 0 scored, 67 awaiting an outcome. They all fall between 11:20 and 15:59 on 2026-09-28, a single session, and the 24h horizon needs a quote from 2026-09-29 11:20 onward which does not exist because the market has been closed. Mean llm confidence 0.276. So the honest reading is not \"the model is bad\" but \"we do not know yet\" - the report says INSUFFICIENT with a note that the value is unmeasured rather than good, and the doctor check stays a warning until the verdict starts with SIGNAL. Scoring rules: only a hold that avoided a loss is correct; MISSED_ALPHA and FALSE_TRADE are both incorrect, because scoring a missed rally as \"correct caution\" would give any model that never trades a perfect curve for free, which is the easiest way to manufacture good calibration; NEUTRAL is excluded since a move that did not clear the cost is silence. Two of my own mistakes: the first metric compared gate-clearing accuracy against the base rate, but with min_confidence at 0.5 both a 0.6 and a 0.9 clear the gate so the comparison measured almost every decision and could not distinguish a model that separates good from bad from one that does not - a test failed for the right reason with the wrong metric, so the comparison is now the most confident populated bucket against the base rate, with a test pinning the gate comparison's weakness so it is not reintroduced. And the bucket width matters: 0.2 wide so 0.95 and 1.0 land together, since splitting them produced a one-member bucket reading as a 100% accurate stratum. Commit 0b6d19e. make verify: 21 classes, 0 failed, 588 distinct tests, 91/91 audit, doctor OK, exit 0.",
-      "next": "Remaining from the full objective, in rough value order. (1) Doc deliverables 5-8, which the objective states explicitly and which are still missing: per-phase implementation tasks/dependencies/test methods/exit criteria/verification results; PnL cause attribution across signal/model/strategy/allocation/execution/cost/regime (which of these actually caused the +564.39?); proven-capability vs design-target; and the next 1-3 highest-value changes. (2) Unrealized PnL - only realized is attributed, so open lots contribute nothing to the account picture. (3) Regime context - referenced in curriculum prose but never computed or recorded, so the PnL attribution in (1) cannot yet separate regime from signal. (4) Phase 7 needs market hours, and the model calibration verdict needs outcomes that only accrue once the market reopens. One thing worth flagging: the objective's ordering rule says a phase may only be entered once the prior phase's exit criteria are met, and Phase 3 is still only met in part (no model registry), so the honest sequencing is to close the model-registry gap and the doc deliverables before any further capability work."
-    },
-    {
-      "time": 1790685058450,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790685125770,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -439,11 +423,31 @@
       "time": 1790688904668,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790689048521,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790689062405,
+      "summary": "Two things landed. First, the last unevidenced explicit requirement: docs/superpowers/STEP_CONTRACT.md gives every stage's input, output, responsibility boundary, failure behaviour, log, provenance and automated test, derived from the code rather than from intent. The responsibility-boundary column earns its keep because most defects in this audit were a stage doing another stage's job, not a bug inside one: the 29 shares sold was the Guardian checking the ACCOUNT's holdings rather than the agent's; shadow orders could have counted as fills because SHADOWED was not a distinct status; PnL was gross because no cost term existed in the live ledger; strategy_realized_pnl read as evidence for the model because the lot-to-order-to-source join was never made. The document states its own gaps rather than hiding them: stage 2 \"understand\" has no module of its own and is computed inside the curriculum path so it could not be replaced independently; unrealized PnL is proven only by test because the agent holds no open position; cost is an assumption not an observation; 33 of 33 candidates cannot state what observation motivated them. Every claim re-checked against code rather than written from memory - 38 Guardian tests, the shadow- prefix, the admission write-if-absent guard, the absence of an understand module, the cost default. Second, and more important: THE MARKET OPENED at 09:30 EDT and the loop produced its first new cycle in 18 hours, carrying model provenance for the first time in the system's history - qwen3.8:27b. The model registry now reads 921 decisions: qwen3.8:27b 1, and 920 that predate provenance and are honestly unattributable. The registry refuses to back-fill and the first new decision lands attributed, which is the whole point of adding the field before the market reopened rather than after. The model stated confidence 0.82 against a historical LLM mean of 0.276 with almost everything previously at 0.5 or below - one data point proving nothing, and recorded as such: model calibration still reads INSUFFICIENT, 68 llm decisions 0 scored, because a 24h horizon needs a quote from 2026-09-30 09:30 onward. The new cycle moved pending 67 to 68 rather than scored. Everything else held: hold_quality unchanged 0.687 over 350 scored, after-cost unchanged +555.72, runtime integrity OK on 921 cycles and 5926 events. Also recorded rather than acted on: three unreferenced runtime files totalling 21K including daemon.out.crashed-1324 - not deleted, because runtime/ is the evidence store and a file named for a crash is the record that a crash happened. Commits 2bb646e, 0d43867. make verify: 22 classes, 0 failed, 660 distinct tests, 91/91 audit, doctor OK, exit 0.",
+      "next": "The 68 pending llm decisions are now the measurement everything depends on, and they resolve over the next 24 hours of market hours - a quote at or after 2026-09-30 09:30 scores them. Nothing needs to be built for that; it needs the daemon to keep running. The daemon IS running unattended and has now produced a verified post-open cycle with provenance, so the immediate user actions narrow to one: free $HOME quota (.cache 835M or .local 707M) so minictrl install-service can write reboot-persistent units, since FragmentPath is /run/user/29424/... which is tmpfs and empty after a reboot, and only the watchdog limits the damage today. Beyond that, the useful checkpoints are all time-based rather than code-based: re-run make verify and doctor after a full session closes, confirm the pending count falls and model calibration moves off INSUFFICIENT, and confirm trend-follow-20260612-006 - the strategy selected on the very first post-open cycle - acquires the evaluation evidence it has never had, which is the evidence the Phase 6 gate has been correctly refusing to promote without."
+    },
+    {
+      "time": 1790689452978,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790689500892,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 748,
+  "storageGeneration": 770,
   "createdAt": 1790641773516,
-  "updatedAt": 1790689031151,
+  "updatedAt": 1790689580385,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:c3cb3254c518367f1c8cd88244e84bcbd83597fa1d10bffb8cee3387f57fdc53",

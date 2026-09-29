@@ -1427,6 +1427,56 @@ memory — 38 Guardian tests, the `shadow-` client-order prefix, the admission
 write-if-absent guard, the absence of a `understand` module and the cost default all
 verified.
 
+## 31b. `daemon_interval_seconds` was inert during trading hours
+
+Found by watching rather than by reading. The market opened at 09:30, the loop
+produced one cycle at 09:30:00, and then nothing for 11 minutes against a configured
+5-minute interval. The heartbeat said `RUNNING` and the model answered a trivial
+prompt in 1.6s, so neither a slow model nor a crash explained it.
+
+```python
+# MarketScheduler.sleep_seconds, before the fix
+target = self.seconds_until_next_close(default_interval) if self.market_is_open()          else self.seconds_until_next_open(default_interval)
+return max(1, min(target, max_sleep))
+```
+
+Verified against the real broker clock:
+
+```
+market_is_open           : True
+configured cycle interval: 300s
+ACTUAL cadence while open: 900s      <- max_sleep, i.e. maintenance_interval_seconds
+```
+
+While the market was open the loop slept until the next **close**, capped at
+`maintenance_interval_seconds` (900). So the daemon took **one cycle every 15 minutes
+during a session instead of every 5**, and `daemon_interval_seconds` did nothing
+exactly when it mattered.
+
+Nothing reported it. The heartbeat stayed fresh, the process stayed alive, the
+`verify` gate was green, and the only symptom was that the market opened, produced a
+single cycle, and went quiet. This is the objective's "configuration existing is not
+the capability working" in its purest form: a real, configured, documented control
+that had no effect on the thing it names.
+
+The cost was not cosmetic — three times fewer decisions per session, and a directly
+slower accumulation of the 68 unscoreable decisions the whole system is waiting on.
+
+`while open: min(default_interval, max_sleep)`; `while closed: sleep until the next
+open, capped`, so maintenance still runs overnight.
+
+### 31b.1 A test that had encoded the defect
+
+`test_scheduler_caps_sleep_at_max_sleep` asserted that with the market open and the
+close 500 seconds away, the loop would sleep 60 seconds against a **configured 30**.
+The test was correct when written and was asserting the bug. It is rewritten to the
+contract — the cycle interval governs while open, `max_sleep` still caps it, and a
+closed market sleeps until the next open — with the shipped 300/900 numbers pinned
+directly so this cannot regress silently.
+
+The same pattern as the four SELL tests in §29: a test is not automatically right, and
+"the test says so" is not the same as "the behaviour is right".
+
 ## 32. First evidence from the reopened market
 
 At **09:30 EDT on 2026-09-29** the market opened and the loop produced its first new
