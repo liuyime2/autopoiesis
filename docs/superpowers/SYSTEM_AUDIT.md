@@ -1158,3 +1158,42 @@ left standing is worse than one never made.
 The earlier edit also silently did nothing on the first attempt because it targeted a
 line that no longer existed — the same "looks applied but isn't" shape this audit has
 been removing all session, this time in my own tooling.
+
+## 27. The model registry: closing the one partial phase
+
+Phase 3 asked for a strategy **and model** registry. The strategy half existed. The
+model half did not: every decision recorded `decision_source` — "llm",
+"fallback_policy_engine", "baseline" — but not *which* model, so the 67 LLM
+decisions could not be separated by prompt or model version, and **no outcome could
+ever be attributed to a model change**. The model was upgraded during this project
+(Ollama 0.34.4, `qwen3.8:27b`, single-CUDA pin), and without provenance that upgrade
+is invisible in the record and its effect is unmeasurable forever.
+
+`TradeDecision.model` now records it, stamped **at the point the model is called**
+rather than inferred from config later — the model can be swapped between the call and
+the journal write, and a decision attributed to the wrong version is worse than one
+with no attribution. A model named inside the response itself wins over the configured
+name, because that is the one that actually served the request. The fallback path
+names itself `fallback_policy_engine`, so a fallback decision can never be counted as
+a model's work.
+
+`model_registry.py` is a **view over the journal**, like the experiment registry and
+lineage. A separate persisted store of model performance would be a second source of
+truth about numbers that are already recorded, and would drift from them. A test
+asserts the module exposes no `save`/`write`/`append`.
+
+### 27.1 The history is not back-filled
+
+```
+model registry: 920 decision(s), none of which records a model;
+                provenance was not captured, so none can be attributed to a model
+```
+
+All 920 cycles predate the field. Assigning them the currently configured model would
+assert a fact about the past that is not known, and would make every future
+comparison look like evidence for a model that never ran. They report `UNATTRIBUTED`
+and the doctor check is a **warning** while that is true — correct rather than noisy,
+and it clears itself as soon as the market is open and new decisions are stamped.
+
+This closes the only phase that was **partial** for a missing component rather than
+thin data. Every other remaining gap is a function of elapsed market time.

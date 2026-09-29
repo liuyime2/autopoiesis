@@ -69,6 +69,7 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_regime.py": (
         "point-in-time-no-leakage", "pnl-accounting", "data-integrity",
     ),
+    "test_model_registry.py": ("data-integrity", "lifecycle-invariants"),
     "test_research_backtest.py": (
         "point-in-time-no-leakage", "pnl-accounting", "lifecycle-invariants",
     ),

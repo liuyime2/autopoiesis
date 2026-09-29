@@ -12,14 +12,20 @@ from min_agent.models import DataSnapshot, KnowledgeArtifact, TradeDecision
 Transport = Callable[[str, dict[str, Any], int], dict[str, Any]]
 
 
-def parse_decision_json(text: str) -> TradeDecision:
+def parse_decision_json(text: str, *, model_name: str | None = None) -> TradeDecision:
     start = text.find("{")
     end = text.rfind("}")
     if start == -1 or end == -1 or end <= start:
         raise ValueError("LLM response did not contain a JSON object")
 
     payload = json.loads(text[start : end + 1])
-    return TradeDecision.model_validate(payload)
+    decision = TradeDecision.model_validate(payload)
+    # Stamped at the point the model is called rather than inferred later from config.
+    # The model can be swapped between the call and the journal write, and a decision
+    # attributed to the wrong model version is worse than one with no attribution.
+    if model_name and decision.model is None:
+        return decision.model_copy(update={"model": model_name})
+    return decision
 
 
 class OllamaDecisionEngine:
@@ -77,7 +83,9 @@ class OllamaDecisionEngine:
             "options": {"temperature": 0.1},
         }
         response = self.transport(f"{self.base_url}/api/generate", payload, self.timeout)
-        decision = parse_decision_json(str(response.get("response", "")))
+        decision = parse_decision_json(
+            str(response.get("response", "")), model_name=self.model,
+        )
         return decision.model_copy(update={"decision_source": "llm"})
 
     @staticmethod

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from min_agent import (
     attribution, calibration, counterfactual, experiment_registry,
-    lineage, regime, strategy_engine,
+    lineage, model_registry, regime, strategy_engine,
 )
 from min_agent.atomicio import write_json_atomic
 from min_agent.broker_evidence import latest_evidence_batch
@@ -249,6 +249,11 @@ def _check_governance(report: DoctorReport, config: AgentConfig) -> None:
         #     actually produced the PnL. The objective asks this directly and the
         #     answer is not the one the headline number suggests.
         _check_pnl_attribution(report, config, journal, records)
+
+        # 11. Model provenance. Phase 3 asks for a model registry alongside the
+        #     strategy one, and until provenance was captured no outcome could ever
+        #     be attributed to a model change.
+        _check_model_registry(report, config, records)
 
         # 8. Champion-challenger, search effort, and whether candidates can say
         #    what they are for.
@@ -660,6 +665,33 @@ def _check_pnl_attribution(
         )
     else:
         report.add("pnl attribution", OK, detail)
+
+
+def _check_model_registry(
+    report: DoctorReport, config: AgentConfig, records: list
+) -> None:
+    """Report which models produced decisions, and flag total absence of provenance.
+
+    A warning while every decision is unattributed is correct rather than noisy: it
+    is the truth about the 920 cycles already on the journal, and it will clear
+    itself as soon as the market is open and new decisions are stamped. Back-filling
+    them would make the gap invisible and every future comparison would then look
+    like evidence for a model that never ran.
+    """
+    try:
+        registry = model_registry.build(records)
+    except Exception as exc:
+        report.add(
+            "model registry", WARN, f"could not derive: {type(exc).__name__}"
+        )
+        return
+    if registry.total_decisions == 0:
+        report.add("model registry", WARN, "no decisions on record")
+        return
+    if list(registry.models) == [model_registry.UNATTRIBUTED]:
+        report.add("model registry", WARN, registry.summary())
+        return
+    report.add("model registry", OK, registry.summary())
 
 
 def _check_knowledge_value(report: DoctorReport, config: AgentConfig) -> None:

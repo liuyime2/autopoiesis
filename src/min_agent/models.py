@@ -700,6 +700,19 @@ class TradeDecision(BaseModel):
     confidence: float = Field(ge=0, le=1)
     rationale: str = Field(min_length=1)
     strategy_id: str | None = None
+    #: Which model produced this decision, e.g. "qwen3.8:27b".
+    #:
+    #: This is provenance, and it was missing. Every decision recorded
+    #: `decision_source` - "llm", "fallback_policy_engine", "baseline" - but not
+    #: *which* model, so the 67 LLM decisions could not be separated by prompt or by
+    #: model version, and no outcome could ever be attributed to a model change. The
+    #: model was upgraded during this project; without this field that upgrade is
+    #: invisible in the record and its effect is unmeasurable forever.
+    #:
+    #: Optional and defaulting to None so the 920 cycles already on the journal still
+    #: parse. They predate the field, and back-filling them with the currently
+    #: configured model would assert a fact about the past that is not known.
+    model: str | None = None
     hold_reason: HoldReason | None = None
     """Why a HOLD was chosen, stated by the model.
 

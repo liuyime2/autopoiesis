@@ -21,7 +21,7 @@ rather than carrying a placeholder.
 | **0** startup / restart / recovery / reconciliation | every class PASS; recovery proven under real failure | `make verify`; SIGKILL test | **MET.** SIGKILL at 07:34:55 → `NRestarts=1`, new `MainPID` at 07:35:25, pidfile rewritten, 920 cycles + 5782 events re-read cleanly, journal re-parsed with zero corrupt lines |
 | **1** real trading and PnL attribution | broker-confirmed fills; per-strategy attribution | 24 orders submitted, 24 broker-confirmed fills; FIFO ledger | **MET.** 23 closed lots, +564.39, `broker_strategy_closed_lot_pnl_verified` |
 | **2** counterfactual and decision quality | every decision scored against a real later quote, after cost | `point-in-time-no-leakage` class; live report | **MET.** hold quality 0.687 over 350 scored; 67 pending, 50 refused as gaps |
-| **3** strategy / model / experiment registry | one source of truth; lineage; champion; failed trials | `lifecycle-invariants`, `data-integrity` classes | **PARTIAL.** strategy registry, derived experiment view, lineage and champion exist. **No model registry** — `Ollama` is a single configured model with no registry, no version pinning per decision, and no record of which model produced which decision |
+| **3** strategy / model / experiment registry | one source of truth; lineage; champion; failed trials | `lifecycle-invariants`, `data-integrity` classes | **MET.** strategy registry, derived experiment view, lineage and champion all exist. Model registry added: `TradeDecision.model` records which model produced each decision, and `model_registry.py` groups decisions by it |
 | **4** backtest / walk-forward / cost / leakage / stress / overfitting | strict OOS, cost on both sides, leakage guard, stress, trial control | `research/` package; `point-in-time-no-leakage`, `pnl-accounting` | **MET, and negative.** 27 of 27 strategies return `INSUFFICIENT`: 3 out-of-sample trades against the 10 required for 27 trials. Not one strategy has enough OOS evidence to be called anything |
 | **5** shadow trading | real decision path, no broker contact, no PnL leakage | `shadow-live-consistency` class; live journal | **MET.** `status=SHADOWED`, `order_id=None`, cycle count unchanged 920/920, account realized PnL `None` |
 | **6** evidence-gated probation | no promotion without verifiable evidence | `lifecycle-invariants` class; live registry | **MET.** both PROBATION strategies blocked with the reason recorded |
@@ -150,7 +150,7 @@ Different scopes, different periods. The 970.93 difference is not a loss.
 | **long-term after-cost risk-adjusted live PnL** | 1 clean session of prospective data; costs are 0.00 because paper |
 | **regime awareness** | measured, unusable on this data |
 | **champion–challenger performance** | champion `fixed-size-buy-001` (+120.37) exists; no challenger has been measured against it |
-| **model registry** | does not exist at all |
+| **model provenance for the 920 existing decisions** | the field was added after they were written, so all 920 report `UNATTRIBUTED`. They are deliberately **not** back-filled: assigning them the currently configured model would assert a fact about the past that is not known, and would make every future comparison look like evidence for a model that never ran |
 | **unrealized PnL** | not implemented; only realized is attributed |
 
 ---
@@ -182,20 +182,19 @@ Expected effect, stated in advance so it can be falsified: after ~20 additional
 trading days, the 67 pending LLM decisions resolve, `model calibration` moves off
 `INSUFFICIENT`, and at least one strategy crosses the 10-out-of-sample-trade bar.
 
-### 2. Close the Phase 3 gap: a model registry
-
-Phase 3 is the only phase marked **partial** for a reason that is a missing component
-rather than thin data. Decisions record `decision_source` but not *which model
-version* produced them, so the 67 LLM decisions cannot be separated by prompt, by
-model version, or by a change made on 2026-09-28. Without it, no amount of
-accumulated data can attribute outcomes to a model change — which is exactly what
-deliverable ⑥ needs in order to ever say something about the model.
-
-### 3. Unrealized PnL
+### 2. Unrealized PnL
 
 Only realized PnL is attributed, so open lots contribute nothing to the account
 picture and the account figure and the agent figure cannot be reconciled even in
 principle. Small, and it removes a standing source of the confusion §4 documents.
+
+### Done since this was written
+
+The Phase 3 model-registry gap is **closed**: `TradeDecision.model` now records which
+model produced each decision, and `model_registry.py` groups them. It is a view over
+the journal rather than a store, so it cannot drift. The 920 existing cycles report
+`UNATTRIBUTED` and are not back-filled; the warning clears itself as soon as the
+market is open and new decisions are stamped.
 
 ### Explicitly not next
 

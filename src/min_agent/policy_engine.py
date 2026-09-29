@@ -35,6 +35,9 @@ class PolicyEngine:
         strategy = self.selector.select(strategies, results)
         if strategy is None:
             return TradeDecision(
+                # Named so a fallback decision is never confused with a model
+                # decision, and so the two can be compared.
+                model="fallback_policy_engine",
                 symbol=snapshot.symbol,
                 action="HOLD",
                 quantity=0,
