@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790646136867,
-      "lastRequestTokens": 150916,
-      "lastInputTokens": 150221
+      "observedAt": 1790682376495,
+      "lastRequestTokens": 178494,
+      "lastInputTokens": 178070
     }
   },
   "runtimeFingerprint": {
@@ -43,17 +43,18 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 6,
-    "tokens": 447746,
+    "turns": 7,
+    "tokens": 624299,
     "cost": 0,
-    "runtimeMs": 62805,
+    "runtimeMs": 79762,
     "seenMessageIDs": [
       "msg_0ea911ff0001xqHQnFmbF3aICp",
       "msg_0ea980dc20015f3lGA67tXRaUK",
       "msg_0eaa68606001KGUnxDEOmPxiG6",
       "msg_0eaae9de0001Pl6Qy08lWTuxb3",
       "msg_0eabb114c0011swJz6bSgFfGwB",
-      "msg_0eacd9dc0001NpvI0XwA252B4I"
+      "msg_0eacd9dc0001NpvI0XwA252B4I",
+      "msg_0ecf211f5001nujl702C3l4B8b"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -63,8 +64,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 45,
-  "observedProgressRevision": 41,
+  "progressRevision": 50,
+  "observedProgressRevision": 46,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
     "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
@@ -110,35 +111,15 @@
     "shell-worktree:006002640b8e9dae34247cc8516ab530a221eff0a7bdd17961464aad6eb1612c",
     "shell-worktree:e3bd223134b349d3e9cb5b5480d152b542bf326858f179f485b0f5d432e302b3",
     "shell-worktree:a1bb59e15919230e8857bf637447a291e1b523350077123960bc1953c703767f",
-    "shell-worktree:ce710447e978866ec5fb7d02f50fadb16bd82b694f3df775f1b7a9f4922d84bc"
+    "shell-worktree:ce710447e978866ec5fb7d02f50fadb16bd82b694f3df775f1b7a9f4922d84bc",
+    "shell-worktree:1216211d8e6b9b9eb2021cd8ca64a50ba361419313989b2f25140eafc582ad16",
+    "shell-worktree:745a4f43e8c7f5a1f641744a4b4253c86df121a9b282fe9ea8ed52fe833f9d7c",
+    "shell-worktree:bd1f141dddee67d62534511600f83d257170c065e4b0b4534d9dd758657be19f",
+    "shell-worktree:8f30f89a45081ef3756681255a5cc3f3b7b64998906e5138a121db2831b0d3c1",
+    "shell-worktree:98b6b4b77218fb563c0aba8177335743a108a4c214119d0cf4e2505f59f770ca"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790642078423,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790642102766,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790642120461,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790642150165,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790642203226,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790642212797,
       "summary": "Fact-level audit complete and written to docs/superpowers/SYSTEM_AUDIT.md. Classification of every component against real call paths, not names. Key findings: (1) the production chain is intact through fill and PnL attribution (+564.39, broker-confirmed) and stops dead after that - counterfactual evaluation, offline validation, shadow trading, experiment registry, champion-challenger, strategy lineage and cost accounting have zero source hits; (2) the knowledge base's strategy-relevance filter is dead logic - source_refs hold cycle UUIDs and tags hold generic words, so it can never match and the fallback feeds every decision the same 5 near-identical artifacts; (3) fees are 0.0 across all 24 fills, so the cost code path has never run with real data; (4) 27 strategies with 9 near-duplicate BUY variants, because duplicate detection only covers id and TREND_FOLLOW parameters. Deleted 24 files: src/voyager_quant (dead, contains exec() on model-generated Python), skill_library (its content), tools/legacy (10/12 unreferenced, full_ingest broken and aimed at the live journal), plus two never-read window-hash fields and two never-read submitted-order params. Merged three drifted copies of the evidence-batch reader into one. 405 passed, audit 91/91.",
@@ -363,11 +344,36 @@
       "time": 1790646066210,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790646190042,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790681900648,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790682165573,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790682287381,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790682322407,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 321,
+  "storageGeneration": 367,
   "createdAt": 1790641773516,
-  "updatedAt": 1790646136867,
+  "updatedAt": 1790682376495,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:d9b69ac2c1f8b0bbc90c47d5bb5615b71ffc238325b2b248340f3a260feb8032",

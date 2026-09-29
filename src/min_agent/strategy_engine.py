@@ -514,13 +514,39 @@ def behavioural_signature(strategy: StrategySpec) -> tuple | None:
     gate that every admitted strategy has already passed, and neither changes the
     action or the quantity.
 
-    A TREND_FOLLOW returns None because its side is derived from price at decision
-    time, so it cannot be compared to another strategy without a snapshot.
+    TREND_FOLLOW used to return None, on the grounds that its side is derived from
+    the price at decision time and so could not be compared without a snapshot. The
+    consequence was that *no* TREND_FOLLOW was ever compared to *any* other one: 12
+    of them sat in the registry and the zoo check was blind to all of it. Three were
+    exact duplicates - `trend-follow-20260611-001/-002/-003` shared
+    reference_price 100.0, threshold 0.02 and quantity 1, and `-004/-005` shared
+    150.0 and 0.01.
+
+    The side being dynamic does not make two strategies uncomparable, because the
+    *rule* is fully determined by the declared parameters: the same reference, the
+    same threshold and the same quantity produce the same action on every snapshot.
+    So the signature is built from those, and `confidence` is still excluded for the
+    same reason as above - it is an admission gate, not a behaviour.
     """
     if strategy.kind == "HOLD_BASELINE":
         return ("HOLD_BASELINE", tuple(sorted(strategy.symbols)))
     if strategy.kind == "TREND_FOLLOW":
-        return None
+        reference = strategy.parameters.get("reference_price")
+        threshold = strategy.parameters.get("threshold_pct")
+        quantity = strategy.parameters.get("quantity")
+        if not all(
+            isinstance(v, (int, float)) and not isinstance(v, bool)
+            for v in (reference, threshold, quantity)
+        ):
+            return None
+        return (
+            strategy.kind,
+            tuple(sorted(strategy.symbols)),
+            round(float(reference), 6),
+            round(float(threshold), 6),
+            int(quantity),
+            round(float(strategy.max_position_value), 2),
+        )
     action = str(strategy.parameters.get("action", "")).upper()
     if action not in {"BUY", "SELL", "HOLD"}:
         return None

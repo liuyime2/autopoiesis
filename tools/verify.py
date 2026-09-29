@@ -59,6 +59,9 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_evaluator.py": ("pnl-accounting", "replay-determinism"),
     "test_executor.py": ("broker-reconciliation", "guardian-bypass-prevention"),
     "test_experiment_registry.py": ("lifecycle-invariants", "data-integrity"),
+    "test_research_backtest.py": (
+        "point-in-time-no-leakage", "pnl-accounting", "lifecycle-invariants",
+    ),
     "test_fill_reconciler.py": ("broker-reconciliation",),
     "test_governance_invariants.py": (
         "guardian-bypass-prevention", "shadow-live-consistency",
@@ -242,6 +245,45 @@ def check_docs_not_stale() -> Result:
         f"{len(plans)} plan document(s), none asserting an unacted state"
     )
     return Result("docs-not-stale", FAIL if problems else PASS, detail)
+
+
+def check_production_research_separation() -> Result:
+    """Production must never import the research layer.
+
+    The objective requires the production system and the research/evolution system to
+    be thoroughly separated: production is data -> decision -> allocation ->
+    Guardian -> execution -> reconciliation, and research is diagnosis ->
+    hypothesis -> backtest -> walk-forward -> robustness -> shadow -> probation.
+
+    A separation held only by convention is a separation that erodes the first time
+    a backtest looks like a useful signal, which is exactly when someone would reach
+    for it. So this is checked rather than documented.
+    """
+    production = [
+        p for p in sorted((SRC / "min_agent").glob("*.py"))
+    ]
+    research_dir = SRC / "min_agent" / "research"
+    violations: list[str] = []
+    for module in production:
+        for line_no, line in enumerate(module.read_text().splitlines(), 1):
+            code = line.split("#", 1)[0]
+            if "min_agent.research" in code or (
+                code.strip().startswith(("import ", "from ")) and " research" in code
+            ):
+                violations.append(f"{module.name}:{line_no}: {line.strip()}")
+    if not research_dir.exists():
+        return Result("production-research-separation", SKIP, "no research package yet")
+
+    research_files = sorted(research_dir.glob("*.py"))
+    detail = (
+        f"{len(research_files)} research module(s), {len(production)} production "
+        "module(s), no production import of research"
+    )
+    return Result(
+        "production-research-separation",
+        FAIL if violations else PASS,
+        "; ".join(violations) if violations else detail,
+    )
 
 
 def check_data_integrity() -> Result:
@@ -528,6 +570,7 @@ def main() -> int:
     results.append(check_known_classes_run())
     results.append(check_software_supply_chain())
     results.append(check_docs_not_stale())
+    results.append(check_production_research_separation())
     results.append(check_syntax_import())
     results.append(check_data_integrity())
     results.append(check_shadow_live_consistency())

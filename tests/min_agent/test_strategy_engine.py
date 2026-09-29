@@ -875,3 +875,65 @@ def test_admission_rejects_a_strategy_that_would_behave_identically_to_one_in_th
         assert result.accepted is False
         assert "behaviourally identical" in result.reason
         assert "existing" in result.reason
+
+
+def _trend(strategy_id, reference, threshold=0.02, quantity=1, max_position_value=1.0):
+    from min_agent.models import StrategySpec
+    return StrategySpec(
+        strategy_id=strategy_id, name=strategy_id, kind="TREND_FOLLOW",
+        symbols=("SPY",),
+        parameters={
+            "reference_price": reference, "threshold_pct": threshold,
+            "quantity": quantity, "confidence": 0.55,
+        },
+        max_position_value=max_position_value,
+        created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        rationale="r",
+    )
+
+
+def test_two_identical_trend_follow_strategies_have_the_same_signature():
+    """TREND_FOLLOW used to return None, so no TREND_FOLLOW was ever compared to any
+    other and the zoo check was blind to all twelve of them. Three were exact
+    duplicates. The side is derived from the price, but the *rule* is fully
+    determined by the declared parameters, so two strategies with the same
+    reference, threshold and quantity act identically on every snapshot."""
+    from min_agent.strategy_engine import behavioural_signature
+
+    a = behavioural_signature(_trend("a", 100.0))
+    b = behavioural_signature(_trend("b", 100.0))
+    assert a is not None, "a comparable TREND_FOLLOW must produce a signature"
+    assert a == b
+
+
+def test_trend_follow_strategies_differing_in_rule_differ_in_signature():
+    from min_agent.strategy_engine import behavioural_signature
+
+    base = behavioural_signature(_trend("base", 100.0, threshold=0.02))
+    assert base != behavioural_signature(_trend("x", 150.0)), "reference differs"
+    assert base != behavioural_signature(_trend("y", 100.0, threshold=0.05)), "threshold"
+    assert base != behavioural_signature(_trend("z", 100.0, quantity=5)), "quantity"
+
+
+def test_confidence_still_does_not_split_a_trend_follow():
+    """confidence is an admission gate, not a behaviour. Including it is what let
+    one strategy split into several."""
+    from min_agent.models import StrategySpec
+    from min_agent.strategy_engine import behavioural_signature
+
+    loud = _trend("loud", 100.0)
+    quiet = loud.model_copy(update={
+        "strategy_id": "quiet",
+        "parameters": {**loud.parameters, "confidence": 0.95},
+    })
+    assert behavioural_signature(loud) == behavioural_signature(quiet)
+
+
+def test_a_trend_follow_with_non_numeric_parameters_has_no_signature():
+    """Compared rather than crashed: one malformed spec must not take down a batch
+    admission run."""
+    from min_agent.strategy_engine import behavioural_signature
+
+    broken = _trend("broken", 100.0)
+    broken.parameters.pop("threshold_pct")
+    assert behavioural_signature(broken) is None

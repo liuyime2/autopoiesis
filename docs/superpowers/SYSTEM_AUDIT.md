@@ -551,3 +551,142 @@ The current code is correct: `_record_pnl_evidence` reports only the four
 The historical records are **left as they are**. Rewriting the journal to remove
 misleading entries would falsify the audit trail, which is the one thing the whole
 system rests on. The correction belongs here, in the record, not in the data.
+
+---
+
+# Part 2 — the full objective, re-read
+
+The first part of this audit worked from a truncated objective. The complete text
+carries a **Phase 0–8 ordering** with the rule that a phase may only be entered once
+the previous phase's exit criteria are met, and it names requirements that had not
+been looked for at all. Re-auditing against the full text changed the picture.
+
+## 14. Correction: shadow trading is a required phase, not a merge
+
+Section 10.1 argued that shadow trading was "merged into probation" because
+probation already exercises the real execution path and a second executor would be
+a second execution truth. That reasoning was sound on its own terms and it was
+**wrong against this contract**: Phase 5 (shadow trading) and Phase 6
+(evidence-gated probation) are named as separate stages. The argument has been
+withdrawn as a decision about scope. Shadow is recorded as **missing**, and Phase 5
+is outstanding work.
+
+The underlying observation still stands and is worth keeping: a shadow executor
+must not become a divergent copy of the real one. When it is built, it should reuse
+the loop and swap only the execution sink, so the decision path being validated is
+the same path production uses.
+
+## 15. Phase 0–8 status against the full objective
+
+| phase | exit criteria | status |
+| --- | --- | --- |
+| 0 | syntax/import/tests/service startup/restart/recovery/reconciliation PASS | **met** — and crash recovery is now proven rather than configured (16) |
+| 1 | real trading and PnL attribution | **met** — 24 orders, 24 fills, 23 closed lots, +564.39 |
+| 2 | counterfactual and decision-quality evaluation | **met** — hold quality 0.687 over 350 scored, after cost |
+| 3 | strategy/model/experiment registry | **met in part** — strategy registry and derived experiment view exist; champion–challenger and lineage do not |
+| 4 | strict offline backtest, walk-forward OOS, cost, leakage, stress, overfitting | **now implemented** (17) |
+| 5 | shadow trading | **missing** — not implemented; see §14 |
+| 6 | evidence-gated probation | **partly** — probation exists and offline validation now gates it, but it is not shadow-gated |
+| 7 | prospective live evidence drives promote/pause/retire | **incomplete** — lifecycle is PnL-driven and running; prospective duration not yet accumulated |
+| 8 | regime-aware allocation, model retraining, strategy evolution | **not started**, correctly — the objective forbids entering it early |
+
+## 16. Crash recovery, proven rather than configured
+
+`Restart=always` in the unit file is a claim, not evidence. It was tested by
+`SIGKILL`ing the daemon — no cleanup, no chance to shut down:
+
+```
+07:34:55  Main process exited, code=killed, status=9/KILL
+07:35:25  Scheduled restart job, restart counter is at 1
+07:35:25  Started min-agent.service
+```
+
+`NRestarts=0 → 1`, new `MainPID`, pidfile rewritten, no manual step. State survived
+it: 920 cycles and 5782 events re-read cleanly afterwards, the journal re-parsed
+with zero corrupt lines, and the restarted daemon resumed journalling within a
+minute. A daemon that comes back alive but has forgotten everything is not a
+recovered daemon.
+
+## 17. Phase 4: offline validation, now real
+
+`src/min_agent/research/` implements the backtest the objective's Phase 4 requires.
+It is a separate package, and a `make verify` check **fails if any production module
+imports it** — the separation between production and research is machine-checked
+rather than conventional, because a convention erodes exactly when a backtest starts
+looking like a useful signal.
+
+An earlier session concluded a backtest would be "theatre" and declined to build
+one. Both halves of that are recorded in the module, because it was half right:
+
+* **Right:** production does not enforce `parameters["action"]` or TREND_FOLLOW's
+  `threshold_pct`. A passing backtest says nothing about what production will do —
+  which is why walk-forward, shadow and probation exist, and why a green backtest
+  can never promote anything.
+* **Wrong:** "not enforced in production" is not "not specified". The rule is
+  fully determined by the declared parameters and is executable. The research layer
+  is exactly where it should be measured.
+
+### 17.1 The controls, and three of them caught me
+
+* **Leakage.** The guard asks the rule the same question twice — once with the whole
+  series, once with only the bars up to now — and counts any disagreement. The first
+  version only noticed the loop index going backwards, which no rule in the module
+  could do; it could not have detected the one leak that matters. A test plants a
+  rule that reads one bar ahead and asserts the guard fires.
+* **Cost.** Charged on entry *and* exit. The paper broker reported zero commission
+  on all 24 fills, so a gross backtest flatters every strategy by exactly what it
+  would really have paid.
+* **De-duplication of observations.** 920 journaled records are 467 distinct
+  observations. Keyed on timestamp the sample looks twice its real size and measures
+  the 5-minute polling interval.
+* **Overfitting control — the first version did nothing.** It computed
+  `threshold / trials`, and the threshold was `0.0`, so `0.0 / 40` is `0.0`: trying
+  forty variants cost nothing and the control was decoration. The real risk of
+  trying N specs is not a too-small return but that the winner was selected on
+  noise, so the trial count now raises the number of independent out-of-sample
+  trades required, on a square-root schedule. With 27 trials that is 10 trades.
+* **Stress — one jitter seed is not a stress test.** The single seed used first made
+  a long position *better* (+28.97 against a +26.14 baseline), because an early
+  negative shock lowers the entry. The worst of five seeds is kept, and the seeds
+  range from +8.74 to +39.61, which is exactly why one seed was worthless.
+* **Verdict ordering.** "Overfitted" was returned for strategies with one trade per
+  fold. That is a claim about generalisation, which needs enough trades to
+  generalise from, so thin data is now reported as thin before any confident label
+  is attached.
+
+### 17.2 The honest result: no strategy survives
+
+Run over all 27 registered strategies, on 467 real bars:
+
+```
+verdict tally: {'INSUFFICIENT': 27}
+required OOS trades for 27 trials: 10
+best achieved: 3 out-of-sample trades
+```
+
+**Not one strategy in the registry has enough out-of-sample evidence to be called
+anything.** That is the first truthful research verdict this system has produced,
+and it is the correct answer to the data available rather than a disappointing one.
+Three independent lines of evidence already agree: three strategies earned verified
+PnL, hold quality is 0.687, and 27 of 27 strategies are statistically unproven.
+
+## 18. A dedupe blind spot, and a strategy that lies about itself
+
+`behavioural_signature` returned `None` for every TREND_FOLLOW, on the reasoning that
+its side is derived from the price at decision time and so cannot be compared without
+a snapshot. The consequence was that **no TREND_FOLLOW was ever compared to any
+other** — twelve sat in the registry and the zoo check was blind to all of them.
+
+The side being dynamic does not make two strategies uncomparable, because the rule is
+fully determined by the declared parameters. TREND_FOLLOW now returns a real
+signature, and 14 redundant copies became visible, including three exact duplicates:
+`trend-follow-20260611-001/-002/-003` share reference 100.0, threshold 0.02 and
+quantity 1, and `-004/-005` share 150.0 and 0.01.
+
+The same pass surfaced a semantic duplicate the objective explicitly asks for.
+`trend-follow-sell-002` is named **"Trend Following Sell Strategy"** but its `kind` is
+`FIXED_SIZE` with no threshold or reference price — it does not trend-follow at all,
+and is behaviourally identical to `fixed-size-sell-001` apart from a `confidence`
+value the signature correctly ignores. A strategy whose name claims one thing and
+whose rule does another is the failure mode "automatic detection of
+semantic/behavioral duplicate" exists to catch.
