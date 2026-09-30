@@ -3635,3 +3635,65 @@ observation about this library at this price, and it is recorded rather than act
 changing selection semantics to guarantee exit coverage is a design change beyond what
 this objective authorises, and it would need the same evidence discipline as any other
 change to how strategies are chosen.
+
+## 65. Why the exit is unreachable, traced properly after getting it wrong twice
+
+Section 64 said the exit was separated from the winner "by tie-break order rather than by
+anything about the exit". That is incomplete, and following it through gives the actual
+structure.
+
+`_score` is `operational * (INACTION_FLOOR + (1 - INACTION_FLOOR) * exploration)`, then
+multiplied by `(1 - PNL_BONUS)` when there is no realized PnL. For the two candidates:
+
+    fixed-size-probe-0001  cycles=4 attempts=4 faults=0  ->  operational 1.000, exploration 1.000, base 1.000 -> 0.900
+    fixed-size-sell-005    cycles=3 attempts=3 faults=0  ->  operational 1.000, exploration 1.000, base 1.000 -> 0.900
+
+Identical structure, so the tie is structural rather than coincidental. Section 64 was
+right that `max()` breaks it by list position and that `list()` sorts by filename, making
+`probe-0001 < sell-005` permanent. It was wrong to leave it there, because that tie is
+never even consulted. Five strategies are still in the probation queue -
+`trend-follow-buy-007` through `-010` and `trend-follow-20260613-001`, all created after
+the restore, all at `cycles=0`. `select()` returns from the probation branch whenever that
+list is non-empty, so argmax is not reached at all.
+
+So the chain is: `sell-005` needs a cycle to change anything; it cannot get one while the
+probation queue is non-empty because it left the queue at 3 cycles; and it left the queue
+at 3 cycles because those 3 were refusals.
+
+The honest cost estimate is roughly five strategies times three cycles each, at about six
+minutes per cycle - about an hour and a half of open market - before argmax is consulted
+at all, and then a permanent tie-break loss to `probe-0001`. That is not a slow path, it
+is a closed one for this session.
+
+What I am not doing, and why, is worth stating precisely rather than leaving implied.
+Three separate designs could each change this, and each is a design change rather than a
+repair:
+
+- Counting only cycles in which the strategy *acted successfully* toward
+  `min_probation_cycles` would stop refusals from completing probation. It would also
+  penalise a strategy for a closed market, which the existing comment explicitly argues
+  against, so the tradeoff is real rather than obvious.
+- Making `max()` break ties by something other than list position - submitted orders, or
+  cycle count - would let `sell-005` eventually win. It would change which strategy every
+  tied cycle selects, across the whole library.
+- Serving a single-route capability ahead of rotation regardless of its probation count
+  would close the exit gap directly. It would also mean exercising a strategy the system
+  has no other way to try, which is the argument `strategy_engine.py:367` already makes and
+  declines to extend.
+
+Each of those is a decision about how strategies are chosen. The objective authorises
+fixing defects in this system and verifying it; it does not authorise changing selection
+semantics to reach a particular outcome, and the outcome being reached here would be a
+specific trade rather than a demonstrated property of the mechanism. Recorded so the next
+reader starts from the real structure instead of re-deriving it, and so that if the design
+question is taken up it is taken up deliberately.
+
+Three more instances of the same error while working this out, all of them asserting a
+number before reading it: "probation is complete by rejection but promotion needs PnL or
+orders, so there is no path" when the score was 0.900; "score=0.0, never selected by
+argmax" when it was 0.900; and the tie-break explanation, which was correct about the
+tie-break and wrong about it mattering. Sections 52, 53, 57, 62, 63 and 64 each recorded
+this; recording it has not fixed it, and the pattern is now specific enough to name: I
+reach for a conclusion that explains the symptom, then look for the number that confirms
+it, instead of reading the number first. The cost is that several of these conclusions
+were wrong while sounding more rigorous than the accurate ones.
