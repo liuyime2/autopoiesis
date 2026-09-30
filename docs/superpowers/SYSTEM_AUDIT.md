@@ -3223,3 +3223,47 @@ close is attributable from the record alone.
 Note also that the FIFO ledger holds no lot for SPY that `fixed-size-sell-005` could be
 credited against, so its own `realized_pnl` stays `None` and its promotion route remains
 the decision-quality gate rather than PnL. A long-only probe strategy by construction.
+
+## 56. The exit is selected on the first cycle after the open, verified against the live broker
+
+Rather than assume the rotation would reach the exit strategy, the selection was
+replayed through the shipped `StrategySelector` against a snapshot built by the real
+`AlpacaDataGateway` - not a reconstructed one. SPY 766.67, `market_open=False`,
+equity 99514.09, source `alpaca`.
+
+`fixed-size-sell-005` is selected at **step 1**, emitting `SELL`. Not third in the
+rotation, not after five near-duplicate BUY strategies: first. The reason is the
+exploration floor rather than the capability branch. With no strategy in the pool
+carrying a result with `trade_attempts > 0`, `select()` reaches the floor, engages it,
+and hands off to `_probe_strategy`, which returns the smallest, most predictable action
+available - and the only SELL in the library. The `count <= 1` capability branch never
+runs, so the near-miss in section 54 does not arise.
+
+Running the shipped `StrategyExecutor` over the same live snapshot produces
+`action=SELL symbol=SPY quantity=1 confidence=0.7` against the real price. Every link of
+the round trip is now confirmed against the broker rather than inferred from code:
+
+| Link | Evidence |
+|---|---|
+| Position to close | 10 agent-owned SPY |
+| Strategy selected | `fixed-size-sell-005`, step 1 of the rotation |
+| Decision emitted | `SELL SPY qty=1`, live price 766.67 |
+| Guardian bound | SELL limited to agent-owned, 10 available vs 1 requested |
+| PnL attribution | credited to the BUY strategy owning the lot, both roles journaled |
+| Promotion route | `PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED` on the opener |
+
+So the round trip needs one trading cycle after the open, not an unknown span of days.
+What it still cannot promise is the *outcome*: a promotion needs the realized figure to
+clear nothing at all - the gate accepts any broker-verified realized PnL, positive or
+negative, because the decision it makes is about evidence rather than about profit. A
+verified loss promotes too. That is the correct behaviour for a lifecycle driven by
+evidence, and it is another reason the profitability criterion and the promotion
+mechanism must be read as separate claims.
+
+Errors here, all mine and all the same shape as section 53: I guessed the SDK module
+name as `alpaca_trading_api` when `cli.py:176` imports `alpaca_trade_api`, guessed
+`load_config` when the constructor is `AgentConfig.from_env()`, and hand-built
+`DataSnapshot` three times until pydantic rejected it on `market_open`, `last_price`,
+`source` and `account` - before switching to the gateway that builds it correctly. Five
+attempts to inspect the system, four of which failed on a name I could have read off the
+import line.
