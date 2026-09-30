@@ -2378,3 +2378,71 @@ events plus a real strategy library, and I did not build those fixtures. Saying
 "28 of 30" is more useful than claiming the set is closed.
 
 `make verify`: **24 classes, 0 failed, 1140 test executions, doctor OK, exit 0.**
+
+## 42. Closing the last two "missing" items
+
+Both items the classification listed as missing are now closed, and one of them
+turned out to need care rather than effort.
+
+### 42.1 Every doctor check can now say no: 30/30
+
+`champion / search` and `experiment chain` needed fixtures I had not built - a
+journal seeded with specific admission and evaluation events, plus a real strategy
+directory. Both are now driven through real files rather than stubs, because a stub
+would only have proved the stub works.
+
+They pin the two most consequential claims in the whole audit:
+
+- **A champion is designated only from broker-verified positive realized PnL.**
+  With no PnL evidence on file the check reports `champion=NONE`, because naming one
+  from cycle counts or an in-sample backtest would be choosing a benchmark on
+  evidence the system already distrusts. A candidate that cannot state the
+  observation that motivated it warns, because the proposal schema requires only
+  free-text `rationale` and a candidate can therefore be admitted having said
+  nothing about what failure it addresses.
+- **A tradable strategy with no evaluation evidence is a genuine hole**, distinct
+  from the historical chains that predate the offline screen. A `RETIRED` strategy
+  with no evidence is reported as an incomplete chain, not as a hole.
+
+I got the chain wrong first, and the way I got it wrong is recorded in the
+registry's own source as a mistake someone else already made: I supplied
+`OFFLINE_VALIDATION_COMPLETED` and expected the tradable test to pass, but that
+counts `STRATEGY_EVALUATION_RECORDED` via `payload["strategy_metrics"]` - the
+event's own `strategy_id` is `None`. Two different links, read from the obvious
+field. The test now pins the correct one.
+
+`30/30 report names covered`, up from `20/30`.
+
+### 42.2 Pruning that does not lose lineage
+
+Eleven accepted lessons carried two distinct statements. Deleting the nine surplus
+copies is the obvious move and it loses data:
+
+```
+10 copies of one answer: source_refs 500 across the copies, 83 distinct
+```
+
+The copies are **not** interchangeable - each cites roughly 50 cycles, and the
+journal records those ids nowhere else. A plain delete would have dropped on the
+order of 33 references. So `tools/prune_knowledge.py` merges instead: one survivor
+per distinct answer, deterministically chosen (lexicographically first id, so
+repeated runs converge rather than oscillate), carrying the **union** of every
+copy's `source_refs`. Dry run by default; `--apply` to write.
+
+Result: 11 artifacts / 2 statements -> 2 artifacts / 2 statements, with **133
+distinct references retained** (83 + 50), verified after the fact rather than
+assumed. The lessons a decision receives are unchanged at 2, because the read-time
+deduplication in section 40 had already fixed the functional harm; this cleans up
+what that deduplication was hiding.
+
+The duplication check now reports `PASS` - 2 artifacts, 2 distinct statements -
+and this time that is the honest answer rather than a threshold that happened to
+miss. It measures the library, and the library is now clean.
+
+Four tests pin the invariant that matters: merging is lossless, distinct statements
+never collapse, formatting-only differences are the same statement, and the
+survivor choice is deterministic.
+
+`make verify`: **24 classes, 0 failed, 1160 test executions, doctor OK, exit 0.**
+The classification's `missing` section is now empty, which is a statement about
+audit coverage only and not about the system making money.

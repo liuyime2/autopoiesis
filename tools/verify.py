@@ -64,6 +64,9 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_lineage.py": (
         "lifecycle-invariants", "data-integrity", "point-in-time-no-leakage",
     ),
+    "test_doctor_chain_checks.py": (
+        "lifecycle-invariants", "data-integrity", "pnl-accounting",
+    ),
     "test_doctor_infra_checks.py": (
         "unit-integration", "data-integrity",
     ),
@@ -72,6 +75,9 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     ),
     "test_daemon_heartbeat.py": (
         "crash-recovery", "unit-integration", "data-integrity",
+    ),
+    "test_knowledge_prune.py": (
+        "data-integrity", "unit-integration",
     ),
     "test_knowledge_lessons.py": (
         "data-integrity", "unit-integration", "lifecycle-invariants",
