@@ -2707,3 +2707,59 @@ Guardian-gated - the decision was not unsafe, and the wording must not imply
 otherwise.
 
 `make verify`: **25 classes, 0 failed, 1174 test executions, exit 0.**
+
+## 47. A phase marked MET on evidence that does not exist
+
+Section 45 concluded that shadow was wired as a mode rather than a stage, and called
+it a design decision for the operator. Checking it against the objective's own phase
+gate rather than against my own opinion turned up something worse than the wiring.
+
+**`docs/superpowers/PHASES.md` recorded Phase 5 as MET**, citing two things:
+
+| claimed verification | reality |
+| --- | --- |
+| "`shadow-live-consistency` class; live journal" | the class verifies the *mechanism*; it has never verified the stage |
+| "`status=SHADOWED`" from the live journal | the journal contains **0** `SHADOWED` executions |
+| "cycle count unchanged 920/920" | 987 cycles now; and a cycle count is not shadow activity |
+
+The execution-status census of all 987 cycles is `SKIPPED 908, REJECTED 45,
+SUBMITTED 34`. There is no `SHADOWED` in it. `MIN_AGENT_SHADOW` is off and the one
+`SHADOW_ORDER_INTENT` carries the rationale `"shadow stage smoke test"`.
+
+So the phase exit criterion was marked satisfied by **code existing**, not code
+having run. That is the precise failure the objective names when it says a
+configuration, a function, a test, or a document existing must never be treated as
+the feature working - here it was a *verified* row asserting a result no artifact
+contained. And the objective's phase gate is explicit: only when the previous
+phase's exit criteria are **fully** met may the system advance.
+
+Three corrections:
+
+1. **The PHASES.md row now states what is true**: *MECHANISM MET, STAGE NOT RUN*,
+   naming the zero count, the off flag, and the smoke-test rationale, and recording
+   that the earlier row claimed otherwise.
+2. **A new gate, `shadow-stage-exercised`**, reports mechanism and stage separately
+   from the journal itself, so the exit criterion cannot be read off unit tests:
+
+   ```
+   [WARN] shadow-stage-exercised   the shadow mechanism is verified but the stage has
+                                   never run: 0 shadowed execution(s), 1 intent(s)
+   ```
+
+   A WARN rather than a FAIL, deliberately. A system that has never run shadow is an
+   honest starting state, not a defect - but it must not be able to say "MET".
+3. **The gate's own docstring was carrying the withdrawn claim** that shadow "is not
+   implemented, the word appears in docstrings only" - a falsehood STATUS.md had
+   already withdrawn while it stayed live in `tools/verify.py`. A check whose
+   docstring is known-false is worse than no check, because it teaches the reader
+   that the surrounding prose is unreliable.
+
+The stale verification header on the same page - "21 classes, 614 distinct tests" -
+is now generated from the live gate output rather than written by hand, so it cannot
+quietly drift again. It read 21 classes against a gate that has run 26.
+
+`verify.py` needed a `WARN` status for this, which it did not have. Added with the
+reasoning attached: only `FAIL` gates, so `WARN` is a finding rather than a failure,
+and all four level names fit the printer's 4-character status field.
+
+`make verify`: **26 classes, 0 failed, 1174 test executions, exit 0.**

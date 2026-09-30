@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790760108909,
-      "lastRequestTokens": 335582,
-      "lastInputTokens": 334869
+      "observedAt": 1790760995833,
+      "lastRequestTokens": 368856,
+      "lastInputTokens": 367899
     }
   },
   "runtimeFingerprint": {
@@ -43,12 +43,13 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 1,
-    "tokens": 1886,
+    "turns": 2,
+    "tokens": 4278,
     "cost": 0,
-    "runtimeMs": 14178,
+    "runtimeMs": 31176,
     "seenMessageIDs": [
-      "msg_0f1901114001484d2fnJE0hmIq"
+      "msg_0f1901114001484d2fnJE0hmIq",
+      "msg_0f1a3bd51001P2jhIfBm6kTFUm"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -58,12 +59,15 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 3,
-  "observedProgressRevision": 0,
+  "progressRevision": 6,
+  "observedProgressRevision": 4,
   "progressFingerprints": [
     "shell-worktree:ee102d12789dd54349b1662438fe8069ed627c7c900a1ea7c2c0db29fa129a05",
     "shell-worktree:027d49c5a869cfb42a78cbb614c78407afbe88f34da32d650b80ef33ebde4f2c",
-    "shell-worktree:36585c3464972e31340af1392d95c09bbcba4907b90cdfedc0fe5f79dc4db317"
+    "shell-worktree:36585c3464972e31340af1392d95c09bbcba4907b90cdfedc0fe5f79dc4db317",
+    "shell-worktree:c23a2c303b1381ba9b65a1f55dc51767a659cb8a5b63a09cfba533c558ee4c11",
+    "shell-worktree:4ea8495f85bdf4d8048f887dfb778aa85c5529fef393108cee832c23448ae65e",
+    "shell-worktree:dbe8e0601a239c40211859a201b43375764dfe96f688caf88d5bec72bf64cce7"
   ],
   "stalledTurns": 0,
   "progressNotes": [
@@ -81,11 +85,31 @@
       "time": 1790760105867,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790760128831,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790760413714,
+      "summary": "Verified the real Alpaca link completely and confirmed the system is running and waiting for the open, against live API calls rather than the system's own reporting. Six endpoints reachable directly - get_clock, get_account, list_positions, list_assets, get_activities, list_orders - and the production ingestor returns a real, complete 30-day batch with zero missing reasons: 11 orders, 12 activities, 21 portfolio-history points. Both apparent failures in my first probe were my own errors, not connectivity: the activity method is get_activities rather than list_activities, and account configurations returns an object rather than a list. Ran the full real path end to end: AlpacaDataGateway.snapshot returned source=alpaca, a live price of 764.38 and all six real positions, then the real qwen3.8:27b produced HOLD at confidence 0.7 and Guardian approved it. The model is genuinely resident on GPU0 at 17.3GB with keep-alive -1, MAX_LOADED_MODELS=1, CUDA_VISIBLE_DEVICES=0, and answers 174 tokens in 4.40s with speculative decoding at 95% acceptance. Confirmed the LLM is actually in the production loop: 134 llm-sourced decisions on record, 67 of them on the 2026-09-29 session alone, every one model=qwen3.8:27b, ending at market close 15:57:42, with only 2 fallback_policy_engine decisions ever. All three systemd units are active and enabled, loading from durable paths under $HOME/.config/systemd/user with zero enablement links into tmpfs, and the watchdog timer is firing every 10 minutes. Requirement audit against the objective: R1 real, 987 of 987 cycles source=alpaca, no synthetic data. R2 Alpaca link complete, all endpoints plus the production ingestor with zero missing reasons. R3 running and waiting for the open, three units active/enabled/durable with next_open 2026-09-30 09:30 ET. R4 review and confirm, make verify 25 classes 0 failed 1174 test executions exit 0, plus 13 of 13 figures independently reproduced from raw journal text with no production code in the counting path. R5 every previously-reported problem is closed and verified against current state: curriculum truncation fixed with per-site windows 4096/8192 and a 600s timeout, admission bypass closed with zero bypasses, all 31 doctor report names pinned to a failing path, unmanaged exposure reported at $37k or 37 percent of equity, knowledge dedup and prune complete with 2 artifacts 2 distinct lessons and 133 references retained, daemon heartbeat beats on entry to long work, curriculum refusals fed back, and the LLM fallback now surfaced. One item remains open by deliberate choice rather than oversight: shadow mode is wired as a global executor swap rather than a per-strategy stage, so the objective's shadow/probation/promote chain cannot be expressed, and I did not rewrite it because turning a mode flag into a stage defines what evidence a strategy must gather before touching the paper broker, which is the operator's decision. I also found and fixed one new problem today that nothing was reporting: an LLM timeout silently substitutes the deterministic policy engine and the cycle looks ordinary, which is exactly the failure masking the objective forbids, so a new llm fallback check now reports it, escalating on the share rather than the count. I did not raise the 120s timeout, because observed production latency is 24-56s warm with 67 of 67 model-authored decisions, the loop is single-threaded at a 240s interval, and widening it would hide the fallback rather than report it. Commit 031fc90.",
+      "next": "The loop needs no intervention before the open: three durable units are active and enabled, the watchdog fires every 10 minutes, the model is resident on GPU0 with keep-alive -1, and the broker clock confirms the next open at 2026-09-30 09:30 ET. Nothing further is required from the operator except the one open design decision on shadow mode, which does not block trading."
+    },
+    {
+      "time": 1790760604854,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790760641906,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 35,
+  "storageGeneration": 70,
   "createdAt": 1790759144543,
-  "updatedAt": 1790760108909,
+  "updatedAt": 1790760995833,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:1794a70a8627a267a345dc5a491d2bc563f0a8246e1de001013d764d1eac1458",

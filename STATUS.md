@@ -249,8 +249,16 @@ recorded as UNKNOWN in `docs/superpowers/known_state_findings.json` and no synth
 retirement was written. It cannot recur — `admit()` writes the file atomically
 before returning `accepted=True`.
 
-**Shadow trading is implemented** (Phase 5) and the per-phase document lives at
-`docs/superpowers/PHASES.md`.
+**The shadow *mechanism* is implemented; the shadow *stage* has never run.** The
+sink is real and switchable by `MIN_AGENT_SHADOW`, and `shadow-not-executed`
+proves no module counts a shadow order as a fill. But the journal holds **zero**
+`SHADOWED` executions, the flag is off, and the single `SHADOW_ORDER_INTENT` carries
+the rationale `"shadow stage smoke test"`. `PHASES.md` previously recorded Phase 5 as
+MET quoting `status=SHADOWED` and a `920/920` cycle count that the live journal does
+not contain; that row is corrected, and a `shadow-stage-exercised` gate now reports
+mechanism and stage separately so the exit criterion cannot be read off code that has
+never run. The deeper wiring problem - shadow is a global executor swap rather than a
+per-strategy stage - is in `SYSTEM_AUDIT.md` §45 and is an operator decision.
 
 Two earlier notes on shadow are **withdrawn as wrong**, and are kept here because a
 withdrawn claim left standing is worse than one never made:

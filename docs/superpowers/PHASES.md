@@ -20,8 +20,9 @@ Companion documents:
 
 ## 1. Phase status, with verification results
 
-`make verify` — 21 classes, 0 failed, 614 distinct tests, 91/91 defect audit,
-`doctor` RESULT OK, exit 0. `make verify-self-test` — green on 7 conditions.
+`make verify` — classes: 26   passed: 26   failed: 0   test executions: 1174 across 60 test files, 91/91 defect audit,
+`doctor` RESULT OK, exit 0. `make verify-self-test` — green, and a new
+`shadow-stage-exercised` finding now proves it can go red.
 
 | phase | exit criteria | verification method | result |
 | --- | --- | --- | --- |
@@ -30,7 +31,7 @@ Companion documents:
 | **2** counterfactual and decision quality | every decision scored against a real later quote, after cost | `point-in-time-no-leakage` class; live report | **MET.** hold quality 0.687 over 350 scored; 67 pending, 50 refused as gaps |
 | **3** strategy / model / experiment registry | one source of truth; lineage; champion; failed trials | `lifecycle-invariants`, `data-integrity` classes | **MET.** strategy registry, derived experiment view, lineage and champion all exist. Model registry added: `TradeDecision.model` records which model produced each decision, and `model_registry.py` groups decisions by it |
 | **4** backtest / walk-forward / cost / leakage / stress / overfitting | strict OOS, cost on both sides, leakage guard, stress, trial control | `research/` package; `point-in-time-no-leakage`, `pnl-accounting` | **MET, and negative.** 27 of 27 strategies return `INSUFFICIENT`: 3 out-of-sample trades against the 10 required for 27 trials. Not one strategy has enough OOS evidence to be called anything |
-| **5** shadow trading | real decision path, no broker contact, no PnL leakage | `shadow-live-consistency` class; live journal | **MET.** `status=SHADOWED`, `order_id=None`, cycle count unchanged 920/920, account realized PnL `None` |
+| **5** shadow trading | real decision path, no broker contact, no PnL leakage | `shadow-live-consistency` class (mechanism only) + live journal (stage) | **MECHANISM MET, STAGE NOT RUN.** The sink is real, switchable by `MIN_AGENT_SHADOW`, and proven not to leak by `shadow-not-executed`. But the journal holds **0** `SHADOWED` executions, the flag is off, and the single `SHADOW_ORDER_INTENT` carries the rationale `"shadow stage smoke test"`. The earlier row claimed MET quoting `status=SHADOWED` and a 920/920 cycle count that the live journal does not contain |
 | **6** evidence-gated probation | no promotion without verifiable evidence | `lifecycle-invariants` class; live registry | **MET.** both PROBATION strategies blocked with the reason recorded |
 | **7** prospective promote / pause / retire | decisions driven by accumulated prospective evidence | lifecycle runs on evidence and has retired 12 strategies | **INCOMPLETE.** the mechanism works, but prospective *duration* is 1 clean session. No strategy has been promoted or retired on prospective evidence specifically |
 | **8** regime-aware allocation, retraining, evolution | — | — | **NOT STARTED, correctly.** Phase 7 has not finished. Regime is *measured* (§3) but nothing allocates by it |

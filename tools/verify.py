@@ -38,6 +38,11 @@ SRC = ROOT / "src"
 TESTS = ROOT / "tests" / "min_agent"
 
 PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
+#: WARN is a finding, not a gate failure: only FAIL turns the gate red
+#: (`failed = [r for r in results if r.status == FAIL]`). Added for
+#: `shadow-stage-exercised`, which must report that a phase has never run
+#: without turning the whole gate red over a fact about the paper account.
+WARN = "WARN"
 
 
 #: Every test file, and the check class it belongs to. Assigning a file to more
@@ -500,6 +505,44 @@ def check_replay_audit() -> Result:
 EXECUTED_STATUSES = {"SUBMITTED", "FILLED"}
 
 
+def check_shadow_stage_has_actually_run() -> Result:
+    """Report whether the shadow stage has ever executed, as distinct from existing.
+
+    The gap this exists to close: PHASES.md marked Phase 5 MET citing
+    `status=SHADOWED` from the live journal, and the journal has never contained
+    one. `MIN_AGENT_SHADOW` is off, the sink is implemented and proven not to leak,
+    and none of that is evidence that the stage ran. Reading a phase exit criterion
+    off code that exists rather than code that executed is how a gate ends up
+    certifying a phase nobody has walked through.
+
+    Deliberately reports rather than fails. A system that has never run shadow is
+    an honest starting state, not a defect - but it must not be able to say "MET".
+    """
+    journal = ROOT / "runtime" / "min_agent" / "journal.jsonl"
+    if not journal.exists():
+        return Result("shadow-stage-exercised", SKIP, "no journal to inspect")
+    shadowed = 0
+    intents = 0
+    with journal.open(encoding="utf-8") as handle:
+        for line in handle:
+            if "SHADOWED" in line:
+                shadowed += 1
+            if "SHADOW_ORDER_INTENT" in line:
+                intents += 1
+    if shadowed:
+        return Result(
+            "shadow-stage-exercised", PASS,
+            f"{shadowed} shadowed execution(s) on record across {intents} intent(s)",
+        )
+    return Result(
+        "shadow-stage-exercised", WARN,
+        f"the shadow mechanism is verified but the stage has never run: "
+        f"{shadowed} shadowed execution(s), {intents} intent(s) on record",
+        "MIN_AGENT_SHADOW is off; Phase 5 cannot be called MET on the strength of "
+        "mechanism tests alone",
+    )
+
+
 def check_shadow_cannot_count_as_executed() -> Result:
     """No production module may treat a shadowed order as an executed trade.
 
@@ -612,11 +655,20 @@ def check_data_integrity() -> Result:
 
 
 def check_shadow_live_consistency() -> Result:
-    """Live must be unreachable, and probation must be a real gate.
+    """Live must be unreachable, probation must be a real gate, shadow must exist.
 
-    Shadow trading is *not* implemented - the word appears in docstrings only. The
-    check therefore asserts the two things that do exist and reports the gap,
-    rather than quietly passing a check that cannot be written yet.
+    This check verifies that the shadow *mechanism* is real and switchable. It does
+    **not** verify that the shadow *stage* has ever been run, and it must not be
+    cited as if it did: `docs/superpowers/PHASES.md` recorded Phase 5 as MET with
+    "status=SHADOWED" quoted from the live journal, while the journal contains zero
+    `SHADOWED` executions and `MIN_AGENT_SHADOW` is off. Unit tests that the sink
+    does not leak are evidence about the mechanism, not about the stage, and
+    conflating the two is how a phase exit criterion gets marked satisfied by code
+    that has never executed.
+
+    The stale line this replaces - "Shadow trading is *not* implemented, the word
+    appears in docstrings only" - was itself withdrawn in STATUS.md while it stayed
+    live here. A check whose docstring is known-false is worse than no check.
     """
     problems: list[str] = []
     rc, out = _run([sys.executable, "-c", (
@@ -980,6 +1032,7 @@ def main() -> int:
     results.append(check_units_are_where_systemd_looks())
     results.append(check_replay_audit())
     results.append(check_shadow_cannot_count_as_executed())
+    results.append(check_shadow_stage_has_actually_run())
     results.append(check_research_trial_ledger())
     results.append(check_doctor_checks_are_all_reachable())
     results.append(check_syntax_import())
