@@ -142,3 +142,36 @@ def test_rejections_do_not_count_as_admissions(tmp_path):
     check = _check(report)
     assert check.status.value == "fail"
     assert "refused-001" in check.detail
+
+
+def test_refused_and_not_selectable_is_accounted_for(tmp_path):
+    """A gate that says no is a gate working, not a gate being bypassed.
+
+    The first version of the repaired check demanded an ACCEPTED event for every
+    file, so a correctly-refused spec sitting at RETIRED was reported as a
+    bypass - and re-adjudicating the five unaccounted files could be applied and
+    still leave the gate red for having done the right thing. Refused plus
+    non-selectable is a complete disposition.
+    """
+    report = _build(
+        tmp_path,
+        files=[_spec("refused-001", lifecycle="RETIRED")],
+        reviews=[("refused-001", "REJECTED")],
+    )
+    check = _check(report)
+    assert check.status.value == "ok", (
+        f"a refused spec that is retired is accounted for, got {check.status.value}: "
+        f"{check.detail}"
+    )
+
+
+def test_refused_but_still_selectable_is_the_worse_failure(tmp_path):
+    """Refused and ACTIVE means the gate's verdict was ignored."""
+    report = _build(
+        tmp_path,
+        files=[_spec("refused-001", lifecycle="ACTIVE")],
+        reviews=[("refused-001", "REJECTED")],
+    )
+    check = _check(report)
+    assert check.status.value == "fail"
+    assert "still selectable" in check.detail, check.detail

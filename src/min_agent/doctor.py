@@ -372,6 +372,7 @@ def _check_admission_provenance(
     """
     reviews = journal.read_events("STRATEGY_ADMISSION_REVIEWED")
     accepted = {e.strategy_id for e in reviews if e.status == "ACCEPTED" and e.strategy_id}
+    refused = {e.strategy_id for e in reviews if e.status == "REJECTED" and e.strategy_id}
     library = StrategyLibrary(config.strategy_dir)
     strategies = library.list()
     if not reviews:
@@ -381,14 +382,34 @@ def _check_admission_provenance(
                    "no admission reviews in the journal to compare the library against")
         return
     # No separate branch for "reviews exist but none was accepted": that is the
-    # same finding as any other unadmitted file, and an early return here reported
-    # the condition without naming the file, which is the one thing an operator
-    # needs. Every file simply falls through to the loop below.
+    # same finding as any other unadjudicated file, and an early return here
+    # reported the condition without naming the file, which is the one thing an
+    # operator needs. Every file simply falls through to the loop below.
+
+    # Not selectable is the gate's own way of saying no. A spec the gate refused is
+    # properly accounted for once it is RETIRED or PAUSED, and demanding an ACCEPTED
+    # event for it instead reported the correct outcome as a bypass - which is how a
+    # re-adjudication of the five unaccounted files could be applied and leave the
+    # gate red for having done the right thing. The failure being guarded against is
+    # a file that is *in the library and tradeable* with no verdict behind it.
+    NOT_SELECTABLE = {"RETIRED", "PAUSED"}
+
+    def accounted(strategy: StrategySpec) -> bool:
+        if strategy.strategy_id in accepted:
+            return True
+        return (strategy.strategy_id in refused
+                and strategy.lifecycle in NOT_SELECTABLE)
 
     gate_since = min(e.timestamp for e in reviews)
     bypasses, legacy = [], []
     for strategy in strategies:
-        if strategy.strategy_id in accepted:
+        if accounted(strategy):
+            continue
+        # A refused spec that is still selectable is a different failure from an
+        # unadjudicated one, and it is the more dangerous of the two.
+        if strategy.strategy_id in refused:
+            bypasses.append((strategy.strategy_id, strategy.lifecycle, None,
+                             "refused by admission but still selectable"))
             continue
         # created_at is model-supplied and demonstrably unreliable (three files
         # share one timestamp), so the on-disk mtime is the honest witness.
@@ -398,24 +419,28 @@ def _check_admission_provenance(
         except OSError:
             written = None
         if written is not None and written > gate_since:
-            bypasses.append((strategy.strategy_id, strategy.lifecycle, written))
+            bypasses.append((strategy.strategy_id, strategy.lifecycle, written, None))
         else:
             legacy.append(strategy.strategy_id)
 
     if bypasses:
         fills = _fills_by_strategy(journal)
         traded = [
-            f"{sid}={fills.get(sid, 0)}fill(s)" for sid, _lc, _w in bypasses
+            f"{sid}={fills.get(sid, 0)}fill(s)" for sid, _lc, _w, _n in bypasses
             if fills.get(sid, 0)
         ]
+        detail = ", ".join(
+            f"{sid}({lc}{', ' + note if note else ''})"
+            for sid, lc, _w, note in bypasses[:6]
+        )
         report.add(
             "admission provenance", FAIL,
-            f"{len(bypasses)} strategy file(s) entered the library after the gate "
-            f"existed with no accepted admission: "
-            f"{', '.join(f'{sid}({lc})' for sid, lc, _w in bypasses[:6])}."
+            f"{len(bypasses)} strategy file(s) are in the library without a "
+            f"disposition the gate can stand behind: {detail}."
             + (f" Broker-confirmed fills attributed to them: {', '.join(traded)}."
                if traded else " No broker-confirmed fills attributed to them yet."),
-            "written outside the admission path; each needs a recorded disposition",
+            "each needs a recorded admission verdict, and a refused one must be "
+            "retired or paused",
         )
     elif legacy:
         report.add(
@@ -426,8 +451,9 @@ def _check_admission_provenance(
         )
     else:
         report.add("admission provenance", OK,
-                   f"all {len(strategies)} file(s) traceable to an accepted admission "
-                   f"({len(accepted)} accepted admissions in the journal)")
+                   f"all {len(strategies)} file(s) carry a disposition the gate can "
+                   f"stand behind ({len(accepted)} accepted, {len(refused)} refused "
+                   f"and not selectable)")
 
 
 def _fills_by_strategy(journal: JsonlJournal) -> dict[str, int]:

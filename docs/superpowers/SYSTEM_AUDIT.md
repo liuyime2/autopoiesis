@@ -2108,3 +2108,81 @@ library of its only evidence-backed strategy; accepting it retroactively would
 launder a bypass into a pass. Six tests pin the resolved behaviour, including that
 post-gate entry fails, that genuine legacy stays a warning, and that a bypass
 names the trading it caused.
+
+## 38. Re-adjudicating five strategies the gate never approved
+
+The operator chose to re-adjudicate the five files through the real gate rather
+than retire them, accept them retroactively, or leave the gate red. That is the
+right call: it produces evidence instead of a decision, and the gate could still
+refuse. It also refuses two of them.
+
+`tools/adjudicate_unadmitted.py` does this, and it is deliberately not a rubber
+stamp. `StrategyAdmission.admit()` short-circuits with *"strategy_id already
+exists"* for anything already in the library, so feeding these files to it
+unchanged would have recorded a verdict that evaluates nothing. Each spec is
+therefore judged against a library that excludes itself - the view it would have
+met had it been proposed fresh - so the rules decide it now exactly as they would
+have decided it then. The `TREND_FOLLOW` reference-price rule is fed the last
+price the journal actually observed, `SPY 764.18` from alpaca at
+2026-09-29 15:57:42-0400, because a gate that decides on an invented price is not
+a gate.
+
+| strategy | verdict | reason | lifecycle |
+| --- | --- | --- | --- |
+| `fixed-size-buy-001` | **REFUSE** | behaviourally identical to `fixed-size-buy-002` | ACTIVE → RETIRED |
+| `fixed-size-sell-001` | **REFUSE** | behaviourally identical to `trend-follow-sell-002` | RETIRED → RETIRED |
+| `tiny-fixed-size-001` | APPROVE | approved | RETIRED → PROBATION |
+| `trend-follow-buy-001` | APPROVE | approved | ACTIVE → PROBATION |
+| `trend-follow-sell-001` | APPROVE | approved | PAUSED → **PAUSED** |
+
+Two things worth being explicit about. `fixed-size-buy-001` held all 16 of its
+broker-confirmed fills and the library's only broker-verified realized PnL, and
+the gate refused it as a behavioural duplicate - so the strategy the evidence was
+accumulated under is not one the gate endorses. Its realized PnL is untouched
+(realized, broker-verified, and attributed by id in the ledger); only its forward
+selection stops.
+
+And `trend-follow-sell-001` stays PAUSED even though it was approved. `PROBATION`
+is selectable and `PAUSED` is not, so promoting it would have put a strategy back
+into trading as a side effect of closing a paperwork gap. Approval makes a spec
+legitimate; it does not retract a risk decision.
+
+### 38.1 Two bugs I introduced doing this, both fixed
+
+**The check demanded `ACCEPTED`, so a correct refusal read as a bypass.** My
+repaired check required every library file to have an accepted admission, which
+means a spec the gate *refused* and correctly retired was still reported as a
+bypass - the gate stayed red for having done the right thing. The failure actually
+worth guarding is a file that is in the library and *tradeable* with no verdict
+behind it. So `REFUSED` + not selectable is now a complete disposition, and
+`REFUSED` + `ACTIVE` is reported as its own, more dangerous, finding.
+
+**I changed lifecycles without recording the decision.** The tool wrote lifecycle
+values with no `STRATEGY_LIFECYCLE_UPDATED` event, tripping
+`_check_lifecycle_provenance` - the check that exists precisely to catch a
+strategy reaching a gated state with no recorded decision. The deeper problem: the
+three approved strategies then had `PROBATION` on disk with a June decision on
+record, and the lifecycle check **cannot see that**, because
+`_check_lifecycle_provenance` deliberately exempts the default states
+`PROBATION`, `BASELINE` and `ACTIVE`. So a strategy can reach a non-default
+lifecycle with no decision behind it and the audit stays silent. That exemption is
+pre-existing and deliberate ("a gated state is what needs an account"); changing it
+has a wide blast radius and is not mine to change unilaterally, so it is recorded
+here as a known gap rather than quietly altered.
+
+The tool now writes the lifecycle decision whenever the current lifecycle is not
+already backed by one - not merely when the file changes, since a re-run that only
+compared old against new would have found them equal and left the gap forever -
+and a second pass backfills decisions for strategies this tool re-adjudicated whose
+admission verdict already existed, which is how the three approved ones were
+missed on the first run.
+
+Eight tests cover the check, including that post-gate entry fails, genuine legacy
+stays a warning, a refused-and-retired spec is accounted for, a refused-and-ACTIVE
+spec is not, and a bypass names the trading it caused.
+
+`make verify`: **24 classes, 0 failed, 1061 test executions, doctor OK, exit 0.**
+The four remaining warnings are the honest kind: the model is still mis-calibrated
+(Brier 0.589 against a 0.25 baseline), PnL attribution still has 29 unmatched
+sell shares, and there is still no champion because no strategy has
+broker-verified positive realized PnL.
