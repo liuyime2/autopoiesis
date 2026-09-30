@@ -2814,3 +2814,65 @@ swallowing it: a count that never moves would mean nothing is ever resolving.
 Both bugs share a shape worth naming: **checks that can only be exercised by the
 market.** A gate whose green state depends on the absence of data is not a gate, and
 the only way to find that out is to let real data arrive.
+
+## 49. Verified end state
+
+Six facts, each re-measured against live state immediately before being recorded.
+
+**Real.** 988 of 988 journal cycles carry `source: alpaca`. There is no synthetic
+or placeholder source anywhere in the decision path.
+
+**Alpaca link complete.** Six of six endpoints reachable by live API call - `get_clock`,
+`get_account`, `list_positions`, `list_assets`, `get_activities`, `list_orders` - and
+the production ingestor returns a 30-day broker batch with zero missing reasons: 11
+orders, 12 activities, 21 portfolio-history points.
+
+**Running and waiting for the open.** `ollama.service`, `min-agent.service` and
+`quant-watchdog.timer` are all active and enabled, loading from durable paths under
+`$HOME/.config/systemd/user` with zero enablement links into tmpfs. The broker clock
+reports `next_open=2026-09-30 09:30:00-04:00`.
+
+**Reviewed and confirmed.** `make verify`: 26 classes, 0 failed, 1175 test executions
+across 60 files, exit 0. The `replay-audit` gate independently reproduces 9 of 9
+figures by naive FIFO arithmetic over raw journal text, cross-checked against the
+production ledger for the same journal - 23 closed lots, +564.39 realized, 29
+unmatched sell shares, agreeing by both routes.
+
+**The daemon path completes against the live broker.** One real cycle recorded
+`src=llm model=qwen3.8:27b HOLD qty=0`, Guardian approved, execution `SKIPPED` with
+the market closed. The model authored the decision; there was no fallback.
+
+**Every problem previously reported is closed.** Every row filed as *broken* in
+`CAPABILITY_CLASSIFICATION.md` is one that was repaired. The single open row is the 29
+shares whose cost basis was never written to the journal: permanently unprovable,
+reported as unproven rather than invented, and not a defect any code can fix.
+
+### 49.1 Not claimed
+
+This audit establishes that the system is real, connected, running, and internally
+consistent. It establishes nothing about profitability, and the distinction matters
+more than anything else in this document.
+
+The realized +564.39 across 23 broker-verified closed lots belongs **entirely to the
+`baseline` decision source**. The model holds 10 open SPY shares and **zero** closed
+lots, so its realized contribution is 0.00 by construction rather than because it did
+nothing. No strategy carries broker-verified positive realized PnL, so `champion=NONE`
+is the correct report rather than a broken one. 70 decisions are still awaiting their
+24-hour horizon, and the strategy library is parked in probation because nothing has
+earned promotion - the loop is refusing to promote on the absence of trouble, which
+is the behaviour the objective asks for and not a defect to fix.
+
+### 49.2 A pattern worth carrying forward
+
+Four times this session I stated a scope claim more strongly than the evidence
+supported: "27/27 strategies INSUFFICIENT" when 4 were `PASS_SCREENED`; six strategies
+`ACTIVE` when none was; that the shadow chain "cannot be expressed" when it runs as a
+flag flip; and that shadow is a "dead end" for promotion when offline validation reads
+counterfactual verdicts and shadow decisions do feed that gate.
+
+The first two came from reading a historical event tally as current state. The last two
+came from asserting things about the promotion path without opening it. The gate and
+the ledger were checked constantly; the promotion gate was not.
+
+Each correction is recorded where the original claim stood rather than edited away,
+because a withdrawn claim left standing is worse than one never made.
