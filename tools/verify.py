@@ -405,6 +405,71 @@ def check_home_independence() -> Result:
     )
 
 
+def check_unit_environment_files_exist() -> Result:
+    """Every deployed unit's EnvironmentFile must point at a file that exists.
+
+    Found by the verifier, not by the gate: the unattended watchdog review had been
+    reporting `ok=False exit=1 failures=[alpaca credentials]` on every run, 275 of 453
+    doctor runs in total, while `minictrl doctor` was green from a shell with the
+    environment sourced. The watchdog unit carried a hardcoded
+    `EnvironmentFile=-%h/.config/min-agent/env`, which resolves to $HOME - where this
+    account's credentials are not - and the leading `-` told systemd to ignore the
+    missing file instead of reporting it.
+
+    A path inside a unit file is a configuration value like any other, and this is the
+    exact case the objective warns about: it existed, it parsed, the unit started, and
+    the review it powered was red for a reason it could not see.
+    """
+    unit_dir = _durable_unit_dir()
+    if unit_dir is None:
+        return Result("unit-environment-files", SKIP, "no durable unit directory")
+    problems: list[str] = []
+    checked = 0
+    for unit in sorted(Path(unit_dir).glob("*.service")):
+        for line in unit.read_text().splitlines():
+            if not line.startswith("EnvironmentFile="):
+                continue
+            spec = line.split("=", 1)[1].strip()
+            # A leading `-` means "ignore if missing", which is how the broken path
+            # stayed hidden. Recorded as a problem in its own right.
+            if spec.startswith("-"):
+                problems.append(
+                    f"{unit.name} silently ignores a missing env file (`-{spec[1:]}`)"
+                )
+                spec = spec[1:]
+            spec = spec.replace("%h", os.path.expanduser("~"))
+            checked += 1
+            if not os.path.exists(spec):
+                problems.append(f"{unit.name} references a missing file: {spec}")
+    if problems:
+        return Result(
+            "unit-environment-files", FAIL,
+            "; ".join(problems[:4]),
+            "a unit whose EnvironmentFile is absent still starts, and the health "
+            "review it powers then fails on a cause it cannot see",
+        )
+    return Result(
+        "unit-environment-files", PASS,
+        f"{checked} EnvironmentFile reference(s) across the deployed units all resolve",
+    )
+
+
+def _durable_unit_dir() -> str | None:
+    if not shutil.which("systemctl"):
+        return None
+    try:
+        proc = subprocess.run(
+            ["systemctl", "--user", "show", "min-agent.service", "-p", "FragmentPath", "--value"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except Exception:
+        return None
+    path = proc.stdout.strip()
+    if not path or path.startswith("/run/"):
+        return None
+    return str(Path(path).parent)
+
+
 def check_units_are_where_systemd_looks() -> Result:
     """A --user unit is only reboot-persistent if it lives where the manager reads.
 
@@ -1066,6 +1131,7 @@ def main() -> int:
     results.append(check_production_research_separation())
     results.append(check_home_independence())
     results.append(check_units_are_where_systemd_looks())
+    results.append(check_unit_environment_files_exist())
     results.append(check_replay_audit())
     results.append(check_shadow_cannot_count_as_executed())
     results.append(check_shadow_stage_has_actually_run())

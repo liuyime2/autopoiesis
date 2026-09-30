@@ -32,7 +32,9 @@ Environment=MIN_AGENT_CURRICULUM_INTERVAL_SECONDS=3600
 # Credentials are never baked into a unit file. %h is $HOME, which is at
 # user quota on this host, so the path is templated by `minictrl
 # install-service` to whichever location actually has room.
-EnvironmentFile=-@ENVFILE@
+# No leading `-` for the same reason as the watchdog: a missing credentials file
+# must stop the unit with the actual cause named.
+EnvironmentFile=@ENVFILE@
 
 ExecStart=@PYTHON@ -m min_agent.cli --daemon
 

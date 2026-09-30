@@ -9,7 +9,16 @@ WorkingDirectory=@ROOT@
 Environment=PYTHONPATH=@ROOT@/src
 Environment=PATH=@ENVBIN@:/usr/local/bin:/usr/bin:/bin
 Environment=OLLAMA_BASE_URL=http://127.0.0.1:11434
-EnvironmentFile=-%h/.config/min-agent/env
+# Rendered by minictrl from the same variable as min-agent.service. This was a
+# hardcoded -%h/.config/min-agent/env, which resolves to $HOME - a directory
+# this account's credentials are not in - so the watchdog started with no
+# credentials and its review reported "alpaca credentials" as a failure on
+# every run, 275 of 453 doctor runs in total, and the leading `-` told systemd
+# to ignore the missing file rather than complain about it.
+#
+# No leading `-`: a missing credentials file should stop the unit with the
+# real reason, not start it and surface as a confusing health failure later.
+EnvironmentFile=@ENVFILE@
 ExecStart=@PYTHON@ -m min_agent.cli --doctor --quiet
 
 # The whole point: an unattended system that never notices it is broken is the

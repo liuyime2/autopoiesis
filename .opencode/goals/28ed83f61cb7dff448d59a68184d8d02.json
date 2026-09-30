@@ -13,11 +13,11 @@
       "required": true,
       "status": "failed",
       "evidenceIDs": [
-        "76813384-2d9a-4e10-a844-fac5ec2a54b3"
+        "59588f07-7996-4bf4-b5f0-75f24391c67a"
       ],
       "verification": "semantic",
       "source": "objective",
-      "updatedAt": 1790763058700
+      "updatedAt": 1790763875072
     }
   ],
   "evidence": [
@@ -37,6 +37,23 @@
         "verdict": "failed",
         "evidenceCount": 5
       }
+    },
+    {
+      "id": "59588f07-7996-4bf4-b5f0-75f24391c67a",
+      "kind": "file",
+      "trust": "verifier",
+      "summary": "Independent verifier: failed. Compound completion claim; current evidence contradicts the completeness/confirmation parts. (1) The unattended health check meant to \"confirm\" the system is red right now: watchdog.log's last line is `ok=False exit=1 failures=[alpaca credentials]`, and all recent watchdog runs fail identically; that check is FAIL-severity in doctor.py. The tree shows why: watchdog.service.in reads `EnvironmentFile=-%h/.config/min-agent/env` while minictrl/STATUS.md put the keys in `$XDG_CONFIG_HOME/min-agent/env`, and the watchdog template is the only unit not substituted with @ENVFILE@; no verify class or test references EnvironmentFile, so the documented green gate does not cover it. (2) \"All previous problems solved\" is contradicted by the project's own authoritative docs: PHASES.md says the success criterion is not met, Phase 5 is MECHANISM MET/STAGE NOT RUN, Phase 7 INCOMPLETE, and STATUS.md still lists credential rotation and reboot-persistent units as required. SYSTEM_AUDIT §49's \"Every problem previously reported is closed\" is prose, and the docs disagree numerically (PHASES.md \"test executions: 1174\" vs SYSTEM_AUDIT \"1182 test executions\"). (3) The make verify / make test results rest on prose only; no host test evidence was given and I cannot execute them. What does hold: the daemon is running and waiting for the open (heartbeat.json 2026-09-30T10:10:44Z \"market closed; maintenance only\"; newest doctor-history entry 2026-09-30T10:20:58Z has no `daemon` failure under a real pid/staleness probe). One component holds; the link-complete/confirmed/all-problems-resolved components are contradicted by live evidence. Evidence: runtime/min_agent/watchdog.log: ok=False exit=1 failures=[alpaca credentials] warnings=[risk-driven halts,experiment chain,model calibration,pnl attribution,model registry,llm fallback,champion / search] checks=34; tools/watchdog.service.in: EnvironmentFile=-%h/.config/min-agent/env; minictrl: ENV_FILE=\"${MIN_AGENT_ENV_FILE:-$XDG_CONFIG_HOME/min-agent/env}\"; docs/superpowers/PHASES.md: The objective's own success criterion is not met and cannot be manufactured; docs/superpowers/PHASES.md: **MECHANISM MET, STAGE NOT RUN.**; docs/superpowers/SYSTEM_AUDIT.md: **Every problem previously reported is closed.**; runtime/min_agent/heartbeat.json: \"message\": \"market closed; maintenance only\"",
+      "createdAt": 1790763875072,
+      "goalRevision": 1,
+      "requirementIDs": [
+        "9c4be591-089c-4731-b849-ac34ff3ead19"
+      ],
+      "source": "semantic-verifier",
+      "passed": false,
+      "metadata": {
+        "verdict": "failed",
+        "evidenceCount": 7
+      }
     }
   ],
   "checks": [],
@@ -52,7 +69,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790763661098,
+      "observedAt": 1790764522709,
       "lastRequestTokens": 418142,
       "lastInputTokens": 417545
     }
@@ -81,8 +98,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 16,
-  "observedProgressRevision": 15,
+  "progressRevision": 19,
+  "observedProgressRevision": 17,
   "progressFingerprints": [
     "shell-worktree:ee102d12789dd54349b1662438fe8069ed627c7c900a1ea7c2c0db29fa129a05",
     "shell-worktree:027d49c5a869cfb42a78cbb614c78407afbe88f34da32d650b80ef33ebde4f2c",
@@ -99,7 +116,10 @@
     "shell-worktree:13c891451e38cd7fb2898d1ec0b9927cfd83c06b207e1a7906902441cd82f7fc",
     "shell-worktree:ef6059311d74a50bd6b14d457ff54a3eb148870d5c3e1ced2048cc4759091e34",
     "shell-worktree:907a0606621600bd1d9ea0ffb3f19f129b525799b0b5c1590e461fdd0c283c20",
-    "shell-worktree:be8a4cd4346c8b89e223d50ebc15501d57410e60cf17e87d529a496c832fa490"
+    "shell-worktree:be8a4cd4346c8b89e223d50ebc15501d57410e60cf17e87d529a496c832fa490",
+    "shell-worktree:b131af8fd90d065499928413c36779e6d9b336bd873e9e916add4d55656f6a1c",
+    "shell-worktree:7731600d33be2391d000a09168d5a5f67a6e8e20aa9dd989e4f2d922db2da635",
+    "shell-worktree:e7e73d42e752ce0fa206b346713592a1ab46c22bac63a128c1418044dc6730ee"
   ],
   "stalledTurns": 0,
   "progressNotes": [
@@ -197,11 +217,26 @@
       "time": 1790763344728,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790763679373,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790763943745,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790764159071,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 161,
+  "storageGeneration": 178,
   "createdAt": 1790759144543,
-  "updatedAt": 1790763661098,
+  "updatedAt": 1790764522709,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:1794a70a8627a267a345dc5a491d2bc563f0a8246e1de001013d764d1eac1458",

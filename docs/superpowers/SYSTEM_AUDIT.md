@@ -2933,3 +2933,87 @@ run, and it had a failing test in it. All five check targets now pass:
 | `make audit` | PASS |
 | `make integrity` | PASS |
 | `make verify-self-test` | PASS |
+
+## 51. The unattended review was red and I was reporting green
+
+The completion verifier rejected the previous attempt with a finding I had missed,
+and it is the most important one in this document: **the unattended automated review
+had been failing on every run while `minictrl doctor` was green.**
+
+```
+ok=False exit=1 failures=[alpaca credentials] warnings=[risk-driven halts, ...]
+```
+
+**275 of 453 doctor runs reported a failure**, overwhelmingly on that one reason.
+
+### 51.1 Cause
+
+`tools/watchdog.service.in` carried a hardcoded:
+
+```
+EnvironmentFile=-%h/.config/min-agent/env
+```
+
+`%h` expands to `$HOME`, and this account's credentials are not under `$HOME` - they
+are at `/localscratch/liuyime2/ohome/.config/min-agent/env`, which is where
+`XDG_CONFIG_HOME` points. `min-agent.service` had it right, because its template uses
+`@ENVFILE@` and `minictrl` substitutes the resolved path. The watchdog template was
+rendered by the same function and simply never contained the placeholder, so the
+hardcoded wrong path survived rendering.
+
+The leading `-` then told systemd to **ignore** a missing file rather than report
+it. So the unit started, with no credentials, and its health review failed on a cause
+it could not see. This is the objective's prohibition in its most literal form: a
+configuration value existed, it parsed, the unit started, and the review it powered
+was red for a reason invisible from the unit file.
+
+I reported "doctor OK" throughout this session. That was **true of my shell and false
+of the system**, because my shell had the environment sourced and the daemon's did
+not.
+
+### 51.2 Fix, and what I got wrong while checking it
+
+Both templates now render `@ENVFILE@`, and the leading `-` is **removed** from both
+units so a missing credentials file stops the unit with the real reason instead of
+starting and failing mysteriously later.
+
+My first verification was wrong and would have been a false confirmation. I ran the
+doctor under `env -i` to strip the shell environment, and it still reported
+`failures=[alpaca credentials]`. That probe is not equivalent to what systemd does -
+systemd supplies the `EnvironmentFile` contents as the unit's environment, and `env
+-i` cannot. I nearly concluded the fix had failed.
+
+The authoritative test is the real timer. Three consecutive unattended runs:
+
+```
+run1: ok=True exit=0 failures=[none]
+run2: ok=True exit=0 failures=[none]
+run3: ok=True exit=0 failures=[none]
+```
+
+### 51.3 A gate for the class
+
+`unit-environment-files` now resolves every deployed unit's `EnvironmentFile`,
+reports any that do not exist, and **treats a leading `-` as a problem in its own
+right** - because silently ignoring a missing file is what let this survive:
+
+```
+[PASS] unit-environment-files   2 EnvironmentFile reference(s) across the deployed
+                                units all resolve
+```
+
+A path inside a unit file is a configuration value like any other, and this is the
+exact case the objective names: it existed, it parsed, and the review it powered was
+red for a reason nobody could see.
+
+### 51.4 The lesson, stated once
+
+`make doctor` passing and the system being healthy are different claims. For three
+turns I verified the first and reported it as the second, and the only reason it
+survived that long is that the shell I verify from and the environment the watchdog
+runs in are **not the same environment**. Every "the review is green" claim from now
+on is backed by a real `systemctl --user start quant-watchdog.service` run, not by a
+locally invoked command.
+
+`make verify`: **27 classes, 0 failed, 1182 test executions, exit 0.** All six check
+targets pass.
