@@ -472,6 +472,64 @@ def _durable_unit_dir() -> str | None:
     return str(Path(path).parent)
 
 
+def check_the_running_daemon_matches_the_worktree() -> Result:
+    """The daemon's heartbeat must carry the source fingerprint of what is on disk.
+
+    Found the hard way. `evaluator.is_system_rejection` was corrected and tested, and
+    `fixed-size-sell-005` was restored to PROBATION - and then retired again, with the
+    identical reason, two hours later, because the daemon had been left running since
+    before the fix. A Python process holds the code it imported. Editing the source
+    changes nothing for it.
+
+    Nothing noticed. The heartbeat was fresh, journal events were landing, `doctor` was
+    green, and the watchdog reported ok=True. Liveness and currency are separate
+    properties, and every check in this gate was asking about the first. A healthy
+    daemon running superseded code is the most expensive kind of wrong: it looks like
+    progress and it is not.
+
+    The fingerprint is hashed from the `min_agent` package as it sits on disk, and the
+    heartbeat records the one the running process imported. Comparing the two turns "did
+    anyone restart it" from an unanswerable question into a fact.
+    """
+    heartbeat = ROOT / "runtime" / "min_agent" / "heartbeat.json"
+    if not heartbeat.exists():
+        return Result("daemon-source-matches-worktree", SKIP, "no heartbeat; daemon not running")
+    try:
+        recorded = json.loads(heartbeat.read_text(encoding="utf-8")).get("source_fingerprint")
+    except (OSError, json.JSONDecodeError) as exc:
+        return Result("daemon-source-matches-worktree", FAIL, f"unreadable heartbeat: {exc}")
+    if not recorded:
+        return Result(
+            "daemon-source-matches-worktree", FAIL,
+            "the running heartbeat carries no source_fingerprint, so it predates the "
+            "field and nothing can say whether it is running the code on disk",
+        )
+
+    proc = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.path.insert(0, %r); "
+         "from min_agent.daemon import source_fingerprint; print(source_fingerprint())"
+         % str(ROOT / "src")],
+        capture_output=True, text=True, timeout=180,
+    )
+    current = proc.stdout.strip()
+    if proc.returncode != 0 or not current:
+        return Result(
+            "daemon-source-matches-worktree", FAIL,
+            f"could not compute the worktree fingerprint: {proc.stderr.strip()[:120]}",
+        )
+    if recorded != current:
+        return Result(
+            "daemon-source-matches-worktree", FAIL,
+            f"the daemon reports fingerprint {recorded} but src/min_agent is now {current}"
+            f" - it is running superseded code; systemctl --user restart min-agent.service",
+        )
+    return Result(
+        "daemon-source-matches-worktree", PASS,
+        f"daemon and worktree both at {current}",
+    )
+
+
 def check_units_are_where_systemd_looks() -> Result:
     """A --user unit is only reboot-persistent if it lives where the manager reads.
 
@@ -1214,6 +1272,7 @@ def main() -> int:
     results.append(check_production_research_separation())
     results.append(check_home_independence())
     results.append(check_units_are_where_systemd_looks())
+    results.append(check_the_running_daemon_matches_the_worktree())
     results.append(check_unit_environment_files_exist())
     results.append(check_replay_audit())
     results.append(check_shadow_cannot_count_as_executed())

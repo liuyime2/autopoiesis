@@ -716,6 +716,17 @@ class HeartbeatPayload(BaseModel):
     active_strategy_id: str | None = None
     last_cycle_id: str | None = None
     message: str = ""
+    #: Fingerprint of the `src/min_agent` tree this process imported, so a running
+    #: daemon can be compared against the worktree it claims to be running.
+    #:
+    #: Liveness and currency are different properties and a health check that only
+    #: knows about the first misses the second completely. A daemon kept running across
+    #: a fix to `evaluator.is_system_rejection` stayed perfectly healthy - fresh
+    #: heartbeat, journal events landing, `doctor` green - while continuing to retire
+    #: `fixed-size-sell-005` under the old rules, twice, hours after the rule had been
+    #: corrected and tested. Nothing in the system asked whether the process running the
+    #: code was the code on disk.
+    source_fingerprint: str | None = None
 
     @field_validator("status", mode="before")
     @classmethod

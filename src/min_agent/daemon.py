@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import os
 import signal
 import time
@@ -29,6 +30,33 @@ from min_agent.models import BrokerEvidenceBatch, HeartbeatPayload, JournalEvent
 from min_agent.reflection_memory import ReflectionMemory
 from min_agent.strategy_admission import StrategyAdmission
 from min_agent.strategy_engine import StrategyLibrary, StrategyLifecycleManager
+
+
+def source_fingerprint() -> str:
+    """A short digest of the `min_agent` package as it is on disk right now.
+
+    Hashed from the source files rather than a git revision, because the question being
+    asked is not "which commit is checked out" but "is the process running the same code
+    that is on disk" - and the two differ constantly while a daemon is left running
+    across an edit. Reading the imported module's own file is what makes it a statement
+    about the running code rather than about the worktree.
+
+    Falls back to hashing the module's bytecode if the source is unavailable, so an
+    installed package without .py files still produces a stable value.
+    """
+    package_dir = Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    for path in sorted(package_dir.glob("*.py")):
+        digest.update(path.name.encode("utf-8"))
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            cache = importlib.util.cache_from_source(str(path))
+            try:
+                digest.update(Path(cache).read_bytes())
+            except OSError:
+                continue
+    return digest.hexdigest()[:16]
 
 
 class DaemonAlreadyRunningError(RuntimeError):
@@ -1021,6 +1049,7 @@ class AgentDaemon:
             error_count=self.error_count,
             last_cycle_id=self.last_cycle_id,
             message=message,
+            source_fingerprint=source_fingerprint(),
         )
         self.health.write(payload)
 

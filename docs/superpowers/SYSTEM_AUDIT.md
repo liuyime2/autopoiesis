@@ -2832,7 +2832,7 @@ orders, 12 activities, 21 portfolio-history points.
 `$HOME/.config/systemd/user` with zero enablement links into tmpfs. The broker clock
 reports `next_open=2026-09-30 09:30:00-04:00`.
 
-**Reviewed and confirmed.** `make verify`: 28 classes, 0 failed, 1191 test executions
+**Reviewed and confirmed.** `make verify`: 29 classes, 0 failed, 1191 test executions
 across 60 files, exit 0.
 figures by naive FIFO arithmetic over raw journal text, cross-checked against the
 production ledger for the same journal - 23 closed lots, +564.39 realized, 29
@@ -3503,3 +3503,44 @@ So `fixed-size-sell-005` is back in PROBATION and selectable, with 3 cycles agai
 sell shares the agent does not own, and the fault counter still charges real faults.
 
 `make verify`: 28 classes, 0 failed, 1191 test executions across 60 files, exit 0.
+
+## 62. The fix was on disk and correct, and the daemon retired the strategy anyway
+
+`fixed-size-sell-005` was retired a second time, at 15:15:35, with the identical reason:
+"severe operational failure rate 1.00". The retirement had been undone 18 minutes
+earlier. The restore, the classification fix and its tests were all correct.
+
+The daemon had been running since 09:49. The evaluator fix was committed at 11:21. A Python
+process holds the code it imported; editing the source changes nothing for it. So the
+lifecycle review at 15:15 applied the pre-fix rule to pre-fix metrics and retired the
+strategy again, correctly, by the rule it was actually running.
+
+Nothing reported it. The heartbeat was fresh, journal events were landing, `doctor` was
+green, and the watchdog returned ok=True. Every check in this project was asking whether
+the daemon was *alive*; none was asking whether it was running *current* code. Those are
+different properties, and a healthy daemon running superseded code is the most expensive
+kind of wrong - it looks like progress and it is not. It also produced a false negative
+about me: I had reported the strategy restored, verified by reading the file, while the
+process that would overrule it was still executing rules I had already replaced.
+
+`daemon-source-matches-worktree` closes it. `HeartbeatPayload` gained
+`source_fingerprint`, hashed from the `min_agent` package as the running process
+imported it; the check recomputes the same digest from the worktree and compares. A
+mismatch names the remedy: `systemctl --user restart min-agent.service`. Proved both
+directions - appending a comment line to `evaluator.py` without restarting turned it red
+with both digests named, and restoring the file turned it green. A heartbeat carrying no
+fingerprint at all is FAIL rather than SKIP, because an old heartbeat is exactly the
+dangerous case rather than a reason to skip.
+
+Hashing the source rather than reading a git revision is deliberate: the question is not
+"which commit is checked out" but "is the process running what is on disk", and those
+differ continuously while a daemon is left running across an edit.
+
+One more error of mine inside this one. I appended `import importlib.util` with a
+conditional replace anchored on `import json`, which is not in `daemon.py`, so the import
+silently did not land and `source_fingerprint` carried a `NameError` on its fallback
+branch. `test_cli_startup.py::test_no_function_loads_a_name_that_does_not_exist` caught it
+as `daemon.source_fingerprint(): 'importlib'` - the check that exists precisely to find
+unbound names, doing its job on code written one turn earlier. I had added the import,
+seen no error, and moved on without confirming it was there. The gate I have been
+criticising for accepting unverified claims caught me doing the same thing.
