@@ -658,3 +658,72 @@ def test_an_unreadable_journal_is_recorded_and_fails_closed(tmp_path):
 
     assert loop._agent_holding("SPY") is None
     assert loop._agent_holding_errors, "the failure must be recorded, not swallowed"
+
+def test_a_sell_larger_than_the_agent_bought_does_not_make_a_later_buy_disappear(tmp_path):
+    """A SELL bigger than the agent's holding must not subtract from BUYs that came
+    after it.
+
+    Found at the first open after this was written, on a real account. The journal held
+    23 agent BUYs, then a SELL of 52 - 29 of those shares being the account owner's -
+    then 10 further agent BUYs. Summing the sides as totals gives 33 - 52 = -19, so the
+    loop reported the agent as holding nothing and the Guardian refused every exit,
+    including exits from shares the agent had demonstrably bought and the broker
+    confirmed it still held. Replaying in timestamp order gives 23 - 52 + 10 = 10,
+    which matches the broker holding of 10 exactly.
+
+    The clamp is not an optimisation: without it the 29 owner shares the agent sold are
+    netted against later purchases, and the agent ends up credited with a position it
+    does not own.
+    """
+    from min_agent.journal import JsonlJournal
+    from min_agent.models import JournalEvent
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    base = datetime.now(tz=timezone.utc)
+    sequence = [("BUY", 23), ("SELL", 52), ("BUY", 10)]
+    for i, (side, qty) in enumerate(sequence):
+        journal.append_event(JournalEvent(
+            event_id=f"f{i}", event_type="ORDER_FILL_CONFIRMED",
+            timestamp=base + timedelta(seconds=i), status="SUCCESS", message="m",
+            payload={"symbol": "SPY", "side": side, "filled_quantity": float(qty),
+                     "fill_price": 700.0},
+        ))
+
+    class _Loop:
+        from min_agent.loop import TradingLoop as _T
+    loop = _Loop._T.__new__(_Loop._T)
+    loop.journal = journal
+    loop._agent_holding_errors = []
+
+    assert loop._agent_holding("SPY") == 10
+
+
+def test_an_agent_holding_is_computed_in_time_order_not_journal_order(tmp_path):
+    """    read_events does not promise chronological order, and the replay depends on it.
+
+    The sequence discriminates: a commutative sum of BUY 10, SELL 12, BUY 5 gives 3,
+    while replaying in order gives 5 - the floor stops the SELL deducting below zero and
+    the later BUY is not netted against it. An earlier version of this test used
+    BUY 10, SELL 4, BUY 5, where both approaches give 11, so the test passed whether or
+    not the ordering fix was present. A test that cannot fail is not a test.
+    """
+    from min_agent.journal import JsonlJournal
+    from min_agent.models import JournalEvent
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    base = datetime.now(tz=timezone.utc)
+    for i, (side, qty) in enumerate([("BUY", 10), ("SELL", 12), ("BUY", 5)]):
+        journal.append_event(JournalEvent(
+            event_id=f"f{i}", event_type="ORDER_FILL_CONFIRMED",
+            timestamp=base + timedelta(seconds=i), status="SUCCESS", message="m",
+            payload={"symbol": "SPY", "side": side, "filled_quantity": float(qty),
+                     "fill_price": 700.0},
+        ))
+
+    class _Loop:
+        from min_agent.loop import TradingLoop as _T
+    loop = _Loop._T.__new__(_Loop._T)
+    loop.journal = journal
+    loop._agent_holding_errors = []
+
+    assert loop._agent_holding("SPY") == 5

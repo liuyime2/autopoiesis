@@ -27,23 +27,46 @@ class TradingLoop:
         refuse a SELL rather than fall back to the account's figure - the safe
         direction, since a missed exit is recoverable and selling the owner's shares
         is not.
+
+        The events are replayed in timestamp order and clamped at zero on the way.
+        Summing the SELLs as one total was wrong in a way that only surfaced once the
+        agent actually held shares: this journal contains a SELL of 52 SPY preceded by
+        23 agent BUY fills - 29 of those shares belonging to the account owner - and
+        followed by 10 further agent BUYs. A commutative sum gives 33 - 52 = -19 and
+        reports the agent as holding nothing, so the Guardian refused every exit and
+        the agent could never close a position it demonstrably owned, against a
+        broker holding of 10. Replaying in order gives 23 - 52 + 10 = 10, floored to
+        0, which is the real figure and matches the broker exactly.
+
+        Flooring is what makes the oversell visible instead of netted away. The 29
+        owner shares were liquidated by an order this agent submitted, but no
+        arithmetic should hand the agent a credit for them; the clamp keeps the
+        holding at what the agent can legitimately sell and leaves the historical
+        29-share discrepancy documented rather than absorbed into a balance.
         """
         if self.journal is None:
             return None
         try:
+            events = [
+                event
+                for event in self.journal.read_events("ORDER_FILL_CONFIRMED")
+                if (event.payload or {}).get("symbol") == symbol
+                and (event.payload or {}).get("filled_quantity") is not None
+            ]
+            # read_events does not promise chronological order, and the replay above
+            # depends on it: an out-of-order SELL would deduct against shares that
+            # had not been bought yet.
+            events.sort(key=lambda event: event.timestamp)
             quantity = 0.0
-            for event in self.journal.read_events("ORDER_FILL_CONFIRMED"):
+            for event in events:
                 payload = event.payload or {}
-                if payload.get("symbol") != symbol:
-                    continue
-                filled = payload.get("filled_quantity")
-                if filled is None:
-                    continue
+                filled = float(payload["filled_quantity"])
                 side = str(payload.get("side", "")).upper()
                 if side == "BUY":
-                    quantity += float(filled)
+                    quantity += filled
                 elif side == "SELL":
-                    quantity -= float(filled)
+                    quantity -= filled
+                quantity = max(0.0, quantity)
         except Exception as exc:
             # An unreadable journal means the holding is genuinely unknown, and
             # unknown is exactly the case the Guardian refuses. Recorded rather than

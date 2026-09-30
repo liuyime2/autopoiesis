@@ -2832,7 +2832,7 @@ orders, 12 activities, 21 portfolio-history points.
 `$HOME/.config/systemd/user` with zero enablement links into tmpfs. The broker clock
 reports `next_open=2026-09-30 09:30:00-04:00`.
 
-**Reviewed and confirmed.** `make verify`: 28 classes, 0 failed, 1182 test executions
+**Reviewed and confirmed.** `make verify`: 28 classes, 0 failed, 1184 test executions
 across 60 files, exit 0.
 figures by naive FIFO arithmetic over raw journal text, cross-checked against the
 production ledger for the same journal - 23 closed lots, +564.39 realized, 29
@@ -3317,3 +3317,54 @@ HOLD, and I generalised from one record. Section 52 and 53 both recorded this ex
 asserting a number about the system's own records from a guess. The cure has not been
 writing the lesson down; it has been checking before typing. Reading the distribution first
 costs one command.
+
+## 58. The first open found a defect that 751 passing tests had missed
+
+At 09:22 ET the daemon was confirmed armed: sleeping until `next_open` inside the
+900s maintenance cap, so it would wake at 09:30:00 rather than drifting, heartbeat
+`RUNNING / cycle_count 0 / "market closed; maintenance only"`, `qwen3.8:27b` already
+resident. The market opened, and the first real cycle behaved exactly as predicted -
+and the Guardian refused it.
+
+    snapshot : SPY=766.43  market_open=True  source=alpaca  equity=99495.91
+    decision : action=SELL qty=1 conf=0.7 strategy=fixed-size-sell-005 model=qwen3.8:27b
+    guardian : approved=False
+               "cannot sell 1 SPY; the agent holds 0. The account may hold more,
+                but those shares are not the agent's to sell"
+
+The broker holds 10 SPY. The agent had demonstrably bought shares. The guard was right to
+be cautious and wrong about the facts, and the reason was a real bug in
+`loop._agent_holding`.
+
+It summed the SELLs as a commutative total: every BUY adds, every SELL subtracts, order
+irrelevant. This journal contains 23 agent BUYs at 15:20 on 09-28, a SELL of 52 shares at
+19:12 that day - 29 of them the account owner's, which is the historical discrepancy
+section 55 documents - and 10 further agent BUYs at 19:10 on 09-29. Commutative:
+33 - 52 = -19, floored to 0, so the loop reported the agent as holding nothing and the
+Guardian refused every exit from a position the broker confirmed it owned.
+
+Time-ordered: 23 - 52 + 10 = **10**, exactly the broker's figure.
+
+Two things were wrong, not one. The summation ignored order, so a SELL deducted against
+BUYs that had not happened yet; and the result was allowed to go negative and then
+clamped, which silently netted the 29 owner shares against later purchases. Replaying in
+timestamp order and clamping at each step keeps the holding at what the agent can
+legitimately sell, and leaves the historical 29-share discrepancy documented rather than
+absorbed into a balance.
+
+Why 751 tests missed it: the existing coverage appended events in chronological order
+with a balanced sequence, where a commutative sum and a replay agree. The bug needs an
+unbalanced sequence and a journal whose order is not guaranteed. Two tests added, and
+both were verified to fail against the old implementation and pass against the fix -
+the ordering test initially used BUY 10, SELL 4, BUY 5, where both approaches give 11,
+so it would have passed either way. It now uses BUY 10, SELL 12, BUY 5, which gives 3
+commutatively and 5 in order.
+
+The safe direction held throughout: refusing to sell is recoverable, selling the owner's
+shares is not. But "safe" was hiding a defect that blocked the mechanism the whole
+objective is waiting on. Only opening the market revealed it - 988 cycles, 527 of them
+open-market, had run without a single agent exit being attempted, so no path ever
+required this function to be right about an oversell.
+
+`make verify` went red on the new tests until the current-state figures were updated
+from 1182 to 1184 executions, which is the fact-docs gate working as intended.
