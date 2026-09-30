@@ -3111,3 +3111,44 @@ Sections 17 through 51 each contain one. Point-in-time records are not the probl
 must not be rewritten to match the present; the problem is present-tense prose with no
 expiry, which ages into a falsehood with the file. That is what `fact-docs-current`
 gates, and it is scoped to current-state blocks for exactly that reason.
+
+## 53. Six promotions whose reason the current code cannot produce, and my own wrong summary
+
+Chasing the outstanding probation requirement, I read the journal and found six
+`PROBATION -> ACTIVE` transitions carrying the reason "probation completed with
+acceptable operational metrics", with no metrics and no PnL figure in the payload. That
+string is not produced anywhere in `src/` today - it survives only inside the comment
+at `strategy_engine.py:252` that explains why the fallback was removed. All six are
+dated 2026-06-11 to 2026-06-18, written by `tools/adjudicate_unadmitted.py` re-asserting
+the lifecycle already on record, which is why they carry `re_adjudication: true` on some
+and a generic reason on all.
+
+What the production path does instead, at `strategy_engine.py:224`: once the cycle bar
+is met, promotion requires either `PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED` with a
+realized figure, which is then quoted in the recorded reason, or - for a long-only
+strategy that may never close a lot - decision-quality evidence from the counterfactual
+ledger, cleared through `_promotion_evidence_gate`. A strategy with no submitted orders
+returns `None` and is not promoted at all. `test_verified_positive_pnl_drives_the_promotion_and_is_recorded_as_the_reason`
+is the test that holds this in place, and it passes.
+
+So the requirement is satisfied by mechanism and by test, and unsatisfied by a live round
+trip. Those are different states and the distinction is the whole point: the tests prove
+the promotion *route* requires broker-verified PnL; they cannot manufacture the market
+time in which a strategy would earn it. Phase 7 stays incomplete and that is the correct
+report.
+
+Two errors of mine while establishing this, both in the direction of understating what
+the system has done:
+
+- I summarised the 35 lifecycle updates as "every one is a re-adjudication". False. Only
+  3 are; the other 32 include 6 `PROBATION -> ACTIVE`, 9 `PAUSED -> PAUSED`, 8
+  `RETIRED -> RETIRED`. I read a field that happened to be populated on the re-adjudicated
+  subset and generalised from it.
+- Probing for the provenance of all 988 cycles returned `0/988 alpaca`, because I looked
+  for `payload.source`. The field is `snapshot.source`, and the true figure is **988 of
+  988 `source=alpaca`** - the claim I had been making was right and my verification of it
+  was wrong, twice, in opposite directions, before I read the actual schema.
+
+Both are the same error as section 52: asserting a number about the system's own records
+from a guess about their shape, instead of reading the shape. `make verify` exists because
+that guess is not a safe default.
