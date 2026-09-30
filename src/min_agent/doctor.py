@@ -960,10 +960,75 @@ def _check_broker(report: DoctorReport, config: AgentConfig, client, skip: bool)
     except Exception as exc:
         report.add("broker positions", FAIL, f"{type(exc).__name__}: {exc}")
         return
+    if not positions:
+        report.add(
+            "broker positions", OK, f"0 position(s), {len(orders)} open order(s)",
+            hint="an empty book is correct for a fresh paper account",
+        )
+        return
     report.add(
         "broker positions", OK,
-        f"{len(positions)} position(s), {len(orders)} open order(s)",
-        hint="" if positions or orders else "an empty book is correct for a fresh paper account",
+        f"{len(positions)} position(s), {len(orders)} open order(s): "
+        + ", ".join(f"{p.symbol}={_position_quantity(p):g}" for p in positions),
+        hint="" if orders else "no open orders",
+    )
+    _check_unmanaged_exposure(report, config, client, positions)
+
+
+def _position_quantity(position) -> float:
+    """alpaca-trade-api returns every numeric field as a string.
+
+    Checking for int/float here and falling back to 0 produced a check that
+    reported "5 positions outside the allowlist: BIL=0, TLT=0, ... $37,074" -
+    zero shares alongside tens of thousands of dollars, which is worse than no
+    output at all.
+    """
+    for attribute in ("qty", "quantity"):
+        value = getattr(position, attribute, None)
+        if value is None or value == "":
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def _check_unmanaged_exposure(report: DoctorReport, config: AgentConfig, client, positions) -> None:
+    """Positions the agent does not manage still move the equity it is judged on.
+
+    This account holds BIL, TLT, XLB, XLE and XLF alongside the allowlist book -
+    about $37k of long market value the agent neither chose nor can attribute. The
+    agent's *exposure* limits are allowlist-scoped on purpose, because it cannot
+    increase exposure outside the allowlist. But `daily_loss` is not exposure, it
+    is `day_start_equity - equity` on the whole account, so a drop in BIL or TLT
+    consumes the agent's $500 daily-loss budget and trips a risk limit for a reason
+    that appears in no decision, no PnL record, and no attribution. Being
+    conservative is the right failure direction; being unable to explain why is not,
+    and the previous version of this check reported only a count, so the composition
+    was invisible.
+    """
+    allowlist = {s.upper() for s in config.allowlist}
+    unmanaged = [p for p in positions if str(p.symbol).upper() not in allowlist]
+    if not unmanaged:
+        return
+    try:
+        account = client.get_account()
+        equity = float(getattr(account, "equity", 0.0) or 0.0)
+    except Exception:
+        equity = 0.0
+    value = sum(
+        float(getattr(p, "market_value", 0.0) or 0.0) for p in unmanaged
+    )
+    share = f" ({value / equity:.0%} of equity)" if equity else ""
+    report.add(
+        "unmanaged exposure", WARN,
+        f"{len(unmanaged)} position(s) outside the allowlist the agent cannot "
+        f"manage or attribute: "
+        + ", ".join(f"{p.symbol}={_position_quantity(p):g}" for p in unmanaged)
+        + f", ${value:,.2f}{share}",
+        "daily_loss is measured on whole-account equity, so these positions can "
+        "consume the agent's daily-loss budget without appearing in any PnL record",
     )
 
 

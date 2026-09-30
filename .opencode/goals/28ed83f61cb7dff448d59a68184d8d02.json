@@ -32,7 +32,7 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790735690652,
+      "observedAt": 1790736200281,
       "lastRequestTokens": 178420,
       "lastInputTokens": 177495
     }
@@ -84,7 +84,7 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 124,
+  "progressRevision": 127,
   "observedProgressRevision": 122,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
@@ -210,25 +210,13 @@
     "shell-worktree:d9c0bcd5c107db2e36d985f3a09d25aab95055ce48b7852833cdd801c1556130",
     "shell-worktree:0e443d63aa1d4f7ef585a2010bdc2fe9eec6d7f025f7baec47ebe63119e37ce6",
     "file:src/min_agent/doctor.py:c8899c214b01dfc5ceded104b2afe964ccb92dfaf3dcc37066688a3f23199994",
-    "shell-worktree:c5def1543f8aa0bff99bf4b7ecffe9cf27c21d15361e5884d5a1b939835141ba"
+    "shell-worktree:c5def1543f8aa0bff99bf4b7ecffe9cf27c21d15361e5884d5a1b939835141ba",
+    "shell-worktree:cb5bd785537ef936cf0f1cc992d8f0943416d451ae48e9061af3dcb34cd186f1",
+    "shell-worktree:e1e78cfcb0abba4149b536ebe6ea3fbd427f24e3c6455f5a473fd7d58054d1b0",
+    "shell-worktree:c2a81370465bb91f3603f85e4efff55b7a250ab7e10c6fbf9268da08366fe071"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790686899869,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790686943528,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790687087854,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790687108026,
       "summary": "Implemented unrealized PnL - the last code item from deliverable 8. Only realized PnL was attributed, so a position the agent was holding contributed nothing to its own record and the account figure and the agent figure could never be reconciled even in principle: one measured closed trades, the other measured everything, and the gap could only be explained away. PnLEvidence now carries open_lots, unrealized_pnl, net_pnl and net_of_fees, with open lots keeping the strategy that opened them to match the realized side's rule (the strategy that opens a lot is the one expected to realize its PnL, which may not be the strategy that eventually sells it). Verified by the daemon writing it rather than by a script: realized 564.39, open lots empty, unrealized 0.0, net 564.39, net of fees 564.39 - the agent holds no SPY (account positions are BIL, TLT, XLB, XLE, XLF) so unrealized is 0 and net equals realized, which is the correct answer and not a stub, and the machinery is proven only by test against a live position because there is no live position. The refusal that matters: an open lot whose price is unknown is reported with current_price None and unrealized_pnl None, never valued at its entry price, because marking a position at its own cost reports it as worth exactly nothing - a fabricated number wearing the appearance of a measurement. This surfaced a real finding now visible in doctor: 29 shares were sold under trend-follow-sell-002 that no linked BUY can account for. The account holds no SPY so those shares came from somewhere the fill linkage cannot see - a pre-existing position, a fill whose client_order_id never linked, or a lot opened before the journal began. The 23 closed lots carrying the +564.39 are all fully linked so the verified figure is unaffected, but 29 shares of unexplained selling belongs in a health report rather than a payload field. It is explicitly NOT diagnosed: it needs the ORDER_FILL_CONFIRMED events for that strategy traced back, which is real work and not something to guess at. A test also caught the doctor implementation formatting unrealized unconditionally, which would have raised TypeError on its own history since every stored PNL event predates the field - the same shape as reading a JournalEvent as a dict; it now degrades to net alone. Commit 20704da. make verify: 21 classes, 0 failed, 636 distinct tests, 91/91 audit, doctor OK, exit 0.",
@@ -463,11 +451,26 @@
       "time": 1790735687292,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790735699919,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790736105864,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790736197281,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 1132,
+  "storageGeneration": 1169,
   "createdAt": 1790641773516,
-  "updatedAt": 1790735690652,
+  "updatedAt": 1790736200281,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:c3cb3254c518367f1c8cd88244e84bcbd83597fa1d10bffb8cee3387f57fdc53",

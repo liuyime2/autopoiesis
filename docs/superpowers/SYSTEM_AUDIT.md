@@ -2186,3 +2186,82 @@ The four remaining warnings are the honest kind: the model is still mis-calibrat
 (Brier 0.589 against a 0.25 baseline), PnL attribution still has 29 unmatched
 sell shares, and there is still no champion because no strategy has
 broker-verified positive realized PnL.
+
+## 39. The account is not only the agent's book
+
+### 39.1 A false alarm I have to retract
+
+The PnL warning reports 29 unmatched sell shares. Chasing it, I reached a
+confident and wrong conclusion and want that on the record, because the shape of
+the mistake - build a theory, state it, only then check - is what this whole
+document exists to prevent.
+
+Confirmed fills are 33 BUYs and one 52-share SELL, so the journal's net position
+is **-19 shares**, which is impossible for an account that holds 10 SPY. That
+looked like a fresh hole in execution truth. It is not. `Guardian` already
+documents the incident in its own source:
+
+> the agent bought 23 shares, the account held 52, and a single SELL of 52 was
+> approved and filled - liquidating 29 shares of a pre-existing position the agent
+> never bought, which is 56% of the owner's holding.
+
+So the 29 are the **owner's** shares, sold in June before that guard existed. The
+arithmetic reconciles exactly: 33 journalled buys + 29 unrecorded = 62 SPY held,
+52 sold, 10 remain, which is what the broker shows. The ledger is correct, the
+doctor's 29 is correct, and the PnL it cannot attribute is honestly reported as
+unproven rather than filled in. `Guardian` now refuses a SELL whose bound is
+unknown, so this specific failure cannot recur.
+
+I also wasted two probes on my own sloppiness before that: I searched for a
+`kind` field the journal does not have, and I imported `alpaca` when the package
+is `alpaca_trade_api`. Both produced confident-looking errors.
+
+### 39.2 What is genuinely missing: visibility of unmanaged exposure
+
+The broker holds six positions and the journal knows about one:
+
+| symbol | qty | market value | in allowlist? |
+| --- | --- | --- | --- |
+| BIL | 209 | $19,154.85 | **no** |
+| TLT | 226 | $17,754.56 | **no** |
+| SPY | 10 | $7,654.40 | yes |
+| XLB | 1 | $49.10 | **no** |
+| XLE | 1 | $61.49 | **no** |
+| XLF | 1 | $54.11 | **no** |
+
+**$37,074.11 of long market value, 37% of account equity, sits in symbols the
+agent neither chose nor can attribute**, and `doctor`'s `broker positions` check
+reported only `6 position(s), 0 open order(s)` - a count, with the composition
+invisible.
+
+The agent's *exposure* limits being allowlist-scoped is correct and deliberate: it
+cannot increase exposure outside the allowlist. But `daily_loss` is not exposure.
+It is `day_start_equity - equity` over the **whole account**, so a drawdown in BIL
+or TLT consumes the agent's $500 daily-loss budget and trips a risk limit for a
+reason that appears in no decision, no PnL record and no attribution. The limit
+then behaves conservatively, which is the right direction, while the agent cannot
+say why it fired.
+
+That is a `missing` capability in the objective's classification, and it is now
+reported rather than silent:
+
+```
+[WARN] unmanaged exposure   5 position(s) outside the allowlist the agent cannot
+    manage or attribute: BIL=209, TLT=226, XLB=1, XLE=1, XLF=1,
+    $37,074.11 (37% of equity)
+```
+
+A WARN and not a FAIL is deliberate. This is a fact about the account, not a
+breach by the agent, and the agent is correctly forbidden from touching those
+positions. Making it FAIL would train the reader to ignore the line.
+
+`broker positions` now also names the composition, because a count cannot be
+reconciled against a journal.
+
+One bug of my own while writing it: the first version reported
+`BIL=0, TLT=0, ... $37,074.11`, because `alpaca-trade-api` returns **every
+numeric field as a string** and the helper only accepted `int`/`float`. Zero
+shares printed next to tens of thousands of dollars is worse than printing
+nothing, so the coercion is fixed and pinned by a test.
+
+`make verify`: **24 classes, 0 failed, 1077 test executions, doctor OK, exit 0.**
