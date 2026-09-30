@@ -3585,3 +3585,53 @@ One more of the same error as sections 52, 53, 57 and 62: I printed the conclusi
 "sell-005 is third-oldest and two older strategies precede it" and, in the same output,
 asserted the queue was *not* advancing - before reading whether buy-006 had met the
 threshold. Reading the regenerated count costs one command.
+
+## 64. Probation was "completed" by three rejections, and what that does and does not mean
+
+Fifteen minutes of watching produced no SELL. The reflection regenerated at 12:25 ET
+(`generated_at` 16:25:01Z), `trend-follow-buy-006` went from 1 recorded cycle to 7, left
+the probation queue, and selection moved on to `trend-follow-buy-007` - skipping
+`fixed-size-sell-005` entirely.
+
+Reading the refreshed reflection explains why. `_needs_probation` is `result is None or
+result.cycles < min_probation_cycles`, and `min_probation_cycles` is 3. `sell-005` has
+`cycles=3`. Its three cycles are the ones from 09:30, 09:36 and 09:42 - all three
+`approved=False / REJECTED`, all three before the holding fix, all three refused with
+"the agent holds 0". So it satisfied the probation requirement by being refused three
+times. A cycle in which the system stopped the strategy counts toward completing the
+strategy's probation.
+
+Two things about that are worth separating. The `cycles` threshold existing at all is not
+the bug - probation is earned by showing up, and requiring a successful trade to count
+would penalise a strategy for a market being closed. But `min_probation_cycles` and
+`min_active_cycles` are different numbers, 3 and 5, both counting the same `cycles` field,
+and the queue uses the smaller. A strategy therefore leaves the queue after 3 cycles and
+then has to survive 2 more to be promoted, and between those two points it competes on
+score rather than being served.
+
+Whether that leaves the exit unreachable is a question I got wrong twice while checking
+it. I first asserted from a single probe that `sell-005` "has no path: probation complete
+by rejection but promotion needs broker PnL or orders" - and it does have one. Its score
+is 0.900, not the 0.0 I inferred from its three rejections never being submitted:
+`_probe_strategy` and the scoring rules credit a strategy that acted and was correctly
+refused, which is the intent. It is tied at the top of the argmax with
+`fixed-size-probe-0001`, and `max()` takes the first maximum, which is the earlier list
+position. Then I asserted the opposite - "score=0.0, never selected by argmax" - also
+without reading the value, and the value was 0.900.
+
+So the honest statement is narrower than either: `sell-005` is a live argmax candidate at
+0.900, tied with a strategy that is ahead of it in list order, and the two are separated
+by tie-break order rather than by anything about the exit. The SELL-priority branch at
+`strategy_engine.py:374` does not help either, because `_uncovered_capabilities` counts
+SELL as covered - `sell-005` itself supplies it, at 1, and `count <= 1` treats a single
+route as covered.
+
+What this needs is not a fix to `min_probation_cycles`, which is a deliberate design
+choice, but the observation that no TREND_FOLLOW in PROBATION can emit SELL at SPY 768 -
+their reference prices are 764.38, 766.82, 768.1, 768.175 and 768.29, all at or below the
+live price, and a TREND_FOLLOW emits the side its reference points at. The library can
+only exit through a strategy it reaches by score tie-break. That is a real structural
+observation about this library at this price, and it is recorded rather than acted on:
+changing selection semantics to guarantee exit coverage is a design change beyond what
+this objective authorises, and it would need the same evidence discipline as any other
+change to how strategies are chosen.
