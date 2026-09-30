@@ -2655,3 +2655,55 @@ gather before it touches the paper broker, and therefore what "promotable" means
 and the operator should weigh that rather than have it changed as a side effect of
 an audit. What the audit can and does establish is that the chain currently has no
 working shadow rung, and that this is a wiring gap rather than a missing feature.
+
+## 46. A fallback that hid in plain sight
+
+Verifying the real Alpaca link turned up a masked failure, and it is exactly the
+kind the objective forbids: *"任何失败不能被 warning 或 fallback 掩盖"*.
+
+`HybridDecisionEngine` falls back to the deterministic policy engine when the model
+call exceeds the engine timeout, and returns a decision that looks entirely
+ordinary. That is the safe direction - the substitute is still Guardian-gated, and
+a deterministic rule is not a hallucinating one - but the LLM has silently left the
+decision loop.
+
+Nothing reported it:
+
+- `model_registry` counts `decision_source`, so a fallback is **not** `UNATTRIBUTED`
+  and looks completely accounted for;
+- `decision quality` scores whatever decision arrived, whoever authored it.
+
+The journal holds **two** such decisions - 2026-09-28 at 11:47 and 12:05, both
+`BUY 1 SPY @ conf 0.6`, two consecutive cycles - and neither warning mentioned
+them. I hit a third live while probing: 120.1s against the engine's 120s timeout,
+`decision_source=fallback_policy_engine`. That one was my own probe contending with
+other jobs on a shared 96-core host, and the model answered 174 tokens in 4.40s
+immediately afterwards with speculative decoding at 95% acceptance, so the model
+is healthy - but it proved the window exists.
+
+`llm fallback` now reports it:
+
+```
+[WARN] llm fallback   2 of 987 decision(s) (0%) came from the deterministic
+                     policy engine instead of the model
+```
+
+Severity escalates on the **share**, not the count, and I got that wrong in the
+test first: two fallbacks out of three decisions is a 67% bypass rate and the check
+correctly called it a failure, where I had expected a warning. A count threshold
+would have called that "two, that's fine" when the model authored a third of the
+decisions. A rate threshold also means the first occurrence - the one nobody is
+watching for - still surfaces.
+
+I did **not** raise the 120s timeout. Observed production latency is 24-56s warm
+with 67 of 67 decisions on the last session coming from the model, and the daemon
+loop is single-threaded with a 240s interval and a median observed gap of 331s, so a
+longer timeout would delay cycles rather than prevent overlap. Widening it would
+have hidden the fallback instead of reporting it, which is the opposite of what the
+objective asks for.
+
+Seven tests pin the check, including that the message says the substitute is still
+Guardian-gated - the decision was not unsafe, and the wording must not imply
+otherwise.
+
+`make verify`: **25 classes, 0 failed, 1174 test executions, exit 0.**

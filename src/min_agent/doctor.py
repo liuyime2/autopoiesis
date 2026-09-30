@@ -254,6 +254,7 @@ def _check_governance(report: DoctorReport, config: AgentConfig) -> None:
         #     strategy one, and until provenance was captured no outcome could ever
         #     be attributed to a model change.
         _check_model_registry(report, config, records)
+        _check_llm_fallback(report, config, records)
 
 
         # 8. Champion-challenger, search effort, and whether candidates can say
@@ -813,6 +814,49 @@ def _check_pnl_attribution(
         )
     else:
         report.add("pnl attribution", OK, detail)
+
+
+def _check_llm_fallback(
+    report: DoctorReport, config: AgentConfig, records: list
+) -> None:
+    """Surface cycles where the model was bypassed.
+
+    The objective is explicit that no failure may be masked by a fallback. When the
+    model call exceeds the engine timeout, `HybridDecisionEngine` substitutes the
+    deterministic policy engine and returns a perfectly ordinary-looking decision.
+    That is the safe direction - the substitution is still Guardian-gated, and a
+    deterministic rule is not a hallucinating one - but it means the LLM silently
+    left the decision loop and the cycle's record looked like any other.
+
+    Nothing reported it. `model_registry` counts the source, so a fallback is not
+    `UNATTRIBUTED` and looks accounted for; `decision quality` scores whatever
+    decision arrived. The two 2026-09-28 fallbacks are visible in the journal and
+    in neither warning. A masked failure is what this line exists to prevent, so
+    any occurrence is worth saying out loud, and a sustained rate is worth saying
+    louder.
+    """
+    sources: dict[str, int] = {}
+    for record in records:
+        source = getattr(record.decision, "decision_source", None)
+        if source:
+            sources[source] = sources.get(source, 0) + 1
+    fallbacks = sources.get("fallback_policy_engine", 0)
+    total = sum(sources.values())
+    if not fallbacks:
+        report.add(
+            "llm fallback", OK,
+            f"0 of {total} decision(s) bypassed the model "
+            f"({sources.get('llm', 0)} came from the model)",
+        )
+        return
+    share = fallbacks / total if total else 0.0
+    report.add(
+        "llm fallback", WARN if share < 0.1 else FAIL,
+        f"{fallbacks} of {total} decision(s) ({share:.0%}) came from the "
+        f"deterministic policy engine instead of the model",
+        "the model call exceeded its timeout and was substituted; the cycle is "
+        "still Guardian-gated, but the LLM was not the author of that decision",
+    )
 
 
 def _check_model_registry(
