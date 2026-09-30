@@ -894,7 +894,12 @@ def check_fact_docs_match_the_live_gate(live: list | None = None) -> Result:
     # than no gate, and the recursion was mine.
     if not live:
         return Result("fact-docs-current", SKIP, "no live summary supplied")
-    classes = str(len(live))
+    # +1 for this check, which appends itself to `results` immediately after being
+    # called. Without it the gate under-reports the class count by one and the
+    # documents then "match" a number that is one behind the run that produced it -
+    # a green gate certifying a stale figure, which is the exact failure it was
+    # written to prevent.
+    classes = str(len(live) + 1)
     failed = str(sum(1 for r in live if r.status == FAIL))
     executions = str(sum(r.counts.get("passed", 0) for r in live))
     files = str(len({p.name for p in TESTS.glob("test_*.py")}))

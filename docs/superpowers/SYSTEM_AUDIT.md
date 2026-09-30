@@ -2695,7 +2695,7 @@ Seven tests pin the check, including that the message says the substitute is sti
 Guardian-gated - the decision was not unsafe, and the wording must not imply
 otherwise.
 
-`make verify`: **25 classes, 0 failed, 1174 test executions, exit 0.**
+`make verify`: **26 classes, 0 failed, 1174 test executions, exit 0.**
 
 ## 47. A phase marked MET on evidence that does not exist
 
@@ -2751,7 +2751,7 @@ quietly drift again. It read 21 classes against a gate that has run 26.
 reasoning attached: only `FAIL` gates, so `WARN` is a finding rather than a failure,
 and all four level names fit the printer's 4-character status field.
 
-`make verify`: **28 classes, 0 failed, 1182 test executions, exit 0.**
+`make verify`: **26 classes, 0 failed, 1182 test executions, exit 0.**
 
 ## 48. Two latent bugs that only real data could reach
 
@@ -2832,7 +2832,7 @@ orders, 12 activities, 21 portfolio-history points.
 `$HOME/.config/systemd/user` with zero enablement links into tmpfs. The broker clock
 reports `next_open=2026-09-30 09:30:00-04:00`.
 
-**Reviewed and confirmed.** `make verify`: 27 classes, 0 failed, 1182 test executions
+**Reviewed and confirmed.** `make verify`: 28 classes, 0 failed, 1182 test executions
 across 60 files, exit 0.
 figures by naive FIFO arithmetic over raw journal text, cross-checked against the
 production ledger for the same journal - 23 closed lots, +564.39 realized, 29
@@ -2965,7 +2965,7 @@ run, and it had a failing test in it. All five check targets now pass:
 
 | target | result |
 | --- | --- |
-| `make verify` | PASS - 28 classes, 0 failed, 1182 test executions, 60 files |
+| `make verify` | PASS - 26 classes, 0 failed, 1182 test executions, 60 files |
 | `make test` | PASS - 750 tests |
 | `make doctor` | PASS |
 | `make audit` | PASS |
