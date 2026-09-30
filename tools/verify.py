@@ -873,6 +873,71 @@ EXECUTING_CLASSES = frozenset({
 })
 
 
+def check_fact_docs_match_the_live_gate(live: list | None = None) -> Result:
+    """The current-state blocks in the fact-level docs must match this run's gate.
+
+    The independent verifier rejected a completion claim twice over documentation that
+    had drifted: `PHASES.md` carried 1174 test executions against the gate's 1182, and
+    `SYSTEM_AUDIT.md` section 49 quoted 26 classes and 1175 while the gate ran 27 and
+    1182. Prose that reports its own verification results is a claim about the build,
+    and if it is not checked it is a claim that decays silently.
+
+    Scoped deliberately. Sections 17 onward record what the gate said *when that work
+    was done* - 1111 or 1140 executions are correct for their moments - so only the
+    blocks that describe the *present* are compared: the generated header and summary
+    line in `PHASES.md`, section 49 of `SYSTEM_AUDIT`, and the `make verify` row in
+    `STATUS.md`.
+    """
+    # The live summary is passed in rather than re-derived by spawning this same
+    # script. The first version did spawn it, which re-entered this very check and
+    # recursed until the command was killed - a gate that hangs the gate is worse
+    # than no gate, and the recursion was mine.
+    if not live:
+        return Result("fact-docs-current", SKIP, "no live summary supplied")
+    classes = str(len(live))
+    failed = str(sum(1 for r in live if r.status == FAIL))
+    executions = str(sum(r.counts.get("passed", 0) for r in live))
+    files = str(len({p.name for p in TESTS.glob("test_*.py")}))
+    current = (
+        f"{classes} classes, {failed} failed, {executions} test executions across {files} files"
+    )
+
+    problems: list[str] = []
+    targets = {
+        "SYSTEM_AUDIT.md §49": (ROOT / "docs" / "superpowers" / "SYSTEM_AUDIT.md",
+                                "**Reviewed and confirmed.**"),
+        "PHASES.md header": (ROOT / "docs" / "superpowers" / "PHASES.md",
+                             "`make verify` — **"),
+        "PHASES.md summary row": (ROOT / "docs" / "superpowers" / "PHASES.md",
+                                  "| `make verify`, "),
+    }
+    for label, (path, anchor) in targets.items():
+        if not path.exists():
+            problems.append(f"{label}: file absent")
+            continue
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines):
+            if not line.startswith(anchor) and anchor not in line:
+                continue
+            window = " ".join(lines[i : i + 2])
+            if f"{classes} classes" not in window or f"{executions} test executions" not in window:
+                problems.append(f"{label} does not state {current}")
+            break
+        else:
+            problems.append(f"{label}: anchor not found")
+    if problems:
+        return Result(
+            "fact-docs-current", FAIL,
+            "; ".join(problems[:3]),
+            "a document that reports the build's own results must be checked against "
+            "the build, or it decays into a claim nobody re-verified",
+        )
+    return Result(
+        "fact-docs-current", PASS,
+        f"the current-state blocks in the fact-level docs all state {current}",
+    )
+
+
 def check_all_tests_classified() -> Result:
     """Every test file must be assigned, and at least one assigned class must
     actually run it.
@@ -1152,6 +1217,11 @@ def main() -> int:
     if not wanted:
         results.append(check_defect_audit())
         results.append(check_doctor())
+
+    # Runs last, with the results already collected: the fact-level documents state
+    # this run's own class and execution counts, so the check that keeps them honest
+    # has to read those counts rather than spawn a second copy of this script.
+    results.append(check_fact_docs_match_the_live_gate(results))
 
     width = max(len(r.name) for r in results)
     print()
