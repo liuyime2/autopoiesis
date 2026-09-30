@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790729664717,
-      "lastRequestTokens": 36499,
-      "lastInputTokens": 36103
+      "observedAt": 1790730397892,
+      "lastRequestTokens": 108586,
+      "lastInputTokens": 107424
     }
   },
   "runtimeFingerprint": {
@@ -43,10 +43,10 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 23,
-    "tokens": 690859,
+    "turns": 24,
+    "tokens": 695669,
     "cost": 0,
-    "runtimeMs": 334979,
+    "runtimeMs": 355357,
     "seenMessageIDs": [
       "msg_0ea911ff0001xqHQnFmbF3aICp",
       "msg_0ea980dc20015f3lGA67tXRaUK",
@@ -70,7 +70,8 @@
       "msg_0ed5de605001C0118sq40BmNc1",
       "msg_0ed62e887001SFx8kKIqPkBw7h",
       "msg_0ed70ec15001lCHVYhMyIAbdG3",
-      "msg_0efae778b001GOGDfJ2EdYiczn"
+      "msg_0efae778b001GOGDfJ2EdYiczn",
+      "msg_0efcfaba40015YIxe0uY9JYNWU"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -80,8 +81,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 114,
-  "observedProgressRevision": 113,
+  "progressRevision": 118,
+  "observedProgressRevision": 115,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
     "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
@@ -196,35 +197,14 @@
     "shell-worktree:fc1bbed686f7a3621dcd1ffc9879883e79767b30dd7a62d7bbbda0301adf3637",
     "shell-worktree:55e59cf7dfdc7465187bc579eefc7b6c8cb31709326c5e49a23b97d002dd15da",
     "shell-worktree:838fa01f2e8344fb14c75a963ba89c18ca60b29603d01c2fdd3a46f60c66bb44",
-    "shell-worktree:c39a1482d658eebeeea4510ccd47d9b9c69090295adc214237b5cb61d6ed5f53"
+    "shell-worktree:c39a1482d658eebeeea4510ccd47d9b9c69090295adc214237b5cb61d6ed5f53",
+    "shell-worktree:1b431232bce74a61c274c6a41f149f1df77a84010972b9a962dd5f0afe343e8e",
+    "shell-worktree:c3475e21ea0c180207c1247ab6a9454398bd629227c951ba4c079146c115fc83",
+    "shell-worktree:76ff882811d9aa360a905db4bdcd4b292634d79eabbe8027ea151d17ede2c8dd",
+    "shell-worktree:04b255f4243f42d675937eb43f69f3805a23eaa411908c048ca2b7cf159f51cb"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790685804523,
-      "summary": "Regime context implemented, completing the measurement half of objective deliverable 6. regime.py derives the regime from the realized price series (only one last_price per cycle exists - no OHLC, volume or VIX), and deliberately does NOT allocate by regime since allocation is Phase 8 and starting it before earlier phases finish would be entering a phase out of order. The limitation is stated rather than buried: these are last-trade prints on a 5-minute cycle, not exchange bars, so volatility is noisier and slightly inflated by intra-interval moves, and a gap between samples reads as a move that may have occurred anywhere within it. The live result is mostly \"cannot tell\": of 467 bars, 391 are UNKNOWN and 76 TRENDING_DOWN, and only 78 bars have a contiguous window at all - the current regime cannot be labelled because the last 78 bars span a gap over 30 minutes. A window spanning a gap is refused rather than classified, because the journal contains a 97-day outage and a \"recent volatility\" across it would describe two different months as one market. The consequence is the honest one: every one of the 23 profitable lots was opened in a window that cannot be labelled, so the regime row is no longer CANNOT ATTRIBUTE because code was missing but because it was MEASURED and came back unusable - the loop now knows it cannot answer this rather than not knowing that it could not. The unmeasurable bucket is reported rather than dropped, since a bucket that silently vanishes is how a conclusion gets drawn from the measurable minority. Two properties enforced rather than assumed: point-in-time (a label at bar i uses bars up to i only, with the test that matters being that appending future bars cannot change an earlier label - a regime label on a past decision is exactly the context that leaks, and it leaks silently), and volatility overriding direction (a steep decline is UNSTABLE not TRENDING_DOWN, because filing a violent decline as a calm downtrend understates the risk of trading through it). A test caught my own fixture making that mistake - a -2.0-per-bar series expected to be TRENDING_DOWN, and the classifier was right while the test was wrong - and the same test showed the classifier describes the window it is given, so with the default 78-bar window a series that rose then fell is TRENDING_UP because the rise dominates, which is correct and is now tested with a 30-bar window rather than expecting the classifier to see through its own window. Commit 8a115a8. make verify: 21 classes, 0 failed, 614 distinct tests, 91/91 audit, doctor OK, exit 0.",
-      "next": "Objective deliverable 6 is now complete: all seven causes are reported, and regime is the last one that was purely absent - it is now measured and its unusability on this data is a finding. Remaining doc deliverables are 5 (per-phase implementation tasks, dependencies, test methods, exit criteria and verification results), 7 (proven capability vs design target) and 8 (the next 1-3 highest-value changes). Also open: unrealized PnL (only realized is attributed, so open lots contribute nothing to the account picture) and the Phase 3 model-registry gap. Given three findings now point the same way - the model has contributed 0.00 to PnL, all 67 LLM decisions are unscoreable because the market has been closed, and only 78 of 467 bars have a contiguous window so regime cannot be labelled - the data-sparseness itself is arguably the binding constraint on everything downstream, and a doc deliverable recording that honestly may be more valuable than further instrumentation. Phase 7 and the calibration verdict both need market hours."
-    },
-    {
-      "time": 1790686048200,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790686178014,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790686192360,
-      "summary": "Quantified the binding constraint and delivered objective deliverables 5, 7 and 8 as docs/superpowers/PHASES.md. Quantifying first, because three separate findings turned out to have one cause: the model contributing 0.00, all 67 llm decisions being unscoreable, and only 78 of 467 bars having a contiguous window. 467 distinct observations across 111.4 days on 10 distinct trading days (9% of elapsed days), mean interval 344 min against a configured 300 s, max gap 140841 min (97.8 days). But the median gap is exactly 5 min, matching daemon_interval_seconds, and on the days it ran coverage was a full session with the most recent day at 1-minute granularity - so the sampling rate is correct and the daemon simply did not run. This is not a configuration defect and there is nothing to fix in the code: ten trading days cannot support an out-of-sample claim, a calibration verdict or a regime attribution, and every instrument built this session now says so rather than guessing. The systemd blocker was re-tested rather than repeated: df -h ~ reports 1.8T free on /home which looks like there is no problem and is misleading, because df shows the filesystem while the limit that bites is a per-user quota - mkdir ~/.config/systemd still fails with \"Disk quota exceeded\". $HOME holds 11G, of which .cache is 835M and .local is 707M; freeing either would let minictrl install-service write a permanent unit. That is the third time this session a plausible-looking signal turned out to be the wrong one - df, a grep for \"backtest\" matching a docstring, and a doctor check printing a stale claim. Also found a contradiction in STATUS.md by checking my own edit rather than trusting it: a pointer edit created two lines that contradicted each other and left a withdrawn claim standing three lines below (\"shadow is implemented\" alongside \"shadow is merged into probation, not missing\"). Both earlier notes are now recorded as withdrawn with the reason, because a withdrawn claim left standing is worse than one never made. That edit also silently did nothing on its first attempt because it targeted a line that no longer existed - the same \"looks applied but isn't\" shape this audit has been removing all session, this time in my own tooling. PHASES.md records: per-phase tasks/dependencies/test methods/exit criteria/verification results (Phase 3 marked PARTIAL for a missing component rather than thin data - no model registry, since TradeDecision has no model field so the 67 llm decisions cannot be separated by prompt or model version); proven-vs-design-target; the full 7-cause PnL attribution; and the next three changes chosen by what unblocks the most - run and let evidence accumulate with the systemd fix protecting it, close the Phase 3 model-registry gap, and unrealized PnL. Phase 8 is explicitly not next. Commit 70dccbf. make verify: 21 classes, 0 failed, 614 distinct tests, 91/91 audit, doctor OK, exit 0.",
-      "next": "All seven explicit doc deliverables are now covered: 1 architecture/flow and 2-4 component classification in SYSTEM_AUDIT.md, 5 phases and 7 proven-vs-target and 8 next changes in PHASES.md, 6 PnL cause attribution. The highest-value remaining work per deliverable 8 is the one item that is not a code change: run and let evidence accumulate, protected by making the systemd units reboot-persistent. That requires freeing $HOME quota (.cache 835M or .local 707M) so minictrl install-service can write a permanent unit, or setting MIN_AGENT_UNIT_DIR to a path the user manager reads. Second is the Phase 3 model registry (TradeDecision has no model field, so the 67 llm decisions cannot be attributed to a prompt or model version). Third is unrealized PnL. Phase 7 and the calibration verdict both need market hours. The quota fix is arguably a user action since it means deleting cache directories under $HOME, and the daemon's continued unattended operation is the other thing only the user can confirm."
-    },
-    {
-      "time": 1790686252113,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790686288836,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -449,11 +429,36 @@
       "time": 1790729081512,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790729712932,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790729737460,
+      "summary": "Operator said continue with the curriculum name-churning fix. Working that first required correcting numbers I had reported earlier and turned up a regression I had caused myself an hour earlier. Corrected counts first: the journal holds two record shapes in one file (987 cycle records keyed by cycle_id/snapshot, 6700 events keyed by event_type) and my earlier curriculum counts searched for a \"kind\" field that does not exist while mixing UTC event timestamps with ET trading dates. Real figures: 259 CURRICULUM_PROPOSED (not 258), 47 CURRICULUM_FAILED (not 44), 22 proposals today across 3 distinct strategy_ids (not 26 across 12 names), and the open strategy_spec question resolves - CurriculumTask holds strategy_spec and its validator requires it for STRATEGY_SPEC tasks, so the spec exists and reaches the strategy file; the CURRICULUM_PROPOSED event schema simply never had a field for it, so nothing was corrupted and only the audit trail was incomplete. The 47 failures are also not one problem: 26 ValidationError (all June 11, the missing-task_id bug, since fixed), 14 ReadTimeout, 4 JSONDecodeError, 3 ValueError; I had reported all 14 as residual cold-load. The regression: in commit 0ebf58a I set num_ctx=4096 for \"the ollama call sites\" and justified it from the decision engine's ~253-token context, but the curriculum context measures 3441 tokens, 13x larger. Measured on the live model with the real 27-strategy library: num_ctx=4096 gives prompt=3441 eval=652 used=4093 done=length body=\"\" (deterministic truncation, surfacing as the exact observed ValueError \"constrained response contained no JSON object\"); 8192 gives eval=1452 used=4893 done=stop with valid JSON. All 3 ValueError failures are 19:36, 19:53 and 20:10 ET today, after the change, with none before it. My chars/3.6 estimate said 2838 tokens and was 19% low because JSON punctuation is cheap per character - the error ran in exactly the direction that hid the bug, so \"3.5x headroom\" was true of the decision prompt and false of the curriculum one. My own test enforced this: test_every_generation_call_site_uses_the_same_window asserted every call site used the same window and passed, because \"both call sites pin a window\" was never the property that mattered while \"both can finish their own prompt and answer\" was, and a shared constant is only correct while two workloads happen to agree. It is now pins_a_named_window, plus a test that the two windows are not assumed equal and one that rebuilds the real worst-case context and requires window to cover prompt plus the longest measured answer. Fixing only the window would have failed differently: the working window takes 118.4s at 6144, 141.9s at 8192, 141.8s at 12288, and the 120s default timeout sat inside that range, so it would have traded a truncation for a ReadTimeout and reopened the earlier timeout investigation against a cause that no longer existed. Curriculum now uses CURRICULUM_NUM_CTX 8192 and CURRICULUM_TIMEOUT_S 600; the decision path keeps 4096 and 120s because it answers in ~12s. The margin is 13% cheaper to carry as well: the exploration summary carried 50 cycle UUIDs solely so the daemon can cite them as source_refs on no-exploration knowledge artifacts - lineage for a journal write, not input for a decision, ~2100 of the block's 2522 characters - removed at the boundary where the consumer changes so the daemon keeps provenance and the model stops paying for it. Churn root cause is that the curriculum was structurally blind to its own output: _recent_exploration_summary reads cycle records, so the block the model receives describes trading activity (HOLD 47, BUY 2, ten submitted orders, SPY 764.18) and contains no record of any spec the model authored, while strategy_ids_in_use lists only the 28 admitted strategies, so a refused id looked as fresh as a new one. Meanwhile admission was already writing a specific 212-character refusal naming the exact dimensions that must differ, journalled 83 times and shown to nobody; the last 4 proposals and last 6 reviews were all fixed-size-sell-002 carrying that identical sentence. _recent_rejections now reads the verdicts back, deduplicated to the newest per id, and the prompt states what the refusal demands. The negative result is recorded plainly rather than dressed up: feeding the refusal back did not stop the churn. With the feedback the model proposed fixed-size-sell-003 - same name, same FIXED_SIZE/SPY/SELL/quantity 1/max_position_value 5000, and parameters null - a rename rather than a change, reproduced live by the daemon at 20:54 ET. The guard still fails closed, verified directly against the real library: fixed-size-sell-003 and trend-follow-sell-009 are both refused as behaviourally identical to fixed-size-sell-001, so no duplicate can enter and this is efficiency rather than correctness. The cause is saturation, not prompting: for FIXED_SIZE + SELL + SPY under these Guardian limits, quantity 1 and max_position_value 5000 are very nearly the only admissible values, so every correct FIXED_SIZE sell duplicates the one already held, and no instruction turns a rename into an exploration. A collision retry would burn ~140s of model time per call for a rename with no evidence it converges, so it was not built. make verify: 24 classes, 0 failed, 1045 test executions, doctor OK. Commit d9b7720.",
+      "next": "Operator asked to continue with the curriculum name-churning. Working it surfaced a self-inflicted regression first, and that is the substance of this checkpoint. Setting num_ctx=4096 for \"the ollama call sites\" in commit 0ebf58a was justified from the decision engine's ~253-token context, but the curriculum's context measures 3441 tokens, 13x larger. At 4096 it had 655 tokens of room for a reply needing ~1200, so truncation was deterministic: measured done_reason=length with an empty body, which surfaces as ValueError \"constrained response contained no JSON object\". The journal agrees exactly - all 3 ValueError failures are 19:36, 19:53 and 20:10 ET today, after the change, none before. My chars/3.6 estimate put the prompt at 2838, 19% low, because JSON punctuation is cheap per character; the error ran in precisely the direction that hid the bug. So the \"3.5x headroom\" claim was true of the decision prompt and false of the curriculum one, and my own test test_every_generation_call_site_uses_the_same_window enforced that mistake and passed. Replaced with pins_a_named_window, plus tests that the two windows are not assumed equal and that the real worst-case context must fit window + longest measured answer. Fixing only the window would have failed differently: the working window takes 118-142s and the 120s default timeout sat inside that range, trading a truncation for a ReadTimeout, so curriculum now gets 8192 and 600s while the decision path keeps 4096 and 120s. Also removed 50 provenance UUIDs from the model-facing summary (~2100 of 2522 chars) that exist for the daemon's no-exploration artifact source_refs. The churn root cause: the curriculum was structurally blind to its own output - the summary it receives describes trading activity (HOLD 47, BUY 2, SPY 764.18) and no spec the model ever authored, so a refused id looked as fresh as a new one, while admission wrote a good 212-character refusal naming the exact dimensions that must differ, journalled 83 times, shown to nobody. _recent_rejections now reads verdicts back, newest per id. Negative result stated plainly: it did not stop the churn. The model proposed fixed-size-sell-003 with the same name, same FIXED_SIZE/SPY/SELL/1/5000 and parameters null - a rename, not a change, reproduced live at 20:54 ET. The guard still fails closed, verified against the real library. Cause is saturation, not prompting: for FIXED_SIZE+SELL+SPY under these limits, quantity 1 and max_position_value 5000 are nearly the only admissible values, so every correct FIXED_SIZE sell duplicates the one held; a collision retry would burn ~140s per call for a rename with no evidence it converges, so it is not built. Also corrected earlier miscounts: the journal holds two record shapes (987 cycles, 6700 events) and I searched for a nonexistent \"kind\" field while mixing UTC with ET dates - 259 proposals not 258, 47 failures not 44, 22 today across 3 ids not 26 across 12, and the 47 are 26 ValidationError (June 11, fixed), 14 ReadTimeout, 4 JSONDecodeError, 3 ValueError. The open strategy_spec question resolves: CurriculumTask requires it and it reaches the strategy file, the event schema never had a field, so nothing was corrupted and only the audit trail was incomplete. Commit d9b7720, 24 classes, 1045 test executions, doctor OK. Next: no code work remains justified until market hours - 70 decisions pending a 24h horizon, 10 SPY shares open at +1.05 unrealized, 0 closed model lots, 27/27 strategies INSUFFICIENT against a 52-event bar, after-cost net +556.77 still entirely baseline. Resume 2026-09-30 09:30."
+    },
+    {
+      "time": 1790729993881,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790730291925,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790730394757,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 1031,
+  "storageGeneration": 1078,
   "createdAt": 1790641773516,
-  "updatedAt": 1790729664717,
+  "updatedAt": 1790730397892,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:c3cb3254c518367f1c8cd88244e84bcbd83597fa1d10bffb8cee3387f57fdc53",

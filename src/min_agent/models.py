@@ -690,24 +690,6 @@ class CurriculumTask(BaseModel):
         return self
 
 
-class DaemonState(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    status: DaemonStatus
-    started_at: datetime
-    updated_at: datetime
-    cycle_count: int = Field(ge=0)
-    error_count: int = Field(ge=0)
-    active_strategy_id: str | None = None
-    last_cycle_id: str | None = None
-    message: str = ""
-
-    @field_validator("status", mode="before")
-    @classmethod
-    def normalize_status(cls, value: str) -> str:
-        return value.strip().upper()
-
-
 class ReflectionRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 

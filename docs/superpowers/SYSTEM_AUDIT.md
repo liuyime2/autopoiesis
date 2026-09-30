@@ -1992,3 +1992,119 @@ goal remains market time - 27 of 27 strategies are `INSUFFICIENT` out-of-sample
 against a 52-event bar, none with a closed model lot.
 
 `make verify`: **24 classes, 0 failed, 1045 test executions, doctor OK.**
+
+## 37. A file in the library is not an approved strategy
+
+The operator said continue with the curriculum. I had reported "no code work
+remains justified until market hours", and following the objective's own ordering
+- delete, merge, simplify, reuse, repair, *then* add - there was real work left:
+the fact-level audit of what is actually wired, which I had never completed.
+
+### 37.1 Correcting two more of my own claims
+
+Both came from counting things I had not counted.
+
+**"27/27 strategies INSUFFICIENT" is false.** Only 20 strategies have an offline
+validation result at all, and the verdicts are:
+
+| verdict | count |
+| --- | --- |
+| `INCONCLUSIVE_INSUFFICIENT_EVIDENCE` | 14 |
+| `PASS_SCREENED` | **4** |
+| `REJECT_POOR_DECISIONS` | 2 |
+
+Four strategies passed screening. I had said "27/27 insufficient" in several
+checkpoints and it was never true.
+
+**"need 52 out-of-sample events" is not a threshold anywhere.** The only `52` in
+`evaluator.py` is a comment about a historical lot count. The real bar is stated
+in the verdict messages themselves: "below the 10 needed to say anything".
+
+I also nearly reported two more false findings. `STRATEGY_LIFECYCLE_UPDATED`
+looked like it recorded `None -> None` transitions - I had guessed the field names
+`from`/`to`; the real keys are `old_lifecycle`/`new_lifecycle` and all 32 events
+carry real transitions. And a first dead-code scan reported 59 unreferenced
+symbols, because it excluded each symbol's own file; counting genuine AST name
+loads across all production files, the real number was 3.
+
+### 37.2 Three genuinely dead symbols, deleted
+
+```
+curriculum.py   json_text()          one-line wrapper over json.dumps, unreferenced
+evaluator.py    evaluate_cycles()    wrapper over DeterministicEvaluator().evaluate()
+models.py       DaemonState          a second schema for daemon state
+```
+
+`evaluate_cycles` is exactly the duplicated abstraction the objective names: four
+production modules import from `evaluator` and every one constructs
+`DeterministicEvaluator` directly. `DaemonState` is worse - it is a parallel
+definition of the daemon's state that nothing validates against, describing
+`heartbeat.json` field-for-field minus the `pid` the real schema has.
+`HeartbeatPayload` already exists, is used, and is the actual contract; the daemon
+writes the heartbeat through it. So `DaemonState` was a second source of truth for
+one shape, which is the opposite of the single-state-source the objective requires.
+A scan for symbols with zero production references now returns nothing.
+
+### 37.3 The admission gate was not actually enforced on library membership
+
+This is the serious one, and it was already in the codebase, wired, and reporting
+green.
+
+`StrategyLibrary` is a directory and the engine selects straight from it. A file
+that lands there is indistinguishable, from that point on, from a strategy the
+admission gate approved. The doctor has a check for this -
+`_check_admission_provenance` - and it correctly identified the five library files
+with no accepted admission. What it then did was report them as a **WARN**, hedged
+as "legacy from before admission was journalled, **or** written outside the gate".
+
+That hedge is resolvable from data the check already has. The first admission event
+in the journal is 2026-06-10 23:34:25Z. Comparing each file's mtime against it:
+
+| strategy | lifecycle | file written | verdict |
+| --- | --- | --- | --- |
+| `fixed-size-buy-001` | **ACTIVE** | 2026-06-18 17:54Z | after the gate |
+| `fixed-size-sell-001` | RETIRED | 2026-06-18 14:45Z | after the gate |
+| `tiny-fixed-size-001` | RETIRED | 2026-06-16 18:16Z | after the gate |
+| `trend-follow-buy-001` | **ACTIVE** | 2026-06-18 18:54Z | after the gate |
+| `trend-follow-sell-001` | PAUSED | 2026-09-28 15:20Z | after the gate |
+
+Not one of them is legacy. All five entered the library after the gate was
+journalled, and three of them traded:
+
+| strategy | submitted | `ORDER_FILL_CONFIRMED` |
+| --- | --- | --- |
+| `fixed-size-buy-001` | 16 | **16** |
+| `tiny-fixed-size-001` | 13 | **13** |
+| `trend-follow-buy-001` | 4 | **4** |
+
+Thirty-three broker-confirmed paper fills from strategies that admission never
+approved - two of which are `ACTIVE` and therefore selectable right now. A check
+that cannot fail is not a control, and one that explains away its own finding
+teaches its reader to ignore it.
+
+Repaired: the check now separates pre-gate legacy (still a WARN, which is the right
+severity) from post-gate entry (FAIL), uses the file mtime rather than the
+model-supplied `created_at` as the witness - three of these files share one
+`created_at` of `2026-06-18T03:21:34`, which is the prompt asking the model for
+"the current time" and the model not supplying it - and reports the
+broker-confirmed fill count so the severity is concrete rather than adjectival.
+The "reviews exist but none accepted" branch was removed rather than given its own
+message: a test caught it reporting the condition without naming the file, which is
+the one thing an operator needs.
+
+`make verify` is now **red**, and that is the honest state:
+
+```
+FAIL - the gate is red:
+  doctor: RESULT: FAIL - 1 blocking problem(s): admission provenance
+```
+
+I am not resolving that red myself. Two of the five are `ACTIVE` and currently
+selectable, and the disposition is a genuine judgement call with a real trade-off
+rather than a mechanical fix: `fixed-size-buy-001` holds the only
+broker-verified realized PnL in the library (+120.37), and the selection ranking
+uses precisely that evidence to choose a strategy. Retiring it would strip the
+library of its only evidence-backed strategy; accepting it retroactively would
+launder a bypass into a pass. Six tests pin the resolved behaviour, including that
+post-gate entry fails, that genuine legacy stays a warning, and that a bypass
+names the trading it caused.

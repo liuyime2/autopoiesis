@@ -307,10 +307,6 @@ class _StrategyPnl:
     unmatched_sell_quantity: float = 0.0
 
 
-def evaluate_cycles(records: list[CycleRecord]) -> EvaluationReport:
-    return DeterministicEvaluator().evaluate(records)
-
-
 #: Charged on both sides of a closed lot, as a percent of notional, when no explicit
 #: value is supplied. The paper broker reported 0.00 commission on all 24 fills, so
 #: without an assumption the live PnL is gross and the objective's *after-cost*

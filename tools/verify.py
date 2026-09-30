@@ -64,6 +64,9 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_lineage.py": (
         "lifecycle-invariants", "data-integrity", "point-in-time-no-leakage",
     ),
+    "test_admission_provenance.py": (
+        "lifecycle-invariants", "data-integrity", "guardian-bypass-prevention",
+    ),
     "test_curriculum_feedback.py": (
         "lifecycle-invariants", "unit-integration", "data-integrity",
     ),

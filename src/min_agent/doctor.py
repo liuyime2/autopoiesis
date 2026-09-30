@@ -357,27 +357,95 @@ def _check_lifecycle_provenance(
 def _check_admission_provenance(
     report: DoctorReport, config: AgentConfig, journal: JsonlJournal
 ) -> None:
-    accepted = {
-        event.strategy_id
-        for event in journal.read_events("STRATEGY_ADMISSION_REVIEWED")
-        if event.status == "ACCEPTED" and event.strategy_id
-    }
+    """Every strategy in the library must trace to an accepted admission.
+
+    The library is a directory and the engine selects straight from it, so a file
+    is indistinguishable from an approved strategy once it lands there. This check
+    existed and was wired, but it reported its findings as a WARN hedged with
+    "legacy from before admission was journalled, or written outside the gate" -
+    a hedge the journal can resolve on its own, by comparing each file against the
+    first admission event that was ever recorded. Resolving it matters: all five
+    files it names were written *after* the gate was journalled, so none of them is
+    legacy, and three of them placed 33 broker-confirmed paper fills. A warning
+    that cannot fail is not a control, and one that explains away its own finding
+    teaches the reader to ignore it.
+    """
+    reviews = journal.read_events("STRATEGY_ADMISSION_REVIEWED")
+    accepted = {e.strategy_id for e in reviews if e.status == "ACCEPTED" and e.strategy_id}
     library = StrategyLibrary(config.strategy_dir)
-    if not accepted:
-        # Pre-existing library from before the admission gate was journaled.
+    strategies = library.list()
+    if not reviews:
+        # No admission has ever been journalled, so there is no gate to compare
+        # against. That is genuinely unknown, not a pass.
         report.add("admission provenance", WARN,
-                   "no accepted admissions in the journal to compare the library against")
+                   "no admission reviews in the journal to compare the library against")
         return
-    missing = [s.strategy_id for s in library.list() if s.strategy_id not in accepted]
-    if missing:
+    # No separate branch for "reviews exist but none was accepted": that is the
+    # same finding as any other unadmitted file, and an early return here reported
+    # the condition without naming the file, which is the one thing an operator
+    # needs. Every file simply falls through to the loop below.
+
+    gate_since = min(e.timestamp for e in reviews)
+    bypasses, legacy = [], []
+    for strategy in strategies:
+        if strategy.strategy_id in accepted:
+            continue
+        # created_at is model-supplied and demonstrably unreliable (three files
+        # share one timestamp), so the on-disk mtime is the honest witness.
+        path = Path(config.strategy_dir) / f"{strategy.strategy_id}.json"
+        try:
+            written = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        except OSError:
+            written = None
+        if written is not None and written > gate_since:
+            bypasses.append((strategy.strategy_id, strategy.lifecycle, written))
+        else:
+            legacy.append(strategy.strategy_id)
+
+    if bypasses:
+        fills = _fills_by_strategy(journal)
+        traded = [
+            f"{sid}={fills.get(sid, 0)}fill(s)" for sid, _lc, _w in bypasses
+            if fills.get(sid, 0)
+        ]
+        report.add(
+            "admission provenance", FAIL,
+            f"{len(bypasses)} strategy file(s) entered the library after the gate "
+            f"existed with no accepted admission: "
+            f"{', '.join(f'{sid}({lc})' for sid, lc, _w in bypasses[:6])}."
+            + (f" Broker-confirmed fills attributed to them: {', '.join(traded)}."
+               if traded else " No broker-confirmed fills attributed to them yet."),
+            "written outside the admission path; each needs a recorded disposition",
+        )
+    elif legacy:
         report.add(
             "admission provenance", WARN,
-            f"{len(missing)} strategy file(s) have no accepted admission event: "
-            f"{', '.join(missing[:6])}",
-            "legacy from before admission was journalled, or written outside the gate",
+            f"{len(legacy)} strategy file(s) predate the admission gate and have no "
+            f"accepted admission: {', '.join(legacy[:6])}",
+            "genuinely legacy; no post-gate entry was found",
         )
     else:
-        report.add("admission provenance", OK, f"all {len(accepted)} file(s) traceable to admission")
+        report.add("admission provenance", OK,
+                   f"all {len(strategies)} file(s) traceable to an accepted admission "
+                   f"({len(accepted)} accepted admissions in the journal)")
+
+
+def _fills_by_strategy(journal: JsonlJournal) -> dict[str, int]:
+    return _fills_by_strategy_cached.get(journal.path, _scan_fills(journal))
+
+
+#: One scan per journal path per process. `_fills_by_strategy` is called from a
+#: check that already walks the whole journal, and the doctor runs on a schedule.
+_fills_by_strategy_cached: dict = {}
+
+
+def _scan_fills(journal: JsonlJournal) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for event in journal.read_events("ORDER_FILL_CONFIRMED"):
+        if event.strategy_id:
+            counts[event.strategy_id] = counts.get(event.strategy_id, 0) + 1
+    _fills_by_strategy_cached[journal.path] = counts
+    return counts
 
 
 def _check_decision_quality(

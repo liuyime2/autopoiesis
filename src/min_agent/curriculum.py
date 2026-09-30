@@ -681,10 +681,6 @@ def prompt_context_text(prompt_context: dict) -> str:
     return "Context: " + json.dumps(prompt_context, sort_keys=True)
 
 
-def json_text(value) -> str:
-    return json.dumps(value, sort_keys=True)
-
-
 def _json_load(raw: str) -> dict:
     start = raw.find("{")
     end = raw.rfind("}")
