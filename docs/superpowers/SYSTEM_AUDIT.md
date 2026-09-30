@@ -3152,3 +3152,44 @@ the system has done:
 Both are the same error as section 52: asserting a number about the system's own records
 from a guess about their shape, instead of reading the shape. `make verify` exists because
 that guess is not a safe default.
+
+## 54. The round trip is not waiting on market time, and the reason was not the clock
+
+Every previous section framed the outstanding requirement as "elapsed prospective
+market time". That was wrong, and being wrong about it mattered, because it would have
+had this system sit idle through an open it was able to trade.
+
+The market opens 2026-09-30 09:30 ET. At 08:53 ET the broker clock reported
+`is_open=false` with 36 minutes to the open. Rather than wait, the chain a round trip
+needs was traced end to end, and every link is present:
+
+1. **A position to close.** 10 SPY shares bought by the agent at 764.075, all 13
+   confirmed fills being BUY. `ORDER_FILL_CONFIRMED` events across the whole journal
+   read 33 BUY and 1 SELL of 52 shares - and that SELL predates the agent-owned SELL
+   guard, so it is the historical 29 unmatched owner shares, not an agent exit.
+2. **A strategy that can express the exit.** `fixed-size-sell-005`, lifecycle PROBATION,
+   `action=SELL`, quantity 1, `max_position_value=2500`.
+3. **Guardian permitting it.** A SELL is bounded by what the *agent* holds rather than
+   what the account holds. 10 agent-owned SPY against a requested quantity of 1 is
+   executable.
+
+What actually blocked the round trip is a design detail worth recording. At SPY 767,
+`_uncovered_capabilities` returns `none`, because `fixed-size-sell-005` exists and makes
+SELL a *declared* capability. The SELL-priority branch at `strategy_engine.py:374`,
+added earlier precisely so a capability the library otherwise lacks is served first,
+therefore does not fire: the capability is covered on paper by a strategy that has never
+been selected. That is not a defect - the coverage test deliberately uses `count <= 1`,
+treating a single route as "has another chance to be tried", and this is that chance. The
+strategy is third-oldest in a five-deep PROBATION pool, so rotation reaches it.
+
+The finding is that the blocker was never the market clock and never a missing piece of
+mechanism. Every capability, guard and gate required for a round trip was already in
+place and verified; what was missing was anyone checking whether the chain was intact
+instead of restating that time had not yet passed.
+
+Two errors of mine in this section, both from trusting an assumption over a reading. I
+queried `ALPACA_API_KEY_ID` twice before noticing the env file defines `ALPACA_API_KEY`,
+which is the kind of guess section 53 warns about. And I reconstructed `StrategySpec`
+objects by hand from raw JSON, twice hitting pydantic validation errors, before
+switching to the shipped `StrategyLibrary.list()` - the same loader production uses,
+which is what the third attempt should have been first.
