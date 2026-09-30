@@ -3544,3 +3544,44 @@ as `daemon.source_fingerprint(): 'importlib'` - the check that exists precisely 
 unbound names, doing its job on code written one turn earlier. I had added the import,
 seen no error, and moved on without confirming it was there. The gate I have been
 criticising for accepting unverified claims caught me doing the same thing.
+
+## 63. Why the exit strategy is not being selected, and why no fix is needed
+
+`fixed-size-sell-005` is in PROBATION, emits a real `SELL SPY qty=1` against the live
+price, and the Guardian would clear it - 20 agent-owned SPY against a requested 1. Across
+twelve minutes of watching, the daemon ran five cycles and selected
+`trend-follow-buy-006` every time.
+
+The cause is the probation queue, not a defect. `select()` serves PROBATION strategies
+oldest-first by `created_at`, and the queue is:
+
+    2024-06-14  fixed-size-probe-0001     BUY
+    2026-06-18  trend-follow-buy-001      BUY
+    2026-09-30  fixed-size-sell-005       SELL      <- third
+    2026-09-30  trend-follow-buy-006      HOLD
+    ... six more, all created after the restore
+
+`trend-follow-buy-006` sits ahead of it and stays in the queue until it reaches
+`min_probation_cycles` (3). Whether it has is a question about a *snapshot*:
+`_needs_probation` reads `result.cycles` from `reflection.json`, which was generated at
+11:46 ET and recorded `cycles: 1` for it, while the journal now holds five. Recomputing the
+same 50-cycle window with the current evaluator gives `cycles=5, trade_attempts=0`.
+
+So the queue is not stuck; it is reading a stale count that has not yet been refreshed.
+Two mechanisms refresh it and both are on timers that had simply not fired since the 11:28
+restart: `reflection_interval_seconds=1800`, and `cycle_count % reflect_every == 0` with
+`reflect_every=10` - a counter that restarted at zero, so it is at 4 and rising roughly
+every six minutes.
+
+Nothing here needs changing. The rotation is fair, the exit strategy is third, and the
+reflection will regenerate within the interval. What is worth recording is that
+`needs_probation` decisions are made against a periodic snapshot rather than the journal,
+so queue progress lags real activity by up to `reflection_interval_seconds`, and a daemon
+restart resets the cycle counter that also gates regeneration. Neither is wrong; both mean
+"the queue will get there" is a claim about a timer, and it should be verified by reading
+the regenerated reflection rather than inferred.
+
+One more of the same error as sections 52, 53, 57 and 62: I printed the conclusion
+"sell-005 is third-oldest and two older strategies precede it" and, in the same output,
+asserted the queue was *not* advancing - before reading whether buy-006 had met the
+threshold. Reading the regenerated count costs one command.
