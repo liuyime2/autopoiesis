@@ -3267,3 +3267,53 @@ name as `alpaca_trading_api` when `cli.py:176` imports `alpaca_trade_api`, guess
 `source` and `account` - before switching to the gateway that builds it correctly. Five
 attempts to inspect the system, four of which failed on a name I could have read off the
 import line.
+
+## 57. Pre-open readiness, and correcting a claim I printed before checking it
+
+Asked to confirm the system is running correctly and ready for the open. Every readiness
+link verified against current state:
+
+- `ollama.service`, `min-agent.service` and `quant-watchdog.timer` all `enabled` and
+  `active`, `quant-watchdog.service` `static` and correctly `inactive` between timer
+  firings. FragmentPaths under `/home/liuyime2/.config/systemd/user`.
+- `qwen3.8:27b` already resident in Ollama, so the first open decision is not a cold
+  start.
+- Last three unattended watchdog runs `ok=True exit=0 failures=[none]`.
+- Broker clock live and authoritative; daemon PID 1050838 matches the heartbeat's `pid`.
+
+**The scheduling question worth answering.** Whether the daemon would actually trade at
+the open, rather than sleep through it, is decided by `scheduler.sleep_seconds`. While
+the market is closed it sleeps until `next_open`, capped by
+`maintenance_interval_seconds=900`. At T-393s the remaining time is inside that cap, so
+the daemon sleeps precisely to 09:30:00 rather than waking early, and `should_trade_now()`
+returns `market_is_open()` immediately after. Above the cap it would wake every 900s and
+re-test, costing at most a quarter hour at the boundary - it cannot sleep through a whole
+session. `max_daily_cycles=288` is nowhere near binding. Heartbeat reads
+`status: RUNNING`, `cycle_count: 0`, `message: market closed; maintenance only`, which is
+the correct resting state and not a stall.
+
+**An error worth recording, because it is the same failure twice.** Seeing `guardian:
+approved` on a cycle whose rationale said the market was closed, I asserted in output that
+"the system has never run a real cycle with the market open" - and printed that claim
+*before* reading the data. It is false. Of 988 cycles, **527 ran with `market_open=True`**,
+and on those the full trade path is already proven against the broker:
+
+| open-market (approved, action, status) | count |
+| --- | --- |
+| approved, BUY, SUBMITTED | 33 |
+| approved, SELL, SUBMITTED | 1 |
+| rejected, BUY, REJECTED | 25 |
+| rejected, SELL, REJECTED | 4 |
+| rejected, HOLD, REJECTED | 4 |
+| approved, HOLD, SKIPPED | 460 |
+
+The four refused SELLs name their reasons - "cannot sell more than known holdings" twice,
+"position value exceeds hard limit", "decision confidence below minimum" - so the hard
+gates have fired on real broker data, and the single approved SELL of 52 shares was
+submitted against a real 52-share position. Opening will not introduce an untested path.
+
+The distinction that made me miss it: the *latest* cycle happened to be a closed-market
+HOLD, and I generalised from one record. Section 52 and 53 both recorded this exact error -
+asserting a number about the system's own records from a guess. The cure has not been
+writing the lesson down; it has been checking before typing. Reading the distribution first
+costs one command.
