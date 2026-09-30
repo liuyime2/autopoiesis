@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790737542586,
-      "lastRequestTokens": 238592,
-      "lastInputTokens": 237747
+      "observedAt": 1790738249870,
+      "lastRequestTokens": 258624,
+      "lastInputTokens": 258156
     }
   },
   "runtimeFingerprint": {
@@ -43,10 +43,10 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 29,
-    "tokens": 706982,
+    "turns": 30,
+    "tokens": 709820,
     "cost": 0,
-    "runtimeMs": 499547,
+    "runtimeMs": 510982,
     "seenMessageIDs": [
       "msg_0ea911ff0001xqHQnFmbF3aICp",
       "msg_0ea980dc20015f3lGA67tXRaUK",
@@ -76,7 +76,8 @@
       "msg_0f021ee47001LyS9jDOAJRxCY2",
       "msg_0f0282df2001VHT3OgKVI830zr",
       "msg_0f03291d3001TWJghPGfWAdMJk",
-      "msg_0f03af2c9001YQNfSR5hDMY3Bo"
+      "msg_0f03af2c9001YQNfSR5hDMY3Bo",
+      "msg_0f0470042001EDLtla8IuSwwYE"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -86,12 +87,9 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 135,
-  "observedProgressRevision": 131,
+  "progressRevision": 138,
+  "observedProgressRevision": 136,
   "progressFingerprints": [
-    "shell-worktree:b06b3c957c83a5a5b9ad32118c903576cbc26e55865004254e8ece5a24ed70c0",
-    "shell-worktree:7c9e2929057a8ce0cfa1ce605f7e94515e3a8569cf022065e1d6a35f0399f93b",
-    "shell-worktree:3dd347e05435d0ae3933f70dce8e3af3ffd02c8c783ad9219db342684b9cc41b",
     "shell-worktree:30a31afbf3f8250417a4a95153a7c602378d9dc454d11906b503539fa60da8ce",
     "shell-worktree:5f3298e8a0a1a18797c081f668fb304b85fc161eba265cba8bbecf3063661e11",
     "shell-worktree:b26da4849a9f33eeb880d7c0a1d288f861c1558aea94a7d94e235bc7309fb755",
@@ -216,30 +214,13 @@
     "file:src/min_agent/policy_engine.py:e0be54e9473fa63ece76dd00f774f3b4342d9f43f5b88237aa62632b7424dfc6",
     "shell-worktree:f6632d1d5a94e4a7da5e44ee19f42171bc2f18060150b6b38e8d68884ab5ab8c",
     "shell-worktree:1288b8f8fceb316342913f261f92fc614788b97530165ace4bea621bafb4d070",
-    "shell-worktree:456a2e08a3355a8b64688bdf97bce248a24e75d4e6ab8d71168788110dff9a2c"
+    "shell-worktree:456a2e08a3355a8b64688bdf97bce248a24e75d4e6ab8d71168788110dff9a2c",
+    "shell-worktree:be1a6a64e245c81bd2af0fd07a023f5f48905fd60989d5df17ab273c85589e32",
+    "file:tests/min_agent/test_doctor_infra_checks.py:4c6477fcf0eee4e42431e50bbf0042b7cfdd539e61bd97d30d5df0eb06ec9774",
+    "shell-worktree:f6b323cde8446e04330d1cdc2dc1fba5152850c6311e0a486dedd345d25ef510"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790687994950,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790688061573,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790688098999,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790688172714,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790688198515,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -469,11 +450,31 @@
       "time": 1790737338387,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790737554908,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790737564078,
+      "summary": "Did the two items I had named from the classification's missing section, both repairs of partially-wired or broken capabilities rather than new work, neither touching a trading rule. First, five lesson slots were buying one idea. The knowledge path is wired end to end, so it is not the write-only loop I suspected before checking, and I would otherwise have reported a false finding - the defect was narrower and worse: relevant_lessons sliced before deduplicating, so lessons[:max_lessons] filled all five slots with the first five artifacts in library order, and this library's order is dominated by one statement. Ten of the eleven accepted artifacts share a single answer, so every decision prompt carried the same sentence five times, buying nothing and costing prompt budget on every cycle. Dedup now happens on normalised answer before the cap, so a decision carries 2 distinct lessons instead of 5 copies of 1, and the two it now carries are genuinely different - the general no-exploration lesson and the all-hold degenerate-strategy lesson. The cap still applies to distinct lessons, so a real library still fills its budget. The check that should have caught this was wrong twice over: it counted distinct summaries rather than answers, and warned only when the count collapsed to exactly 1, so 11 artifacts with 2 distinct statements reported OK. That is the same defect shape as the model-registry severity bug fixed in the previous turn, so both are now treated as one pattern - a ratio tested as a boolean - rather than two coincidences. Second, and more important for trusting the gate: a working daemon was reported dead twice. make verify went red on doctor: daemon while journal events were landing throughout, the pid was alive, and it had used 1m08s of CPU across 2h09s elapsed. I dismissed the first occurrence as transient, which is precisely what a crying-wolf check induces. The cause is that the heartbeat was written once per loop iteration, after _maintenance() returned, and one maintenance pass screens 27 strategies and can make a ~140s curriculum call, so the gap between beats exceeded stale_after_seconds (900) while the daemon was mid-work. The fix beats on entry to the long work rather than raising the threshold, and that distinction is the substance: a daemon that beats on entry and then genuinely wedges still goes stale 900s later, so the check keeps its ability to catch a real hang. Only the dishonest \"I am working\" silence is removed; raising the threshold would have hidden the next real stall behind a wider window. Four tests pin both halves - that the beat precedes the work in the source, that the message says maintenance rather than idle, that a wedged pass still fails the staleness arithmetic, and that the payload accepts the new message. 12 new tests across three files, 1111 test executions. make verify 24 classes, 0 failed, exit 0, with the warnings now being the honest kind: knowledge value at 11 artifacts carrying 2 distinct statements, model registry at 93 percent unattributed, calibration mis-calibrated, pnl attribution with the 29 owner shares, no champion, and the new unmanaged-exposure line. Commit 7d4eaf2.",
+      "next": "Two of the four items in the classification's \"missing\" section are now repaired (knowledge lesson dedup and the daemon liveness false positive), leaving failure-path tests for 10 doctor checks and pruning of superseded knowledge artifacts. Everything else is market time: 70 decisions await a 24h horizon, the model has 10 open SPY shares and zero closed lots, no strategy has broker-verified positive realized PnL so there is still no champion, and after assumed cost +556.77 belongs entirely to the baseline rule rather than to anything the model chose. Resume 2026-09-30 09:30."
+    },
+    {
+      "time": 1790737621198,
+      "summary": "[host:tool:write] Project file content changed: tests/min_agent/test_doctor_infra_checks.py",
+      "next": ""
+    },
+    {
+      "time": 1790737974661,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 1232,
+  "storageGeneration": 1275,
   "createdAt": 1790641773516,
-  "updatedAt": 1790737542586,
+  "updatedAt": 1790738249870,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:c3cb3254c518367f1c8cd88244e84bcbd83597fa1d10bffb8cee3387f57fdc53",

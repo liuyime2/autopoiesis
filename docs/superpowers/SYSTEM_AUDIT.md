@@ -2329,3 +2329,52 @@ A check that cries wolf is worse than no check, because it teaches its reader to
 re-run it instead of read it. I did exactly that on the first occurrence.
 
 `make verify`: **24 classes, 0 failed, 1111 test executions, doctor OK, exit 0.**
+
+## 41. Pinning the checks that can now say no
+
+The capability classification listed 10 doctor checks with no test asserting their
+non-OK path. Eight are now pinned; **two are not**, and the shortfall is stated
+rather than rounded away.
+
+The question asked of each check is the one this audit has kept asking: *what input
+would make this say something other than OK?* A check with no such input is an
+advertisement. New coverage, and what each test now proves can go wrong:
+
+| check | the failure it can now report |
+| --- | --- |
+| `python` | a 3.9 interpreter, which would break every dependency downstream |
+| `dep:<module>` | a missing import, with the other two still reported so one gap does not hide the rest |
+| `broker clock` | an unreachable broker fails rather than skipping, and `--skip-broker` is distinguishable from passing |
+| `alpaca credentials` | missing credentials produce `SKIP`, not `OK` - unknown is not healthy |
+| `knowledge library` | an unreadable library is `FAIL`; an empty one is `WARN`, because with nothing accepted the reflection-to-decision link is silently inert |
+| `end-to-end proof` | a fresh install with no cycles proves nothing, and says so |
+| `proof: per-strategy pnl` | a fill alone is not PnL |
+| `proof: submitted>0` | no order has ever been submitted |
+| `risk-driven halts` | a decision maker abstaining on risk grounds is a second, undeclared risk authority - one occurrence is enough to look at, since a threshold would hide the first |
+| `decision quality` | holds with no later quote are reported as unknown, not as fine |
+| `pnl evidence` | the string the whole after-cost claim rests on, reported when absent |
+| `model calibration` | a miscalibrated result must not come out `OK` |
+
+**Four of my own assumptions were wrong, and in every case the production code was
+better-reasoned than my guess.** I expected `knowledge library` to warn on an
+unreadable directory - it fails, correctly, because that is a broken install and
+would otherwise be indistinguishable from an empty library. I expected an empty
+library to be OK - it warns, correctly. I expected the `risk-driven halts` line to
+be *absent* when there were no risk halts - it is present and OK, because the
+report shape is deliberately stable so it stays greppable, so the assertion belongs
+on the status, not the presence. And I asserted the message "could not be scored
+yet" where the code says "no decision could be scored yet". In each case I changed
+the test.
+
+One fixture bug is worth recording because it exposed a real property: omitting
+`counterfactual_horizon_hours` from a stub config made the check report
+`evaluation failed: AttributeError`. A check that catches everything can hide a
+broken caller behind a plausible message - which is why the `python` and
+`dep:` tests above matter more than they look.
+
+**Not done:** `champion / search` and `experiment chain` still have no failure-path
+test. Both need a journal seeded with specific admission and offline-validation
+events plus a real strategy library, and I did not build those fixtures. Saying
+"28 of 30" is more useful than claiming the set is closed.
+
+`make verify`: **24 classes, 0 failed, 1140 test executions, doctor OK, exit 0.**

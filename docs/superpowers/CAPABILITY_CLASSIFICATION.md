@@ -101,7 +101,7 @@ Each of these reported success while something real was wrong.
 | --- | --- |
 | **visibility of unmanaged account exposure** | Now reported. It did not exist: `daily_loss` is whole-account equity, so a drawdown in BIL or TLT could consume the agent's $500 daily-loss budget for a reason appearing in no decision, PnL record or attribution |
 | **knowledge pruning** | Nothing removes superseded artifacts. 10 of 11 accepted lessons are duplicates of one answer, and they persist under distinct ids from an earlier scheme, so `max_lessons` is spent on repetition |
-| **failure-path tests for 10 doctor checks** | `broker clock`, `champion / search`, `decision quality`, `experiment chain`, `knowledge library`, `knowledge value`, `model calibration`, `pnl evidence`, `python`, `risk-driven halts` have no test asserting the non-OK path |
+| **failure-path tests for 2 doctor checks** | Down from 10 uncovered to **2**: `champion / search` and `experiment chain` still have no test asserting their non-OK path. Both need a journal seeded with specific admission/offline-validation events plus a real strategy library, and I did not build those fixtures. The other eight are now pinned, including the two whose severity I had guessed wrong |
 | **attribution for 29 shares** | Sold in June before the SELL bound existed. The cost basis is not in the journal, so that realized PnL is permanently unproven. Correctly reported rather than invented |
 
 ---
