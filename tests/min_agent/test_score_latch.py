@@ -184,9 +184,63 @@ def test_risk_systems_own_refusals_are_not_counted_as_strategy_faults(reason):
     assert metrics.trade_attempts == 1
 
 
-def test_a_genuine_strategy_fault_is_still_charged():
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "cannot sell 1 SPY; the agent holds 0. The account may hold more, but those "
+        "shares are not the agent's to sell",
+        "cannot sell more than known holdings",
+        "the agent's own holding of SPY is unknown, so a SELL cannot be bounded; "
+        "refusing rather than risk selling the account owner's shares",
+        "agent exposure 900.00 + 2500.00 exceeds the 3000.00 limit "
+        "(allowlist symbols only; account total is 400.00)",
+    ],
+)
+def test_rejections_caused_by_system_state_are_not_strategy_faults(reason):
+    """A rejection the strategy could not have avoided is not its fault.
+
+    These reasons interpolate the offending quantity and the limit breached, so an
+    exact-equality test against SYSTEM_REJECTION_REASONS could never match them and
+    they were charged to the strategy. The cost was concrete: the only SELL-capable
+    strategy in the library was retired with "severe operational failure rate 1.00"
+    for three refusals whose stated cause was "the agent holds 0" - a quantity derived
+    from the journal, not anything the strategy did. A strategy was removed from the
+    library for obeying the system.
+
+    This test previously asserted the opposite for "cannot sell more than known
+    holdings", treating it as a fault. That check is `_has_position` against a broker
+    snapshot (`guardian.py:90`), the same class of system-derived fact as the journal-
+    derived agent holding at `guardian.py:110`.
+    """
     report = DeterministicEvaluator().evaluate(
-        [_record("s", "SELL", "REJECTED", reason="cannot sell more than known holdings", approved=False)]
+        [_record("s", "SELL", "REJECTED", reason=reason, approved=False)]
+    )
+    metrics = report.strategy_metrics["s"]
+
+    assert metrics.rejected_orders == 1
+    assert metrics.strategy_fault_rejections == 0
+    # Still an attempt: the strategy acted and the system stopped it.
+    assert metrics.trade_attempts == 1
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "position value exceeds hard limit",
+        "strategy position value exceeds hard limit",
+        "decision confidence below minimum",
+        "symbol is outside the allowlist",
+    ],
+)
+def test_a_genuine_strategy_fault_is_still_charged(reason):
+    """The fault counter still does its job.
+
+    Each of these is the strategy asking for something its own specification makes
+    impermissible: a position larger than the hard limit, more than it can afford, or a
+    symbol it is not permitted to trade.
+    """
+    report = DeterministicEvaluator().evaluate(
+        [_record("s", "BUY", "REJECTED", reason=reason, approved=False)]
     )
 
     assert report.strategy_metrics["s"].strategy_fault_rejections == 1

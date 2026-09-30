@@ -2832,7 +2832,7 @@ orders, 12 activities, 21 portfolio-history points.
 `$HOME/.config/systemd/user` with zero enablement links into tmpfs. The broker clock
 reports `next_open=2026-09-30 09:30:00-04:00`.
 
-**Reviewed and confirmed.** `make verify`: 28 classes, 0 failed, 1184 test executions
+**Reviewed and confirmed.** `make verify`: 28 classes, 0 failed, 1191 test executions
 across 60 files, exit 0.
 figures by naive FIFO arithmetic over raw journal text, cross-checked against the
 production ledger for the same journal - 23 closed lots, +564.39 realized, 29
@@ -3447,3 +3447,59 @@ live one. The market being open is the condition under which every figure in thi
 is supposed to be trustworthy, and it is precisely when two of the checks stopped being
 trustworthy. Fixing them required no change to the system under audit - only to the
 assertion about it.
+
+## 61. A strategy was retired for obeying the system, and restoring it required two gates
+
+`fixed-size-sell-005` was retired at 13:51:46 with the reason "severe operational failure
+rate 1.00". The arithmetic was correct: three cycles, three refusals, 1.00 against a 0.75
+threshold. The refusals were not the strategy's fault, and there were two independent
+reasons.
+
+The first is section 58's bug - `_agent_holding` reported 0, so the Guardian refused each
+SELL with "cannot sell 1 SPY; the agent holds 0". Fixed.
+
+The second was independent and would have retired the strategy anyway. Guardian reasons
+that interpolate the offending quantity interpolate it into the message:
+`"cannot sell 1 SPY; the agent holds 0. The account may hold more..."`. `strategy_fault_
+rejections` compared reasons by exact equality against a literal `frozenset`, so a message
+carrying numbers could never match, and every such refusal was charged to the strategy as
+its own fault. `evaluator.is_system_rejection` now classifies by stable literal prefix.
+Across the real journal this reclassifies 7 refusals and leaves 9 alone: the systemic ones
+are the agent's own holding, the broker's known holdings, and aggregate account exposure;
+the genuine faults are a strategy asking for more position value than its own limit allows
+or acting below its own confidence floor.
+
+The library was left with no sellable exit at all - `fixed-size-sell-001` retired earlier,
+`fixed-size-sell-005` retired here, `trend-follow-sell-002` PAUSED - and a round trip needs
+an exit. `tools/readmit_misattributed.py` restores one, and it is deliberately not a
+rubber stamp: it selects candidates from the journal by retirement reason *and* by every
+recorded refusal being systemic, re-runs the real `StrategyLifecycleManager`, and applies
+whatever that decides. Where the current rules raise no objection it restores the
+`old_lifecycle` the journal recorded for the retirement being undone, read rather than
+assumed. It recomputes metrics from the journal with the current evaluator instead of
+reading `reflection.json`, which still carried `strategy_fault_rejections=3` from a window
+the pre-fix code had evaluated - a question already answered by the old rules. Both
+original retirement events stay in the journal untouched.
+
+Three errors mine while writing it, all caught by the gates rather than by me:
+
+- `_review_one` returns `None` for a strategy already `RETIRED`, so a lifecycle review can
+  never un-retire one. Each candidate is now reviewed as a copy in PROBATION; nothing is
+  written from that copy but its decision.
+- `JsonlJournal.append_event` returns `None`, not the event. Reading `decided.event_id` off
+  the return value raised `AttributeError` between the file write and the applied event,
+  producing exactly the traceable half-state the daemon's own comment warns about. The
+  event is now built before it is appended so its id is in hand. The resulting orphan was
+  closed with a hand-written applied event whose payload says why.
+- The tool restored `fixed-size-sell-001` to PROBATION on the strength of its retirement
+  reason, overriding an unrelated real decision: the admission gate had refused it three
+  times as behaviourally identical to `trend-follow-sell-002`. `make doctor` failed with
+  `admission provenance`, which was correct. Strategies refused at admission are now
+  excluded, `fixed-size-sell-001` was returned to RETIRED, and the tool is a no-op on the
+  corrected library.
+
+So `fixed-size-sell-005` is back in PROBATION and selectable, with 3 cycles against the 5
+`min_active_cycles` requires. No hard limit was touched: the Guardian still refuses to
+sell shares the agent does not own, and the fault counter still charges real faults.
+
+`make verify`: 28 classes, 0 failed, 1191 test executions across 60 files, exit 0.

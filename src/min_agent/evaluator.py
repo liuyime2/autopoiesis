@@ -45,6 +45,44 @@ SYSTEM_REJECTION_REASONS = frozenset({
     "account day-start equity unavailable",
 })
 
+#: Rejection reasons that describe the *system's* state rather than a fault of the
+#: strategy, matched on a stable literal prefix rather than the whole message.
+#:
+#: Several Guardian reasons interpolate the offending quantity and the limit they
+#: breached, which is worth having in the journal and worth reading. It also means an
+#: exact-equality test against `SYSTEM_REJECTION_REASONS` could never match them, so
+#: they were charged to the strategy as its own fault. The cost was concrete: the only
+#: SELL-capable strategy in the library was retired with "severe operational failure
+#: rate 1.00" for three rejections whose stated cause was "the agent holds 0" - a
+#: figure derived from the journal, not anything the strategy did.
+#:
+#: Prefixes rather than a code field on `GuardianResult`: 21 rejection branches would
+#: each need one, and the message already carries the detail a reader needs. These
+#: prefixes are stable literals in `guardian.py`; a test pins them so an edit that
+#: rewords a message cannot silently reclassify it.
+#:
+#: Deliberately *not* here: "position value exceeds hard limit", "decision confidence
+#: below minimum", "strategy position value exceeds hard limit". Those are the
+#: strategy asking for something its own specification makes impermissible, which is
+#: exactly what the fault counter is for.
+SYSTEM_REJECTION_REASON_PREFIXES = (
+    # The agent's own holding is derived from the journal, and the account's positions
+    # come from a broker snapshot. Neither is a property of the strategy.
+    "cannot sell ",
+    "the agent's own holding of ",
+    # Aggregate account state the strategy cannot see or choose.
+    "agent exposure ",
+    "account total ",
+    "total exposure exceeds hard limit",
+)
+
+
+def is_system_rejection(reason: str) -> bool:
+    """Whether a Guardian rejection is the system's state rather than the strategy's fault."""
+    if reason in SYSTEM_REJECTION_REASONS:
+        return True
+    return any(reason.startswith(prefix) for prefix in SYSTEM_REJECTION_REASON_PREFIXES)
+
 
 class DeterministicEvaluator:
     def evaluate(
@@ -231,7 +269,7 @@ class _StrategyBucket:
 
         if not record.guardian.approved:
             self.guardian_rejections[record.guardian.reason] = self.guardian_rejections.get(record.guardian.reason, 0) + 1
-            if record.guardian.reason not in SYSTEM_REJECTION_REASONS:
+            if not is_system_rejection(record.guardian.reason):
                 self.strategy_fault_rejections += 1
 
     def to_evaluation(self) -> StrategyEvaluation:
