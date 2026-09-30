@@ -451,6 +451,48 @@ def check_units_are_where_systemd_looks() -> Result:
     )
 
 
+def check_replay_audit() -> Result:
+    """Re-derive the load-bearing numbers from the raw journal, independently.
+
+    Every figure in the audit and the capability classification came from calling
+    the production code. That is circular for the purpose they are used for: the
+    objective forbids treating "the function exists and the test passes" as "the
+    feature works", and asserting +564.39 is correct by asking the code that
+    computed +564.39 is that same mistake one level up.
+
+    `tools/replay_audit.py` parses the jsonl as text with no `min_agent` import in
+    its counting path and re-derives each number from first principles, including
+    the FIFO lot arithmetic. It exits non-zero on any disagreement.
+    """
+    script = ROOT / "tools" / "replay_audit.py"
+    if not script.exists():
+        return Result("replay-audit", SKIP, "tools/replay_audit.py is absent")
+    import subprocess as sp
+    try:
+        proc = sp.run(
+            [sys.executable, str(script)], capture_output=True, text=True, timeout=300,
+        )
+    except Exception as exc:  # pragma: no cover
+        return Result("replay-audit", FAIL, f"could not run: {type(exc).__name__}: {exc}")
+    if proc.returncode == 0:
+        summary = next(
+            (l.strip() for l in proc.stdout.splitlines() if "independently reproduced" in l),
+            "reproduced",
+        )
+        return Result(
+            "replay-audit", PASS,
+            f"{summary} straight from the raw journal, no production code involved",
+        )
+    bad = [
+        l.strip() for l in proc.stdout.splitlines() if "[MISMATCH]" in l
+    ]
+    return Result(
+        "replay-audit", FAIL,
+        f"independent replay disagrees with the reported figures: "
+        + "; ".join(bad[:4]) + f" (exit {proc.returncode})",
+    )
+
+
 #: The statuses that mean an order actually reached the broker.
 EXECUTED_STATUSES = {"SUBMITTED", "FILLED"}
 
@@ -933,6 +975,7 @@ def main() -> int:
     results.append(check_production_research_separation())
     results.append(check_home_independence())
     results.append(check_units_are_where_systemd_looks())
+    results.append(check_replay_audit())
     results.append(check_shadow_cannot_count_as_executed())
     results.append(check_research_trial_ledger())
     results.append(check_doctor_checks_are_all_reachable())

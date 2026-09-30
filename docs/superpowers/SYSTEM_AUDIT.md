@@ -2446,3 +2446,63 @@ survivor choice is deterministic.
 `make verify`: **24 classes, 0 failed, 1160 test executions, doctor OK, exit 0.**
 The classification's `missing` section is now empty, which is a statement about
 audit coverage only and not about the system making money.
+
+## 43. Verifying the audit's own numbers without the audit's own code
+
+The capability classification closed by admitting a limitation: *"the full
+event-by-event replay has not been performed; every figure here comes from
+aggregate queries."* That is the objective's own failure mode applied to my own
+writing - every number in these documents came from calling the production code, so
+asserting that +564.39 is correct **by asking the code that computed +564.39** is
+the same mistake one level up.
+
+`tools/replay_audit.py` parses `journal.jsonl` as text, with no `min_agent` import
+anywhere in its counting path, and re-derives each load-bearing number from first
+principles. It is deliberately naive: a naive check that agrees is weak evidence,
+and a naive check that disagrees is strong.
+
+```
+[PASS] replay-audit   13/13 independently reproduced straight from the raw
+                      journal, no production code involved
+```
+
+**The FIFO lot arithmetic reproduces exactly.** Re-deriving 23 closed lots,
++$564.39 gross, and 29 unmatched sell shares from 34 `ORDER_FILL_CONFIRMED` events
+by naive first-in-first-out matching over the raw JSON - with no lot ledger, no
+evaluator, and no attribution module - lands on the same three numbers the doctor
+reports. That is the strongest evidence available offline that the PnL figure is
+real rather than self-consistent. It also reproduces that all 987 snapshots carry
+`source: alpaca`, that zero fills lack `paper_only`, and that the one 52-share SELL
+belongs to `trend-follow-sell-002` while the 33 acquisitions belong to three
+different strategies.
+
+### 43.1 The naive check caught two of my figures being wrong
+
+Which is the point of writing it, and both were mine rather than the code's.
+
+**Submitted orders: I said 10, the journal has 34.** The 10 is the count of
+one-share BUYs submitted in the 2026-09-29 session; I carried a session-scoped
+number into a whole-journal check. Both are true at their own scope and only one
+belongs in that row, so the scope is now named in the check rather than assumed.
+The 34 is corroborated independently by 34 `ORDER_FILL_CONFIRMED` events.
+
+**Strategies with confirmed fills: I said 3, there are 4.** I counted the three
+strategies that *acquired* shares and forgot that `trend-follow-sell-002` also has a
+confirmed fill against its name. Counting only acquirers is the same class of error
+as counting only RETIRED states in the lifecycle check.
+
+Neither was caught by any existing test, because both lived in prose.
+
+### 43.2 It also explains the stale-heartbeat incident from the evidence side
+
+The replay counts 4004 maintenance events - offline validation, reflection,
+counterfactuals, PnL evidence - on record. Those advanced while the heartbeat
+exceeded `stale_after_seconds`, which is the independent corroboration that
+`doctor: daemon` was reporting a working daemon as dead rather than catching a
+stall. The same journal supports both conclusions; only one of them was being
+drawn from it.
+
+The gate runs the script and fails on any disagreement, so the numbers cannot
+silently drift as the market adds records.
+
+`make verify`: **25 classes, 0 failed, 1160 test executions, exit 0.**

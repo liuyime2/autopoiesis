@@ -115,8 +115,11 @@ Each of these reported success while something real was wrong.
   rejected. The "need 52 out-of-sample events" bar does not exist in the code; the
   real bar is the 10 informative decisions named in the verdicts. These counts
   grow while the market is open, so treat them as of this commit.
-- The full event-by-event replay of all 7,896 journal records has not been
-  performed. Every figure here comes from aggregate queries.
+- The figures here are now **independently reproduced**: `tools/replay_audit.py`
+  parses the jsonl as text, with no `min_agent` import in its counting path, and
+  re-derives 13 load-bearing numbers from first principles - including the FIFO
+  lot arithmetic that produces the +564.39. It runs as the `replay-audit` gate
+  class. It covers the numbers quoted here, not every field of every record.
 - "No dead symbols" is a statement about module-level names. Methods reached only
   dynamically, and a symbol referenced only by tests, would not be caught.
 
