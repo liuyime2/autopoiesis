@@ -28,6 +28,41 @@ def parse_decision_json(text: str, *, model_name: str | None = None) -> TradeDec
     return decision
 
 
+Transport = Callable[[str, Mapping[str, Any], int], Mapping[str, Any]]
+
+#: Two ollama call sites, two different jobs, two different context budgets.
+#:
+#: These were once one number applied to both, and a test asserted they stayed
+#: equal. That test passed while the curriculum was returning empty responses,
+#: because "both call sites pin a window" was never the property that mattered -
+#: "both call sites can finish their own prompt and answer" was. A shared constant
+#: is only correct while two workloads happen to agree; these never did.
+#:
+#: Measured against the live model on the real 27-strategy context, same prompt
+#: both times:
+#:
+#:   num_ctx= 4096  prompt=3441 eval= 652  used=4093  done=length  body=""
+#:   num_ctx= 6144  prompt=3441 eval=1143  used=4584  done=stop    body=valid
+#:   num_ctx= 8192  prompt=3441 eval=1452  used=4893  done=stop    body=valid
+#:
+#: 4096 is truncation, not a slow answer: 655 tokens of room for a reply that
+#: needs ~1200. 8192 is chosen over 6144 because the margin must survive the
+#: context growing, not merely the context that happened to exist today.
+DECISION_NUM_CTX = 4096
+#: Worst case must be prompt + answer + growth. 3441 measured prompt, 1452
+#: measured answer, 3299 spare at 8192. A chars/3.6 estimate said 2838 and was
+#: 19% low, because JSON punctuation and short keys are cheap per character;
+#: budgets are set from token counts, never from character guesses.
+CURRICULUM_NUM_CTX = 8192
+#: Measured 118.4s at 6144, 141.9s at 8192, 141.8s at 12288 on the same prompt.
+#: The engine's default 120s timeout sat inside that range, so simply fixing the
+#: window would have turned a truncation into a ReadTimeout instead. The
+#: curriculum is an off-hours job, not the 5-minute trading loop, so paying two
+#: minutes for a correct answer is the right trade. The decision path keeps 120s
+#: because it answers in ~12s.
+CURRICULUM_TIMEOUT_S = 600
+
+
 class OllamaDecisionEngine:
     """Calls the local model and returns its structured decision.
 
@@ -89,13 +124,21 @@ class OllamaDecisionEngine:
             # the two variants are compared below rather than assumed equal.
             "options": {
                 "temperature": 0.1,
-                # 4096, not the server's 32768. The largest context the engine can
-                # build is ~253 tokens in, ~814 tokens of answer measured, so 4096
-                # leaves 3.5x headroom. KV cache is allocated for the full window
-                # even when unused: at 32768 the same call took 17.8s against 4.6s
-                # at 4096. Cutting it below ~1100 would truncate a real decision
-                # mid-JSON, which is a correctness bug wearing a speedup's clothes.
-                "num_ctx": 4096,
+                # DECISION_NUM_CTX, not the server's 32768. The largest context the
+                # engine can build is ~253 tokens in, ~814 tokens of answer
+                # measured, so 4096 leaves 3.5x headroom. KV cache is allocated for
+                # the full window even when unused: at 32768 the same call took
+                # 17.8s against 4.6s at 4096.
+                #
+                # This value is for the DECISION prompt only. It was briefly used
+                # for the curriculum prompt too, on the assumption that one window
+                # should serve both call sites. That assumption was wrong by 13x:
+                # the decision context is ~253 tokens, the curriculum context
+                # measures 3441. At 4096 the curriculum had 655 tokens left to
+                # answer, needed ~1202, and returned done_reason=length with an
+                # empty body - the exact "constrained response contained no JSON
+                # object" failure. See CURRICULUM_NUM_CTX below.
+                "num_ctx": DECISION_NUM_CTX,
             },
         }
         response = self.transport(f"{self.base_url}/api/generate", payload, self.timeout)

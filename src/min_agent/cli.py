@@ -31,7 +31,12 @@ from min_agent.evaluator import (
 from min_agent.journal import JsonlJournal
 from min_agent.knowledge_admission import KnowledgeAdmission
 from min_agent.knowledge_library import KnowledgeLibrary
-from min_agent.llm_decision import HybridDecisionEngine, OllamaDecisionEngine
+from min_agent.llm_decision import (
+    CURRICULUM_NUM_CTX,
+    CURRICULUM_TIMEOUT_S,
+    HybridDecisionEngine,
+    OllamaDecisionEngine,
+)
 from min_agent.models import BrokerEvidenceBatch, JournalEvent
 from min_agent.loop import TradingLoop
 BrokerEvidenceBatch, JournalEvent
@@ -316,6 +321,12 @@ def _ollama_curriculum_transport(config: AgentConfig):
         base_url=config.ollama_base_url,
         model=config.model,
         gpu_devices=config.gpu_devices,
+        # Not the engine default of 120s. Measured on the real curriculum prompt
+        # the model takes 118.4s at num_ctx=6144 and 141.9s at 8192, so a 120s
+        # timeout sat *inside* the working range: raising the window alone would
+        # have converted a truncation failure into a ReadTimeout. The curriculum
+        # runs off-hours, so a two-minute correct answer beats a fast wrong one.
+        timeout=CURRICULUM_TIMEOUT_S,
     )
 
     def call(prompt: str, schema: dict) -> str:
@@ -324,14 +335,7 @@ def _ollama_curriculum_transport(config: AgentConfig):
             "prompt": prompt,
             "stream": False,
             "format": schema,
-            # Same window as the decision engine, and for the same reason: the
-            # server default of 32768 allocates KV cache for the whole window even
-            # when unused, measured 17.8s against 4.6s at 4096 on an identical
-            # call. This is also the path that recorded the 120s read timeouts, so
-            # tuning only the decision engine would have left the timeout site
-            # untouched. tests/min_agent/test_llm_decision.py asserts every
-            # /api/generate call site pins this.
-            "options": {"temperature": 0.1, "num_ctx": 4096},
+            "options": {"temperature": 0.1, "num_ctx": CURRICULUM_NUM_CTX},
         }
         response = engine.transport(f"{engine.base_url}/api/generate", payload, engine.timeout)
         return str(response.get("response", ""))

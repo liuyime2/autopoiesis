@@ -85,6 +85,7 @@ class StructuredCurriculumAgent:
         current_strategies: list[StrategySpec],
         target_daily_return_pct: float = 10.0,
         recent_exploration_summary: dict[str, object] | None = None,
+        prior_rejections: Sequence[Mapping[str, object]] = (),
         guardian_max_position_value: float | None = None,
         open_positions: Sequence[Mapping[str, object]] = (),
         last_price: float | None = None,
@@ -150,11 +151,24 @@ class StructuredCurriculumAgent:
             "required_action": (
                 _required_action(_capability_coverage(current_strategies, last_price, symbol))
             ),
-            "recent_exploration_summary": recent_exploration_summary,
+            "recent_exploration_summary": _model_facing_summary(recent_exploration_summary),
+            # What the model already proposed and was refused, with the reason.
+            # The curriculum was blind to its own output: the exploration summary
+            # described trading activity (HOLD counts, orders, prices) and never
+            # mentioned a single spec, so a rejected id looked as fresh as a new
+            # one. On 2026-09-29 it proposed fixed-size-sell-002 four times in a
+            # row and received the identical 212-character refusal each time,
+            # which was computed, journalled, and never shown to the author. The
+            # reason already names the exact dimensions that must differ.
+            "recently_rejected": [dict(item) for item in prior_rejections],
+            "recently_rejected_ids_must_not_be_reused": [
+                str(item.get("strategy_id")) for item in prior_rejections if item.get("strategy_id")
+            ],
             "guardian_max_position_value": guardian_max_position_value,
             "exploration_policy": [
                 "No trade is not failure; no exploration is failure.",
                 "If recent_exploration_summary.no_exploration is true, propose the next distinct small admissible strategy instead of repeating generic EVALUATE or near-duplicate TREND_FOLLOW.",
+                "Every entry in recently_rejected is a strategy you already proposed and admission refused. Read the reason and change what it names: kind, symbols, action, quantity, or max_position_value. Renaming the same trade does not make it a new strategy and will be refused identically.",
                 "Do not force orders; Guardian, market-open checks, and paper executor remain authoritative.",
                 "Do not claim profitability or target achievement without broker evidence in the supplied context.",
             ],
@@ -494,6 +508,22 @@ class StructuredCurriculumAgent:
 
     def _increment(self) -> None:
         self._set_count(self._consecutive_evaluate_count + 1)
+
+
+def _model_facing_summary(summary: dict[str, object] | None) -> dict[str, object] | None:
+    """The exploration summary minus fields only the daemon can use.
+
+    `_recent_exploration_summary` carries up to 50 `cycle_ids` so the daemon can
+    cite them as `source_refs` on a no-exploration KnowledgeArtifact. That is
+    provenance for a journal write, not input for a decision: 50 UUIDs were ~2100
+    of the 2522 characters in this block, about 550 tokens of a 3441-token prompt,
+    and no curriculum choice can depend on them. Deleting them from the summary
+    would have broken the artifact's lineage, so they are removed at the boundary
+    where the data changes consumer instead of where it is collected.
+    """
+    if not summary:
+        return summary
+    return {key: value for key, value in summary.items() if key != "cycle_ids"}
 
 
 def _now_iso() -> str:

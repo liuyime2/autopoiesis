@@ -1844,3 +1844,151 @@ default. The first version of that test flagged its own explanatory comment, and
 the second walked back a fixed number of lines; both are now structural.
 
 `make verify`: **24 classes, 0 failed, 1031 test executions, doctor OK.**
+
+## 36. I optimised the wrong call site, and my own test certified it
+
+The operator instruction was to fix the curriculum's redundant proposals. Getting
+there first required correcting numbers I had reported earlier, and then turned up
+a regression I had caused myself an hour earlier.
+
+### 36.1 Several figures I reported earlier were wrong
+
+The journal holds two record shapes in one file - cycle records keyed by
+`cycle_id`/`snapshot`, and events keyed by `event_type`. My earlier counts searched
+for a `kind` field that does not exist, and I mixed UTC event timestamps with ET
+trading dates. Corrected against the file:
+
+| claim | correct |
+| --- | --- |
+| 7686 events | 7687 records: 987 cycles + 6700 events |
+| 258 curriculum proposals | 259 |
+| 44 curriculum failures | 47 |
+| 26 proposals today, 12 names | 22 proposals, 3 distinct strategy_ids |
+| "no strategy_spec in the journal" | the event schema never carried it |
+
+That last row resolves the question left open in section 35. `CurriculumTask` holds
+`strategy_spec` and its validator *requires* it for `STRATEGY_SPEC` tasks, so the
+spec exists in memory and lands in the strategy file. The `CURRICULUM_PROPOSED`
+event simply never had a field for it. Nothing was corrupted; the audit trail was
+incomplete, and a rejected proposal leaves no durable record of what was tried.
+
+The 47 failures are not one problem: 26 `ValidationError` (all 2026-06-11, the
+missing-`task_id` bug, since fixed), 14 `ReadTimeout`, 4 `JSONDecodeError`, and 3
+`ValueError`. I had reported all 14 timeouts as residual cold-load; only some were.
+
+### 36.2 num_ctx=4096 truncated every curriculum response
+
+In section 35 I set `num_ctx=4096` for "the ollama call sites" and justified it
+from the decision engine: ~253 tokens of context against ~814 of answer. That
+measurement was taken on the wrong call site. The curriculum builds a far larger
+context, and measured on the live model with the real 27-strategy library:
+
+```
+num_ctx= 4096   prompt=3441  eval= 652  used=4093  done=length  body=""
+num_ctx= 6144   prompt=3441  eval=1143  used=4584  done=stop    body=valid
+num_ctx= 8192   prompt=3441  eval=1452  used=4893  done=stop    body=valid
+num_ctx=12288   prompt=3441  eval=1493  used=4934  done=stop    body=valid
+```
+
+At 4096 the curriculum had 655 tokens of room for a reply that needs ~1200, so
+truncation was deterministic: `done_reason=length` and an empty body, which
+surfaces as `ValueError: constrained response contained no JSON object`. The
+journal agrees exactly. All three `ValueError` failures are dated 19:36, 19:53 and
+20:10 ET on 2026-09-29 - after the config change, and there are none before it. My
+chars/3.6 estimate said the prompt was 2838 tokens; it is 3441, because JSON
+punctuation and short keys are cheap per character. The estimate was 19% low in
+precisely the direction that hid the bug.
+
+So the "3.5x headroom" claim was true of the decision prompt and false of the
+curriculum prompt, which is 13x larger. This is the exact failure mode I named one
+section earlier - a correctness bug wearing a speedup's clothes - and I shipped it
+anyway, then wrote a test that enforced it.
+
+### 36.3 The test enforced the wrong invariant
+
+`test_every_generation_call_site_uses_the_same_window` asserted every call site
+used the *same* window, and it passed. "Both call sites pin a window" was never the
+property that mattered; "both call sites can finish their own prompt and answer"
+was. A shared constant is only correct while two workloads happen to agree, and
+these never did - so the test was structurally guaranteed to be wrong about one of
+them. It is now
+`test_every_generation_call_site_pins_a_named_window`: every site must reference a
+named constant, so a value lives in one place with its measurements beside it. Two
+more tests hold the line: one that the two windows are not assumed equal, and one
+that rebuilds the real worst-case curriculum context and requires the window to
+cover prompt plus the longest measured answer.
+
+### 36.4 Fixing the window alone would have failed differently
+
+Latency at a *working* window is 118.4s at 6144, 141.9s at 8192, 141.8s at 12288.
+The engine's timeout default is 120s - inside that range. Raising the window while
+leaving the timeout would have converted a truncation into a `ReadTimeout` on the
+same call, and the earlier read-timeout investigation would have been reopened
+against a cause that no longer existed. The curriculum now uses its own window
+(8192) and its own timeout (600s). The decision path keeps 4096 and 120s, because
+it answers in ~12s. Two workloads, two budgets, both measured.
+
+The margin is also 13% cheaper to carry: the exploration summary contained 50
+cycle UUIDs so the daemon could cite them as `source_refs` on no-exploration
+knowledge artifacts. That is lineage for a journal write, not input for a
+decision, and it was ~2100 of the 2522 characters in the block. `_model_facing_summary`
+removes it where the consumer changes rather than where the data is collected, so
+the daemon keeps the provenance and the model stops paying for it.
+
+### 36.5 Why the curriculum kept proposing the same trade
+
+Not laziness, and not a weak model. The curriculum was **structurally blind to its
+own output**. `_recent_exploration_summary` reads cycle records - snapshot,
+decision, guardian, execution - so the block handed to the model described
+trading activity: `HOLD: 47, BUY: 2`, ten submitted orders, `SPY: 764.18`. It
+contained no record of a single spec the model had itself authored. The prompt's
+`strategy_ids_in_use` lists the 28 *admitted* strategies, so a refused id looked
+exactly as available as a new one.
+
+Meanwhile admission was already writing a good, specific refusal and nobody read
+it back:
+
+```
+behaviourally identical to existing strategy 'fixed-size-sell-001': same kind,
+symbols, action, quantity and max_position_value. Propose a strategy that differs
+in one of those, or explain what problem it solves.
+```
+
+That 212-character lesson was computed, journalled 83 times, and shown to nobody.
+The last four proposals and the last six reviews before the fix were all
+`fixed-size-sell-002` carrying that identical sentence. The model was being asked
+to "propose the next distinct strategy" while holding no record of having proposed
+anything.
+
+`_recent_rejections` now reads the verdicts back, deduplicated to the newest
+verdict per id (a refused id is re-reviewed on every retry, and six copies of one
+sentence teaches nothing), and the prompt states that the refusal names the exact
+dimensions that must differ.
+
+### 36.6 The negative result, stated plainly
+
+Feeding the refusal back did **not** stop the churn. With the feedback in context
+the model proposed `fixed-size-sell-003` - the same name, the same
+`FIXED_SIZE`/`SPY`/`SELL`/`quantity 1`/`max_position_value 5000`, and this time with
+`parameters: null`. It renamed the trade rather than making it different. The live
+daemon reproduced this at 20:54 ET.
+
+So the blindness is fixed and the churn is not. The guard still fails closed, which
+I verified directly against the real library: `fixed-size-sell-003` and
+`trend-follow-sell-009` are both refused as behaviourally identical to
+`fixed-size-sell-001`. No duplicate can enter, so this is an efficiency defect and
+not a correctness one.
+
+The reason is worth recording because it is not a prompt problem. For
+`FIXED_SIZE` + `SELL` + `SPY` under these Guardian limits, `quantity 1` and
+`max_position_value 5000` are very nearly the only admissible values, so **every
+correct FIXED_SIZE sell is a duplicate of the one already held**. The strategy space
+is saturated for that kind, and no amount of instruction will make a rename into an
+exploration. A retry loop that re-asks on collision would burn ~140s of model time
+per call for a rename, and I have no evidence it converges, so I have not built
+one. The honest bound: the exploration step generates no new candidates for the
+saturated kind, the guard refuses the duplicates, and the binding constraint on the
+goal remains market time - 27 of 27 strategies are `INSUFFICIENT` out-of-sample
+against a 52-event bar, none with a closed model lot.
+
+`make verify`: **24 classes, 0 failed, 1045 test executions, doctor OK.**

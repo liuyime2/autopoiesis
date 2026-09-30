@@ -470,6 +470,32 @@ class AgentDaemon:
                 return held
         return []
 
+    def _recent_rejections(self, limit: int = 6) -> list[dict[str, str]]:
+        """Rejected proposals with the reason, newest verdict per strategy id.
+
+        Admission already produces a specific, actionable refusal - it names the
+        colliding strategy and the dimensions that must differ - and the journal
+        already keeps it. Nothing read it back. The curriculum was therefore
+        asked to "propose the next distinct strategy" while being shown only
+        trading activity, never its own output, so a refused id looked unused.
+        Deduplicated because the same id is reviewed again on every retry and six
+        copies of one sentence teaches nothing a single copy does not.
+        """
+        if self.journal is None:
+            return []
+        latest: dict[str, str] = {}
+        for event in self.journal.read_events("STRATEGY_ADMISSION_REVIEWED"):
+            if event.payload.get("accepted"):
+                continue
+            strategy_id = (event.strategy_id or "").strip()
+            reason = str(event.payload.get("reason") or "").strip()
+            if strategy_id and reason:
+                latest[strategy_id] = reason
+        return [
+            {"strategy_id": strategy_id, "rejected_because": reason}
+            for strategy_id, reason in list(latest.items())[-limit:]
+        ]
+
     def _curriculum_proposal(self) -> None:
         try:
             reflection = self.reflection_memory.load()
@@ -487,6 +513,7 @@ class AgentDaemon:
                     reflection=reflection,
                     current_strategies=strategies,
                     recent_exploration_summary=exploration_summary,
+                    prior_rejections=self._recent_rejections(),
                     guardian_max_position_value=self.config.max_position_value,
                     open_positions=self._open_book(),
                     last_price=self._last_market()[0],
@@ -498,6 +525,7 @@ class AgentDaemon:
                     reflection=reflection,
                     current_strategies=strategies,
                     recent_exploration_summary=exploration_summary,
+                    prior_rejections=self._recent_rejections(),
                     guardian_max_position_value=self.config.max_position_value,
                     open_positions=self._open_book(),
                     last_price=self._last_market()[0],
