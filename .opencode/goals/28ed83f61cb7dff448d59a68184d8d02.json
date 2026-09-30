@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790736200281,
-      "lastRequestTokens": 178420,
-      "lastInputTokens": 177495
+      "observedAt": 1790736670330,
+      "lastRequestTokens": 214469,
+      "lastInputTokens": 213803
     }
   },
   "runtimeFingerprint": {
@@ -43,10 +43,10 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 27,
-    "tokens": 701756,
+    "turns": 28,
+    "tokens": 704331,
     "cost": 0,
-    "runtimeMs": 476488,
+    "runtimeMs": 485969,
     "seenMessageIDs": [
       "msg_0ea911ff0001xqHQnFmbF3aICp",
       "msg_0ea980dc20015f3lGA67tXRaUK",
@@ -74,7 +74,8 @@
       "msg_0efcfaba40015YIxe0uY9JYNWU",
       "msg_0f01c212d0010NEICSqW3kGGiG",
       "msg_0f021ee47001LyS9jDOAJRxCY2",
-      "msg_0f0282df2001VHT3OgKVI830zr"
+      "msg_0f0282df2001VHT3OgKVI830zr",
+      "msg_0f03291d3001TWJghPGfWAdMJk"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -84,11 +85,9 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 127,
-  "observedProgressRevision": 122,
+  "progressRevision": 130,
+  "observedProgressRevision": 128,
   "progressFingerprints": [
-    "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
-    "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
     "shell-worktree:b0ca9582d43b0b4b67e7f0142e387b150b1e130f2ce944d4aeefd1b15a43293a",
     "shell-worktree:09b1c7fb586006a7a12e6656cfa2927aed35051065845d220cb4a04e15bb061b",
     "shell-worktree:bd7ff486b0dee23b90ee233068589df3e08921a3d4217262d8fdde51740dee4a",
@@ -213,30 +212,13 @@
     "shell-worktree:c5def1543f8aa0bff99bf4b7ecffe9cf27c21d15361e5884d5a1b939835141ba",
     "shell-worktree:cb5bd785537ef936cf0f1cc992d8f0943416d451ae48e9061af3dcb34cd186f1",
     "shell-worktree:e1e78cfcb0abba4149b536ebe6ea3fbd427f24e3c6455f5a473fd7d58054d1b0",
-    "shell-worktree:c2a81370465bb91f3603f85e4efff55b7a250ab7e10c6fbf9268da08366fe071"
+    "shell-worktree:c2a81370465bb91f3603f85e4efff55b7a250ab7e10c6fbf9268da08366fe071",
+    "shell-worktree:5bf82248ef62e72983aa0be16ea9eaef8c029403e0c2ffaaf695f33ce8144da2",
+    "shell-worktree:208263bac5f26bcd33d62d835a5bf4bbc7af44fd3908f53aba5da6a66d716308",
+    "shell-worktree:1ce18857650fe09ef0cb2d15c061f9a0519d8d8cd02730910136d0be4cccf204"
   ],
   "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790687108026,
-      "summary": "Implemented unrealized PnL - the last code item from deliverable 8. Only realized PnL was attributed, so a position the agent was holding contributed nothing to its own record and the account figure and the agent figure could never be reconciled even in principle: one measured closed trades, the other measured everything, and the gap could only be explained away. PnLEvidence now carries open_lots, unrealized_pnl, net_pnl and net_of_fees, with open lots keeping the strategy that opened them to match the realized side's rule (the strategy that opens a lot is the one expected to realize its PnL, which may not be the strategy that eventually sells it). Verified by the daemon writing it rather than by a script: realized 564.39, open lots empty, unrealized 0.0, net 564.39, net of fees 564.39 - the agent holds no SPY (account positions are BIL, TLT, XLB, XLE, XLF) so unrealized is 0 and net equals realized, which is the correct answer and not a stub, and the machinery is proven only by test against a live position because there is no live position. The refusal that matters: an open lot whose price is unknown is reported with current_price None and unrealized_pnl None, never valued at its entry price, because marking a position at its own cost reports it as worth exactly nothing - a fabricated number wearing the appearance of a measurement. This surfaced a real finding now visible in doctor: 29 shares were sold under trend-follow-sell-002 that no linked BUY can account for. The account holds no SPY so those shares came from somewhere the fill linkage cannot see - a pre-existing position, a fill whose client_order_id never linked, or a lot opened before the journal began. The 23 closed lots carrying the +564.39 are all fully linked so the verified figure is unaffected, but 29 shares of unexplained selling belongs in a health report rather than a payload field. It is explicitly NOT diagnosed: it needs the ORDER_FILL_CONFIRMED events for that strategy traced back, which is real work and not something to guess at. A test also caught the doctor implementation formatting unrealized unconditionally, which would have raised TypeError on its own history since every stored PNL event predates the field - the same shape as reading a JournalEvent as a dict; it now degrades to net alone. Commit 20704da. make verify: 21 classes, 0 failed, 636 distinct tests, 91/91 audit, doctor OK, exit 0.",
-      "next": "All code items from deliverable 8 are now done, and every phase except 7 is met or correctly not started. Two things remain, and neither is a code change. (1) The 29 unmatched shares under trend-follow-sell-002 are undiagnosed: no linked BUY accounts for them while the account holds no SPY, so the next step is tracing the ORDER_FILL_CONFIRMED events for that strategy back to find whether the BUY was never linked, preceded the journal, or the client_order_id did not match - that is real investigative work, not a guess, and it may reveal a fill-linkage defect that would matter for every future SELL. (2) Everything else is gated on elapsed market time: Phase 7 prospective promote/pause/retire, the model calibration verdict (67 pending llm decisions), the 27 of 27 INSUFFICIENT walk-forward results, and the first model-provenance-stamped decisions. Two user actions unblock that accumulation: freeing $HOME quota (.cache 835M or .local 707M, since mkdir ~/.config/systemd fails with \"Disk quota exceeded\" despite df showing 1.8T free) so the units can be made reboot-persistent, and confirming the daemon may run unattended through the 09:30 EDT open."
-    },
-    {
-      "time": 1790687194567,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790687243669,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790687336396,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790687400028,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -466,11 +448,31 @@
       "time": 1790736197281,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790736216690,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790736227553,
+      "summary": "Resolved the two things I had flagged as needing data rather than speculation, and one of them turned out to be a false alarm I had to retract on the record. First, the lifecycle-provenance asymmetry I had promised not to touch unilaterally: I measured the blast radius first and it was zero, so the repair was safe. The check had skipped the default states (PROBATION/BASELINE/ACTIVE) outright, which caught a strategy moved into PAUSED/RETIRED with no recorded decision but left one moved out of them invisible - and that is exactly how my own first adjudication attempt slipped through, moving three strategies to PROBATION while the audit stayed silent. Any disagreement in either direction is now unaccounted for, while a strategy with no decision at all remains legitimate while it sits in the state it was admitted into, since HOLD_BASELINE is BASELINE from creation and demanding a transition that never happened would be wrong. Exactly one strategy had no decision, and it is that baseline. Four new tests; 12 in the file; 1069 executions at that point. Second, the 29 unmatched sell shares. I reached a confident wrong conclusion: confirmed fills are 33 BUYs against one 52-share SELL, so the journal net position is -19 shares, impossible for an account holding 10 SPY, and I treated that as a fresh hole in execution truth. It is not. Guardian already documents the incident in its own source: the agent bought 23 shares, the account held 52, and a single SELL of 52 was approved and filled, liquidating 29 shares of a pre-existing position the agent never bought, 56 percent of the owner's holding. The arithmetic reconciles exactly - 33 journalled buys plus 29 unrecorded is 62 held, 52 sold, 10 remain, which is what the broker shows. The ledger is correct, the 29 is correct, and the unattributable PnL is honestly reported as unproven rather than filled in, and Guardian now refuses a SELL whose bound is unknown so it cannot recur. I also burned two probes on my own sloppiness before that, searching for a journal \"kind\" field that does not exist and importing \"alpaca\" when the package is alpaca_trade_api. What is genuinely missing turned out to be visibility, not correctness: the broker holds six positions and the journal knows one. BIL 209 shares $19,154.85, TLT 226 shares $17,754.56, SPY 10 shares $7,654.40, XLB 1, XLE 1, XLF 1 - so $37,074.11, 37 percent of account equity, in symbols the agent neither chose nor can attribute, while doctor's broker-positions check reported only \"6 position(s), 0 open order(s)\" with the composition invisible. Allowlist-scoped exposure limits are correct and deliberate because the agent cannot increase exposure outside the allowlist, but daily_loss is not exposure: it is day_start_equity minus equity over the whole account, so a drawdown in BIL or TLT consumes the agent's $500 daily-loss budget and trips a risk limit for a reason appearing in no decision, no PnL record and no attribution. The limit then behaves conservatively, the right direction, while the agent cannot say why it fired. That is a \"missing\" capability in the objective's own classification and is now reported as a WARN rather than a FAIL, deliberately, because it is a fact about the account rather than a breach by the agent, the agent is correctly forbidden from touching those positions, and making it FAIL would train the reader to ignore the line. broker positions now also names the composition, since a count cannot be reconciled against a journal. One bug of my own while writing it: the first version printed \"BIL=0, TLT=0, ... $37,074.11\" because alpaca-trade-api returns every numeric field as a string and the helper accepted only int/float; zero shares next to tens of thousands of dollars is worse than printing nothing, so it is fixed and pinned by a test along with the value and share arithmetic. make verify 24 classes, 0 failed, 1077 test executions, doctor OK, exit 0, 5 warnings all substantive. Commits 46829a5 and 3fa6830.",
+      "next": "Market time is the binding constraint and the loop is green and honest: 24 classes / 0 failed / 1077 test executions / doctor OK / exit 0, 5 warnings all substantive (risk-driven halts, model calibration Brier 0.589 vs 0.25 baseline, pnl attribution with 29 owner shares sold pre-guard now correctly unproven, no champion since no strategy has broker-verified positive realized PnL, and the new unmanaged-exposure line). Outstanding evidence: 70 decisions pending a 24h horizon, 10 SPY shares open at +1.05 unrealized, 0 closed model lots, no champion, after-cost net +556.77 still entirely baseline. Resume 2026-09-30 09:30."
+    },
+    {
+      "time": 1790736329779,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790736406549,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 1169,
+  "storageGeneration": 1200,
   "createdAt": 1790641773516,
-  "updatedAt": 1790736200281,
+  "updatedAt": 1790736670330,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:c3cb3254c518367f1c8cd88244e84bcbd83597fa1d10bffb8cee3387f57fdc53",

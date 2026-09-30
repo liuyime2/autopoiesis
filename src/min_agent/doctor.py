@@ -836,8 +836,27 @@ def _check_model_registry(
     if registry.total_decisions == 0:
         report.add("model registry", WARN, "no decisions on record")
         return
-    if list(registry.models) == [model_registry.UNATTRIBUTED]:
-        report.add("model registry", WARN, registry.summary())
+    unattributed = registry.models[model_registry.UNATTRIBUTED].decisions \
+        if model_registry.UNATTRIBUTED in registry.models else 0
+    # Severity has to be proportional. This check warned only when *every* decision
+    # was unattributed, so a record that is 93% unattributed - 920 of 987, the
+    # state it is actually in - reported OK on the strength of the 67 that do
+    # carry a name. The docstring is right that back-filling would be worse, and
+    # right that the total-absence case is worth a warning; it drew the line at the
+    # only value that cannot be a majority. The question this check exists to answer
+    # is how much of the decision record can be attributed at all, and "almost none
+    # of it" is not an OK. The boundary is inclusive: exactly half unattributed is a
+    # coin flip on provenance, which is not a state to report as healthy. The first
+    # version used a strict `>` and a test caught 50/50 reporting OK.
+    if unattributed and unattributed >= registry.total_decisions / 2:
+        report.add(
+            "model registry", WARN,
+            f"{unattributed} of {registry.total_decisions} decision(s) "
+            f"({unattributed / registry.total_decisions:.0%}) cannot be attributed "
+            f"to a model; {registry.summary()}",
+            "provenance was not captured for these; they are left unattributed "
+            "deliberately rather than back-filled",
+        )
         return
     report.add("model registry", OK, registry.summary())
 
