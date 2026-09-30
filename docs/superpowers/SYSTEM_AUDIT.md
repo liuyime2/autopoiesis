@@ -2855,11 +2855,29 @@ defect being closed is not the objective's success criterion being met**, and
 Phase 7 is INCOMPLETE, and the success criterion is not met. Those are not in
 conflict - one is about defects, the other about prospective after-cost live PnL -
 but stating only the first and leaving the second to be inferred is how a reader ends
-up believing the system is finished. It is not. `STATUS.md` additionally carries two
-items that are open and neither is a code fix: the Alpaca paper credentials were
-pasted into an earlier session and should be rotated, and one more full round trip
-through probation is needed before a lifecycle transition is *driven by* broker PnL
-rather than merely accompanied by it.
+up believing the system is finished. It is not.
+
+`STATUS.md` listed two further open items, and both are now closed rather than
+silently dropped:
+
+- **Credential rotation.** The paper key pair was pasted into an earlier session, so
+  it was flagged as a standing exposure. The operator reviewed it and decided
+  rotation is not required, on the grounds that this is a paper account whose purpose
+  is testing the Alpaca integration. That is a decision about the operator's own
+  paper credentials. Recorded rather than deleted, so the history stays visible: the
+  concern was real, it was raised, and it was answered. One consequence is now on the
+  record - a knowingly-retained key that lives in a transcript must never be promoted
+  to live trading.
+- **Reboot-persistent units.** This entry was stale, claiming the units sit under
+  `/run/user/$UID` and die at reboot "because $HOME is out of quota". That was the
+  pre-fix state, and the exact remnant of this audit's own wrong claim that the quota
+  was never the blocker. It was the blocker; it is no longer at quota; and
+  `units-where-systemd-looks` now fails the build if it regresses.
+
+**One item genuinely remains open, and no code can close it: one more full round
+trip through probation.** A lifecycle transition has not yet been *driven by*
+broker PnL rather than merely accompanied by it, because no strategy in PROBATION has
+a closed lot behind it. That needs market hours, not a fix.
 
 **Figures in the numbered sections above are point-in-time.** Sections 17 through 50
 each record what the gate reported when that work was done - 24 classes, 1111 test

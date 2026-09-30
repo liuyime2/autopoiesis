@@ -135,14 +135,27 @@ back empty. Verified against the live API before changing anything.
 
 ## What is still required
 
-1. **Rotate the Alpaca paper credentials.** They were pasted into this session and
-   are in the transcript. The key pair should be regenerated in the Alpaca paper
-   console and the external env file updated.
+1. ~~Rotate the Alpaca paper credentials~~ — **CLOSED BY OPERATOR DECISION, 2026-09-30.**
+   The key pair was pasted into an earlier session and is in the transcript, so it was
+   flagged as a standing exposure. The operator reviewed it and decided rotation is
+   not required, on the grounds that this is a **paper** trading account whose purpose
+   is testing the Alpaca integration.
+
+   That is a decision about the operator's own paper credentials, and it is theirs to
+   make. Recorded here rather than deleted so the item's history is visible: the
+   concern was real, it was raised, and it was answered. Anyone reading this later
+   should know the key is knowingly retained, not overlooked.
+
+   One consequence is worth stating: because the key is knowingly retained and is in
+   the transcript, this account must never be promoted to live trading with these
+   credentials. That constraint is now on the record rather than implied.
 
 2. **One more round trip.** Per-strategy PnL is proven; a lifecycle transition
    *driven by* it is not yet, because nothing is in `PROBATION` with a closed lot
-   behind it. See "What is still missing, and why" above. This needs market hours,
-   not another fix.
+   behind it. See "What is still missing, and why" above. **This needs market hours,
+   not another fix** — it is the one remaining item on this list and no code change
+   can close it. It resolves when the market opens and a probation strategy completes
+   a round trip, and the system is correctly refusing to promote anything before then.
 
 3. ~~Reboot-persistent units~~ — **RESOLVED, and this entry was stale.** It
    previously said the units sit under `/run/user/$UID/systemd/user` and do not
