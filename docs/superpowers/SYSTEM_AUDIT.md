@@ -3193,3 +3193,33 @@ which is the kind of guess section 53 warns about. And I reconstructed `Strategy
 objects by hand from raw JSON, twice hitting pydantic validation errors, before
 switching to the shipped `StrategyLibrary.list()` - the same loader production uses,
 which is what the third attempt should have been first.
+
+## 55. Who receives the realized PnL when one strategy closes another's lot
+
+The last open question before the round trip is whether the strategy that sells can be
+the strategy promoted. It cannot, and that is correct.
+
+`evaluator.py:792` reads `owner = lot.strategy_id or strategy_id` when a SELL consumes a
+lot, so realized PnL is credited to the strategy that *opened* the lot. The SELL side is
+recorded alongside it: `ClosedLotAttribution` carries both `strategy_id` (the opener) and
+`closing_strategy_id`, at `models.py:350`. `test_evaluator.py:449` pins this exactly -
+`lot.strategy_id == "opener"` with `lot.closing_strategy_id == "closer"` - so attribution
+to the opener is intended and covered, not an oversight.
+
+The consequence for this account is concrete. Agent-owned SPY by BUY strategy:
+`fixed-size-buy-001` 16 shares, `tiny-fixed-size-001` 13, `trend-follow-buy-001` 4, of
+which 10 remain open. A SELL by `fixed-size-sell-005` would therefore credit its realized
+PnL to whichever BUY strategy owns the oldest lot, and *that* strategy is the candidate for
+`PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED` and so for promotion. `fixed-size-sell-005` is
+exercised as an exit and gains no realized PnL of its own, because it never opened a lot.
+
+That is the right accounting - PnL belongs to the position that carried the risk - and it
+means the promotion this goal is waiting for will land on a BUY strategy rather than on the
+SELL one. Worth stating before the open rather than discovering afterwards, because "the
+SELL strategy did not get promoted" would otherwise read as a failed round trip when it is
+a completed one, correctly attributed. Both roles are in the journal either way, so the
+close is attributable from the record alone.
+
+Note also that the FIFO ledger holds no lot for SPY that `fixed-size-sell-005` could be
+credited against, so its own `realized_pnl` stays `None` and its promotion route remains
+the decision-quality gate rather than PnL. A long-only probe strategy by construction.
