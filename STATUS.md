@@ -144,20 +144,29 @@ back empty. Verified against the live API before changing anything.
    behind it. See "What is still missing, and why" above. This needs market hours,
    not another fix.
 
-3. **Reboot-persistent units.** The systemd units are installed under
-   `/run/user/$UID/systemd/user` and do not survive a reboot, because `$HOME` is
-   out of quota and the user manager cannot create `~/.config/systemd/user`.
-   Freeing a few MB fixes it:
+3. ~~Reboot-persistent units~~ — **RESOLVED, and this entry was stale.** It
+   previously said the units sit under `/run/user/$UID/systemd/user` and do not
+   survive a reboot "because $HOME is out of quota". That was the state before the
+   unit-location defect was found and fixed. The truth now:
 
-   ```bash
-   ./minictrl install-service && ./minictrl service enable --now
+   ```
+   min-agent.service       /home/liuyime2/.config/systemd/user/min-agent.service
+   ollama.service          /home/liuyime2/.config/systemd/user/ollama.service
+   quant-watchdog.timer    /home/liuyime2/.config/systemd/user/quant-watchdog.timer
+   links into tmpfs: 0
    ```
 
-4. **Ollama after a reboot** — the port mismatch recorded in `ollama.log`
-   (`:11435`, `CUDA_VISIBLE_DEVICES=3`) is resolved; it serves on
-   `127.0.0.1:11434` with `deepseek-r1:8b` on GPU 0, verified against the real
-   model on both paths. It is not reboot-persistent either, and the watchdog unit
-   will not bring it back if `$HOME` is still out of quota:
+   `$HOME` is no longer at quota, the units load from a durable path, no enablement
+   link points into tmpfs, and the `units-where-systemd-looks` gate fails the build if
+   either regresses. The quota was the cause after all — the earlier claim that "the
+   quota was never the blocker" was wrong, and this entry is the stale remnant of that
+   error.
+
+4. ~~Ollama after a reboot~~ — **RESOLVED.** The port mismatch recorded in
+   `ollama.log` (`:11435`, `CUDA_VISIBLE_DEVICES=3`) was resolved earlier; the unit
+   is now installed durably alongside the others and will come back on reboot. It
+   serves `qwen3.8:27b` on `127.0.0.1:11434`, resident on GPU 0, verified against the
+   real model. The `deepseek-r1:8b` text below predates the single-model change.
 
    ```bash
    OLLAMA_MODELS=/localscratch/liuyime2/ollama_local/models \

@@ -2842,10 +2842,30 @@ unmatched sell shares, agreeing by both routes.
 `src=llm model=qwen3.8:27b HOLD qty=0`, Guardian approved, execution `SKIPPED` with
 the market closed. The model authored the decision; there was no fallback.
 
-**Every problem previously reported is closed.** Every row filed as *broken* in
-`CAPABILITY_CLASSIFICATION.md` is one that was repaired. The single open row is the 29
-shares whose cost basis was never written to the journal: permanently unprovable,
-reported as unproven rather than invented, and not a defect any code can fix.
+**Every *defect* previously reported is closed.** Every row filed as *broken* in
+`CAPABILITY_CLASSIFICATION.md` is one that was repaired, and the single open row
+there is the 29 shares whose cost basis was never written to the journal:
+permanently unprovable, reported as unproven rather than invented, and not a defect
+any code can fix.
+
+That sentence is narrower than it may read, and the distinction is load-bearing
+because an earlier draft of it said "every problem" and was wrong twice over. **A
+defect being closed is not the objective's success criterion being met**, and
+`PHASES.md` says so in the same terms: Phase 5 is MECHANISM MET / STAGE NOT RUN,
+Phase 7 is INCOMPLETE, and the success criterion is not met. Those are not in
+conflict - one is about defects, the other about prospective after-cost live PnL -
+but stating only the first and leaving the second to be inferred is how a reader ends
+up believing the system is finished. It is not. `STATUS.md` additionally carries two
+items that are open and neither is a code fix: the Alpaca paper credentials were
+pasted into an earlier session and should be rotated, and one more full round trip
+through probation is needed before a lifecycle transition is *driven by* broker PnL
+rather than merely accompanied by it.
+
+**Figures in the numbered sections above are point-in-time.** Sections 17 through 50
+each record what the gate reported when that work was done - 24 classes, 1111 test
+executions and similar are accurate for their moments. Only this section and the
+headers in `PHASES.md` describe the current state, and both are generated from live
+output rather than written by hand.
 
 ### 49.1 Not claimed
 

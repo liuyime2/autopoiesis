@@ -20,9 +20,7 @@ Companion documents:
 
 ## 1. Phase status, with verification results
 
-`make verify` — classes: 26   passed: 26   failed: 0   test executions: 1174 across 60 test files, 91/91 defect audit,
-`doctor` RESULT OK, exit 0. `make verify-self-test` — green, and a new
-`shadow-stage-exercised` finding now proves it can go red.
+`make verify` — **27 classes, 0 failed, 1182 test executions across 60 files**, 91/91 defect audit, `doctor` RESULT OK, exit 0. `make verify-self-test` — green, and the findings it proves can go red include `shadow-stage-exercised`.
 
 | phase | exit criteria | verification method | result |
 | --- | --- | --- | --- |
@@ -253,7 +251,7 @@ means a real measurement, not a green test.
 | behavioural / semantic duplicate detection | 14 redundant copies exposed, incl. a strategy named "Trend Following" that was `FIXED_SIZE` |
 | offline backtest / walk-forward / cost / leakage / stress / overfitting | 27 of 27 `INSUFFICIENT` — implemented and negative |
 | shadow trading | real loop, shadow sink, zero PnL leakage, reachable by config |
-| `make verify`, 13 classes, `FAIL=0` | **22 classes, 0 failed, 663 tests, 91/91 audit, doctor OK, exit 0** |
+| `make verify`, 27 classes, `FAIL=0` | **generated from live output: 27 classes, 0 failed, 1182 test executions across 60 files, 91/91 audit, doctor OK, exit 0** |
 | documents ①–⑧ | `SYSTEM_AUDIT.md`, `PHASES.md`, `STEP_CONTRACT.md`, `STATUS.md` |
 
 ### 7.2 Not proven — and cannot be, yet
