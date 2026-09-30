@@ -3368,3 +3368,39 @@ required this function to be right about an oversell.
 
 `make verify` went red on the new tests until the current-state figures were updated
 from 1182 to 1184 executions, which is the fact-docs gate working as intended.
+
+## 59. After the fix, the agent trades again and the exit path is open
+
+`min-agent.service` was restarted onto the fixed code, PID 1050838 to 1373859, heartbeat
+`RUNNING / cycles=0`. The next open-market cycle:
+
+    market_open=True SPY=767.2
+    decision : BUY qty=1 strategy=tiny-fixed-size-001
+    guardian : approved=True reason=approved
+    execution: SUBMITTED
+
+Against real broker data, with the model authoring the decision and the Guardian
+approving on its own reasoning rather than a bypass.
+
+`_agent_holding` now reports SPY 10, BIL 0, TLT 0 against the live journal, with no
+errors. That is the correct shape: the agent owns SPY and owns none of BIL or TLT, whose
+shares are the account holder's. So a SELL of 1 SPY clears
+`decision.quantity > agent_position_quantity` and proceeds to the remaining hard gates,
+while a SELL of BIL or TLT is still refused. The protection that caused the bug is what
+made the bug matter, and it is still in force - the fix restores the agent's ability to
+exit without weakening a single limit.
+
+The round trip this objective has been waiting on is now reachable at runtime rather than
+only in analysis. What is still outstanding is the part no code change can supply: a
+PROBATION strategy accumulating enough open-market cycles for the lifecycle manager to
+evaluate, with `submitted_orders > 0` and, if a lot closes, a broker-verified realized
+figure. `fixed-size-sell-005` is selected first by the exploration floor, the agent has
+10 SPY to work with, and the daemon cycles every 300 seconds while the market is open.
+
+Two honest notes on what the open did and did not establish. The defect in section 58 was
+found only because the market opened and an exit was finally attempted - 527 open-market
+cycles had run without one, so the function was never required to be correct. And the
+new BUY is `tiny-fixed-size-001` rather than the SELL strategy: the exploration floor's
+choice depends on which strategies have results with `trade_attempts > 0`, and a BUY that
+was just submitted now counts, so the SELL's priority is not guaranteed to persist. The
+selection is verified per cycle, not assumed to hold.
