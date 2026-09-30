@@ -2506,3 +2506,89 @@ The gate runs the script and fails on any disagreement, so the numbers cannot
 silently drift as the market adds records.
 
 `make verify`: **25 classes, 0 failed, 1160 test executions, exit 0.**
+
+## 44. Requirement-by-requirement: the chain, link by link
+
+The objective names a seventeen-link chain and one success criterion. Before
+claiming anything about the goal I walked each link and asked what evidence on
+record shows it running. Every count below is from the journal, not from a
+document.
+
+| link | evidence on record | proven? |
+| --- | --- | --- |
+| observe | 987 cycles, every snapshot `source: alpaca` | yes |
+| understand | 717 `REFLECTION_GENERATED` | yes |
+| generate decision | 987 decisions (912 HOLD / 70 BUY / 5 SELL) | yes |
+| risk check | 987 Guardian reviews, 0 bypasses | yes |
+| execute | 34 `ORDER_FILL_CONFIRMED`, 85.0 shares | yes |
+| broker fill | 34 fills, 0 lacking `paper_only` | yes |
+| reconcile | 60 `ORDER_RECONCILIATION_REVIEWED` | yes |
+| PnL attribution | 1654 recorded, 1193 skipped by design | yes |
+| counterfactual evaluation | 102 `COUNTERFACTUAL_EVALUATED` | yes |
+| reflection | 717 `REFLECTION_GENERATED` | yes |
+| hypothesis | 42 `KNOWLEDGE_ARTIFACT_PROPOSED` | yes |
+| candidate strategy/model | 264 `CURRICULUM_PROPOSED` | yes |
+| admission gate | 97 `STRATEGY_ADMISSION_REVIEWED` | yes |
+| offline validation | 1531 `OFFLINE_VALIDATION_COMPLETED` | yes |
+| shadow / probation | 3 strategies in `PROBATION` now | partially |
+| lifecycle transitions | 35 `STRATEGY_LIFECYCLE_UPDATED` | yes |
+| **promote to ACTIVE** | **0 currently `ACTIVE`** | **no** |
+
+**Every link except one has run on real data. The one that has not is the one the
+goal is actually about.**
+
+### 44.1 The promotion link has never fired under the current rule
+
+The current lifecycler's comment is worth quoting, because it describes a promotion
+this repository had already made and then forbade itself from repeating:
+
+> A strategy that existed, never submitted an order, never opened a lot and
+> therefore has no PnL of any kind was being promoted to ACTIVE on the grounds that
+> it had not crashed. The objective requires every promotion to rest on verifiable
+> evidence rather than on the absence of trouble.
+
+So `submitted_orders <= 0` refuses promotion outright, and passing that still
+requires the decision-quality evidence gate. **Six strategies were promoted to
+ACTIVE under the retired rule** - every one of them with the reason "probation
+completed with acceptable operational metrics" - and **not one transition anywhere
+in the journal cites PnL, profit, or a champion.**
+
+Those six are not currently `ACTIVE`. The live library is 12 `RETIRED`, 12 `PAUSED`,
+3 `PROBATION`, 1 `BASELINE`, and the three in probation are the only selectable
+strategies. So the promotions did happen, the strategies have since moved on, and
+today's rule would refuse to make them again.
+
+That is the correct behaviour, and it is also the honest answer to the goal: **the
+loop is structurally complete and has exercised sixteen of seventeen links, and it
+is parked at probation because nothing has earned promotion.** Promotion now
+requires verifiable evidence, and the only broker-verified realized PnL on record
+belongs to a strategy the admission gate later refused as a behavioural duplicate.
+The system is refusing to promote on absence of trouble, which is the whole point.
+
+### 44.2 I nearly filed a false finding here, again
+
+I set out to report that six strategies were `ACTIVE` under a promotion criterion
+today would refuse - a grandfathered promotion, which would have been a real gap.
+The check returned **0 `ACTIVE`**. My six was a tally of `new_lifecycle` values
+*ever recorded*, not current state.
+
+That is the third time this session I read a historical event tally as current
+state: the same error as the "27/27 INSUFFICIENT" claim, and as counting only
+`RETIRED` states in the lifecycle check. The event tally and the on-disk state are
+different things, and the journal cannot answer a question about the present. This
+is now the third instance, so it is a pattern rather than a slip, and it is why
+`tools/replay_audit.py` exists.
+
+The claim I would have made was wrong. The claim I am making is the one I measured.
+
+### 44.3 What this does not establish
+
+Sixteen links running is not a closed loop that improves, and the seventeenth link
+not firing is not a defect. Neither statement says anything about profit. The
+objective's criterion is long-term prospective after-cost risk-adjusted live net
+PnL, and the honest summary of that is unchanged: **+$564.39 gross across 23
+broker-verified closed lots, +$556.77 after an assumed cost, all of it attributable
+to the baseline rule; the model has 10 open SPY shares, zero closed lots, and no
+strategy has broker-verified positive realized PnL.**
+
+`make verify`: **25 classes, 0 failed, 1160 test executions, exit 0.**
