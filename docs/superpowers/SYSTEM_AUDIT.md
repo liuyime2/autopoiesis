@@ -2627,12 +2627,22 @@ return AlpacaPaperExecutor(client=client, base_url=config.alpaca_base_url)
 ```
 
 So shadow is an **alternative to** paper trading for the whole system, not a **stage
-before** it. Three consequences follow, and together they mean the objective's chain
-`offline validation → shadow/probation → live validation → promote` cannot be
-expressed as written:
+before** it. Three consequences follow:
 
-1. **There is no progression.** Shadow on means shadow stays on. Nothing moves a
-   strategy or a system from shadow into paper; the flag is global and manual.
+**Correcting myself on one of them.** I wrote that the objective's chain
+`offline validation → shadow/probation → live validation → promote` "cannot be
+expressed". That is too strong, and it is the third time this session I have stated
+a scope claim more forcefully than the evidence supports. The chain *is* expressible
+as a manual procedure: run with `MIN_AGENT_SHADOW=1` for a period, then flip it and
+run the same strategies against the paper broker. What is actually true is narrower
+and more specific - **the shadow stage contributes nothing to promotion**, because
+`SHADOWED` results never reach the promotion gate, so it is a *dead-end* stage rather
+than an inexpressible one. A dead-end stage is a weaker finding than an inexpressible
+chain, and it is the one the evidence supports. The remaining two consequences stand:
+
+1. **There is no automatic progression.** Shadow on means shadow stays on. Nothing
+   moves a strategy or a system from shadow into paper on evidence; the flag is
+   global and flipped by hand.
 2. **Shadow can never produce promotion evidence.** `order_id` is always `None`, so
    no fill, no closed lot, and no broker-verified PnL. Section 44 established that
    promotion requires verifiable evidence and that nothing is currently `ACTIVE`. A
@@ -2763,3 +2773,65 @@ reasoning attached: only `FAIL` gates, so `WARN` is a finding rather than a fail
 and all four level names fit the printer's 4-character status field.
 
 `make verify`: **26 classes, 0 failed, 1174 test executions, exit 0.**
+
+## 48. Two latent bugs that only real data could reach
+
+Running one real cycle against the live broker - the strongest pre-open verification
+available, and it recorded `src=llm model=qwen3.8:27b HOLD qty=0` with Guardian
+approved and execution `SKIPPED`, so the modified daemon path completes end to end -
+turned the gate red twice. Both failures were real, and both had been dormant
+precisely because the market had not been running long enough to expose them.
+
+### 48.1 The replay gate could not survive a live system
+
+`tools/replay_audit.py` pinned its expectations: 987 cycles, 34 fills, 33 buys. The
+moment one genuine cycle landed, the gate went red. **A check that measures how long
+it has been since anyone traded is not an accounting check.** A live system's counts
+grow by design.
+
+It now asserts what must hold at any volume - every snapshot broker-sourced, every
+fill paper-only, submitted ≤ confirmed, closed lots ≤ fill events, unmatched sells
+non-negative - and prints absolute totals for context.
+
+The comparison that gives the script its value is restored and computed at runtime:
+naive FIFO arithmetic over raw JSON, checked against what the production ledger
+reports *for the same journal right now*. Getting it running took four wrong guesses,
+each of which a broad `except` turned into a silent `"production evaluator
+unavailable"`. A silent fallback inside a check is worse than no check, because it
+reads as a pass - so the fallback now reports itself as a **failure**:
+
+```
+[OK ] closed lots: naive FIFO vs ledger          replay=23     reported=23
+[OK ] realized PnL: naive FIFO vs ledger         replay=564.39 reported=564.39
+[OK ] unmatched sell shares: naive vs ledger     replay=29.0   reported=29.0
+```
+
+The guesses, in order: the figures live under `.pnl`, not on the top-level result;
+`evaluate()` returns `MISSING` with empty figures unless handed the broker evidence
+batch; `total_realized_pnl` is not on `PnLEvidence` at all - it lives on the
+attribution result, a different object from a different module; and
+`unmatched_sell_quantity` is per-strategy, so the comparable figure is its total.
+The naive arithmetic stays pure stdlib - `src` is added to `sys.path` only so the
+comparison helper can read the same journal the system reports from, which is the
+entire point of having it.
+
+### 48.2 A pending placeholder was being scored as a determinism failure
+
+`test_replaying_the_live_journal_reproduces_the_recorded_verdicts` compared **every**
+recorded counterfactual row against a fresh recomputation. It passed for months, and
+the reason is the defect: **no recorded decision had yet gained its 24-hour horizon
+quote.** The first real cycle after a quiet weekend supplied one, and the gate went
+red on a row recorded as `verdict=PENDING, net_return_pct=None` that now correctly
+recomputes as `GOOD_HOLD, -0.195005`.
+
+Measured before fixing anything: **0 decided verdicts changed** and **1 of 66 PENDING
+rows had resolved**. So the determinism property held throughout; the check was
+scoring a placeholder. Determinism means a *decided* answer does not change - it
+says nothing about an undecided one.
+
+The check now skips PENDING rows, and prints the resolved-since count rather than
+swallowing it: a count that never moves would mean nothing is ever resolving.
+
+Both bugs share a shape worth naming: **checks that can only be exercised by the
+market.** A gate whose green state depends on the absence of data is not a gate, and
+the only way to find that out is to let real data arrive.

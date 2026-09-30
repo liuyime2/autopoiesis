@@ -15,6 +15,17 @@ Deliberately naive: if a real figure can only be produced by the production
 machinery, this script says so rather than approximating. A naive check that
 agrees is weak evidence; a naive check that disagrees is strong.
 
+The expected values are **not hard-coded**, and that was the first version's bug. It
+pinned 987 cycles and 34 fills, and the gate went red the moment one real cycle
+landed - which is a check that measures how long it has been since anyone traded
+rather than whether the accounting is right. A live system's counts grow by design.
+So the figures are recomputed here from raw text and compared against what the
+production code reports *for the same journal right now*, which is a consistency
+check that survives the market adding records. Absolute totals are printed for
+context and asserted only where they must hold regardless of volume: that every
+snapshot is broker-sourced, that every fill is paper-only, and that the FIFO
+arithmetic agrees with the ledger.
+
 Usage: python tools/replay_audit.py
 """
 from __future__ import annotations
@@ -25,6 +36,12 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 JOURNAL = Path("runtime/min_agent/journal.jsonl")
+
+# Only so `_production_lot_figures` can read the same journal with the same code the
+# system reports from. Nothing above this line imports it, and every figure this
+# script prints before the comparison is derived from stdlib json alone - which is
+# the entire point of the exercise.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 
 def load(path: Path):
@@ -50,6 +67,63 @@ def check(label, got, expected, note=""):
     return ok
 
 
+def _production_lot_figures():
+    """The same three figures as the production ledger reads them.
+
+    Imported here rather than at module scope so the naive counting above stays
+    independent: nothing in the arithmetic it performs touches `min_agent`.
+
+    Two things had to be right and both were wrong first. `evaluate()` returns a
+    result whose figures live under `.pnl`, not on the top-level object; and it
+    returns `MISSING` with empty figures unless it is handed the broker evidence
+    batch, which is why the first version silently fell back to "production
+    evaluator unavailable" and left the most valuable comparison in the script not
+    running at all. A silent fallback in a check is worse than a missing check,
+    because it reads as a pass.
+    """
+    try:
+        from min_agent.broker_evidence import latest_evidence_batch
+        from min_agent.evaluator import DeterministicEvaluator, confirmed_fill_activities
+        from min_agent.journal import JsonlJournal
+        from min_agent.fill_reconciler import FILL_EVENT
+    except Exception as exc:  # surfaced below rather than silently skipped
+        return f"import failed: {type(exc).__name__}: {exc}"
+    journal = JsonlJournal(JOURNAL)
+    records = journal.read_all()
+    if not records:
+        return "no cycle records to evaluate"
+    fills = {}
+    for event in journal.read_events(FILL_EVENT):
+        coid = event.payload.get("client_order_id")
+        qty = event.payload.get("filled_quantity")
+        if isinstance(coid, str) and isinstance(qty, (int, float)) and qty > 0:
+            fills[coid] = max(fills.get(coid, 0.0), float(qty))
+    result = DeterministicEvaluator().evaluate(
+        records,
+        evidence=latest_evidence_batch(journal),
+        fills=fills,
+        seeded_fills=confirmed_fill_activities(journal, records),
+    )
+    pnl = result.pnl
+    # Three wrong guesses in a row on this line, each caught by the surface-it
+    # rather than swallow-it change: `total_realized_pnl` is not on PnLEvidence at
+    # all (it lives on the attribution result, which is a different object built by
+    # a different module), and `strategy_realized_pnl` is a per-strategy dict rather
+    # than a total. The figures the doctor prints come from the attribution result,
+    # so that is what is compared here.
+    from min_agent.attribution import attribute
+    report = attribute(records, result.pnl.model_dump(mode="json"))
+    # unmatched_sell_quantity is per-strategy, which is why the doctor prints
+    # "UNMATCHED SELLS {'trend-follow-sell-002': 29.0}". The naive pass has no
+    # strategy attribution - it only knows a sell exceeded the lots available - so
+    # the comparable quantity is the total.
+    unmatched = pnl.unmatched_sell_quantity
+    total_unmatched = (
+        sum(unmatched.values()) if isinstance(unmatched, dict) else float(unmatched)
+    )
+    return (report.closed_lots, report.total_realized_pnl, total_unmatched)
+
+
 def main() -> int:
     if not JOURNAL.exists():
         print(f"no journal at {JOURNAL}")
@@ -60,14 +134,14 @@ def main() -> int:
     print(f"\n  journal: {len(cycles) + len(events)} records "
           f"({len(cycles)} cycles + {len(events)} events)\n")
 
-    print("  -- volume --")
-    passed.append(check("cycle records", len(cycles), 987))
+    print("  -- volume (printed for context; a live system grows by design) --")
+    print(f"            {len(cycles)} cycle records, {len(events)} event records")
     passed.append(check("event records", len(events), len(events),
                         "self-referential; the split itself is the claim"))
 
     print("\n  -- data provenance: every snapshot must be a real source --")
     sources = Counter(c["snapshot"]["source"] for c in cycles)
-    passed.append(check("distinct snapshot sources", dict(sources), {"alpaca": 987},
+    passed.append(check("every snapshot is broker-sourced", dict(sources), {"alpaca": len(cycles)},
                         "any non-broker source would be fabricated data"))
 
     print("\n  -- decisions --")
@@ -83,21 +157,25 @@ def main() -> int:
     # 10 one-share BUYs submitted on 2026-09-29 - into a whole-journal check. Both
     # numbers are true at their own scope and only one belongs in this row, so the
     # scope is now named rather than assumed.
-    passed.append(check("SUBMITTED executions (whole journal)", submitted, 34,
-                        "34 in total; 10 of them on the 2026-09-29 session alone"))
+    fills_on_record = sum(
+        1 for e in events if e["event_type"] == "ORDER_FILL_CONFIRMED"
+    )
+    passed.append(check("SUBMITTED <= confirmed fills", submitted <= fills_on_record, True,
+                        f"{submitted} submitted, {fills_on_record} broker-confirmed; "
+                        "a submission with no confirmation is legitimate (reconciled later) "
+                        "but the reverse would be a fill with no order"))
     print(f"            BUY decisions={buys}  SELL decisions={sells}")
 
     print("\n  -- broker-confirmed fills --")
     fills = [e for e in events if e["event_type"] == "ORDER_FILL_CONFIRMED"]
-    passed.append(check("ORDER_FILL_CONFIRMED events", len(fills), 34))
     fill_sides = Counter(e["payload"]["side"] for e in fills)
-    passed.append(check("  buy fills", fill_sides.get("BUY", 0), 33))
-    passed.append(check("  sell fills", fill_sides.get("SELL", 0), 1))
-    sell_qty = sum(
-        e["payload"]["filled_quantity"] for e in fills
-        if e["payload"]["side"] == "SELL"
-    )
-    passed.append(check("  shares sold", sell_qty, 52.0))
+    buy_qty = sum(e["payload"]["filled_quantity"] for e in fills
+                  if e["payload"]["side"] == "BUY")
+    sell_qty = sum(e["payload"]["filled_quantity"] for e in fills
+                   if e["payload"]["side"] == "SELL")
+    print(f"            {len(fills)} confirmed fill(s): "
+          f"{fill_sides.get('BUY', 0)} buy / {fill_sides.get('SELL', 0)} sell, "
+          f"{buy_qty:g} bought / {sell_qty:g} sold")
     not_paper = [e for e in fills if not e["payload"].get("paper_only", False)]
     passed.append(check("  fills not marked paper_only", len(not_paper), 0,
                         "live execution in a paper-only system would be disqualifying"))
@@ -126,11 +204,38 @@ def main() -> int:
         unmatched += max(remaining, 0.0)
     print(f"            FIFO closed lots={closed}  realized gross=${realized:,.2f}  "
           f"unmatched sell shares={unmatched:g}")
-    passed.append(check("closed lots", closed, 23))
-    passed.append(check("realized gross PnL", round(realized, 2), 564.39,
-                        "gross of any cost assumption"))
-    passed.append(check("unmatched sell shares", unmatched, 29.0,
-                        "the owner's pre-existing position, sold before the SELL bound existed"))
+    # Invariants that must hold at any volume: the sell can never exceed what was
+    # bought plus what the owner already held, and the ledger cannot report more
+    # closed lots than there are fill events to pair them with.
+    passed.append(check("closed lots <= fill events", closed <= len(fills), True,
+                        "every closed lot needs a matching buy and a matching sell"))
+    passed.append(check("unmatched sells are non-negative", unmatched >= 0.0, True))
+
+    # The comparison that matters, and the reason this script exists: the figures
+    # the system reports, taken from the production evaluator reading the same
+    # journal, checked against the naive FIFO arithmetic above. Computed at runtime
+    # rather than hard-coded, so it keeps working when the market adds a record -
+    # the first version pinned 564.39 and went red on the next real cycle.
+    prod = _production_lot_figures()
+    if isinstance(prod, str):
+        # Not a pass. A check that silently degrades is worse than one that is
+        # absent, because it reads as a clean run.
+        print(f"            !! production ledger NOT compared: {prod}")
+        passed.append(check("production ledger comparison ran", False, True,
+                            "the strongest check in this script did not execute"))
+    else:
+        if prod is None:
+            print("            !! production ledger returned nothing to compare")
+            passed.append(check("production ledger comparison ran", False, True,
+                                "the strongest check in this script did not execute"))
+        p_lots, p_pnl, p_unmatched = prod
+        passed.append(check("closed lots: naive FIFO vs ledger", closed, p_lots))
+        passed.append(check("realized PnL: naive FIFO vs ledger",
+                            round(realized, 2), round(p_pnl, 2),
+                            "gross of any cost assumption"))
+        passed.append(check("unmatched sell shares: naive vs ledger",
+                            unmatched, p_unmatched,
+                            "the owner's pre-existing position, sold before the SELL bound existed"))
 
     print("\n  -- strategy attribution --")
     by_strategy = defaultdict(float)
@@ -143,8 +248,8 @@ def main() -> int:
     # Four, not three: the three buyers plus `trend-follow-sell-002`. I first wrote
     # 3, counting only the strategies that acquired shares and forgetting that the
     # seller also has a confirmed fill against its name.
-    passed.append(check("strategies with confirmed fills", len(by_strategy), 4,
-                        "3 acquirers + trend-follow-sell-002, which sold 52"))
+    print(f"            {len(by_strategy)} strateg(y/ies) with confirmed fills: "
+          f"{dict(by_strategy)}")
 
     print("\n  -- the PnL is not the model's --")
     model_fills = [

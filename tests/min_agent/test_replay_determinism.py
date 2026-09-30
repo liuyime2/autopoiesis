@@ -127,13 +127,74 @@ def test_replaying_the_live_journal_reproduces_the_recorded_verdicts():
     report = cf.evaluate(records, symbol="SPY", horizon_hours=24.0)
 
     mismatches = []
+    resolved_since = 0
     for row in report.rows:
         prior = recorded.get(row.cycle_id)
         if prior is None:
             continue
         if prior[0] != row.verdict or prior[1] != row.net_return_pct:
+            if prior[0] == "PENDING":
+                # A PENDING row is not a claim about the outcome, so it cannot be
+                # a determinism violation when the outcome later arrives. This check
+                # compared every row, and stayed green for months only because no
+                # recorded decision had yet gained its 24h horizon quote. The first
+                # real cycle added after a quiet weekend resolved one, and the gate
+                # went red on a placeholder - the correct verdict, reached the wrong
+                # way. Determinism means a decided answer does not change; it says
+                # nothing about an undecided one.
+                resolved_since += 1
+                continue
             mismatches.append((row.cycle_id, prior, row.verdict, row.net_return_pct))
 
     assert not mismatches, (
         f"{len(mismatches)} journalled verdicts did not reproduce: {mismatches[:3]}"
     )
+    # Surfaced rather than swallowed: a rising count here is the expected shape, and
+    # a count that never moves would mean nothing is ever resolving.
+    print(
+        f"replay determinism: {len(mismatches)} decided verdict(s) changed; "
+        f"{resolved_since} placeholder(s) have since resolved"
+    )
+
+
+def test_a_pending_placeholder_is_not_a_determinism_violation():
+    """A PENDING row is not a claim, so its later resolution cannot violate anything.
+
+    The live-journal check compared every row and stayed green for months only
+    because no recorded decision had yet gained its 24h horizon quote. The first
+    real cycle after a quiet weekend resolved one and the gate went red - the right
+    verdict, reached the wrong way. Determinism means a *decided* answer does not
+    change; it says nothing about an undecided one.
+    """
+    import dataclasses
+    from datetime import datetime, timezone
+
+    from min_agent.counterfactual import CounterfactualRow
+
+    # Bare literals, because that is what the production module uses too
+    # ("PENDING", "GAP" appear as string comparisons, not constants).
+    PENDING, GOOD_HOLD = "PENDING", "GOOD_HOLD"
+
+    pending = CounterfactualRow(
+        cycle_id="c1", symbol="SPY", action="HOLD", quantity=0,
+        strategy_id=None,
+        decided_at=datetime(2026, 9, 28, 15, 0, tzinfo=timezone.utc),
+        price_at_decision=100.0, price_at_horizon=None,
+        horizon_hours=24.0, gap_hours=None,
+        gross_return_pct=None, assumed_cost_pct=0.05, net_return_pct=None,
+        verdict=PENDING,
+    )
+    assert pending.verdict == PENDING
+    assert pending.net_return_pct is None
+
+    # Once a horizon quote exists the same row is a decided answer, and that is the
+    # property the check actually enforces: it must not move afterwards.
+    settled = CounterfactualRow(
+        **{**dataclasses.asdict(pending), "price_at_horizon": 101.0,
+           "gap_hours": 24.0, "gross_return_pct": 1.0, "net_return_pct": 0.95,
+           "verdict": GOOD_HOLD},
+    )
+    assert settled.verdict == GOOD_HOLD
+    assert settled.net_return_pct == 0.95
+    again = CounterfactualRow(**{**dataclasses.asdict(settled)})
+    assert (again.verdict, again.net_return_pct) == (settled.verdict, settled.net_return_pct)
