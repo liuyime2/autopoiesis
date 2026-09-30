@@ -64,10 +64,14 @@ Reaches production, but delivers materially less than its shape suggests.
 
 Present, reachable in code, and not exercised by the run.
 
+*(shadow mode was classified here and moved to **broken** in section 45: its wiring
+is a mode swap, not a stage, so it cannot function as the chain link it documents
+itself to be.)*
+
 | capability | evidence |
 | --- | --- |
 | `regime.py` classifier | Referenced only as a *label* in `attribution.py`. Phase 8 is not started, so this is by design, not an oversight — but it means "regime" in the attribution output is currently `UNKNOWN` for every lot |
-| shadow mode | `config.shadow = False`; 1 `SHADOW_ORDER_INTENT` in 6909 events, ever |
+| ~~shadow mode~~ | Moved to **broken**: `config.shadow` swaps the executor wholesale, so shadow is an *alternative to* paper rather than a *stage before* it. `order_id` is always `None`, so shadow can never yield the fills the promotion gate requires, and the objective's `shadow → probation → promote` chain cannot be expressed. 1 `SHADOW_ORDER_INTENT` in 6909 events, and its rationale is `"shadow stage smoke test"`. The mechanism itself is sound; the wiring is not. See section 45 |
 | champion / challenger | `champion=NONE` — no strategy has broker-verified positive realized PnL, so nothing has ever been promoted |
 
 ## Duplicated — deleted this session
