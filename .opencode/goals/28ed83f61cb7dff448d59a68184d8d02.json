@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790762156127,
-      "lastRequestTokens": 390702,
-      "lastInputTokens": 389374
+      "observedAt": 1790762346915,
+      "lastRequestTokens": 418142,
+      "lastInputTokens": 417545
     }
   },
   "runtimeFingerprint": {
@@ -43,14 +43,15 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 3,
-    "tokens": 6884,
+    "turns": 4,
+    "tokens": 9282,
     "cost": 0,
-    "runtimeMs": 55320,
+    "runtimeMs": 70983,
     "seenMessageIDs": [
       "msg_0f1901114001484d2fnJE0hmIq",
       "msg_0f1a3bd51001P2jhIfBm6kTFUm",
-      "msg_0f1afed57001cVewcMhXbimDkz"
+      "msg_0f1afed57001cVewcMhXbimDkz",
+      "msg_0f1bf48e7001Gv4x8ikR3pui2n"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -60,8 +61,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 10,
-  "observedProgressRevision": 7,
+  "progressRevision": 13,
+  "observedProgressRevision": 11,
   "progressFingerprints": [
     "shell-worktree:ee102d12789dd54349b1662438fe8069ed627c7c900a1ea7c2c0db29fa129a05",
     "shell-worktree:027d49c5a869cfb42a78cbb614c78407afbe88f34da32d650b80ef33ebde4f2c",
@@ -72,7 +73,10 @@
     "shell-worktree:5ff5d8a42264a6099e0cdd86069c80a6442bc728d48b5c75e8371a7c736abd49",
     "shell-worktree:571ec62b41c794af58b0880147f8d5755d05ada69bec9f284bdc411ca187cb88",
     "shell-worktree:0de75043be90e1c2d13f1de4ed765c2efc23a5525335a220a132d99be037b595",
-    "shell-worktree:15b10896a1f8336196435c30072d242fe38e60fcdcefb3d09cf9f041a4a5dc63"
+    "shell-worktree:15b10896a1f8336196435c30072d242fe38e60fcdcefb3d09cf9f041a4a5dc63",
+    "shell-worktree:4e9376cb3e89a20670b3c36d9af3e5ed99a5d93169648aeb945c2c09689d3467",
+    "shell-worktree:c9fb01e3e7f8cffda2a372348c8cbeac40840ae7b06e3d61628a0ef4594df1ab",
+    "shell-worktree:13c891451e38cd7fb2898d1ec0b9927cfd83c06b207e1a7906902441cd82f7fc"
   ],
   "stalledTurns": 0,
   "progressNotes": [
@@ -135,11 +139,31 @@
       "time": 1790761954407,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790762182694,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790762218898,
+      "summary": "Ran one real cycle against the live broker as the strongest pre-open verification - the modified daemon path completed end to end and recorded src=llm model=qwen3.8:27b HOLD qty=0 with Guardian approved and execution SKIPPED, market closed so nothing could trade, and with the model authoring the decision rather than falling back. That turned the gate red twice, on two real latent bugs that had been dormant precisely because the market had not been running long enough to expose them. First, tools/replay_audit.py pinned its expectations at 987 cycles, 34 fills and 33 buys, so one genuine cycle made it red: a check that measures how long it has been since anyone traded is not an accounting check, and a live system's counts grow by design. It now asserts what must hold at any volume - every snapshot broker-sourced, every fill paper-only, submitted <= confirmed, closed lots <= fill events, unmatched sells non-negative - and prints absolute totals for context. The comparison that gives the script its value is restored and computed at runtime: naive FIFO over raw JSON against what the production ledger reports for the same journal right now. Getting it running took four wrong guesses, each turned into a silent \"production evaluator unavailable\" by a broad except, and a silent fallback inside a check reads as a pass, so it now reports itself as a failure. The guesses: the figures live under .pnl not the top-level result; evaluate() returns MISSING without the broker evidence batch; total_realized_pnl is not on PnLEvidence at all but on the attribution result, a different object from a different module; and unmatched_sell_quantity is per-strategy so the comparable figure is its total. The naive arithmetic stays pure stdlib, with src added to sys.path only so the comparison helper reads the same journal the system reports from. It now confirms closed lots 23, realized 564.39 and unmatched 29.0 by both routes. Second, the replay-determinism check compared every recorded counterfactual row against a fresh recomputation and passed for months because of the defect: no recorded decision had yet gained its 24-hour horizon quote. The first real cycle after a quiet weekend supplied one and the gate went red on a row recorded verdict=PENDING that correctly recomputes as GOOD_HOLD at -0.195005. Measured before changing anything, 0 decided verdicts changed and 1 of 66 PENDING rows had resolved, so the determinism property held throughout and the check was scoring a placeholder. It now skips PENDING rows and prints the resolved-since count rather than swallowing it. Both bugs share a shape worth naming: checks that can only be exercised by the market, where a gate whose green state depends on the absence of data is not a gate and the only way to find that out is to let real data arrive. I also corrected an overstatement of my own in section 45: I had written that the shadow chain cannot be expressed, which is too strong - it is expressible as a manual procedure by flipping the flag, and the narrower true statement is that SHADOWED results never reach the promotion gate so the stage is a dead end for promotion rather than an inexpressible one. make verify 26 classes, 0 failed, 1175 test executions, exit 0. Commit 380a642.",
+      "next": "The loop needs no intervention before the open: three durable units are active and enabled, the watchdog fires every 10 minutes, the model is resident on GPU0 with keep-alive -1, and the broker clock confirms the next open at 2026-09-30 09:30 ET. The shadow stage remains a dead end for promotion by design of its current wiring; rewiring it is an operator decision and it is now reported honestly rather than claimed as MET."
+    },
+    {
+      "time": 1790762304273,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790762338706,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 118,
+  "storageGeneration": 135,
   "createdAt": 1790759144543,
-  "updatedAt": 1790762156127,
+  "updatedAt": 1790762346915,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:1794a70a8627a267a345dc5a491d2bc563f0a8246e1de001013d764d1eac1458",

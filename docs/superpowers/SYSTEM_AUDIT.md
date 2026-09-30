@@ -2593,78 +2593,57 @@ strategy has broker-verified positive realized PnL.**
 
 `make verify`: **25 classes, 0 failed, 1160 test executions, exit 0.**
 
-## 45. The shadow stage is wired as a mode, so the chain cannot express it
+## 45. Shadow: two of my three criticisms were wrong
 
-Section 44 marked `shadow / probation` as only *partially* proven. It is worse than
-that, and worth stating precisely, because the code's own documentation states the
-intent correctly and the wiring does not match it.
+This section originally read "The shadow stage is wired as a mode, so the chain
+cannot express it". Both the title's claim and the body have been corrected in
+place, because I asserted things about the promotion gate that I had not checked.
 
-`shadow.py` opens:
+**What survives.** `config.shadow` selects the executor, so shadow is an alternative
+to paper for the whole system rather than an automatic per-strategy progression.
+That is a real limitation.
 
-> Phase 5 of the objective asks for shadow trading **as a stage of its own, before
-> evidence-gated probation**. It is the stage that answers one question the other
-> stages cannot: *would the full production decision path have produced a profitable
-> outcome if it had actually placed the order?*
+**Withdrawn: "the chain cannot be expressed."** Too strong. The chain runs as a
+manual procedure - shadow for a period, flip the flag, run the same strategies
+against the paper broker.
 
-The mechanism is genuinely well built. It runs the real loop - real market data, the
-real model, the real Guardian, the real journal - and replaces only the final broker
-call, which is the right design: a shadow path with its own simplified logic would
-be grading a different system from the one that will trade. The safety property is
-also the right way round, stated negatively: a shadow order is **not** a fill, and
-three separate mechanisms stop it being believed to be one - `status="SHADOWED"` is
-outside the set the evaluator treats as executed, `order_id` is always `None` so no
-reconciliation can match it to a broker order, and every shadow intent is journalled
-as its own event type. If shadow results leaked into the PnL ledger the account would
-show profits from money never risked, which is the most dangerous bug available in
-this system.
+**Withdrawn: "shadow is a dead end for promotion."** I wrote this because
+`SHADOWED` results never reach the promotion gate. **That was wrong, and I should
+have read the gate instead of asserting it.**
+`offline_validation` builds its `DecisionRecord`s from `COUNTERFACTUAL_EVALUATED`
+rows - counterfactual verdicts computed from decisions and real market prices - and
+there is no `SHADOWED` filter anywhere in it. A shadow cycle's decisions are scored
+exactly like any other, accumulate into the offline screen, and feed
+`_promotion_evidence_gate`. Shadow **does** contribute promotion evidence.
 
-**The wiring is what does not match.** `config.shadow` selects the executor:
+What shadow genuinely cannot supply is the separate `submitted_orders > 0`
+precondition immediately before that gate, and the code states why in its own
+comment: *"a strategy with no orders has no evidence at all"* is the failure being
+refused, and the decision-quality path exists precisely so a long-only strategy that
+never closes a lot can still be judged. Requiring a strategy to have actually placed
+an order before promotion is the point of the gate, not a flaw in the stage.
 
-```python
-if config.shadow:
-    return ShadowExecutor(journal=journal)
-return AlpacaPaperExecutor(client=client, base_url=config.alpaca_base_url)
-```
+**So the honest finding is narrow and modest: shadow is a working stage whose
+progression to paper is a manual flag flip rather than an automatic one.** The
+objective does not require that progression to be automatic, so this is a design
+observation, not a defect, and it should not have been filed as one - let alone
+classified as broken.
 
-So shadow is an **alternative to** paper trading for the whole system, not a **stage
-before** it. Three consequences follow:
+The genuinely true finding about shadow is the one in section 47: **the stage has
+never run.** One `SHADOW_ORDER_INTENT` in roughly 7,000 events, rationale
+`"shadow stage smoke test"`. `shadow-stage-exercised` reports that, and Phase 5 is
+recorded as MECHANISM MET, STAGE NOT RUN.
 
-**Correcting myself on one of them.** I wrote that the objective's chain
-`offline validation → shadow/probation → live validation → promote` "cannot be
-expressed". That is too strong, and it is the third time this session I have stated
-a scope claim more forcefully than the evidence supports. The chain *is* expressible
-as a manual procedure: run with `MIN_AGENT_SHADOW=1` for a period, then flip it and
-run the same strategies against the paper broker. What is actually true is narrower
-and more specific - **the shadow stage contributes nothing to promotion**, because
-`SHADOWED` results never reach the promotion gate, so it is a *dead-end* stage rather
-than an inexpressible one. A dead-end stage is a weaker finding than an inexpressible
-chain, and it is the one the evidence supports. The remaining two consequences stand:
-
-1. **There is no automatic progression.** Shadow on means shadow stays on. Nothing
-   moves a strategy or a system from shadow into paper on evidence; the flag is
-   global and flipped by hand.
-2. **Shadow can never produce promotion evidence.** `order_id` is always `None`, so
-   no fill, no closed lot, and no broker-verified PnL. Section 44 established that
-   promotion requires verifiable evidence and that nothing is currently `ACTIVE`. A
-   strategy therefore **cannot shadow its way to being promotable** - the stage that
-   is supposed to gather evidence cannot gather the evidence the next stage demands.
-3. **It has never run as a stage.** `MIN_AGENT_SHADOW` defaults to `False` and the
-   single `SHADOW_ORDER_INTENT` in 6909 events carries the rationale
-   `"shadow stage smoke test"` - a manual smoke test, not a loop decision.
-
-This is the objective's "looks implemented but has not entered the real closed loop"
-category in its sharpest form. The stage is written, tested, documented as Phase 5,
-and **structurally incapable of functioning as the stage the objective describes**.
-I have reclassified it from *implemented but unused* to **broken: the wiring does
-not match the documented intent**, which is a stronger and more accurate statement
-than "off".
-
-I am not rewriting the wiring. Turning a global mode flag into a per-strategy stage
-is a design change with real consequences - it decides what evidence a strategy must
-gather before it touches the paper broker, and therefore what "promotable" means -
-and the operator should weigh that rather than have it changed as a side effect of
-an audit. What the audit can and does establish is that the chain currently has no
-working shadow rung, and that this is a wiring gap rather than a missing feature.
+The mechanism's real strength is worth keeping on the record: it runs the real loop -
+real market data, the real model, the real Guardian, the real journal - and replaces
+only the final broker call, which is the right design because a shadow path with
+simplified logic would be grading a different system from the one that will trade.
+Its safety property is stated negatively and enforced three ways: `status="SHADOWED"`
+is outside the set the evaluator treats as executed, `order_id` is always `None` so
+no reconciliation can match it to a broker order, and every shadow intent is
+journalled as its own event type. If shadow results leaked into the PnL ledger the
+account would show profits from money never risked - the most dangerous bug
+available in this system.
 
 ## 46. A fallback that hid in plain sight
 

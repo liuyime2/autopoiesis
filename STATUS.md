@@ -257,11 +257,14 @@ the rationale `"shadow stage smoke test"`. `PHASES.md` previously recorded Phase
 MET quoting `status=SHADOWED` and a `920/920` cycle count that the live journal does
 not contain; that row is corrected, and a `shadow-stage-exercised` gate now reports
 mechanism and stage separately so the exit criterion cannot be read off code that has
-never run. The wiring point that remains: shadow is a global executor swap rather than a
-per-strategy stage, and `SHADOWED` results never reach the promotion gate, so the
-stage is a **dead end** for promotion rather than an inexpressible one - the chain can
-still be run as a manual procedure by flipping the flag. Whether to rewire it is in
-`SYSTEM_AUDIT.md` §45 and is an operator decision.
+never run. The wiring point: shadow is a global executor swap rather than an automatic
+per-strategy stage, so progression to paper is a manual flag flip. It is **not** a
+dead end - shadow decisions are scored by the counterfactual ledger and do feed the
+promotion gate, since offline validation reads verdicts rather than fills. Only the
+separate `submitted_orders > 0` precondition needs real orders, which is the gate's
+purpose. The objective does not require automatic progression, so this is a design
+observation rather than a defect; the earlier "dead end" claim in `SYSTEM_AUDIT.md`
+§45 was wrong and has been withdrawn.
 
 Two earlier notes on shadow are **withdrawn as wrong**, and are kept here because a
 withdrawn claim left standing is worse than one never made:

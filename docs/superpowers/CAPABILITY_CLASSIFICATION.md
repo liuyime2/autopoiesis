@@ -64,14 +64,12 @@ Reaches production, but delivers materially less than its shape suggests.
 
 Present, reachable in code, and not exercised by the run.
 
-*(shadow mode was classified here and moved to **broken** in section 45: its wiring
-is a mode swap, not a stage, so it cannot function as the chain link it documents
-itself to be.)*
+
 
 | capability | evidence |
 | --- | --- |
 | `regime.py` classifier | Referenced only as a *label* in `attribution.py`. Phase 8 is not started, so this is by design, not an oversight — but it means "regime" in the attribution output is currently `UNKNOWN` for every lot |
-| ~~shadow mode~~ | Moved to **broken**: `config.shadow` swaps the executor wholesale, so shadow is an *alternative to* paper rather than a *stage before* it. `order_id` is always `None`, so shadow can never yield the fills the promotion gate requires, and the objective's `shadow → probation → promote` chain cannot be expressed. 1 `SHADOW_ORDER_INTENT` in 6909 events, and its rationale is `"shadow stage smoke test"`. The mechanism itself is sound; the wiring is not. See section 45 |
+| shadow stage | **Working, manual progression.** `config.shadow` swaps the executor wholesale, so shadow is an alternative to paper rather than an automatic per-strategy stage. But shadow cycles *do* feed the promotion gate: offline validation reads counterfactual verdicts, which are computed from decisions and prices with no `SHADOWED` filter. What shadow cannot supply is the separate `submitted_orders > 0` precondition - and requiring a strategy to have traded before promotion is the gate's purpose. **Never run:** 1 `SHADOW_ORDER_INTENT` in ~7k events, rationale `"shadow stage smoke test"`; reported by the `shadow-stage-exercised` gate |
 | champion / challenger | `champion=NONE` — no strategy has broker-verified positive realized PnL, so nothing has ever been promoted |
 
 ## Duplicated — deleted this session
@@ -104,9 +102,9 @@ Each of these reported success while something real was wrong.
 | capability | what is missing |
 | --- | --- |
 | **visibility of unmanaged account exposure** | Now reported. It did not exist: `daily_loss` is whole-account equity, so a drawdown in BIL or TLT could consume the agent's $500 daily-loss budget for a reason appearing in no decision, PnL record or attribution |
-| ~~knowledge pruning~~ | **Closed.** 11 artifacts carrying 2 statements became 2 carrying 2, by merging `source_refs` rather than deleting: the ten copies cited 83 distinct cycle ids between them and the journal records those ids nowhere else, so a plain delete would have destroyed lineage |
-| ~~failure-path tests for doctor checks~~ | **Closed.** 10 checks had no test asserting their non-OK path; all 30 report names are now covered, including `champion / search` and `experiment chain`, whose fixtures needed a journal seeded with specific admission and evaluation events plus a real strategy library |
-| **attribution for 29 shares** | Sold in June before the SELL bound existed. The cost basis is not in the journal, so that realized PnL is permanently unproven. Correctly reported rather than invented |
+| knowledge pruning | **Closed.** 11 artifacts carrying 2 statements became 2 carrying 2, by merging `source_refs` rather than deleting: the ten copies cited 83 distinct cycle ids between them and the journal records those ids nowhere else, so a plain delete would have destroyed lineage |
+| failure-path tests for doctor checks | **Closed.** 10 checks had no test asserting their non-OK path; all 30 report names are now covered, including `champion / search` and `experiment chain`, whose fixtures needed a journal seeded with specific admission and evaluation events plus a real strategy library |
+| **attribution for 29 shares** | Sold in June before the SELL bound existed. The cost basis is not in the journal, so that realized PnL is **permanently unprovable** - no code change can recover data that was never written, and inventing a basis would be fabrication. Correctly reported as unproven. This is the only open row, and it is a historical data gap rather than a defect |
 
 ---
 
