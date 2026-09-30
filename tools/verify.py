@@ -50,7 +50,12 @@ WARN = "WARN"
 TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_broker_evidence.py": ("broker-reconciliation", "crash-recovery"),
     "test_cli.py": ("unit-integration",),
-    "test_cli_startup.py": ("syntax-import",),
+    # Was mapped only to `syntax-import`, which imports the 35 production
+    # modules and runs none of this file's assertions - so its one failing
+    # test was invisible to a green gate. The coverage map checks that a file
+    # is *assigned*, not that some assigned class actually *runs* it; that is
+    # a weaker guarantee than it looks, and this file is where it showed.
+    "test_cli_startup.py": ("syntax-import", "unit-integration"),
     "test_config.py": ("unit-integration", "shadow-live-consistency"),
     "test_config_wiring.py": (
         "unit-integration", "data-integrity", "shadow-live-consistency",
@@ -788,19 +793,50 @@ def run_pytest_class(cls: str) -> Result:
     return Result(cls, PASS if rc == 0 else FAIL, _tail(out), duration, counts)
 
 
+#: Classes that execute a test file's assertions, as opposed to classes that
+#: inspect the repository. A file mapped only to a non-executing class is reported
+#: as covered while none of its tests ever run - which is exactly what happened to
+#: `test_cli_startup.py`, mapped only to `syntax-import`. That class imports the 35
+#: production modules and stops, so the file's one failing assertion stayed invisible
+#: behind a green gate while `make test` was red.
+EXECUTING_CLASSES = frozenset({
+    "unit-integration", "point-in-time-no-leakage", "pnl-accounting",
+    "data-integrity", "lifecycle-invariants", "guardian-bypass-prevention",
+    "replay-determinism", "crash-recovery", "broker-reconciliation",
+    "decision-outcome-counterfactual", "shadow-live-consistency",
+    "defect-regression-audit",
+})
+
+
 def check_all_tests_classified() -> Result:
-    """Every test file must belong to a class. A new file that does not is the
-    system quietly moving out of verification coverage."""
+    """Every test file must be assigned, and at least one assigned class must
+    actually run it.
+
+    Assignment alone is a weaker guarantee than it looks. The map is an
+    accounting of intent, not evidence of execution, and a file whose only class
+    inspects the repository rather than running pytest contributes nothing to the
+    gate while looking fully covered.
+    """
     on_disk = {p.name for p in TESTS.glob("test_*.py")}
     unknown = sorted(on_disk - set(TEST_CLASS_MAP))
     ghost = sorted(set(TEST_CLASS_MAP) - on_disk)
+    never_run = sorted(
+        name for name, classes in TEST_CLASS_MAP.items()
+        if name in on_disk and not (set(classes) & EXECUTING_CLASSES)
+    )
     problems = []
     if unknown:
         problems.append(f"unclassified test files: {unknown}")
     if ghost:
         problems.append(f"mapped but absent: {ghost}")
+    if never_run:
+        problems.append(
+            "assigned only to non-executing classes, so no test in them ever "
+            f"runs in the gate: {never_run}"
+        )
     detail = "; ".join(problems) if problems else (
-        f"all {len(on_disk)} test files are assigned to a check class"
+        f"all {len(on_disk)} test files are assigned, and each is assigned to at "
+        f"least one class that actually runs it"
     )
     return Result("test-coverage-map", FAIL if problems else PASS, detail)
 

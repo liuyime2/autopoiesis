@@ -35,7 +35,7 @@ from min_agent.health import HealthMonitor
 from min_agent.journal import JsonlJournal
 from min_agent.reflection_memory import ReflectionMemory
 from min_agent.knowledge_library import KnowledgeLibrary
-from min_agent.models import BrokerEvidenceBatch
+from min_agent.models import BrokerEvidenceBatch, StrategySpec
 from min_agent.strategy_engine import StrategyLibrary
 
 OK = "ok"

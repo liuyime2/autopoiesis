@@ -2876,3 +2876,60 @@ the ledger were checked constantly; the promotion gate was not.
 
 Each correction is recorded where the original claim stood rather than edited away,
 because a withdrawn claim left standing is worse than one never made.
+
+## 50. A green gate that was not running one of its own test files
+
+The completion audit reported a failing verification result. `make verify` was green
+at that moment, so the failure had to be somewhere the gate does not reach - and
+`make test` found it immediately:
+
+```
+FAILED tests/min_agent/test_cli_startup.py::test_no_function_loads_a_name_that_does_not_exist
+assert not ["doctor._check_admission_provenance(): 'StrategySpec'",
+            "doctor.accounted(): 'StrategySpec'"]
+```
+
+**My bug, from this session.** The `accounted` helper I added to
+`_check_admission_provenance` annotates its parameter `strategy: StrategySpec`, and
+`StrategySpec` was never imported into `doctor.py`. `from __future__ import
+annotations` means the annotation is never evaluated, so it ran fine and the doctor
+reported PASS - the name is simply unbound, waiting for the line that reaches it.
+Imported.
+
+### 50.1 The finding that matters more than the bug
+
+A test file was mapped only to `syntax-import`, a class that **imports the 35
+production modules and runs none of the file's assertions.** So `test_cli_startup.py`
+contributed nothing to the gate while the coverage report counted it, and the gate
+was green while `make test` was red.
+
+`check_all_tests_classified` verified that every file is **assigned** to a class. It
+never verified that any assigned class actually **runs** it. The map is an accounting
+of intent, not evidence of execution - which is the same distinction this whole
+document keeps returning to, in a new place: a configuration existing is not a
+feature working.
+
+It now requires at least one executing class per file, and was demonstrated going
+red by temporarily mapping `test_counterfactual.py` to `syntax-import` alone:
+
+```
+[FAIL] test-coverage-map   assigned only to non-executing classes, so no test in
+                           them ever runs in the gate: ['test_counterfactual.py']
+```
+
+`test_cli_startup.py` is now mapped to `syntax-import` **and** `unit-integration`, so
+both the import and the assertions are covered.
+
+**The sequence is the lesson.** The gate was green, a separate check was red, and the
+green one was wrong rather than the red one being strict. Every earlier "the gate is
+green" claim in this session rests on `make verify` alone; `make test` was not being
+run, and it had a failing test in it. All five check targets now pass:
+
+| target | result |
+| --- | --- |
+| `make verify` | PASS - 26 classes, 0 failed, 1182 test executions, 60 files |
+| `make test` | PASS - 750 tests |
+| `make doctor` | PASS |
+| `make audit` | PASS |
+| `make integrity` | PASS |
+| `make verify-self-test` | PASS |
