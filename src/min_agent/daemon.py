@@ -594,6 +594,20 @@ class AgentDaemon:
     def _maintenance(self) -> None:
         if not self._due(self.last_maintenance_at, self.config.maintenance_interval_seconds):
             return
+        # Beat before the work, not only after it. The heartbeat used to be written
+        # once per loop iteration, after this method returned, so a maintenance
+        # pass that screens 27 strategies *and* makes a ~140s curriculum call went
+        # longer than `stale_after_seconds` (900) and a daemon that was provably
+        # working - journal events landing throughout - was reported dead by
+        # doctor's liveness check. It went red twice before the cause was found, and
+        # a health check that cries wolf is worse than none: it teaches the reader
+        # to re-run it instead of reading it.
+        #
+        # Beating on entry rather than raising the threshold matters. A daemon that
+        # writes here and then genuinely wedges inside this method still goes stale
+        # 900s later, so the check keeps its ability to catch a real hang; only the
+        # honest "I am working" silence is removed.
+        self._heartbeat("RUNNING", "maintenance in progress")
         self._resolve_pending_fills()
         evidence = self._latest_evidence_batch()
         if self._due(self.last_evidence_at, self.config.evidence_interval_seconds):

@@ -2265,3 +2265,67 @@ shares printed next to tens of thousands of dollars is worse than printing
 nothing, so the coercion is fixed and pinned by a test.
 
 `make verify`: **24 classes, 0 failed, 1077 test executions, doctor OK, exit 0.**
+
+## 40. Two repairs, and a health check that cried wolf
+
+Named as worth attention in the capability classification, then done. Both are
+repairs of partially-wired or broken capabilities, neither changes a trading rule.
+
+### 40.1 Five lesson slots were buying one idea
+
+The knowledge path is wired end to end - `relevant_lessons` -> `context["lessons"]`
+-> the model's prompt - so it is not the write-only loop I suspected before
+checking, which is worth recording because I would otherwise have reported a false
+finding. The defect was narrower and worse than "duplicates exist":
+
+```python
+lessons = [a for a in artifacts if a.artifact_type == "LESSON"]
+return lessons[: self.max_lessons]      # slice first, dedup never
+```
+
+Slicing *before* deduplicating means the five lesson slots were filled by the first
+five artifacts in library order, and this library's order is dominated by one
+statement. Ten of the eleven accepted artifacts share a single answer, so **every
+decision prompt carried the same sentence five times**. The slot exists to buy
+distinct context; filled with copies it bought nothing and cost prompt budget on
+every cycle.
+
+Dedup now happens on normalised `answer` before the cap. A decision now carries 2
+distinct lessons instead of 5 copies of 1, and the two it carries are genuinely
+different - the general no-exploration lesson and the all-hold degenerate-strategy
+lesson. The cap still applies to *distinct* lessons, so a real library still fills
+its budget.
+
+The doctor check that should have caught this was also wrong twice over: it counted
+distinct **summaries** rather than answers, and warned only when the count collapsed
+to exactly 1, so 11 artifacts carrying 2 distinct statements reported OK. That is
+the same defect shape as the model-registry severity bug fixed in section 39 - a
+ratio tested as a boolean - which is why both are treated as one pattern rather
+than two coincidences. It is now proportional and counted by answer.
+
+### 40.2 A working daemon was reported dead, twice
+
+`make verify` went red on `doctor: daemon` while the daemon was provably working -
+journal events landing throughout, pid alive, only 1m08s of CPU in 2h09s elapsed.
+I dismissed the first occurrence as transient. It was not, and it recurred.
+
+The cause: the heartbeat was written once per loop iteration, **after**
+`_maintenance()` returned. One maintenance pass screens 27 strategies and can make a
+~140s curriculum call, so the gap between heartbeats exceeded
+`stale_after_seconds` (900) while the daemon was mid-work. The health check read
+that silence as death.
+
+The fix beats on *entry* to the long work, not by raising the threshold - which is
+the distinction that matters. A daemon that beats on entry and then genuinely
+wedges still goes stale 900s later, so the check keeps its ability to catch a real
+hang. Only the dishonest "I am working" silence is removed. Raising the threshold
+instead would have hidden the next real stall behind a longer window.
+
+Four tests pin both halves: that the beat precedes the work in the source, that the
+message says maintenance rather than idle, that a wedged pass still fails the
+staleness arithmetic, and that the payload accepts the new message.
+
+A check that cries wolf is worse than no check, because it teaches its reader to
+re-run it instead of read it. I did exactly that on the first occurrence.
+
+`make verify`: **24 classes, 0 failed, 1111 test executions, doctor OK, exit 0.**

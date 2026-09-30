@@ -873,17 +873,21 @@ def _check_knowledge_value(report: DoctorReport, config: AgentConfig) -> None:
     if not artifacts:
         report.add("knowledge value", OK, "no accepted artifacts")
         return
+    # Count distinct by *answer*, not by summary: two artifacts can share a summary
+    # and still say different things, and 10 of the 11 here differ nowhere at all.
+    # The decision prompt receives the answer, so the answer is what has to be
+    # counted.
     seen: dict[str, int] = {}
     for artifact in artifacts:
-        key = " ".join(artifact.summary.lower().split())
+        key = " ".join((artifact.answer or artifact.summary).lower().split())
         seen[key] = seen.get(key, 0) + 1
     distinct = len(seen)
-    if distinct == 1 and len(artifacts) > 1:
+    if len(artifacts) > 1 and distinct < len(artifacts) / 2:
         report.add(
             "knowledge value", WARN,
-            f"{len(artifacts)} accepted artifact(s) carrying {distinct} distinct "
-            f"statement(s)",
-            "the library is not adding information; it needs a real derivation",
+            f"{len(artifacts)} accepted artifact(s) carrying only {distinct} "
+            f"distinct statement(s): the library is not adding information",
+            "needs a real derivation, and superseded artifacts need pruning",
         )
     else:
         report.add(

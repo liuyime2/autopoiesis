@@ -96,4 +96,19 @@ class PolicyEngine:
         except Exception:
             return []
         lessons = [a for a in artifacts if a.artifact_type == "LESSON"]
-        return lessons[: self.max_lessons]
+        # Deduplicate before truncating, not after. Slicing first meant the five
+        # lesson slots were filled by the first five artifacts in library order,
+        # and this library's order is dominated by one statement - so the decision
+        # prompt carried the same sentence five times and learned one thing from a
+        # five-slot budget. 10 of the 11 accepted artifacts share a single answer.
+        # The slot is meant to buy distinct context; filling it with copies buys
+        # nothing and costs prompt budget on every cycle.
+        seen: set[str] = set()
+        distinct: list = []
+        for artifact in lessons:
+            key = " ".join((artifact.answer or artifact.summary or "").lower().split())
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            distinct.append(artifact)
+        return distinct[: self.max_lessons]
