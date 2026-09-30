@@ -249,7 +249,7 @@ means a real measurement, not a green test.
 | production / research separation | `make verify` fails on any production import of research |
 | champion–challenger | champion `fixed-size-buy-001` +120.37, 2 challengers |
 | behavioural / semantic duplicate detection | 14 redundant copies exposed, incl. a strategy named "Trend Following" that was `FIXED_SIZE` |
-| offline backtest / walk-forward / cost / leakage / stress / overfitting | 27 of 27 `INSUFFICIENT` — implemented and negative |
+| offline backtest / walk-forward / cost / leakage / stress / overfitting | implemented and negative: **27 of 27 research trials `INSUFFICIENT`**; shadow/offline screening verdicts are separate and not all negative (540 `PASS_SCREENED`, 270 `REJECT_POOR_DECISIONS`, 1304 `INCONCLUSIVE`) |
 | shadow trading | real loop, shadow sink, zero PnL leakage, reachable by config |
 | `make verify`, 28 classes, `FAIL=0` | **generated from live output: 28 classes, 0 failed, 1182 test executions across 60 files, 91/91 audit, doctor OK, exit 0** |
 | documents ①–⑧ | `SYSTEM_AUDIT.md`, `PHASES.md`, `STEP_CONTRACT.md`, `STATUS.md` |
@@ -274,5 +274,7 @@ requires accumulated prospective market time, and the instruments built to measu
 all currently report `INSUFFICIENT` rather than a number.
 
 Claiming completion would mean claiming a result the system itself declines to report.
-The remaining work is elapsed time plus one user action (freeing `$HOME` quota so the
-units survive a reboot).
+The remaining work is elapsed prospective market time. The second item once listed
+here - freeing `$HOME` quota so the units survive a reboot - is done: the durable unit
+directory exists, all three units are enabled from it, and `STATUS.md` carries the
+same correction. Only the time requirement remains, and no code change removes it.

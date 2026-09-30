@@ -228,10 +228,13 @@ proposed SELL strategy is 6th in line behind five BUY strategies. This is fair
 rotation, not a bug, but it means a new capability takes roughly 90 minutes of
 5-minute cycles to be exercised.
 
-**The systemd units are not reboot-persistent.** They live in `/run/user/$UID`
-because `$HOME` is at user quota, so the manager cannot create
-`$HOME/.config/systemd/user`. Freeing a few MB under `$HOME` makes
-`minictrl install-service` permanent.
+**The systemd units are now reboot-persistent.** They live in
+`/home/liuyime2/.config/systemd/user`, which exists and holds the enablement
+symlinks; `min-agent.service`, `quant-watchdog.service` and `quant-watchdog.timer`
+are all `enabled` with FragmentPath under that durable directory. This paragraph used
+to say the opposite - that they were confined to `/run/user/$UID` and needed `$HOME`
+freed - and it contradicted the RESOLVED entry above it. Corrected here, in the same
+document that made the claim, so the two can no longer disagree.
 
 **The key pair was pasted into a conversation and should be rotated** in the
 Alpaca UI.

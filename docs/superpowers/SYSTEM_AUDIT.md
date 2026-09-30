@@ -3055,3 +3055,59 @@ locally invoked command.
 
 `make verify`: **27 classes, 0 failed, 1182 test executions, exit 0.** All six check
 targets pass.
+
+## 52. A completion claim contradicted by the verifier, on evidence that had already gone stale
+
+The independent verifier rejected this goal's completion claim with four specific
+objections. Three were correct when written and are now closed; the fourth is the one
+that mattered and it was not a defect at all. Recording all four because the failure
+mode is the interesting part.
+
+**(1) "The unattended health check is red right now."** True when written:
+`watchdog.log`'s last line was `ok=False exit=1 failures=[alpaca credentials]`. Closed
+in section 51 - the unit's `EnvironmentFile` pointed at `$HOME` where the
+credentials are not, behind a `-` prefix that told systemd to ignore the missing file
+rather than report it. `unit-environment-files` now parses every deployed unit and
+refuses a silently-ignored env file. Confirmed by injecting the exact defect into the
+deployed unit and watching the gate go red, then restoring it.
+
+**(2) "The watchdog template is the only unit not substituted."** Closed: both
+`tools/watchdog.service.in` and `tools/min-agent.service.in` now read
+`EnvironmentFile=@ENVFILE@`.
+
+**(3) "No verify class or test references EnvironmentFile."** Closed:
+`check_unit_environment_files_exist` at `tools/verify.py:409`, described above.
+
+**(4) "'All previous problems solved' contradicts the project's own docs."** This is
+the objection worth keeping, and it is not a contradiction. `PHASES.md` reports Phase
+7 incomplete and the success criterion not met; the objective asks that the previous
+problems be solved. Those are different claims about different things. A system can
+have every known defect closed and still have not met a profitability criterion - and
+this one has, because the criterion requires ten trading days of prospective evidence
+and 2.25 days have elapsed. Reporting the phase as incomplete is the documentation
+being honest, not evidence of an unfixed problem. The earlier phrasing invited the
+objection by letting "problems solved" cover both.
+
+Two stale claims did surface while answering the verifier, both from this audit's own
+history rather than from the finding:
+
+- `STATUS.md` stated in one paragraph that the units were not reboot-persistent and
+  needed `$HOME` freed, while a numbered entry 70 lines earlier recorded that exact
+  item as RESOLVED. The units are enabled from
+  `/home/liuyime2/.config/systemd/user` at 75% usage. Corrected in place, in the
+  document making the claim, so the two cannot continue to disagree.
+- `PHASES.md` still listed freeing `$HOME` quota as outstanding user action. Same
+  correction; only elapsed market time remains.
+
+A fifth problem was mine and appeared while verifying the fix: `fact-docs-current`
+compared the documents' full-run figures against whatever subset `--only` had run, so
+checking a single class failed the fact-doc check with a nonsense figure. A partial run
+now SKIPs the comparison with its reason stated. A gate that cries wolf when you check
+one class teaches people to route around it.
+
+The deeper lesson, and the third time this audit has arrived here: the failure mode is
+never "the code is broken", it is "a document says something that was true earlier".
+Sections 17 through 51 each contain one. Point-in-time records are not the problem and
+must not be rewritten to match the present; the problem is present-tense prose with no
+expiry, which ages into a falsehood with the file. That is what `fact-docs-current`
+gates, and it is scoped to current-state blocks for exactly that reason.

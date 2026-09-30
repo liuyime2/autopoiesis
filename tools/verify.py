@@ -38,6 +38,8 @@ SRC = ROOT / "src"
 TESTS = ROOT / "tests" / "min_agent"
 
 PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
+#: True when --only narrowed the run; set in main() before checks execute.
+_partial_run = False
 #: WARN is a finding, not a gate failure: only FAIL turns the gate red
 #: (`failed = [r for r in results if r.status == FAIL]`). Added for
 #: `shadow-stage-exercised`, which must report that a phase has never run
@@ -894,6 +896,17 @@ def check_fact_docs_match_the_live_gate(live: list | None = None) -> Result:
     # than no gate, and the recursion was mine.
     if not live:
         return Result("fact-docs-current", SKIP, "no live summary supplied")
+    # A partial run (--only, or a hand-picked class list) reports a class and
+    # execution count that describes the subset, not the build. The documents state
+    # full-run figures, so comparing them to a subset is meaningless - and it made the
+    # gate fail its own healthy neighbours whenever someone checked one class, which
+    # teaches people to distrust the gate instead of reading it.
+    if _partial_run:
+        return Result(
+            "fact-docs-current", SKIP,
+            "partial run: this gate compares against full-run figures, which this "
+            "run does not represent",
+        )
     # +1 for this check, which appends itself to `results` immediately after being
     # called. Without it the gate under-reports the class count by one and the
     # documents then "match" a number that is one behind the run that produced it -
@@ -1219,6 +1232,8 @@ def main() -> int:
             continue  # already run above as bespoke checks
         results.append(run_pytest_class(cls))
 
+    global _partial_run
+    _partial_run = bool(wanted)
     if not wanted:
         results.append(check_defect_audit())
         results.append(check_doctor())
