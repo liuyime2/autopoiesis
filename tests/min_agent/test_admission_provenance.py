@@ -175,3 +175,78 @@ def test_refused_but_still_selectable_is_the_worse_failure(tmp_path):
     check = _check(report)
     assert check.status.value == "fail"
     assert "still selectable" in check.detail, check.detail
+
+
+# --- lifecycle provenance: the direction that was invisible -------------------
+#
+# The check skipped the default states (PROBATION/BASELINE/ACTIVE) outright, so it
+# caught a strategy moved *into* PAUSED/RETIRED with no decision but not one moved
+# *out* of them with no decision. That is not hypothetical: re-adjudicating the
+# five unapproved strategies moved three of them to PROBATION and this check
+# stayed silent, because nothing compared a default state against its last
+# recorded decision.
+
+
+def _lifecycle_report(tmp_path, *, files, decisions):
+    from min_agent.doctor import _check_lifecycle_provenance
+
+    sdir = tmp_path / "lifestrats"
+    sdir.mkdir(exist_ok=True)
+    for spec in files:
+        (sdir / f"{spec['strategy_id']}.json").write_text(json.dumps(spec))
+    journal = JsonlJournal(tmp_path / "lifejournal.jsonl")
+    for i, (sid, new) in enumerate(decisions):
+        journal.append_event(JournalEvent(
+            event_id=f"l{i}", event_type="STRATEGY_LIFECYCLE_UPDATED",
+            timestamp=datetime(2026, 6, 12, tzinfo=timezone.utc),
+            status="SUCCESS", message="m", strategy_id=sid,
+            payload={"old_lifecycle": "PROBATION", "new_lifecycle": new},
+        ))
+    report = DoctorReport()
+    _check_lifecycle_provenance(report, _Cfg(sdir, journal.path), journal)
+    return report
+
+
+def test_moving_out_of_a_gated_state_without_a_decision_fails(tmp_path):
+    """The direction that used to be invisible."""
+    report = _lifecycle_report(
+        tmp_path,
+        files=[_spec("sneaky-001", lifecycle="PROBATION")],
+        decisions=[("sneaky-001", "RETIRED")],
+    )
+    check = _check(report, "lifecycle provenance")
+    assert check.status.value == "fail", (
+        f"file says PROBATION but the last decision was RETIRED: {check.status.value} - "
+        f"{check.detail}"
+    )
+    assert "last decision: RETIRED" in check.detail
+
+
+def test_moving_into_a_gated_state_without_a_decision_still_fails(tmp_path):
+    """The direction that was always caught, kept as a guard."""
+    report = _lifecycle_report(
+        tmp_path,
+        files=[_spec("sneaky-001", lifecycle="RETIRED")],
+        decisions=[],
+    )
+    assert _check(report, "lifecycle provenance").status.value == "fail"
+
+
+def test_a_baseline_with_no_transition_is_not_a_finding(tmp_path):
+    """HOLD_BASELINE is BASELINE from creation; demanding a decision is wrong."""
+    report = _lifecycle_report(
+        tmp_path,
+        files=[_spec("baseline-001", lifecycle="BASELINE")],
+        decisions=[],
+    )
+    check = _check(report, "lifecycle provenance")
+    assert check.status.value == "ok", f"{check.status.value}: {check.detail}"
+
+
+def test_matching_decision_passes(tmp_path):
+    report = _lifecycle_report(
+        tmp_path,
+        files=[_spec("fine-001", lifecycle="RETIRED")],
+        decisions=[("fine-001", "RETIRED")],
+    )
+    assert _check(report, "lifecycle provenance").status.value == "ok"

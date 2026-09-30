@@ -328,24 +328,43 @@ def _check_lifecycle_provenance(
             decided[strategy_id] = new_lifecycle
 
     library = StrategyLibrary(config.strategy_dir)
-    unaccounted = []
+    unaccounted, undecided = [], []
     for strategy in library.list():
-        if strategy.lifecycle in {"PROBATION", "BASELINE", "ACTIVE"}:
-            # The default states; a gated state is what needs an account.
-            continue
         # Per strategy, not per value. The first cut asked whether *any* decision
         # had produced this lifecycle, so one journalled retirement laundered every
         # other unjournalled one - the check passed against eight strategies that
         # had been retired with no recorded decision at all, which is precisely the
         # bypass it exists to catch.
-        if decided.get(strategy.strategy_id) != strategy.lifecycle:
-            unaccounted.append(f"{strategy.strategy_id}={strategy.lifecycle}")
-    if unaccounted:
+        last = decided.get(strategy.strategy_id)
+        if last is None:
+            # No transition has ever been journalled for this strategy. That is
+            # legitimate for a strategy still in the state it was admitted into -
+            # the HOLD_BASELINE is BASELINE from the moment it is created, and
+            # demanding a decision for it would demand a transition that never
+            # happened. It is NOT legitimate for a gated state, where reaching the
+            # state is itself the event.
+            if strategy.lifecycle in {"PAUSED", "RETIRED"}:
+                undecided.append(f"{strategy.strategy_id}={strategy.lifecycle}")
+            continue
+        # Any disagreement, in either direction, is unaccounted for. This check used
+        # to skip the default states outright, which left an asymmetry: a strategy
+        # moved *into* PAUSED/RETIRED with no decision was caught, but one moved
+        # *out* of them into PROBATION/ACTIVE with no decision was invisible. That
+        # is not a hypothetical - re-adjudicating the five unapproved strategies
+        # moved three of them to PROBATION and the audit stayed silent, because
+        # nothing here compared a default state against its last recorded decision.
+        if last != strategy.lifecycle:
+            unaccounted.append(
+                f"{strategy.strategy_id}={strategy.lifecycle} (last decision: {last})"
+            )
+    if unaccounted or undecided:
+        findings = unaccounted + undecided
         report.add(
             "lifecycle provenance", FAIL,
-            f"{len(unaccounted)} strategy/ies reached a gated state with no recorded "
-            f"decision: {', '.join(unaccounted[:6])}",
-            "PAUSED/RETIRED are terminal; only the lifecycle manager may set them",
+            f"{len(findings)} strategy/ies reached a state with no matching recorded "
+            f"decision: {', '.join(findings[:6])}",
+            "PAUSED/RETIRED are terminal; only the lifecycle manager may set them, "
+            "and no state may differ from its last journalled decision",
         )
     else:
         report.add(

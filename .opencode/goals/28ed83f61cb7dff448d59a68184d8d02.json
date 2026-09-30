@@ -32,9 +32,9 @@
       "inputLimit": 524288,
       "outputLimit": 524288,
       "autoCompaction": true,
-      "observedAt": 1790735515375,
-      "lastRequestTokens": 164798,
-      "lastInputTokens": 164099
+      "observedAt": 1790735690652,
+      "lastRequestTokens": 178420,
+      "lastInputTokens": 177495
     }
   },
   "runtimeFingerprint": {
@@ -43,10 +43,10 @@
     "pluginApiVersion": "1.18.33"
   },
   "usage": {
-    "turns": 26,
-    "tokens": 698921,
+    "turns": 27,
+    "tokens": 701756,
     "cost": 0,
-    "runtimeMs": 463121,
+    "runtimeMs": 476488,
     "seenMessageIDs": [
       "msg_0ea911ff0001xqHQnFmbF3aICp",
       "msg_0ea980dc20015f3lGA67tXRaUK",
@@ -73,7 +73,8 @@
       "msg_0efae778b001GOGDfJ2EdYiczn",
       "msg_0efcfaba40015YIxe0uY9JYNWU",
       "msg_0f01c212d0010NEICSqW3kGGiG",
-      "msg_0f021ee47001LyS9jDOAJRxCY2"
+      "msg_0f021ee47001LyS9jDOAJRxCY2",
+      "msg_0f0282df2001VHT3OgKVI830zr"
     ]
   },
   "revisionTurnBaseline": 0,
@@ -83,8 +84,8 @@
     "maxCost": 0,
     "maxRuntimeMs": 0
   },
-  "progressRevision": 121,
-  "observedProgressRevision": 119,
+  "progressRevision": 124,
+  "observedProgressRevision": 122,
   "progressFingerprints": [
     "shell-worktree:8176e35c1795b0f99cb91ecf9241107117137c381af86d367404a39a530aa077",
     "shell-worktree:bb726dbad78ad1baf25415080b0d0fe966fed605cff7e791ebe8a5fab3a5b357",
@@ -206,30 +207,13 @@
     "shell-worktree:04b255f4243f42d675937eb43f69f3805a23eaa411908c048ca2b7cf159f51cb",
     "shell-worktree:c0f26e8f36b4f0bd351934d121ff87c1f98f3658e1dea572fbb980bc9b8908d3",
     "patch:bb81cf4da83a7b10f75d0164d2ea0bf0ed218bbe",
-    "shell-worktree:d9c0bcd5c107db2e36d985f3a09d25aab95055ce48b7852833cdd801c1556130"
+    "shell-worktree:d9c0bcd5c107db2e36d985f3a09d25aab95055ce48b7852833cdd801c1556130",
+    "shell-worktree:0e443d63aa1d4f7ef585a2010bdc2fe9eec6d7f025f7baec47ebe63119e37ce6",
+    "file:src/min_agent/doctor.py:c8899c214b01dfc5ceded104b2afe964ccb92dfaf3dcc37066688a3f23199994",
+    "shell-worktree:c5def1543f8aa0bff99bf4b7ecffe9cf27c21d15361e5884d5a1b939835141ba"
   ],
-  "stalledTurns": 1,
+  "stalledTurns": 0,
   "progressNotes": [
-    {
-      "time": 1790686490926,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790686503488,
-      "summary": "Closed the Phase 3 gap - the only phase that was partial for a missing component rather than thin data. Every decision recorded decision_source (llm, fallback_policy_engine, baseline) but not WHICH model, so the 67 llm decisions could not be separated by prompt or model version and no outcome could ever be attributed to a model change. The model was upgraded during this project (Ollama 0.34.4, qwen3.8:27b, single-CUDA pin) and without provenance that upgrade is invisible in the record and its effect is unmeasurable forever. TradeDecision.model now records it, stamped AT THE POINT THE MODEL IS CALLED rather than inferred from config later - the model can be swapped between the call and the journal write, and a decision attributed to the wrong version is worse than one with no attribution. A model named inside the response itself wins over the configured name because that is the one that actually served the request, and the fallback path names itself fallback_policy_engine so a fallback decision can never be counted as a model's work. model_registry.py is a view over the journal like the experiment registry and lineage, with a test asserting it exposes no save/write/append, because a persisted store of model performance would be a second source of truth about numbers already recorded and would drift. The history is NOT back-filled: all 920 cycles predate the field and report UNATTRIBUTED, since assigning them the currently configured model would assert a fact about the past that is not known and would make every future comparison look like evidence for a model that never ran. The doctor check is a warning while that is true - correct rather than noisy - and clears itself as soon as the market is open and new decisions are stamped. PHASES.md updated so Phase 3 reads MET and deliverable 8 no longer lists the registry as pending. Commit dc8721e. make verify: 21 classes, 0 failed, 627 distinct tests, 91/91 audit, doctor OK, exit 0.",
-      "next": "Only one code item from deliverable 8 remains: unrealized PnL, so open lots contribute to the account picture and the account and agent figures can be reconciled in principle rather than only explained away. After that, every remaining gap is a function of elapsed market time rather than missing code, and two of them need the user rather than me: (1) freeing $HOME quota (.cache 835M or .local 707M, since mkdir ~/.config/systemd fails with \"Disk quota exceeded\" despite df showing 1.8T free) so minictrl install-service can write reboot-persistent units - the daemon currently lives at FragmentPath=/run/user/29424/... which is tmpfs and empty after a reboot, so only the watchdog limits the damage today; (2) confirming the daemon may keep running unattended while the market reopens at 09:30 EDT, which is what will produce the first model-provenance-stamped decisions and resolve the 67 pending counterfactual rows."
-    },
-    {
-      "time": 1790686603790,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
-    {
-      "time": 1790686615392,
-      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
-      "next": ""
-    },
     {
       "time": 1790686899869,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
@@ -459,11 +443,31 @@
       "time": 1790735383118,
       "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
       "next": ""
+    },
+    {
+      "time": 1790735531889,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
+    },
+    {
+      "time": 1790735544230,
+      "summary": "The operator chose to re-adjudicate the five unapproved strategy files through the real gate rather than retire them, accept them retroactively, or leave the gate red. That is the right call: it produces evidence rather than a decision, and the gate could still refuse - which it did. tools/adjudicate_unadmitted.py is deliberately not a rubber stamp. StrategyAdmission.admit() short-circuits with \"strategy_id already exists\" for anything already in the library, so feeding these files to it unchanged would have recorded a verdict that evaluates nothing; each spec is instead judged against a library that excludes itself, the view it would have met had it been proposed fresh, so the rules decide it now exactly as they would have decided it then. The TREND_FOLLOW reference-price rule is fed the last price the journal actually observed (SPY 764.18 from alpaca at 2026-09-29 15:57:42-0400) rather than an invented one, because a gate that decides on a fabricated price is not a gate. Verdicts: REFUSE fixed-size-buy-001 (behaviourally identical to fixed-size-buy-002, ACTIVE -> RETIRED); REFUSE fixed-size-sell-001 (identical to trend-follow-sell-002, stays RETIRED); APPROVE tiny-fixed-size-001 (RETIRED -> PROBATION); APPROVE trend-follow-buy-001 (ACTIVE -> PROBATION); APPROVE trend-follow-sell-001 (PAUSED -> PAUSED deliberately). Two points worth stating plainly. fixed-size-buy-001 held all 16 of its broker-confirmed fills and the library's only broker-verified realized PnL, and the gate refused it as a behavioural duplicate, so the strategy the evidence accumulated under is not one the gate endorses; its realized PnL is untouched because it is realized, broker-verified and attributed by id in the ledger, and only forward selection stops. And trend-follow-sell-001 stays PAUSED even though approved, because PROBATION is selectable and PAUSED is not, so promoting it would have put a strategy back into trading as a side effect of closing a paperwork gap - approval makes a spec legitimate, it does not retract a risk decision. I introduced two bugs doing this and both are fixed. First, my repaired check demanded an ACCEPTED event for every file, so a spec the gate correctly refused and correctly retired was still reported as a bypass, leaving the gate red for having done the right thing; the failure actually worth guarding is a file that is in the library and tradeable with no verdict behind it, so REFUSED plus not selectable is now a complete disposition and REFUSED plus ACTIVE is its own and more dangerous finding. Second, I changed lifecycles without recording the decision, tripping _check_lifecycle_provenance - the check that exists precisely to catch a strategy reaching a gated state with no recorded decision. Worse, the three approved strategies then had PROBATION on disk against a June decision on record, and that check cannot see it because it deliberately exempts the default states PROBATION, BASELINE and ACTIVE, so a strategy can reach a non-default lifecycle with no decision behind it and the audit stays silent; that exemption is pre-existing and deliberate, changing it has a wide blast radius across existing strategies, so it is recorded as a known gap rather than quietly altered. The tool now writes a lifecycle decision whenever the current lifecycle is not already backed by one, not merely when the file changes - a re-run comparing old against new would have found them equal and left the gap forever - and a second pass backfills strategies whose admission verdict already existed, which is how the three approved ones were missed on the first run. Final state: all five files carry a dated verdict and a lifecycle decision matching the file; 8 tests cover the check including post-gate entry fails, genuine legacy stays a warning, refused-and-retired is accounted, refused-and-ACTIVE is not, and a bypass names the trading it caused. make verify 24 classes, 0 failed, 1061 test executions, doctor OK, exit 0. Commits a31c156 and 5562797.",
+      "next": "Gate is green again at 24 classes / 0 failed / 1061 test executions / doctor OK / exit 0, and the five bypass files now each carry a dated verdict plus a lifecycle decision that matches the file. Next is market time, and one thing I found is worth the operator's attention before then: _check_lifecycle_provenance deliberately exempts the default states PROBATION, BASELINE and ACTIVE, so a strategy can reach a non-default lifecycle with no recorded decision and the audit stays silent - that is how my own first adjudication attempt slipped through. Changing the exemption has a wide blast radius across existing strategies so I have not touched it unilaterally. Otherwise: 70 decisions pending a 24h horizon, 10 SPY shares open at +1.05 unrealized, 0 closed model lots, no champion, after-cost net +556.77 still entirely baseline, and 29 unmatched sell shares still unproven PnL. Resume 2026-09-30 09:30."
+    },
+    {
+      "time": 1790735608365,
+      "summary": "[host:tool:edit] Project file content changed: src/min_agent/doctor.py",
+      "next": ""
+    },
+    {
+      "time": 1790735687292,
+      "summary": "[host:tool:bash] Goal-owned shell command changed the project worktree.",
+      "next": ""
     }
   ],
-  "storageGeneration": 1117,
+  "storageGeneration": 1132,
   "createdAt": 1790641773516,
-  "updatedAt": 1790735515375,
+  "updatedAt": 1790735690652,
   "todoPlan": {
     "goalRevision": 1,
     "digest": "sha256:c3cb3254c518367f1c8cd88244e84bcbd83597fa1d10bffb8cee3387f57fdc53",
