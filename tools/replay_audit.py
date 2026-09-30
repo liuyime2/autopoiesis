@@ -160,10 +160,38 @@ def main() -> int:
     fills_on_record = sum(
         1 for e in events if e["event_type"] == "ORDER_FILL_CONFIRMED"
     )
-    passed.append(check("SUBMITTED <= confirmed fills", submitted <= fills_on_record, True,
-                        f"{submitted} submitted, {fills_on_record} broker-confirmed; "
-                        "a submission with no confirmation is legitimate (reconciled later) "
-                        "but the reverse would be a fill with no order"))
+    # The invariant is one-directional: a broker-confirmed fill must have a
+    # corresponding submission, never the reverse. A submission without a
+    # confirmation is normal - the reconciler runs on the maintenance interval, so an
+    # order filled at 14:12 is not on record until the next pass, up to
+    # maintenance_interval_seconds later. Asserting submitted <= fills contradicted the
+    # message printed beside it and turned the gate red every time the market was open
+    # and trading, which is exactly when the audit matters most: the live figures
+    # showed 36 submitted against 35 broker-confirmed, differing by precisely the one
+    # order awaiting reconciliation.
+    #
+    # The reverse case is the one that indicates fabrication - a fill with no order
+    # behind it - so that is what is checked.
+    confirmed_coids = {
+        e["payload"].get("client_order_id")
+        for e in events
+        if e["event_type"] == "ORDER_FILL_CONFIRMED"
+        and e["payload"].get("client_order_id")
+    }
+    submitted_coids = {
+        c["execution"]["client_order_id"]
+        for c in cycles
+        if c["execution"]["status"] == "SUBMITTED" and c["execution"]["client_order_id"]
+    }
+    fills_without_order = sorted(confirmed_coids - submitted_coids)
+    pending = len(submitted_coids - confirmed_coids)
+    passed.append(check(
+        "every broker-confirmed fill has a submitted order", not fills_without_order,
+        True,
+        f"{len(confirmed_coids)} confirmed fill(s) all trace to a submission; "
+        f"{pending} submission(s) await reconciliation, which is normal while the "
+        f"market is open and the reconciler has not yet run",
+    ))
     print(f"            BUY decisions={buys}  SELL decisions={sells}")
 
     print("\n  -- broker-confirmed fills --")

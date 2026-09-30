@@ -3404,3 +3404,46 @@ new BUY is `tiny-fixed-size-001` rather than the SELL strategy: the exploration 
 choice depends on which strategies have results with `trade_attempts > 0`, and a BUY that
 was just submitted now counts, so the SELL's priority is not guaranteed to persist. The
 selection is verified per cycle, not assumed to hold.
+
+## 60. The audit gate asserted the wrong direction, and only a live market exposed it
+
+The market opened, the agent traded for the first time in this session, and the gate went
+red twice for a reason that was not a defect at all.
+
+A BUY of 1 SPY submitted at 13:52:57Z filled at the broker at 13:52:58Z for 766.87. The
+journal recorded it as `SUBMITTED / filled_quantity 0.0 / broker_status pending_new`, and
+`ORDER_FILL_CONFIRMED` stayed at 34 for nineteen minutes. `make verify` failed with
+`[MISMATCH] SUBMITTED <= confirmed fills`.
+
+The first thing I did was treat it as a broken reconciliation. It is not.
+`_resolve_pending_fills` sits inside `_maintenance`, which returns early unless
+`maintenance_interval_seconds` (900) has elapsed since the last pass. The daemon's last
+maintenance ran at startup around 13:49-13:51; the fill landed at 13:52:58; the next
+maintenance pass was not due until roughly 14:05. Running the shipped reconciler directly
+against the daemon's own config and journal returned the confirmation immediately -
+`SPY BUY 1.0 @ 766.87 (filled)` - and thirty seconds after the window opened the daemon
+recorded it unprompted: `FILL_CONFIRMED=35`, matching the broker's `filled_qty=1
+avg=766.87`, with SPY at 11 shares. Nothing was broken; I had mistaken a fifteen-minute
+configured interval for a fault.
+
+The gate was, though. It asserted `submitted <= fills_on_record`, and the message printed
+beside it said "a submission with no confirmation is legitimate (reconciled later) but the
+reverse would be a fill with no order". The assertion checked the legitimate case and
+ignored the dangerous one. It therefore went red whenever the market was open and the
+agent was trading - precisely when an audit matters - and would have stayed red through
+every reconciliation interval for the rest of the session. A gate that is red during
+normal operation trains its reader to re-run it instead of reading it.
+
+Inverted to the one-directional invariant that was actually meant: every broker-confirmed
+fill must trace to a submitted order, while a submission awaiting reconciliation is
+normal and is now reported as a count rather than asserted against. Verified by injecting
+the fabrication case - every confirmed fill with no submission - and watching the gate go
+red, then restoring it. `replay-audit` is 9 of 9 again.
+
+The lesson is the fourth instance of one thing. Sections 52, 53 and 57 were each a claim
+asserted ahead of the check, and this is the same failure arriving through the tooling
+instead of through prose: an invariant written to match a quiet moment, then meeting a
+live one. The market being open is the condition under which every figure in this project
+is supposed to be trustworthy, and it is precisely when two of the checks stopped being
+trustworthy. Fixing them required no change to the system under audit - only to the
+assertion about it.
