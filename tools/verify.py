@@ -726,6 +726,48 @@ def check_the_documented_pipeline_targets_exist() -> Result:
     )
 
 
+def check_unit_templates_have_no_host_paths() -> Result:
+    """A `.service.in` template must not contain a path from the machine that wrote it.
+
+    `tools/ollama.service.in` carried `ExecStart=/localscratch/liuyime2/ollama_local/bin/ollama`
+    and a matching OLLAMA_MODELS path, because that is where Ollama lives here. `minictrl`
+    substituted @ROOT@, @PYTHON@, @ENVBIN@ and @ENVFILE@ but not those, so every install on
+    any other machine produced a unit that systemd could not start - and the failure appears
+    at boot, long after the command that caused it returned success.
+
+    Both are placeholders now, with `minictrl` substituting them from OLLAMA_BIN and
+    OLLAMA_MODELS with sane defaults. This checks both halves: no absolute host path in a
+    template, and no placeholder left unsubstituted by the renderer.
+    """
+    templates = sorted((ROOT / "tools").glob("*.service.in")) + sorted((ROOT / "tools").glob("*.timer"))
+    if not templates:
+        return Result("unit-templates-portable", SKIP, "no unit templates found")
+    problems: list[str] = []
+    host_markers = ("/home/", "/localscratch/", "/Users/", "/opt/conda")
+    for template in templates:
+        text = template.read_text(encoding="utf-8")
+        for line_no, line in enumerate(text.splitlines(), 1):
+            code = line.split("#", 1)[0]
+            if any(marker in code for marker in host_markers):
+                problems.append(
+                    f"{template.name}:{line_no} hardcodes a host path: {line.strip()[:60]}"
+                )
+    # Every placeholder the renderer is expected to fill must actually be filled by it.
+    renderer = (ROOT / "minictrl").read_text(encoding="utf-8")
+    for template in templates:
+        for placeholder in set(re.findall(r"@([A-Z_]+)@", template.read_text(encoding="utf-8"))):
+            if f"@{placeholder}@" not in renderer:
+                problems.append(
+                    f"{template.name} uses @{placeholder}@ but minictrl never substitutes it"
+                )
+    if problems:
+        return Result("unit-templates-portable", FAIL, f"{len(problems)}: {problems[:3]}")
+    return Result(
+        "unit-templates-portable", PASS,
+        f"{len(templates)} unit template(s) carry no host path and every placeholder is substituted",
+    )
+
+
 def check_the_fact_figures_in_prose_match_reality() -> Result:
     """Numbers quoted in prose must match what the commands actually report.
 
@@ -1919,6 +1961,7 @@ BESPOKE_CHECK_NAMES = (
     "fresh-clone-evidence-real",
     "config-example-names",
     "config-example-complete",
+    "unit-templates-portable",
     "fact-figures-match",
     "list-count-matches-run",
     "pipeline-targets-exist",
@@ -2362,6 +2405,7 @@ def main() -> int:
     results.append(check_status_agrees_with_doctor())
     results.append(check_list_reports_the_same_count_as_a_run())
     results.append(check_the_fact_figures_in_prose_match_reality())
+    results.append(check_unit_templates_have_no_host_paths())
     results.append(check_the_documented_pipeline_targets_exist())
     results.append(check_config_example_names_are_real())
     results.append(check_config_example_covers_every_variable())

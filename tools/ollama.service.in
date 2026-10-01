@@ -11,13 +11,19 @@ Before=min-agent.service
 
 [Service]
 Type=exec
-ExecStart=/localscratch/liuyime2/ollama_local/bin/ollama serve
+ExecStart=@OLLAMA_BIN@ serve
 
+# @OLLAMA_BIN@ and @OLLAMA_MODELS@ are substituted by `minictrl install-service`. They were
+# hardcoded to /localscratch/liuyime2/ollama_local/..., and minictrl substituted only
+# @ROOT@, @PYTHON@, @ENVBIN@ and @ENVFILE@ - so every installation on any other machine
+# received a unit pointing at a path that does not exist there, and systemd reported an
+# unstartable ollama.service. An override is honoured if set.
+#
 # The models live outside the default ~/.ollama. The last recorded run
 # (ollama.log) served on :11435 with CUDA_VISIBLE_DEVICES=3 while the agent was
 # configured for :11434 and GPU 0; these three settings are the reconciled
 # values the agent is actually verified against.
-Environment=OLLAMA_MODELS=/localscratch/liuyime2/ollama_local/models
+Environment=OLLAMA_MODELS=@OLLAMA_MODELS@
 Environment=OLLAMA_HOST=127.0.0.1:11434
 Environment=CUDA_VISIBLE_DEVICES=0
 # From 0.13 the build auto-detects Vulkan as well as CUDA, and will shard one

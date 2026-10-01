@@ -35,7 +35,23 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-JOURNAL = Path("runtime/min_agent/journal.jsonl")
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _journal_path() -> Path:
+    """The journal path, resolved through AgentConfig rather than written out again.
+
+    Six sites in this repository spelled out `runtime/min_agent/journal.jsonl`, which made
+    `MIN_AGENT_JOURNAL` a setting that changed nothing for the tools - a documented option
+    that was silently ignored by half the code that reads the file it names. One resolver,
+    and the tools agree with the agent.
+    """
+    sys.path.insert(0, str(ROOT / "src"))
+    from min_agent.config import AgentConfig
+    return Path(AgentConfig.from_env().journal_path)
+
+
+JOURNAL = _journal_path()
 
 # Only so `_production_lot_figures` can read the same journal with the same code the
 # system reports from. Nothing above this line imports it, and every figure this

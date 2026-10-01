@@ -20,6 +20,7 @@ import glob
 import json
 import os
 import pathlib
+from pathlib import Path
 import subprocess
 import sys
 import urllib.request
@@ -27,6 +28,18 @@ from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "runtime" / "min_agent"
+
+
+def _journal_path() -> str:
+    """The journal path, resolved through AgentConfig rather than written out again.
+
+    `MIN_AGENT_JOURNAL` is a documented setting; spelling the path out here made it a lie
+    for this tool even though the agent honoured it.
+    """
+    sys.path.insert(0, str(ROOT / "src"))
+    from min_agent.config import AgentConfig
+    return str(AgentConfig.from_env().journal_path)
+
 
 
 def _run(*cmd: str) -> str:
@@ -52,6 +65,14 @@ def _broker_clock() -> str:
         return f"{data['timestamp']} is_open={data['is_open']}"
     except Exception as exc:
         return f"unavailable ({type(exc).__name__})"
+
+
+def _as_dict(value):
+    """A pydantic model or a literal-eval string, as a plain dict."""
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    result = _literal(value)
+    return result if isinstance(result, dict) else {}
 
 
 def _literal(value):
@@ -120,7 +141,7 @@ def main() -> int:
 
     add("\n## output paths")
     for label, path in (
-        ("journal", "runtime/min_agent/journal.jsonl"),
+        ("journal", str(_journal_path())),
         ("strategies", "runtime/min_agent/strategies/"),
         ("reflection", "runtime/min_agent/reflection.json"),
         ("doctor history", "runtime/min_agent/doctor-history.jsonl"),
@@ -130,22 +151,33 @@ def main() -> int:
 
     add("\n## metrics at the time of this record")
     try:
-        journal = RUNTIME / "journal.jsonl"
-        rows = [json.loads(line) for line in journal.read_text().splitlines() if line.strip()]
-        cycles = [r for r in rows if not r.get("event_type")]
-        last = cycles[-1]
-        snapshot = _literal(last["snapshot"])
-        decision = _literal(last["decision"])
-        account = snapshot.get("account") or {}
-        add(f"  cycles recorded:    {len(cycles)}")
-        add(f"  snapshot source:    {snapshot.get('source')}")
-        add(f"  last action:        {decision.get('action')} {decision.get('symbol')} qty {decision.get('quantity')}")
-        add(f"  account equity:     {round(float(account.get('equity', 0)), 2)}")
-        add(f"  portfolio value:    {round(float(account.get('portfolio_value', 0)), 2)}")
-        states = collections.Counter()
-        for path in glob.glob(str(RUNTIME / "strategies" / "*.json")):
-            states[json.loads(open(path).read()).get("lifecycle")] += 1
-        add(f"  strategy lifecycle: {dict(states)}")
+        # Through JsonlJournal, so rotated generations are included. Reading the live file
+        # alone reported "journal unavailable: IndexError" after a rotation - `cycles[-1]`
+        # on a file that held only events. A provenance record that silently omits its own
+        # metrics is worse than one that reports none: it looks complete.
+        sys.path.insert(0, str(ROOT / "src"))
+        from min_agent.journal import JsonlJournal
+        journal = JsonlJournal(Path(_journal_path()))
+        cycles = journal.read_all()
+        if not cycles:
+            add("  (no cycle records yet)")
+            cycles = None
+        last = cycles[-1] if cycles else None
+        if last is not None:
+            # read_all returns CycleRecord models, not dicts, so the old subscript access
+            # raised TypeError once the journal was read through JsonlJournal.
+            snapshot = _as_dict(last.snapshot)
+            decision = _as_dict(last.decision)
+            account = snapshot.get("account") or {}
+            add(f"  cycles recorded:    {len(cycles)}")
+            add(f"  snapshot source:    {snapshot.get('source')}")
+            add(f"  last action:        {decision.get('action')} {decision.get('symbol')} qty {decision.get('quantity')}")
+            add(f"  account equity:     {round(float(account.get('equity', 0)), 2)}")
+            add(f"  portfolio value:    {round(float(account.get('portfolio_value', 0)), 2)}")
+            states = collections.Counter()
+            for path in glob.glob(str(RUNTIME / "strategies" / "*.json")):
+                states[json.loads(open(path).read()).get("lifecycle")] += 1
+            add(f"  strategy lifecycle: {dict(states)}")
     except Exception as exc:
         add(f"  (journal unavailable: {type(exc).__name__})")
 

@@ -131,6 +131,8 @@ case "$cmd" in
           -e "s|@PYTHON@|$PYTHON_BIN|g" \
           -e "s|@ENVBIN@|$ENVBIN|g" \
           -e "s|@ENVFILE@|$ENV_FILE|g" \
+          -e "s|@OLLAMA_BIN@|${OLLAMA_BIN:-$(command -v ollama 2>/dev/null || echo /usr/local/bin/ollama)}|g" \
+          -e "s|@OLLAMA_MODELS@|${OLLAMA_MODELS:-/var/lib/ollama/.ollama/models}|g" \
           "$1" > "$unit_dir/$2"
     }
     render "$ROOT_DIR/tools/min-agent.service.in"  "$SERVICE_NAME"
