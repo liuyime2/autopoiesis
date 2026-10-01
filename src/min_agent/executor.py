@@ -3,13 +3,19 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 
+from min_agent.config import is_paper_endpoint
 from min_agent.models import ExecutionResult, GuardianResult, TradeDecision
 
 
 class AlpacaPaperExecutor:
     def __init__(self, *, client, base_url: str):
-        if "paper" not in base_url:
-            raise ValueError("AlpacaPaperExecutor requires a paper trading base URL")
+        # The same host test config.is_paper_endpoint() applies, so the last gate before
+        # `submit_order` cannot be more permissive than the one at start-up. It used to be a
+        # second, independent substring check.
+        if not is_paper_endpoint(base_url):
+            raise ValueError(
+                f"AlpacaPaperExecutor requires Alpaca's paper host; got {base_url!r}"
+            )
         self.client = client
         self.base_url = base_url
 

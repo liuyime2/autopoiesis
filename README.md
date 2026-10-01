@@ -212,6 +212,25 @@ would mutate the environment the other stages are running in.
 build failure; if it failed the pipeline, the one number this project exists to move would
 become something you learn to ignore.
 
+### Two gates, and why
+
+`make check` (lint + tests) answers "is this repository correct?" and is the gate that runs in
+CI. `make verify` additionally runs `minictrl doctor` against the live deployment, so on a
+host where the agent is trading it also answers "is the agent doing well?".
+
+That means `make verify` can legitimately go **red for a trading result rather than a code
+defect**. The clearest case is `pnl attribution`: a model that opened lots and subtracted from
+a positive total is reported FAIL, deliberately, and
+`tests/min_agent/test_attribution.py` guards that with an explicit message - an earlier version
+used `== 0.0` instead of `<= 0.0` and reported OK while the model lost money. It is a health
+failure, not a build failure, and the distinction matters when you are reading a red run: check
+which class failed before concluding anything is wrong with the code.
+
+Findings that are limits on the *record* rather than outcomes - currently the 29 shares sold
+that no BUY accounts for, written up in `STATUS.md` - are WARN. They are stated prominently
+but do not redden the gate, because a four-month-old accounting gap that is permanent red is
+how a gate gets ignored.
+
 ## Verifying a clone
 
 The figures quoted elsewhere in this repository are reproduced by one script, and its

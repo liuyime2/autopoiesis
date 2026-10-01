@@ -8,7 +8,7 @@
 # house style it does not follow. `BLE001` (blind `except`) is deliberately excluded:
 # the daemon is designed to catch broadly and record the failure in the journal rather
 # than die mid-cycle, which is a correctness property here, not an oversight. Enabling
-# it would have produced 60 findings, all of them intentional.
+# it would have produced 61 findings, all of them intentional.
 
 
 line-length = 110
@@ -35,7 +35,7 @@ select = [
 ignore = [
     # The daemon catches broadly on purpose: a maintenance failure must be journaled
     # and survive, not crash the process and take the paper run down with it. Each of
-    # these 60 sites record what failed (see `_agent_holding_errors`,
+    # these 61 sites record what failed (see `_agent_holding_errors`,
     # `_maintenance`'s try/except, the doctor's per-check isolation).
     "BLE001",
     # Long lines in the strategy-library lookup tables are data, not logic; reflowing

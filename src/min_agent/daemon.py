@@ -129,8 +129,29 @@ class AgentDaemon:
             if not self._startup_reconcile():
                 return 1
             while not self._stop_requested:
-                self._reset_daily_count_if_needed()
-                self._maintenance()
+                # One failure boundary for the whole loop, not one per call site.
+                #
+                # `_run_symbol` has always had its own try/except; `_maintenance` and
+                # `_reset_daily_count_if_needed` did not, and neither do five of the functions
+                # `_maintenance` calls. A malformed journal shape reaching the evaluator, or a
+                # strategy file that no longer parses, propagated out of run() and killed the
+                # daemon - and with StartLimitBurst=5 systemd then refused to restart it, so
+                # one bad record could end trading for the day with only a log line to say so.
+                #
+                # Maintenance failing is not a reason to stop trading: the trading cycle is
+                # separately guarded, the risk limits do not depend on any of it, and a
+                # daemon that keeps trading while reporting its own maintenance failures is
+                # strictly better than one that stops.
+                try:
+                    self._reset_daily_count_if_needed()
+                    self._maintenance()
+                except Exception as exc:
+                    self.error_count += 1
+                    self._heartbeat(
+                        "BACKING_OFF",
+                        f"maintenance error, continuing to trade: "
+                        f"{type(exc).__name__}: {exc}",
+                    )
                 if max_cycles is not None and self.cycle_count >= max_cycles:
                     break
                 if self.scheduler is not None and not self.scheduler.should_trade_now():

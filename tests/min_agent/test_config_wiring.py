@@ -98,3 +98,75 @@ def test_the_config_loader_refuses_live_mode():
             os.environ.pop("MIN_AGENT_MODE", None)
         else:
             os.environ["MIN_AGENT_MODE"] = previous
+
+
+def test_paper_endpoint_is_a_host_check_not_a_substring():
+    """`"paper" in url` accepted hosts that are not Alpaca's paper host.
+
+    The check appeared in five places across three modules, each as a substring test. That
+    rejected Alpaca's live URL - real safety - while accepting anything with the letters
+    p-a-p-e-r in it, including `https://paper-api.alpaca.markets.evil.example`, which is a
+    host an attacker chooses. It was a check on the wrong property, expressed five times so
+    the five could drift.
+    """
+    from min_agent.config import is_paper_endpoint
+
+    accepted = [
+        "https://paper-api.alpaca.markets",
+        "https://api.paper.trading.alpaca.com",
+        "https://PAPER-API.ALPACA.MARKETS",       # host comparison is case-insensitive
+        "https://paper-api.alpaca.markets/v2",     # path is irrelevant
+    ]
+    rejected = [
+        "https://api.alpaca.markets",              # live
+        "https://live-api.alpaca.markets",
+        "https://evil.example/?next=paper",        # substring in a query string
+        "https://paper-api.alpaca.markets.evil.example",  # suffix attack
+        "https://live-api.paper-trading.example",
+        "https://paper-api.alpaca.markets.evil.example/path",
+        "not a url",
+        "",
+    ]
+    for url in accepted:
+        assert is_paper_endpoint(url) is True, f"{url} is Alpaca's paper host and must be accepted"
+    for url in rejected:
+        assert is_paper_endpoint(url) is False, (
+            f"{url!r} was accepted as a paper endpoint; the check is a substring test again"
+        )
+
+
+def test_every_paper_check_uses_the_one_definition():
+    """No module may re-implement the paper test; they must all route through config.
+
+    Five copies of a safety check is four opportunities to be weaker than the others, and
+    the one nearest `submit_order` is the copy that matters most.
+    """
+    import pathlib
+
+    import min_agent
+
+    root = pathlib.Path(min_agent.__file__).parent
+    offenders = []
+    for path in sorted(root.rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        # Only code, not prose: config.py's own docstring quotes the old expression to
+        # explain why it was replaced, and the first version of this check flagged that.
+        import tokenize
+
+        code_lines = set()
+        with open(path, "rb") as handle:
+            for token in tokenize.tokenize(handle.readline):
+                if token.type == tokenize.NAME or (
+                    token.type == tokenize.OP and token.string in "'\""
+                ):
+                    code_lines.add(token.start[0])
+        for line_no, line in enumerate(text.splitlines(), 1):
+            if line_no not in code_lines:
+                continue
+            code = line.split("#", 1)[0]
+            if '"paper" in' in code or "'paper' in" in code or '"paper" not in' in code:
+                offenders.append(f"{path.name}:{line_no}: {line.strip()[:70]}")
+    assert not offenders, (
+        "paper-only is re-implemented as a substring test; use "
+        f"min_agent.config.is_paper_endpoint(): {offenders}"
+    )

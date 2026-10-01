@@ -164,7 +164,7 @@ def _run_once(config: AgentConfig) -> int:
         print(json.dumps({"error": "missing Alpaca credentials", "missing": missing}, sort_keys=True))
         return 1
 
-    if "paper" not in config.alpaca_base_url:
+    if not config.is_paper_endpoint():
         print(json.dumps({"error": "Alpaca base URL must be paper trading"}, sort_keys=True))
         return 1
 
@@ -211,7 +211,7 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         print(json.dumps({"error": "missing Alpaca credentials", "missing": missing}, sort_keys=True))
         return 1
 
-    if "paper" not in config.alpaca_base_url:
+    if not config.is_paper_endpoint():
         print(json.dumps({"error": "Alpaca base URL must be paper trading"}, sort_keys=True))
         return 1
 
@@ -529,7 +529,7 @@ def _paper_client(config: AgentConfig):
     if missing:
         print(json.dumps({"error": "missing Alpaca credentials", "missing": missing}, sort_keys=True))
         return None
-    if "paper" not in config.alpaca_base_url:
+    if not config.is_paper_endpoint():
         print(json.dumps({"error": "Alpaca base URL must be paper trading"}, sort_keys=True))
         return None
     try:

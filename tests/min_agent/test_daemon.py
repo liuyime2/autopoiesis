@@ -706,3 +706,46 @@ def test_an_already_retired_strategy_is_not_resurrected_or_rewritten(tmp_path):
 
     assert library.try_load("dead").lifecycle == "RETIRED"
     assert journal.read_events("STRATEGY_LIFECYCLE_UPDATED") == []
+
+
+class MaintenanceExplodingLoop(FakeLoop):
+    """A loop that trades fine while maintenance raises on every call.
+
+    `_maintenance` and `_reset_daily_count_if_needed` had no exception boundary of their own,
+    and neither do five of the functions `_maintenance` calls. Anything reaching them with a
+    shape they do not expect - a journal record the evaluator cannot read, a strategy file
+    that no longer parses - propagated out of `run()` and ended the process.
+    """
+    def __init__(self):
+        super().__init__()
+        self.maintenance_failures = 0
+
+    def run_cycle(self, symbol, **_kwargs):
+        self.symbols.append(symbol)
+        return
+
+
+def test_maintenance_failure_does_not_stop_trading(tmp_path, monkeypatch):
+    cfg = config(tmp_path, symbols=("SPY",), interval=0)
+    loop = MaintenanceExplodingLoop()
+    daemon = AgentDaemon(config=cfg, loop=loop, sleep=lambda seconds: None)
+
+    def exploding():
+        loop.maintenance_failures += 1
+        raise ValueError("a strategy file no longer parses")
+
+    monkeypatch.setattr(daemon, "_maintenance", exploding)
+    monkeypatch.setattr(daemon, "_reset_daily_count_if_needed", exploding)
+
+    exit_code = daemon.run(max_cycles=2)
+
+    # The daemon keeps trading through maintenance failures and still shuts down cleanly.
+    assert exit_code == 0
+    assert loop.symbols == ["SPY", "SPY"], (
+        f"trading stopped when maintenance failed; symbols traded: {loop.symbols}"
+    )
+    assert loop.maintenance_failures >= 2
+
+    heartbeat = HealthMonitor(cfg.heartbeat_path).read()
+    assert heartbeat is not None
+    assert heartbeat.error_count >= 2, "the failure must be counted, not swallowed silently"

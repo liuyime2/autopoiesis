@@ -3,6 +3,25 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
+
+# Alpaca's paper hosts, exactly. Anything else is not the paper endpoint, whatever
+# its URL happens to contain.
+PAPER_ALPACA_HOSTS = frozenset({"paper-api.alpaca.markets", "api.paper.trading.alpaca.com"})
+
+
+def is_paper_endpoint(url: str) -> bool:
+    """Whether `url` resolves to Alpaca's paper host. The single definition of paper-only.
+
+    AgentConfig.is_paper_endpoint() delegates here, and so does the executor - which is handed
+    a URL string rather than a config, and sits at the last gate before `submit_order`. One
+    function, so the two cannot drift apart.
+    """
+    try:
+        host = urlsplit(url).hostname or ""
+    except ValueError:
+        return False
+    return host.lower() in PAPER_ALPACA_HOSTS
 
 
 @dataclass(frozen=True)
@@ -104,6 +123,24 @@ class AgentConfig:
             curriculum_interval_seconds=_positive_int("MIN_AGENT_CURRICULUM_INTERVAL_SECONDS", 3600),
             profit_target_return_pct=_positive_float("MIN_AGENT_PROFIT_TARGET_RETURN_PCT", 0.10),
         )
+
+    def is_paper_endpoint(self) -> bool:
+        """Whether `alpaca_base_url` resolves to Alpaca's paper host.
+
+        One definition, used by every caller. The test used to be `"paper" in url`, repeated
+        in five places across three modules. A substring accepts any host with the letters
+        p-a-p-e-r somewhere in it:
+
+            https://evil.example/?next=paper              -> accepted
+            https://paper-api.alpaca.markets.evil.example -> accepted
+            https://live-api.paper-trading.example        -> accepted
+
+        All three are rejected here, and only Alpaca's own paper hosts are accepted. The
+        previous check was not *absent* safety - a live Alpaca URL still failed it - but it
+        was a check on the wrong property, and one that could be satisfied by a URL nobody
+        intended to use.
+        """
+        return is_paper_endpoint(self.alpaca_base_url)
 
     def missing_alpaca_credentials(self) -> list[str]:
         missing = []

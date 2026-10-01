@@ -91,6 +91,28 @@ closed lot behind it. It needs a new round trip, not another fix.
 > **Dated section starts here.** Everything below records the position at the time
 > `minictrl doctor`; the fixed configuration is in the table above.
 
+## Open finding: 29 shares sold that no BUY accounts for
+
+`minictrl doctor` reports `UNMATCHED SELLS {'trend-follow-sell-002': 29.0}`: 29 shares were
+sold with no linked BUY inside that strategy's lot tracker. The journal covers 2026-06-09
+onward and the sells are from 2026-09-28 and 2026-10-01, so this is not a coverage gap at the
+start of the record - the tracker genuinely cannot pair them.
+
+What it does to the numbers: `pnl attribution` reports +563.41 across 27 closed lots, but
+part of that cannot be attributed to a strategy, so the headline is an upper bound rather than
+an exact result. `minictrl profit` is the command that evaluates the target, and it reads the
+same figures.
+
+Not yet diagnosed. The likeliest explanation is that `trend-follow-sell-002` was re-admitted
+mid-flight - it is the strategy `readmit_misattributed.py` restored after the
+`loop._agent_holding` defect - and its BUY history predates its current admission, so the
+tracker starts with no open lots to sell against. That is a hypothesis, not a finding.
+
+This is recorded here rather than fixed because it is a domain question, not a repository
+defect, and getting it wrong would change reported PnL. It is a WARN rather than a FAIL for
+the same reason `make evaluate` exits zero when the profit target is unmet: a property of the
+data is not a property of the code.
+
 ## What was wrong, and what is fixed
 
 Full detail, with reproduction evidence, in
