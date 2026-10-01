@@ -33,7 +33,7 @@ had been the script. It was not:
   that no script assigns a risk limit, writes a `lifecycle` field, force-enables a
   strategy, or touches runtime strategy/knowledge state.
 - **`tests/min_agent/test_governance.py`** asserts the same three properties
-  parameterised over `OPS_SCRIPTS`, which is now `("auto_reviewer.py",)`.
+  parameterised over `OPS_SCRIPTS`, which is now `("minictrl",)`.
 
 `minictrl` is deliberately *not* in `OPS_SCRIPTS`: it is a service-control wrapper, and
 adding it surfaced an assertion about a `DRIFT` marker that only ever applied to
@@ -76,7 +76,7 @@ adding it surfaced an assertion about a `DRIFT` marker that only ever applied to
 | Kept | Why it was tempting to remove it |
 | --- | --- |
 | `src/min_agent/research/` | 845 lines imported by tests only, and `check_production_research_separation` fails the build if production imports it. That is a correct separation of diagnosis from execution. Wiring it into production to "reduce duplication" would destroy the property |
-| `tools/verify.py`'s 42 check classes | Not bloat. Real invariants: production may not import `research/`, every deployed unit's `EnvironmentFile` must resolve, the running daemon's fingerprint must match the worktree, replayed FIFO accounting must reproduce the reported PnL |
+| `tools/verify.py`'s 43 check classes | Not bloat. Real invariants: production may not import `research/`, every deployed unit's `EnvironmentFile` must resolve, the running daemon's fingerprint must match the worktree, replayed FIFO accounting must reproduce the reported PnL |
 | `runtime/min_agent/journal.jsonl` as source of truth | Everything else is derived from it and regenerable |
 
 ## If you are following along from the old version
@@ -154,7 +154,7 @@ runs the documented commands.
 | --- | --- |
 | Clones | `git clone` to an empty directory; `runtime/` absent, as gitignore intends |
 | Installs | New `conda create -n freshclone-test python=3.10`, then `pip install -e ".[dev]"` |
-| Runs | `min-agent --help` works; 794 tests pass; lint clean |
+| Runs | `min-agent --help` works; 800 tests pass; lint clean |
 | Works without credentials | All of the above with zero Alpaca variables set |
 
 **Three defects found only here**, none of which reproduces on the live machine: `ruff` and

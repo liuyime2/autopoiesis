@@ -16,14 +16,16 @@ Ollama is serving `qwen3.8:27b` on `:11434`, both LLM paths are
 verified live against the real model, and the credentials work. The credentials
 live in `$XDG_CONFIG_HOME/min-agent/env` (mode 600, outside the repository) — the
 earlier "credentials FAIL" in this file was stale. With the stack up, `doctor`
-reports **RESULT OK** with 0 failures and 2 warnings, both of them the closed-lot
-criterion:
+reports **RESULT OK with 8 warnings**, all of them evidence still being gathered rather than
+anything broken - unmanaged exposure, risk-driven halts, an incomplete experiment chain,
+unscored LLM decisions, model attribution, and the fallback and champion figures. Run
+`minictrl doctor` for the current list; the count moves as cycles accumulate.
 
 | Check | State |
 |---|---|
 | alpaca credentials | **PASS** — present in the external env file; paper endpoint reachable, market OPEN |
 | daemon | PASS — `min-agent.service` up, pid alive, heartbeat fresh |
-| proof: submitted>0 | **PASS** — 24 orders submitted |
+| proof: submitted>0 | **PASS** — 44 orders submitted, 95.0 shares filled (44 broker-confirmed) |
 | proof: filled>0 | **PASS** — 75 shares filled, 24 broker-confirmed, `fill_quantity_ratio` 1.0 |
 | proof: per-strategy pnl | **PASS** — 3 strategies, broker-verified: `tiny-fixed-size-001` +362.66, `fixed-size-buy-001` +120.37, `trend-follow-buy-001` +81.36 |
 | pnl evidence | **PASS** — `broker_strategy_closed_lot_pnl_verified`, 23 closed lots, 0 open |
@@ -92,8 +94,8 @@ The ones that made the system structurally incapable of profiting:
   admitted strategies.
 
 All fifteen are fixed, and so were nine more found by a full trace of the
-SELL → closed-lot → per-strategy-PnL path. 384 tests pass, up from 175, and
-`tools/audit_defects.py` passes 91/91 across the 15 original defects. The nine:
+SELL → closed-lot → per-strategy-PnL path. 800 tests pass, and
+`tools/audit_defects.py` passes 61/61 across the 15 original defects. The nine:
 
 - **The lot ledger was per-strategy.** The selector returns one strategy per cycle,
   so the strategy that opened a lot and the strategy that closed it were always
@@ -249,7 +251,7 @@ Alpaca UI.
 
 > Dated section. The figures below are what the gate reported on 2026-09-28 and are
 > correct for that date. For the current figures see `README.md`; the gate now runs
-> 42 check classes. The sections below are a record of what was true when each was
+> 43 check classes. The sections below are a record of what was true when each was
 > written, not a description of the present.
 
 **`make verify` is the single gate.** 17 check classes, 0 failed, 472 distinct

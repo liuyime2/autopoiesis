@@ -13,7 +13,7 @@ this refactor removed.
 
 ## The gate — `verify.py`
 
-**`python tools/verify.py`** is the project gate: 42 check classes, non-zero exit on any
+**`python tools/verify.py`** is the project gate: 43 check classes, non-zero exit on any
 failure. `make verify` runs it. Three modes:
 
 - `--self-test` breaks the gate on purpose and asserts it reports failure, because a
@@ -58,12 +58,12 @@ and fails silently.
 
 ## Service templates
 
-`min-agent.service.in`, `watchdog.service.in`, `ollama.service.in` (the timer unit is templated inline in `minictrl`, not as a separate file) —
+`min-agent.service.in`, `watchdog.service.in`, `ollama.service.in` (the timer unit ships as a file, `tools/watchdog.timer`, which `minictrl` copies into place) —
 substituted by `minictrl install-service`, which uses `systemd_unit_dir.sh` to ask
 the systemd user manager where it actually searches rather than trusting the shell's
 `XDG_CONFIG_HOME`. Installing to the latter produces files systemd never opens, while
 `systemctl is-enabled` still answers "enabled".
 
-The timer is `watchdog.timer` and is templated inline in `minictrl` rather than kept
-as a fourth `.in` file, because it carries no substituted value that the service unit
-does not already have.
+The timer is `watchdog.timer`. It ships as a file and `minictrl` copies it into place,
+rather than being templated inline, because a timer has no `ExecStart` to substitute into.
+That makes it the one unit here that is not a `.in` template.

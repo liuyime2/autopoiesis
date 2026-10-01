@@ -705,6 +705,78 @@ def check_the_documented_pipeline_targets_exist() -> Result:
     )
 
 
+def check_the_fact_figures_in_prose_match_reality() -> Result:
+    """Numbers quoted in prose must match what the commands actually report.
+
+    Several figures appeared in three places and were wrong in all of them at once:
+    STATUS.md said the defect audit "passes 91/91" when `tools/audit_defects.py` reports
+    61/61; it said "384 tests pass" when 800 are collected; and it reported "0 failures and
+    2 warnings" from doctor while doctor printed eight, none of them the closed-lot
+    criterion it attributed them to. Nothing recomputed any of them.
+
+    Each figure is read from a command's real output rather than from a file, so the check
+    cannot itself go stale - which is the failure mode it exists to catch. Scoped to the
+    current-state text: a dated section records what was true then, and rewriting those would
+    destroy the record rather than correct it.
+    """
+    problems: list[str] = []
+
+    rc, audit_out = _run([sys.executable, "tools/audit_defects.py"], timeout=900)
+    match = re.search(r"(\d+)/(\d+) checks pass", audit_out)
+    if not match:
+        return Result("fact-figures-match", SKIP, "the defect audit printed no total to compare")
+    passed, total = match.group(1), match.group(2)
+
+    rc, pytest_out = _run([sys.executable, "-m", "pytest", "-q", "--collect-only"], timeout=900)
+    collected = re.search(r"(\d+) tests? collected", pytest_out)
+    if not collected:
+        return Result("fact-figures-match", SKIP, "pytest printed no collection total to compare")
+
+    rc, doctor_out = _run(["./minictrl", "doctor"], timeout=900)
+    warnings = len(re.findall(r"^\[WARN\]", doctor_out, re.MULTILINE))
+    failures = len(re.findall(r"^\[FAIL\]", doctor_out, re.MULTILINE))
+
+    for name in ("STATUS.md", "README.md", "docs/MIGRATION.md"):
+        path = ROOT / name
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        skip = _dated_section_ranges(text)
+        for match in re.finditer(r"(\d+)/(\d+) (?:checks? pass|defect audit)", text):
+            if any(lo <= match.start() <= hi for lo, hi in skip):
+                continue
+            if match.group(1) != passed or match.group(2) != total:
+                line = text[: match.start()].count("\n") + 1
+                problems.append(
+                    f"{name}:{line} says {match.group(0)!r}; the audit reports {passed}/{total}"
+                )
+        for match in re.finditer(r"(\d+) tests pass", text):
+            if any(lo <= match.start() <= hi for lo, hi in skip):
+                continue
+            if match.group(1) != collected.group(1):
+                line = text[: match.start()].count("\n") + 1
+                problems.append(
+                    f"{name}:{line} says {match.group(1)} tests pass; "
+                    f"pytest collects {collected.group(1)}"
+                )
+        for match in re.finditer(r"(\d+) failures and (\d+) warnings", text):
+            if any(lo <= match.start() <= hi for lo, hi in skip):
+                continue
+            if (match.group(1), match.group(2)) != (str(failures), str(warnings)):
+                line = text[: match.start()].count("\n") + 1
+                problems.append(
+                    f"{name}:{line} says {match.group(1)} failures and {match.group(2)} "
+                    f"warnings; doctor reports {failures} and {warnings}"
+                )
+    if problems:
+        return Result("fact-figures-match", FAIL, f"{len(problems)}: {problems[:4]}")
+    return Result(
+        "fact-figures-match", PASS,
+        f"prose agrees with the commands: audit {passed}/{total}, "
+        f"{collected.group(1)} tests collected, doctor {failures} failures / {warnings} warnings",
+    )
+
+
 def check_list_reports_the_same_count_as_a_run() -> Result:
     """`--list` and a real run must state the same number of classes.
 
@@ -1826,6 +1898,7 @@ BESPOKE_CHECK_NAMES = (
     "fresh-clone-evidence-real",
     "config-example-names",
     "config-example-complete",
+    "fact-figures-match",
     "list-count-matches-run",
     "pipeline-targets-exist",
     "gate-class-count-consistent",
@@ -2267,6 +2340,7 @@ def main() -> int:
     results.append(check_the_declared_bespoke_list_matches_what_runs())
     results.append(check_status_agrees_with_doctor())
     results.append(check_list_reports_the_same_count_as_a_run())
+    results.append(check_the_fact_figures_in_prose_match_reality())
     results.append(check_the_documented_pipeline_targets_exist())
     results.append(check_config_example_names_are_real())
     results.append(check_config_example_covers_every_variable())

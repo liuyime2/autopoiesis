@@ -73,7 +73,7 @@ wrappers each duplicated a flag below.
 | `make smoke` | one real cycle end to end against the broker | ~8s |
 | `make smoke-offline` | the same path with broker and model stubbed | <1s |
 | `make fast` | check + smoke + the full gate | ~90s |
-| `make verify` | 42 check classes, non-zero on any failure | ~100s |
+| `make verify` | 43 check classes, non-zero on any failure | ~100s |
 | `make test` | the whole suite | ~5min |
 | `make doctor` | health of the running system, non-zero on any fault | ~20s |
 | `make status` | is the daemon alive and what is it doing | ~1s |
@@ -108,7 +108,7 @@ src/min_agent/          the package. 40 modules, 3 external dependencies.
   strategy_engine.py    strategy library, selection, lifecycle
   evaluator.py          scoring from broker-confirmed evidence
   research/             diagnosis only. production may not import it, and a gate enforces that
-tools/verify.py         the gate: 42 check classes
+tools/verify.py         the gate: 43 check classes
 tools/provenance.py     what `make reproduce` records
 tests/min_agent/        61 test files
 examples/minimal_cycle.py   the smallest runnable example, no broker needed
@@ -123,7 +123,7 @@ docs/MIGRATION.md       what changed and what replaced it
 
 `runtime/min_agent/journal.jsonl` is the only source of truth. Every other file is derived
 from it and can be deleted and regenerated: `reflection.json`, `heartbeat.json`,
-`risk_baseline.json`, `market-state.json`, `curriculum_state.json`, `strategies/`.
+`risk_baseline.json`, `market-state.json` (written by nothing since the deleted `check-market-open.sh`), `curriculum_state.json`, `strategies/`.
 
 `docs/ARCHITECTURE.md` Part II has the full table and the data flow; Part I records
 what the repository looked like before this refactor.
