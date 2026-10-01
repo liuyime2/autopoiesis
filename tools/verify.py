@@ -728,7 +728,13 @@ def check_status_agrees_with_doctor() -> Result:
 
     text = status.read_text(encoding="utf-8")
     skip = _dated_section_ranges(text)
-    journal = re.search(r"^\| journal \|[^|]*?([\d.]+) MB,\s*([\d,]+) lines", text, re.MULTILINE)
+    # Cycles, not bytes or lines. The journal rotates: once it crosses the size cap the live
+    # file restarts near empty and the history moves to `journal.jsonl.1`, so MB and line
+    # count describe whichever generation is currently open and change on their own every
+    # rotation - they were 66.9 MB / 10,573 lines and then 0.3 MB / 56 lines within the hour,
+    # with nothing about the agent having changed. The cycle total spans every generation and
+    # is the figure that actually tracks the deployment.
+    journal = re.search(r"^\| journal \|[^|]*?([\d,]+) cycles", text, re.MULTILINE)
     library = re.search(r"^\| strategy library \|[^|]*?(\d+) total, (\d+) selectable",
                         text, re.MULTILINE)
     if not journal or not library:
@@ -746,7 +752,8 @@ def check_status_agrees_with_doctor() -> Result:
     # doctor's real line is "[PASS] journal<spaces>66.3MB, 10505 lines, 1048 cycles" -
     # status first, detail after. An earlier pattern assumed the label followed the status
     # and matched nothing.
-    live_mb = re.search(r"^\[PASS\] journal\s+([\d.]+)MB,\s*([\d,]+) lines", out, re.MULTILINE)
+    live_mb = re.search(r"^\[PASS\] journal\s+([\d.]+)MB,\s*([\d,]+) lines,\s*([\d,]+) cycles",
+                        out, re.MULTILINE)
     live_total = re.search(r"^\[PASS\] strategy library\s+(\d+) total,\s*(\d+) selectable",
                            out, re.MULTILINE)
     if not live_mb or not live_total:
@@ -754,11 +761,10 @@ def check_status_agrees_with_doctor() -> Result:
             "status-matches-doctor", SKIP,
             "doctor ran but its journal/library lines were not found in the output",
         )
-    stated_mb = journal.group(1).rstrip("0").rstrip(".")
-    if stated_mb != live_mb.group(1):
-        problems.append(f"journal size: STATUS says {stated_mb} MB, doctor says {live_mb.group(1)} MB")
-    if journal.group(2).replace(",", "") != live_mb.group(2).replace(",", ""):
-        problems.append(f"journal lines: STATUS says {journal.group(2)}, doctor says {live_mb.group(2)}")
+    if journal.group(1).replace(",", "") != live_mb.group(3).replace(",", ""):
+        problems.append(
+            f"journal cycles: STATUS says {journal.group(1)}, doctor says {live_mb.group(3)}"
+        )
     if library.group(1) != live_total.group(1):
         problems.append(f"strategies total: STATUS says {library.group(1)}, doctor says {live_total.group(1)}")
     if library.group(2) != live_total.group(2):
@@ -767,8 +773,9 @@ def check_status_agrees_with_doctor() -> Result:
         return Result("status-matches-doctor", FAIL, f"{len(problems)}: {problems}")
     return Result(
         "status-matches-doctor", PASS,
-        f"STATUS.md agrees with doctor: {live_mb.group(1)} MB, {live_mb.group(2)} lines, "
-        f"{live_total.group(1)} strategies, {live_total.group(2)} selectable",
+        f"STATUS.md agrees with doctor: {live_mb.group(3)} cycles across all journal "
+        f"generations ({live_mb.group(1)} MB live), {live_total.group(1)} strategies, "
+        f"{live_total.group(2)} selectable",
     )
 
 

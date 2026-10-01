@@ -27,7 +27,7 @@ criterion:
 | proof: filled>0 | **PASS** — 75 shares filled, 24 broker-confirmed, `fill_quantity_ratio` 1.0 |
 | proof: per-strategy pnl | **PASS** — 3 strategies, broker-verified: `tiny-fixed-size-001` +362.66, `fixed-size-buy-001` +120.37, `trend-follow-buy-001` +81.36 |
 | pnl evidence | **PASS** — `broker_strategy_closed_lot_pnl_verified`, 23 closed lots, 0 open |
-| journal | OK — 66.9 MB, 10573 lines, 1048 cycles, 0 unparseable |
+| journal | OK — 56 lines live plus rotated generations, 1048 cycles total across all of them |
 | strategy library | OK — 40 total, 13 selectable, including one SELL strategy |
 
 ### The self-evolution loop now runs, and it closed a position

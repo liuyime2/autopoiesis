@@ -32,6 +32,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+JOURNAL_BACKUPS = 3  # matches JsonlJournal's default `backups`
 RUNTIME = ROOT / "runtime" / "min_agent"
 FINDINGS = ROOT / "docs" / "superpowers" / "known_state_findings.json"
 
@@ -80,12 +81,25 @@ def main(runtime: Path | None = None, findings: Path | None = None) -> int:
     problems: list[str] = []
     notes: list[str] = []
     journal_path = runtime / "journal.jsonl"
-    records, torn = _read_lines(journal_path)
+    # Every generation, not just the live file. Rotation moves the record to `.1`; reading
+    # only `journal.jsonl` reported 17 lines and 0 cycles immediately after a rotation that
+    # had in fact preserved all 1,048, which turned a healthy deployment into a page of
+    # findings about missing history.
+    generations = [journal_path.with_suffix(journal_path.suffix + f".{i}")
+                   for i in range(JOURNAL_BACKUPS, 0, -1)]
+    generations = [g for g in generations if g.exists()]
+    if journal_path.exists():
+        generations.append(journal_path)
+    records, torn = [], 0
+    for generation in generations:
+        part, part_torn = _read_lines(generation)
+        records.extend(part)
+        torn += part_torn
     cycles = [r for r in records if _is_cycle(r)]
     events = [r for r in records if not _is_cycle(r) and "event_type" in r]
     if torn:
         problems.append(f"{torn} unreadable journal line(s) before the end")
-    if not journal_path.exists():
+    if not generations:
         notes.append("no journal yet")
 
     # 1. A cycle must appear exactly once. It is the unit every aggregate is

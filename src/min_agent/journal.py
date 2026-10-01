@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import itertools
 import os
 from collections import deque
 from pathlib import Path
@@ -103,15 +105,46 @@ class JsonlJournal:
 
     # --- internals -----------------------------------------------------------
 
+    def history_paths(self) -> list:
+        """Every generation of the journal, oldest first.
+
+        `_rotate_if_needed` moves the live file to `.1` and shifts older generations up, so
+        the current file alone stops being the record: on this host the rotation that fired
+        during the refactor left 17 lines in `journal.jsonl` and 10,587 in `journal.jsonl.1`,
+        and every reader that opened only the live path - `read_all`, `read_events`,
+        `count_submitted_on`, `replay_audit.py`, `check_runtime_integrity.py` - concluded
+        the agent had never run a cycle. That is the failure this method exists to prevent.
+
+        The journal is append-only and generations are strictly ordered by age, so reading
+        oldest-first and in file order reconstructs the original sequence. A limit applied
+        across the whole history still yields the most recent records, because the deque is
+        filled in chronological order.
+        """
+        # `.N` holds the oldest generation, so the backups read in descending index order
+        # (oldest first) and the live file comes last because it is the newest.
+        paths = []
+        for index in range(self.backups, 0, -1):
+            candidate = self.path.with_suffix(self.path.suffix + f".{index}")
+            if candidate.exists():
+                paths.append(candidate)
+        if self.path.exists():
+            paths.append(self.path)
+        return paths
+
     def _scan(self, model, *, limit, keep=None):
-        if not self.path.exists():
+        paths = self.history_paths()
+        if not paths:
             return [], 0
         collected: deque = deque(maxlen=limit) if limit else None
         kept: list = []
         dropped = 0
         want_events = model is JournalEvent
-        with self._read_lock(), self.path.open("r", encoding="utf-8") as handle:
-            for line in handle:
+        # Locked once across every generation: rotation replaces the live file, so taking
+        # the lock per generation could interleave a rotation between reads and duplicate
+        # or skip records.
+        with self._read_lock(), contextlib.ExitStack() as stack:
+          handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in paths]
+          for line in itertools.chain.from_iterable(handles):
                 stripped = line.strip()
                 if not stripped:
                     continue
