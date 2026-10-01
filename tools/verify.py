@@ -211,6 +211,7 @@ CHECK_CLASSES: tuple[str, ...] = (
     "defect-regression-audit",
     "doctor",
     "fact-docs-current",
+    "bespoke-list-matches-run",
 )
 
 
@@ -409,7 +410,13 @@ def check_home_independence() -> Result:
     """
     violations: list[str] = []
     targets = sorted((SRC / "min_agent").rglob("*.py"))
-    targets += [ROOT / "tools" / "minictrl"] if (ROOT / "tools" / "minictrl").exists() else []
+    # `minictrl` is at the repository root, not under tools/. The path here said
+    # tools/minictrl, the file does not exist there, and the `if ... exists()` guard turned
+    # that mistake into silence - so the check skipped the one script that most needs it and
+    # reported a clean bill. Found by reading where the file actually is. The root script is
+    # now scanned directly, with no existence guard, because it is on the gate's own path:
+    # `make doctor` and `make status` both invoke it.
+    targets.append(ROOT / "minictrl")
     for path in targets:
         for line_no, line in enumerate(path.read_text().splitlines(), 1):
             code = line.split("#", 1)[0]
@@ -632,6 +639,77 @@ def check_no_unreferenced_design_notes_at_the_root() -> Result:
         "no-loose-design-notes", PASS,
         f"every root markdown file is a documented entry point ({', '.join(sorted(allowed))}) "
         "or declares itself historical",
+    )
+
+
+def check_the_declared_bespoke_list_matches_what_runs() -> Result:
+    """BESPOKE_CHECK_NAMES must be exactly the checks main() appends outside the loop.
+
+    The list exists so that `--list` and the run cannot disagree about the gate's size.
+    That only works while the list is maintained, and nothing connected it to main() - the
+    same shape of defect as the CHECK_CLASSES staleness this repository already had once,
+    where a tuple drifted from reality and every green run reported it as healthy.
+
+    So the source of main() is read and every `check_*` it appends is compared against the
+    declared names, using the Result name each function returns. Read from the AST rather
+    than by running the gate: this check runs inside the gate, and spawning a second copy
+    of it to introspect the first is how the earlier `fact-docs-current` recursion
+    happened.
+    """
+    import ast
+
+    tree = ast.parse((ROOT / "tools" / "verify.py").read_text(encoding="utf-8"))
+    main_fn = next(
+        (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"),
+        None,
+    )
+    if main_fn is None:  # pragma: no cover
+        return Result("bespoke-list-matches-run", FAIL, "main() not found in tools/verify.py")
+
+    # name each appended check function by the Result name it can return
+    returns: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.FunctionDef) and node.name.startswith("check_")):
+            continue
+        found = {
+            arg.value
+            for call in ast.walk(node)
+            if isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == "Result"
+            # The name is the FIRST argument. An earlier version read args[1], which is
+            # the status (PASS/FAIL), a Name rather than a Constant - so the comprehension
+            # matched nothing and every check looked undeclared. Read the signature.
+            and call.args
+            and isinstance(call.args[0], ast.Constant)
+            and isinstance(call.args[0].value, str)
+            for arg in [call.args[0]]
+        }
+        returns[node.name] = found
+
+    appended: set[str] = set()
+    for node in ast.walk(main_fn):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id.startswith("check_")
+        ):
+            appended |= returns.get(node.func.id, {node.func.id})
+
+    declared = set(BESPOKE_CHECK_NAMES)
+    # Checks appended by name that are also in CHECK_CLASSES are not bespoke by definition;
+    # they are the loop's classes, invoked directly so they can take a live argument.
+    bespoke = appended - set(CHECK_CLASSES)
+    missing = sorted(bespoke - declared)
+    extra = sorted(declared - appended)
+    if missing or extra:
+        return Result(
+            "bespoke-list-matches-run", FAIL,
+            f"declared but never appended: {extra}; appended but undeclared: {missing}",
+        )
+    return Result(
+        "bespoke-list-matches-run", PASS,
+        f"{len(declared)} bespoke names, all appended by main() and all reported by --list",
     )
 
 
@@ -1489,9 +1567,24 @@ def check_all_tests_classified() -> Result:
 #: distinction checkable: a class that is neither in EXECUTING_CLASSES nor here will fail
 #: `check_known_classes_run`, so a new substantive check cannot be added untested by
 #: accident.
+# The checks main() appends outside the CHECK_CLASSES loop. Declared once so that --list,
+# the class-count gate and the run itself cannot disagree: three readers of one list rather
+# than three independent recollections of it.
+BESPOKE_CHECK_NAMES = (
+    "docs-no-deleted-commands",
+    "example-runs",
+    "tools-readme-accurate",
+    "no-loose-design-notes",
+    "fresh-clone-evidence-real",
+    "config-example-names",
+    "gate-class-count-consistent",
+    "fact-docs-current",
+)
+
 REPOSITORY_CHECK_CLASSES: frozenset[str] = frozenset({
     # Inspects this repository: test-file accounting, dependency declarations, docs
     # freshness, the production/research boundary, hardcoded paths.
+    "bespoke-list-matches-run",
     "class-coverage",
     "test-coverage-map",
     "docs-not-stale",
@@ -1833,9 +1926,26 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.list:
+        # Reports what the gate runs, which is CHECK_CLASSES plus the bespoke checks
+        # appended in main(). Printing the tuple alone showed 29 while the gate ran 37 -
+        # so the command whose job is to state the gate's size understated it by eight,
+        # which is the drift the class-count check exists to catch. The bespoke names are
+        # declared here rather than scraped out of main(), because scraping would put the
+        # count in two places and drift again.
         for cls in CHECK_CLASSES:
             files = [n for n, c in TEST_CLASS_MAP.items() if cls in c]
             print(f"{cls:<34} {len(files):>2} test file(s)")
+        for name in BESPOKE_CHECK_NAMES:
+            print(f"{name:<34}  -  bespoke check, not a pytest class")
+        # Two more run outside the loop on a full run and are conditional on it being
+        # full, so they are named here rather than counted silently. Leaving them out is
+        # how this command came to under-report the gate in the first place.
+        full_only = ("defect-regression-audit", "doctor")
+        print(f"\n{len(CHECK_CLASSES) + len(BESPOKE_CHECK_NAMES) + len(full_only)} classes "
+              f"on a full run: {len(CHECK_CLASSES)} map to test files, "
+              f"{len(BESPOKE_CHECK_NAMES) + len(full_only)} are bespoke checks run in main()")
+        for name in full_only:
+            print(f"{name:<34}  -  bespoke check, full runs only")
         return 0
     if args.self_test:
         return self_test()
@@ -1860,6 +1970,7 @@ def main() -> int:
     results.append(check_tools_readme_names_real_files())
     results.append(check_no_unreferenced_design_notes_at_the_root())
     results.append(check_the_fresh_clone_evidence_is_real())
+    results.append(check_the_declared_bespoke_list_matches_what_runs())
     results.append(check_config_example_names_are_real())
     results.append(check_unit_environment_files_exist())
     results.append(check_replay_audit())

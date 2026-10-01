@@ -70,9 +70,13 @@ integrity:
 classes:
 	@$(PY) tools/verify.py --list
 
+# Prints the classes the gate actually runs, which is not CHECK_CLASSES: eight bespoke
+# checks are appended in verify.py's main() and never appear in that tuple. Printing the
+# tuple under-reported the gate by those eight, which is the drift the class-count gate
+# exists to catch, reported by the command meant to show the count. `--list` is the gate's
+# own answer and cannot drift from it.
 classes-list:
-	@$(PY) -c "from tools.verify import CHECK_CLASSES as c; print('\n'.join(c))" \
-		2>/dev/null || grep -oP '(?<=^    ")[a-z-]+(?=",)' tools/verify.py | head -13
+	@$(PY) tools/verify.py --list
 
 run:
 	@systemctl --user start min-agent.service
