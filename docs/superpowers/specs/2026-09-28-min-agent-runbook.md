@@ -61,7 +61,7 @@ configured for `:11434` and GPU 0. Check both before blaming the model.
 ./minictrl loop            # bounded daemon run, default 5 cycles
 ./minictrl daemon          # foreground, for debugging
 ./minictrl status          # heartbeat liveness
-./minictrl test            # the 317-test suite
+./minictrl test            # the full test suite
 ```
 
 ## Running 24x7

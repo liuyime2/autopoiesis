@@ -3,21 +3,39 @@
 #
 #   minictrl doctor              check everything, non-zero on any fault
 #   minictrl once                run one cycle
-#   minictrl loop --cycles 5     run a bounded loop (fast iteration)
+#   minictrl loop [n]            run n cycles (default 5) and stop
 #   minictrl daemon               run the daemon in the foreground
-#   minictrl install-service     install the systemd --user unit
-#   minictrl service status|start|stop|logs
-#   minictrl status|stop|reconcile|evidence|report|profit|test|audit
+#   minictrl install-service     install the systemd --user unit (reboot-persistent)
+#   minictrl service             status|start|stop|restart|logs for the unit
+#   minictrl status              account, position and clock
+#   minictrl stop                stop the daemon
+#   minictrl reconcile           match pending orders against the broker
+#   minictrl evidence ingest|report   refresh or show broker evidence
+#   minictrl profit              verify the paper-profit target from broker evidence
+#   minictrl check-env           report configuration and connectivity only
+#   minictrl test|audit          unit tests; the recorded-defect audit
+#
+set -uo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+cd "$ROOT_DIR" || exit 2
+# ---------------------------------------------------------------------------
+# Notes on why this script looks the way it does. Kept below the command list so
+# `minictrl help` prints commands and not an essay; a reader who wants the reasoning
+# opens the file.
+# `loop` took `--cycles 5`, a flag that has never existed: cli.py defines `--max-cycles`, and
+# minictrl forwarded the extra words, so the documented command failed with "unrecognized
+# arguments". The count is now a positional argument. It was also printed in minictrl's own
+# header and in the runbook, so three places advertised a command that could not run.
 #
 # Every subcommand propagates its real exit code. The previous scripts did not:
 # `set -e` without `pipefail` meant a `| tee` pipeline reported tee's status, so
 # a missing interpreter or an unreachable broker printed a green banner and
 # exited 0. That is how auto-fix.log and market-check.log came to contain a
 # header and a footer with nothing in between, stamped "success".
-set -uo pipefail
-
-ROOT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-cd "$ROOT_DIR" || exit 2
+# `loop` accepts a positional count as well as `--cycles N`, because three documents
+# wrote the flag form and it never worked. Translating it is cheaper than editing
+# every caller.
 
 # Locate conda rather than assuming where it lives. The order is: an explicit
 # CONDA_BIN, then PATH, then this account's known install, then the usual suspects.
@@ -98,7 +116,20 @@ agent() {
   timeout "${MIN_AGENT_TIMEOUT:-180}" "$CONDA_BIN" run --no-capture-output -n llm python -m min_agent.cli "$@"
 }
 
-usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
+# The comment block ends at the first non-comment line. `sed -n '2,20p'` ran past it, so
+# `./minictrl help` - which the runbook tells the reader to run for the command list - printed
+# six lines of shell source ending in `set -uo pipefail`. Derived from the file rather than
+# hardcoded, so adding a line to the header cannot put the range out of date again.
+# Only the command list, then. The header also carries the reasoning behind `set -uo
+# pipefail` and behind accepting `--cycles`, which is worth having in the source and not in
+# the output of a command a reader runs to find out what commands exist. Stops at the first
+# blank comment line, which is where the prose begins.
+usage() {
+  awk 'NR > 1 {
+          if ($0 !~ /^#/) exit
+          sub(/^# ?/, ""); print
+        }' "$0"
+}
 
 cmd="${1:-}"
 [ $# -gt 0 ] && shift
@@ -106,7 +137,17 @@ cmd="${1:-}"
 case "$cmd" in
   doctor)          agent --doctor "$@" ;;
   once)            agent --once "$@" ;;
-  loop)            agent --daemon --max-cycles "${MIN_AGENT_CYCLES:-5}" "$@" ;;
+  # A positional count, and "--cycles N" accepted too, because three documents - minictrl's
+  # own header, the runbook, and muscle memory - all wrote `--cycles 5` and it has never
+  # worked. Translating it here is cheaper than editing every caller and breaking the habit.
+  loop)
+    _cycles="${MIN_AGENT_CYCLES:-5}"
+    case "${1:-}" in
+      --cycles) _cycles="${2:-5}"; shift 2 ;;
+      --cycles=*) _cycles="${1#*=}"; shift ;;
+      [0-9]*) _cycles="$1"; shift ;;
+    esac
+    agent --daemon --max-cycles "$_cycles" "$@" ;;
   daemon)          exec "$CONDA_BIN" run --no-capture-output -n llm python -m min_agent.cli --daemon ;;
   status)          agent --status ;;
   stop)            agent --stop ;;
@@ -121,8 +162,7 @@ case "$cmd" in
   install-service)
     # The systemd user manager resolves unit paths from ITS OWN start-time
     # environment, not this shell's. On this host it has no XDG_CONFIG_HOME, so
-    # it only searches $HOME/.config/systemd/user - and /home is at user quota,
-    # so that directory cannot be created. Detect that instead of silently
+ Detect that instead of silently
     # writing somewhere the manager will never read.
     unit_dir="$("$ROOT_DIR/tools/systemd_unit_dir.sh")" || exit 2
     mkdir -p "$unit_dir" || { echo "FATAL: cannot create $unit_dir" >&2; exit 2; }
@@ -162,7 +202,7 @@ case "$cmd" in
       echo >&2
       echo "Unit files are written but the systemd user manager cannot see them." >&2
       echo "It searches \$HOME/.config/systemd/user unless it was started with" >&2
-      echo "XDG_CONFIG_HOME set; /home is at user quota so that path cannot exist." >&2
+      echo "XDG_CONFIG_HOME=$XDG_CONFIG_HOME is set but no unit directory exists under it." >&2
       echo "The daemon and watchdog still work as transient units:" >&2
       echo "  ./minictrl install-transient" >&2
       echo "For permanent enablement, free a few MB under \$HOME and re-run this." >&2

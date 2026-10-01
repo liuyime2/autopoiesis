@@ -1,3 +1,5 @@
+> **SUPERSEDED — historical runbook, not current instructions.** Superseded by `2026-09-28-min-agent-runbook.md`, which describes the system as it now is. This one instructs bare `conda run` (which does not work here - conda is not on PATH), pins a model (`deepseek-r1:8b`) the agent no longer uses, and describes shell wrappers this refactor deleted. Kept as a record of the June 2026 deployment.
+
 # Minimum Trading Agent Runbook
 
 Date: 2026-06-09 (updated from 2026-06-03)

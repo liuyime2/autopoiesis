@@ -80,6 +80,6 @@ Fix one of:
   2. export MIN_AGENT_UNIT_DIR=/some/writable/path before installing
   3. export MIN_AGENT_ALLOW_RUNTIME_UNITS=1 to accept tmpfs units that will NOT
      survive a reboot
-  4. run without systemd: nohup ./run_forever.sh &   (crash-loop guarded)
+  4. run without systemd: minictrl daemon              # foreground, exits on error
 MSG
 exit 2

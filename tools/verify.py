@@ -317,6 +317,17 @@ def check_syntax_import() -> Result:
 
 #: Phrases that assert a plan is not yet acted on. Any of these appearing in a
 #: plan document means the document is describing a tree that no longer exists.
+# Scripts this refactor deleted, per docs/MIGRATION.md. Named here so the docs check and the
+# deleted-command check agree on one list rather than two.
+DELETED_SCRIPT_NAMES = (
+    "auto-fix.sh",
+    "monitor.sh",
+    "observe.sh",
+    "run_forever.sh",
+    "check-market-open.sh",
+    "auto_reviewer.py",
+)
+
 STALE_STATUS_CLAIMS = (
     "no source file has been modified",
     "awaiting approval",
@@ -336,7 +347,13 @@ def check_docs_not_stale() -> Result:
     A plan may only keep these claims if it is explicitly marked SUPERSEDED, which
     is the state this check put it into.
     """
+    # specs/ as well as plans/. Three runbooks lived under specs/ with no SUPERSEDED marker:
+    # the 2026-06-03 one was superseded by nothing and still told the reader to install
+    # `deepseek-r1:8b`, and the 2026-06-09 one is structurally broken (an unclosed code fence
+    # swallows the commands below it) and uses bare `conda run`, which does not work on this
+    # host. Scanning only plans/ is why they survived every prior audit.
     plans = sorted((ROOT / "docs" / "superpowers" / "plans").glob("*.md"))
+    plans += sorted((ROOT / "docs" / "superpowers" / "specs").glob("*.md"))
     if not plans:
         return Result("docs-not-stale", SKIP, "no plan documents to check")
 
@@ -353,6 +370,24 @@ def check_docs_not_stale() -> Result:
         # 2026-06-03 plans did exactly this, and both opened with "implement this plan
         # task-by-task" while referencing modules like `modes.py` and `reflector.py` that do
         # not exist. The phrase list alone reported those two as clean.
+        # A spec or runbook that instructs a deleted script, or bare `conda run`, is
+        # instructing the reader to do something that cannot work. Two June 2026 runbooks
+        # carried 4 and 13 such lines respectively and were unmarked, so scanning only for
+        # missing module references missed them entirely.
+        dead = sorted({
+            name for name in DELETED_SCRIPT_NAMES
+            if re.search(rf"(?:bash|python3?|\./|sh)\s+{re.escape(name)}\b", raw)
+        })
+        if not marked and dead:
+            problems.append(
+                f"{plan.relative_to(ROOT)} instructs deleted script(s) "
+                f"{', '.join(dead)} and is not marked SUPERSEDED"
+            )
+        if not marked and "conda run" in raw and not re.search(rf"{re.escape(str(ROOT))}", raw):
+            problems.append(
+                f"{plan.relative_to(ROOT)} uses bare `conda run`, which does not work on a "
+                "host where conda is not on PATH, and is not marked SUPERSEDED"
+            )
         absent = sorted(
             m for m in re.findall(r"src/min_agent/([a-z_]+)\.py", raw)
             if not (SRC / "min_agent" / f"{m}.py").exists()
