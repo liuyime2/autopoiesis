@@ -43,6 +43,25 @@ make check
 `make setup` prints the same steps. Credentials live outside the repository and are never
 read from a checked-in file.
 
+### Verifying the install before you have credentials
+
+Everything below runs on a fresh clone with no broker credentials and no `runtime/`
+directory, which is what `runtime/` being gitignored means in practice:
+
+```bash
+git clone <repo> && cd min-agent
+conda create -n llm python=3.10 -y && conda activate llm
+make install
+make smoke-offline     # import, config, CLI - no broker contacted
+make check             # lint + tests
+```
+
+That path is verified rather than asserted: cloning into a clean environment and running it
+found three things that only fail off the live machine - `ruff` and `mypy` missing from
+`[dev]`, a test that read the live strategy library from `runtime/`, and a `smoke-offline`
+target that passed `--skip-broker` to a flag which only applies to `--doctor`. All three
+are fixed; see `docs/MIGRATION.md`.
+
 ## Commands
 
 Every task is a `make` target. There are no other scripts to memorise - the deleted shell

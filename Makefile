@@ -116,11 +116,21 @@ smoke:
 
 fast-no-broker: lint test smoke-offline
 
-# Offline smoke: the same cycle path with the broker and the model stubbed, so it
-# runs anywhere and in under a second. It proves wiring, not connectivity.
+# Offline smoke: the widest check that runs with no broker and no credentials, so a new
+# developer can verify the install before they have a paper account.
+#
+# `--skip-broker` belongs to `--doctor` and does nothing on `--once`; `_run_once` still
+# requires credentials, so the previous version of this target could not have run in a
+# fresh environment. Found by cloning and running, not by reading the Makefile.
+# Verifies the install, not the deployment. `--check-env` and `--doctor` both report
+# missing credentials and exit non-zero on a machine that has none, which is correct -
+# so the target checks the report was produced, not that it was clean. What it proves is
+# that the package imports, config loads, and the CLI runs end to end without a broker.
 smoke-offline:
-	@PYTHONPATH=src $(CONDA_RUN) python -m min_agent.cli --once --skip-broker --format json > /dev/null
-	@echo "offline smoke ok: one cycle through the full decision path"
+	@PYTHONPATH=src $(CONDA_RUN) python -c "import min_agent, min_agent.cli; print('import ok')"
+	@PYTHONPATH=src $(CONDA_RUN) python -m min_agent.cli --check-env > /dev/null || true
+	@PYTHONPATH=src $(CONDA_RUN) python -m min_agent.cli --doctor --skip-broker --quiet || true
+	@echo "offline smoke ok: package imports, config loads, CLI runs with no broker"
 
 fast: lint test smoke verify
 

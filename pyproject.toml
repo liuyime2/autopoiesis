@@ -25,6 +25,12 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8,<9",
+    # `make lint` and `make type` invoke these by module name. They were missing here
+    # while being present in the project environment, so a fresh `make install` produced
+    # an environment where the documented `make check` failed with "No module named
+    # ruff" - found by actually cloning and installing rather than by reading pyproject.
+    "ruff>=0.6",
+    "mypy>=1.11",
 ]
 
 [project.scripts]

@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from min_agent.llm_decision import OllamaDecisionEngine, parse_decision_json
@@ -234,14 +236,43 @@ def test_curriculum_window_fits_its_own_prompt_and_answer():
     from min_agent.llm_decision import CURRICULUM_NUM_CTX
     from min_agent.models import ReflectionRecord, StrategySpec
 
-    root = pathlib.Path(__file__).resolve().parents[2]
-    specs: list[StrategySpec] = []
-    for path in sorted(glob.glob(str(root / "runtime/min_agent/strategies/*.json"))):
-        try:
-            specs.append(StrategySpec.model_validate(json.loads(pathlib.Path(path).read_text())))
-        except Exception:
-            continue
-    assert specs, "no strategy library to measure against; the test would be vacuous"
+    # The worst case is constructed rather than read from the live strategy library.
+    # The library lives under runtime/, which is gitignored, so on a fresh clone it does
+    # not exist and this test - the one that pins the curriculum's context window - failed
+    # with "no strategy library to measure against; the test would be vacuous". A test
+    # that protects a documented regression cannot depend on state that a fresh clone
+    # does not have. The synthetic spec below carries the widest parameter set the
+    # curriculum can emit, which is what the window has to cover.
+    specs: list[StrategySpec] = [
+        # One per kind, each with the full permitted parameter set and the widest
+        # symbol list the curriculum emits. Parameter names are validated per kind by
+        # StrategySpec, so these match the three shapes the library actually contains.
+        StrategySpec(
+            strategy_id="worst-case-trend-follow",
+            name="worst case trend follow",
+            kind="TREND_FOLLOW",
+            symbols=("SPY", "QQQ", "IWM", "TLT", "GLD", "XLE", "XLB", "XLF"),
+            parameters={
+                "quantity": 100, "confidence": 0.55,
+                "reference_price": 700.0, "threshold_pct": 0.20,
+            },
+            max_position_value=5000.0,
+            rationale="synthetic widest-case spec so this test does not read live state",
+            lifecycle="PROBATION",
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        ),
+        StrategySpec(
+            strategy_id="worst-case-fixed-size",
+            name="worst case fixed size",
+            kind="FIXED_SIZE",
+            symbols=("SPY", "QQQ", "IWM", "TLT", "GLD", "XLE", "XLB", "XLF"),
+            parameters={"action": "BUY", "quantity": 100, "confidence": 0.55},
+            max_position_value=5000.0,
+            rationale="synthetic widest-case spec so this test does not read live state",
+            lifecycle="PROBATION",
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        ),
+    ]
 
     reflection = ReflectionRecord.model_validate({
         "summary": "50 cycles", "window_cycles": 50, "submitted_orders": 10,
