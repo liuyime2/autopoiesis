@@ -7,7 +7,7 @@ $ git clone <repo> fc && cd fc
 $ python -m pip install -e ".[dev]"
 
 ## commit under test
-7646ccc wip: break clone-evidence circularity
+d7399dd Read the journal across rotated generations; rotation was silently discarding history
 
 ## environment (no credentials present)
 interpreter: /localscratch/liuyime2/conda_env/freshclone-test/bin/python3
@@ -16,7 +16,7 @@ credentials: none present; the gate's broker checks skip rather than fail
 
 ## install
 $ python3 -m pip install -e ".[dev]"
-Obtaining file:///tmp/opencode/fc-f4
+Obtaining file:///tmp/opencode/fc-z
   Installing build dependencies: started
   Installing build dependencies: finished with status 'done'
   Checking if build backend supports build_editable: started
@@ -72,8 +72,8 @@ Requirement already satisfied: six>=1.5 in /localscratch/liuyime2/conda_env/fres
 Building wheels for collected packages: min-agent
   Building editable for min-agent (pyproject.toml): started
   Building editable for min-agent (pyproject.toml): finished with status 'done'
-  Created wheel for min-agent: filename=min_agent-0.1.0-0.editable-py3-none-any.whl size=5965 sha256=c92acc69777534f8f4a7452394c0f42efb0346951c8e714f931f8d105e439d7a
-  Stored in directory: /tmp/pip-ephem-wheel-cache-nn6dgevt/wheels/f7/51/6c/7515541b598159163b620fb5cdd687a6fc99ebbec2db500fca
+  Created wheel for min-agent: filename=min_agent-0.1.0-0.editable-py3-none-any.whl size=5965 sha256=163111ef0e2621e782f23c9cbccfc5a60810f23a7c56397fba59188c4772de9f
+  Stored in directory: /tmp/pip-ephem-wheel-cache-j4u5ee3p/wheels/07/5f/d1/4c3538a3f1353c5031d8b268e1a8eb8315fb817eb3242e4920
 Successfully built min-agent
 Installing collected packages: min-agent
   Attempting uninstall: min-agent
@@ -96,12 +96,12 @@ $ python3 -m pytest -q
 ........................................................................ [ 45%]
 ........................................................................ [ 54%]
 ........................................................................ [ 63%]
-......................................s................................. [ 72%]
+..........................................s............................. [ 72%]
 ........................................................................ [ 81%]
-..................s..................................................... [ 90%]
+......................s................................................. [ 90%]
 ........................................................................ [ 99%]
-....                                                                     [100%]
-794 passed, 2 skipped in 11.62s
+........                                                                 [100%]
+798 passed, 2 skipped in 72.56s (0:01:12)
 RESULT: PASS
 
 ## example
@@ -155,10 +155,10 @@ RESULT: PASS
 ## provenance
 $ python3 tools/provenance.py
 # provenance for one run of min-agent
-generated: 2026-10-01T08:53:26Z
+generated: 2026-10-01T09:37:32Z
 
 ## code
-commit: 7646ccc747ea4219cdc94014fa0e8e110f4c17be
+commit: d7399dd7d877c6aee371c10f849ca5f32152feaa
 dirty:  yes
 
 ## environment
@@ -238,7 +238,7 @@ verify: every check class, one gate
 [PASS] example-runs                     examples/minimal_cycle.py runs with no broker or credentials
 [PASS] tools-readme-accurate            tools/README.md names all 12 tools and invents none of them
 [PASS] no-loose-design-notes            every root markdown file is a documented entry point (AGENTS.md, README.md, STATUS.md) or declares itself historical
-[PASS] fresh-clone-evidence-real        log records 9 steps from commit ef9dce5, regenerable by run-fresh-clone.sh
+[PASS] fresh-clone-evidence-real        log records 9 steps from commit 7646ccc, regenerable by run-fresh-clone.sh
 [PASS] bespoke-list-matches-run         10 bespoke names, all appended by main() and all reported by --list
 [SKIP] status-matches-doctor            doctor ran but its journal/library lines were not found in the output
 [PASS] pipeline-targets-exist           pipeline runs ['validate-data', 'test', 'evaluate', 'reproduce'] and every stage has a rule
@@ -253,24 +253,22 @@ verify: every check class, one gate
 [PASS] syntax-import                    imported 35 modules
 [PASS] data-integrity                   runtime integrity: OK (0 cycles, 0 events, 0 strategies) |   no journal yet |   no strategy registry yet |   6 previously-missing strategies recorded 
 [PASS] shadow-live-consistency          live mode hard-blocked; probation gate enforced; shadow implemented, reachable by MIN_AGENT_SHADOW=1, off by default, strict boolean
-[PASS] syntax-import                    ...............................................                          [100%] | 47 passed in 3.51s
+[PASS] syntax-import                    ...............................................                          [100%] | 47 passed in 3.37s
 [PASS] unit-integration                 ........................................................................ [ 25%] | ....................................................................
 [PASS] point-in-time-no-leakage         ...........................................s............................ [ 92%] | ......                                                              
 [PASS] pnl-accounting                   ........................................................................ [ 60%] | ................................................                    
 [PASS] lifecycle-invariants             ........................................................................ [ 28%] | ....................................................................
 [PASS] guardian-bypass-prevention       ........................................................................ [ 72%] | ...........................                                         
 [PASS] replay-determinism               ........................................................................ [ 69%] | ................................                                    
-[PASS] crash-recovery                   ........................................................................ [ 56%] | .......................................................             
-[PASS] broker-reconciliation            .............................................................            [100%] | 61 passed in 1.65s
-[PASS] decision-outcome-counterfactual  ................................................................         [100%] | 64 passed in 0.32s
+[PASS] crash-recovery                   ........................................................................ [ 54%] | ...........................................................         
+[PASS] broker-reconciliation            .............................................................            [100%] | 61 passed in 1.64s
+[PASS] decision-outcome-counterfactual  ................................................................         [100%] | 64 passed in 0.37s
 [PASS] defect-regression-audit          D15  archived projects are out of the tree  PASS | D15  a plan document exists  PASS | 61/61 checks pass across 15 defects
-[FAIL] doctor                           RESULT: FAIL - 1 blocking problem(s): strategy library
+[PASS] doctor                           no runtime state in this checkout; ran offline (ok=False exit=1 failures=[alpaca credentials,strategy library] warnings=[daemon,journal,knowledge libr
 [PASS] gate-class-count-consistent      every document that states the count says '41 check classes'
-[FAIL] fact-docs-current                SYSTEM_AUDIT.md §49 does not state 41 classes, 1 failed, 1227 test executions across 61 files; PHASES.md header does not state 41 classes, 1 failed, 1
+[SKIP] fact-docs-current                no broker credentials: this host runs 1231 executions against the 1233 the documents state for a configured host; skipped rather than failed, and the 
 
-classes: 41   passed: 39   failed: 2   test executions: 1227 across 61 test files
+classes: 41   passed: 41   failed: 0   test executions: 1231 across 61 test files
 
-FAIL - the gate is red:
-  doctor: RESULT: FAIL - 1 blocking problem(s): strategy library
-  fact-docs-current: SYSTEM_AUDIT.md §49 does not state 41 classes, 1 failed, 1227 test executions across 61 files; PHASES.md header does not state 41 classes, 1 failed, 1227 test executions across 61 files; PHASES.md summary row does not state 41 classes, 1 failed, 1227 test executions across 61 files
-RESULT: FAIL
+OK - all check classes pass
+RESULT: PASS
