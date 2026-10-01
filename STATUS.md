@@ -23,12 +23,13 @@ unscored LLM decisions, model attribution, and the fallback and champion figures
 
 | Check | State |
 |---|---|
-| alpaca credentials | **PASS** — present in the external env file; paper endpoint reachable, market OPEN |
+| alpaca credentials | **PASS** — present in the external env file; paper endpoint reachable |
+| broker clock | see `minictrl status` — the market's open state changes during the day and is not written here |
 | daemon | PASS — `min-agent.service` up, pid alive, heartbeat fresh |
-| proof: submitted>0 | **PASS** — 44 orders submitted, 95.0 shares filled (44 broker-confirmed) |
-| proof: filled>0 | **PASS** — 75 shares filled, 24 broker-confirmed, `fill_quantity_ratio` 1.0 |
+| proof: submitted>0 | **PASS** — 44 orders submitted |
+| proof: filled>0 | **PASS** — 95.0 shares filled, 44 broker-confirmed |
 | proof: per-strategy pnl | **PASS** — 3 strategies, broker-verified: `tiny-fixed-size-001` +362.66, `fixed-size-buy-001` +120.37, `trend-follow-buy-001` +81.36 |
-| pnl evidence | **PASS** — `broker_strategy_closed_lot_pnl_verified`, 23 closed lots, 0 open |
+| pnl evidence | **WARN** — `broker_strategy_closed_lot_pnl_verified`, 23 closed lots, but the model still holds 20 shares OPEN |
 | journal | OK — 1049 cycles total across all of them |
 | strategy library | OK — 40 total, 13 selectable, including one SELL strategy |
 

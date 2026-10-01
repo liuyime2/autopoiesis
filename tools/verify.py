@@ -994,6 +994,17 @@ def check_status_agrees_with_doctor() -> Result:
     # rotation - they were 66.9 MB / 10,573 lines and then 0.3 MB / 56 lines within the hour,
     # with nothing about the agent having changed. The cycle total spans every generation and
     # is the figure that actually tracks the deployment.
+    # The market's open state is deliberately not asserted here. STATUS.md used to carry
+    # "market OPEN" in its credential row, written by hand, and it was wrong whenever the
+    # market was shut - which is most of the time, and always when someone reads the file
+    # outside trading hours. It now points at `minictrl status` for that instead, because a
+    # figure that changes hourly cannot be maintained in a document.
+    if re.search(r"market OPEN", text):
+        return Result(
+            "status-matches-doctor", FAIL,
+            "STATUS.md states a hand-written market open state, which is wrong whenever the "
+            "market is shut; point at `minictrl status` instead",
+        )
     journal = re.search(r"^\| journal \|[^|]*?([\d,]+) cycles", text, re.MULTILINE)
     library = re.search(r"^\| strategy library \|[^|]*?(\d+) total, (\d+) selectable",
                         text, re.MULTILINE)
@@ -1021,6 +1032,34 @@ def check_status_agrees_with_doctor() -> Result:
             "status-matches-doctor", SKIP,
             "doctor ran but its journal/library lines were not found in the output",
         )
+    # The submitted/filled rows are compared too, because they were wrong twice: 24 orders
+    # and 75 shares while the record showed 44 and 95.0, and two rows of the same table
+    # disagreed with each other about the same two numbers.
+    facts = {
+        "submitted>0": re.search(r"^\[PASS\] proof: submitted>0\s+(\d+) order", out, re.M),
+        "filled>0": re.search(r"^\[PASS\] proof: filled>0\s+([\d.]+) share", out, re.M),
+        "confirmed": re.search(r"^\[PASS\] proof: filled>0\s+[\d.]+ share\(s\) filled \((\d+) confirmed\)", out, re.M),
+    }
+    for label, match in facts.items():
+        if not match:
+            continue
+        # The label is the row's key, at the start of the cell: "| proof: filled>0 | ...".
+        # The previous pattern asked for other text before it, which matches nothing.
+        row = re.search(rf"^\|\s*proof:\s*{re.escape(label)}\s*\|[^\n]*$", text, re.MULTILINE)
+        if not row:
+            continue
+        if any(lo <= row.start() <= hi for lo, hi in skip):
+            continue
+        cell = row.group(0)
+        # accept either the integer or the decimal rendering of the same figure
+        value = match.group(1)
+        alternatives = {value, f"{float(value):g}" if value.replace('.','').isdigit() else value}
+        if not any(alt in cell for alt in alternatives):
+            problems.append(
+                f"STATUS.md proof row {label!r} does not carry doctor's figure {value}; "
+                f"the row reads {cell.strip()[:70]}"
+            )
+
     if journal.group(1).replace(",", "") != live_mb.group(3).replace(",", ""):
         problems.append(
             f"journal cycles: STATUS says {journal.group(1)}, doctor says {live_mb.group(3)}"
