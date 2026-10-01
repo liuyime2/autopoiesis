@@ -221,9 +221,11 @@ output is committed:
 docs/evidence/run-fresh-clone.sh
 ```
 
-It clones the committed tree into a scratch directory, installs it, and runs lint, the full
-test suite, the example cycle, the entry point, provenance, and the gate's own self-test. No
-credentials are needed. The result is written to `docs/evidence/fresh-clone.log` and the
+It clones the committed tree into a scratch directory, installs it, and runs seven steps:
+lint, the full test suite, the example cycle, the entry point, provenance, the gate's own
+self-test, and the gate itself. No credentials are needed. That last one is the one that
+matters - it is the check a newcomer runs before they have a paper account or a single
+recorded cycle, and it was red for several commits while every other step was green. The result is written to `docs/evidence/fresh-clone.log` and the
 gate checks that log against the script and the commit it names, so a green claim here is
 traceable to a run rather than to prose. `make verify` runs the same checks in place; the
 clone exists to prove they pass from nothing but a checkout.
