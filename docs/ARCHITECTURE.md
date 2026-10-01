@@ -201,3 +201,43 @@ The import surface in `cli.py` was left alone. Section 8 has the measurements: d
 `requests` made `--help` slower, and the Alpaca SDK is already deferred into the four
 functions that use it. Restructuring it would have added an indirection in exchange for
 nothing measurable.
+
+## 10. What this refactor actually cost and saved
+
+The objective is explicit that line count is not the acceptance criterion, so the honest
+account is given rather than a flattering one.
+
+```
+76 files changed, 1560 insertions(+), 651 deletions(-)
+
+deleted    437 lines   5 shell wrappers, each a thin duplicate of CLI flags
+added      545 lines   README, ARCHITECTURE, MIGRATION
+added      264 lines   pyproject.toml, ruff.toml, Makefile targets
+added      368 lines   tests, of which 40 are the syntax-import class's own
+production +131 / -98   net +33 lines in src/min_agent
+```
+
+The production-code number is the one that matters, and +33 is almost entirely comments
+recording why a thing is the way it is: why the closed-market sleep stays inside the
+heartbeat budget, why `is_system_rejection` matches prefixes, why `research/` is
+quarantined, why the import surface was deliberately left alone. That is the kind of line
+that costs nothing to carry and saves the next reader a wrong change.
+
+What was genuinely removed, in the objective's own order:
+
+- **Delete** - 437 lines of five entry points that did the same things as the CLI; a dead
+  package; every unused import and dead local ruff could identify (12 and 2, before the
+  rules were scoped down to what is worth enforcing).
+- **Merge** - five ways to start the daemon became one `min-agent` console script.
+- **Simplify** - `CHECK_CLASSES` was a list that had stopped matching reality; it now does.
+- **Reuse** - the D8 safety property outlived the script it was written next to.
+- **Rewrite** - `smoke-offline` and the `--help` string, both of which had never worked.
+- **Add** - `pyproject.toml`, `ruff.toml`, `README.md`, `ARCHITECTURE.md`, `MIGRATION.md`,
+  and one test file.
+
+Six real defects were found and fixed that had nothing to do with the refactor's shape and
+everything to do with looking: `smoke` calling an SDK method that does not exist, `--help`
+crashing on argparse's `%` interpolation, a coverage gate passing while checking 13 of 29
+classes, `syntax-import`'s tests never executing inside a green gate, doctor reporting a
+live daemon dead every night, and a test protecting the curriculum's context window
+depending on gitignored state so it could not run on a fresh clone.
