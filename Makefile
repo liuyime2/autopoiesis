@@ -78,7 +78,7 @@ help:
 	@echo "make classes          list the check classes and their test files"
 	@echo "make lint             ruff over src/ tools/ tests/ examples/"
 	@echo "make type             mypy over src/min_agent; reports without gating"
-	@echo "make check            lint + type + the fast gate"
+	@echo "make check            lint + test (no broker, no credentials)"
 	@echo "make test             unit and integration tests only"
 	@echo "make smoke            one real cycle against the paper broker"
 	@echo "make smoke-offline    the widest check needing no broker and no credentials"

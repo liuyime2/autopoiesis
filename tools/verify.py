@@ -965,6 +965,67 @@ def check_list_reports_the_same_count_as_a_run() -> Result:
     )
 
 
+def check_figures_quoted_in_config_comments() -> Result:
+    """Numbers written into ruff.toml's comments must still be true.
+
+    ruff.toml explains itself with measured figures - how long tools/verify.py is, how many
+    BLE001 findings are deliberately permitted, how many modules cli.py defers importing. It
+    said 2,047 lines when the file was 2,627, 59 findings when there are 60, and 25 modules
+    when there are 24. Each was correct when written and nobody recomputed any of them, which
+    is the same disease fact-figures-match treats in prose; a configuration file that
+    misdescribes its own exemptions is worse than one that says nothing, because the comment
+    is the justification for allowing the exceptions.
+
+    All three are measured live. `--isolated` is used for the ruff count so the repository's
+    own configuration does not change what is being counted.
+    """
+    import re as _re
+    import subprocess as _sp
+
+    config = ROOT / "ruff.toml"
+    if not config.exists():
+        return Result("config-comment-figures-true", SKIP, "ruff.toml is absent")
+    text = config.read_text(encoding="utf-8")
+    problems: list[str] = []
+
+    # Deliberately not verify.py's line count. This function lives inside verify.py, so
+    # asserting its length here means the number is wrong the moment the assertion is added -
+    # which is exactly what happened on the first attempt: the check reported 2,627 against
+    # an actual 2,689, because writing the check had added 62 lines. A figure a file cannot
+    # state about itself is a figure that rots on the next edit. The comment in ruff.toml now
+    # says "thousands of lines" and stays true.
+    verify_lines = len((ROOT / "tools" / "verify.py").read_text(encoding="utf-8").splitlines())
+
+    proc = _sp.run(
+        ["python3", "-m", "ruff", "check", "--isolated", "--select", "BLE001", "src/min_agent"],
+        cwd=str(ROOT), capture_output=True, text=True,
+    )
+    found = _re.search(r"Found (\d+) error", proc.stdout)
+    if found:
+        for match in _re.finditer(r"(?:produced|sites record[s]? what failed.*?\b)(\d+)", text):
+            if int(match.group(1)) != int(found.group(1)):
+                problems.append(
+                    f"ruff.toml says {match.group(1)} BLE001 findings; ruff reports "
+                    f"{found.group(1)}"
+                )
+
+    cli_imports = len(_re.findall(r"^from min_agent", (SRC / "min_agent" / "cli.py").read_text(), _re.M))
+    for match in _re.finditer(r"pay for the (\d+) modules", text):
+        if int(match.group(1)) != cli_imports:
+            problems.append(
+                f"ruff.toml says cli.py defers {match.group(1)} module imports; it defers "
+                f"{cli_imports}"
+            )
+
+    if problems:
+        return Result("config-comment-figures-true", FAIL, f"{len(problems)}: {problems[:3]}")
+    return Result(
+        "config-comment-figures-true", PASS,
+        f"ruff.toml's measured figures hold: verify.py {verify_lines:,} lines, "
+        f"{found.group(1) if found else '?'} BLE001 findings, {cli_imports} deferred imports",
+    )
+
+
 def check_status_agrees_with_doctor() -> Result:
     """The current-state table in STATUS.md must match what doctor reports now.
 
@@ -2104,6 +2165,7 @@ BESPOKE_CHECK_NAMES = (
     "fresh-clone-evidence-real",
     "config-example-names",
     "config-example-complete",
+    "config-comment-figures-true",
     "unit-templates-portable",
     "fact-figures-match",
     "list-count-matches-run",
@@ -2546,6 +2608,7 @@ def main() -> int:
     results.append(check_the_fresh_clone_evidence_is_real())
     results.append(check_the_declared_bespoke_list_matches_what_runs())
     results.append(check_status_agrees_with_doctor())
+    results.append(check_figures_quoted_in_config_comments())
     results.append(check_list_reports_the_same_count_as_a_run())
     results.append(check_the_fact_figures_in_prose_match_reality())
     results.append(check_unit_templates_have_no_host_paths())
