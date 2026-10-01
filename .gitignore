@@ -13,6 +13,7 @@ reviews/
 
 # --- logs & terminal captures ---
 *.log
+!docs/evidence/fresh-clone.log
 *.log.*
 screenlog.*
 ollama.log
