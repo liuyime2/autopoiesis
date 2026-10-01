@@ -132,7 +132,7 @@ what the repository looked like before this refactor.
 
 ```bash
 make status                      # daemon alive? which strategy? last decision?
-tail -f runtime/min_agent/daemon.log
+./minictrl logs        # the systemd journal for the daemon
 python -m min_agent.cli --doctor # why the doctor says what it says
 ```
 

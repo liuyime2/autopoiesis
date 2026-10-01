@@ -1703,26 +1703,38 @@ def check_shadow_stage_has_actually_run() -> Result:
     Deliberately reports rather than fails. A system that has never run shadow is
     an honest starting state, not a defect - but it must not be able to say "MET".
     """
-    journal = ROOT / "runtime" / "min_agent" / "journal.jsonl"
-    if not journal.exists():
+    sys.path.insert(0, str(SRC))
+    from min_agent.journal import JsonlJournal
+    from min_agent.config import AgentConfig
+
+    journal = JsonlJournal(AgentConfig.from_env().journal_path)
+    generations = journal.history_paths()
+    if not generations:
         return Result("shadow-stage-exercised", SKIP, "no journal to inspect")
+    # Every generation, not just the live file. It read `journal.jsonl` alone, so after the
+    # rotation that fired on this host it reported "0 intent(s) on record" while
+    # journal.jsonl.1 held one - a check stating a fact about the shadow stage that was
+    # simply false, and it is the check that decides whether Phase 5 counts as exercised.
     shadowed = 0
     intents = 0
-    with journal.open(encoding="utf-8") as handle:
-        for line in handle:
-            if "SHADOWED" in line:
-                shadowed += 1
-            if "SHADOW_ORDER_INTENT" in line:
-                intents += 1
+    for generation in generations:
+        with generation.open(encoding="utf-8") as handle:
+            for line in handle:
+                if "SHADOWED" in line:
+                    shadowed += 1
+                if "SHADOW_ORDER_INTENT" in line:
+                    intents += 1
     if shadowed:
         return Result(
             "shadow-stage-exercised", PASS,
-            f"{shadowed} shadowed execution(s) on record across {intents} intent(s)",
+            f"{shadowed} shadowed execution(s) on record across {intents} intent(s), "
+            f"counted across {len(generations)} journal generation(s)",
         )
     return Result(
         "shadow-stage-exercised", WARN,
         f"the shadow mechanism is verified but the stage has never run: "
-        f"{shadowed} shadowed execution(s), {intents} intent(s) on record",
+        f"{shadowed} shadowed execution(s), {intents} intent(s) on record across "
+        f"{len(generations)} journal generation(s)",
         "MIN_AGENT_SHADOW is off; Phase 5 cannot be called MET on the strength of "
         "mechanism tests alone",
     )
