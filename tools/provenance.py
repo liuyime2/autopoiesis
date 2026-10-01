@@ -20,11 +20,11 @@ import glob
 import json
 import os
 import pathlib
-from pathlib import Path
 import subprocess
 import sys
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "runtime" / "min_agent"
