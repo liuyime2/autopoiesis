@@ -604,7 +604,9 @@ def _safe(check, name: str):
     """
     try:
         return check()
-    except Exception as exc:  # a raising check is a failing check
+    except (Exception, SystemExit) as exc:  # a raising check is a failing check
+        # SystemExit included: a check that calls sys.exit would otherwise terminate the
+        # whole gate, which is the failure mode this wrapper exists to prevent.
         return Result(
             name, FAIL,
             f"raised {type(exc).__name__}: {exc}. The check did not run to a verdict; "
@@ -633,6 +635,36 @@ def _dated_section_ranges(text: str) -> list[tuple[int, int]]:
     if not match:
         return []
     return [(match.start(), len(text))]
+
+
+def _research_verdict_codes() -> set[str]:
+    """Every verdict code the research layer can emit, read from its own source.
+
+    A trial log records `verdict()` split on ":", so the codes are the strings that method
+    returns before the colon. Reading them from the source means adding a new verdict - which
+    happens every time the multiple-testing criteria change - cannot silently break the
+    ledger check.
+    """
+    sys.path.insert(0, str(SRC))
+    from min_agent.research import walk_forward
+
+    codes: set[str] = set()
+    for name in dir(walk_forward):
+        member = getattr(walk_forward, name)
+        if callable(member) or not isinstance(member, str):
+            continue
+        if member and member.replace("_", "").isupper():
+            codes.add(member)
+    source = (SRC / "min_agent" / "research" / "walk_forward.py").read_text(encoding="utf-8")
+    for match in re.finditer(r'"([A-Z][A-Z_]{3,}):', source):
+        codes.add(match.group(1))
+    for match in re.finditer(r'return\s+f?"([A-Z][A-Z_]{3,})"', source):
+        codes.add(match.group(1))
+    # backtest.py emits its own codes
+    backtest = (SRC / "min_agent" / "research" / "backtest.py").read_text(encoding="utf-8")
+    for match in re.finditer(r'"([A-Z][A-Z_]{3,}):', backtest):
+        codes.add(match.group(1))
+    return codes
 
 
 def check_the_fresh_clone_evidence_is_real() -> Result:
@@ -1026,10 +1058,20 @@ def check_figures_quoted_in_config_comments() -> Result:
     )
     found = _re.search(r"Found (\d+) error", proc.stdout)
     if found:
-        for match in _re.finditer(r"(?:produced|sites record[s]? what failed.*?\b)(\d+)", text):
+        # The pattern required the digits immediately after the keyword, so it matched
+        # nothing - ruff.toml reads "would have produced 60 findings" with a space. The check
+        # reported the ruff count in its PASS detail while never comparing it, and rewriting
+        # 60 to 7 still passed. Anchored on the phrase that actually appears.
+        for match in _re.finditer(r"produced (\d+) findings", text):
             if int(match.group(1)) != int(found.group(1)):
                 problems.append(
                     f"ruff.toml says {match.group(1)} BLE001 findings; ruff reports "
+                    f"{found.group(1)}"
+                )
+        for match in _re.finditer(r"these (\d+) sites record", text):
+            if int(match.group(1)) != int(found.group(1)):
+                problems.append(
+                    f"ruff.toml says {match.group(1)} permitted BLE001 sites; ruff reports "
                     f"{found.group(1)}"
                 )
 
@@ -1134,7 +1176,15 @@ def check_status_only_states_what_does_not_change() -> Result:
         ("exposure limit", f"{config.max_total_exposure:,.0f}"),
         ("daily loss limit", f"{config.max_daily_loss:,.0f}"),
     ):
-        pattern = re.escape(value) if not value.startswith("$") else r"\$\s?" + re.escape(value)
+        # Anchored on both sides. `re.escape("5,000")` matches inside "$15,000" and
+        # "20,000" inside "$120,000", so a table quoting limits five times the configured ones
+        # was accepted as correct - verified by doing exactly that. A limit is a number with
+        # boundaries, and so is its match.
+        pattern = (
+            r"(?<![\d,])" + re.escape(value) + r"(?![\d,])"
+            if not value.startswith("$")
+            else r"\$\s?" + re.escape(value) + r"(?![\d,])"
+        )
         if not re.search(pattern, rows):
             problems.append(
                 f"the fixed table does not state the configured {label} ({value})"
@@ -1735,8 +1785,8 @@ def check_shadow_stage_has_actually_run() -> Result:
         f"the shadow mechanism is verified but the stage has never run: "
         f"{shadowed} shadowed execution(s), {intents} intent(s) on record across "
         f"{len(generations)} journal generation(s)",
-        "MIN_AGENT_SHADOW is off; Phase 5 cannot be called MET on the strength of "
-        "mechanism tests alone",
+        "an intent is recorded but no execution was ever shadowed, so the stage is not "
+        "exercised; it cannot be called MET on the strength of mechanism tests alone",
     )
 
 
@@ -1851,7 +1901,13 @@ def check_research_trial_ledger() -> Result:
     # traced back to anything; a verdict outside the known set means the ledger is being
     # written by something this check does not understand.
     problems = []
-    known_verdicts = {"PASS", "FAIL", "INCONCLUSIVE", "INSUFFICIENT"}
+    # Derived from the producer, not guessed. The first version hardcoded
+    # {PASS, FAIL, INCONCLUSIVE, INSUFFICIENT}, and walk_forward.verdict() has never emitted
+    # PASS or FAIL - it emits PASSES_RESEARCH_GATE, and the ledger stores the code before the
+    # colon. So the first trial that actually passed research was reported as
+    # "unrecognised verdict" and the gate turned red on the exact outcome the project exists
+    # to reach. A gate that punishes success gets disabled at the moment it matters.
+    known_verdicts = _research_verdict_codes()
     for index, record in enumerate(recorded):
         if not record.get("strategy_id"):
             problems.append(f"record {index} has no strategy_id, so it cannot be traced back")
@@ -2625,6 +2681,21 @@ def main() -> int:
 
     results: list[Result] = []
     wanted = set(args.only) if args.only else None
+    if wanted:
+        # `make verify CLASS=typo-class` used to report "OK - all check classes pass" with
+        # zero tests executed: an unmatched name silently skipped the loop. That is the one
+        # workflow the README, Makefile help and STATUS.md all advertise for per-class
+        # debugging, and a typo in it produced a green gate that checked nothing.
+        #
+        # The valid set is CHECK_CLASSES plus the bespoke names, not CHECK_CLASSES alone -
+        # the first version rejected `config-comment-figures-true` as unknown, which is a
+        # real class, because only the loop's classes were considered.
+        known = set(CHECK_CLASSES) | set(BESPOKE_CHECK_NAMES)
+        unknown = sorted(wanted - known)
+        if unknown:
+            print(f"verify: no such check class: {', '.join(unknown)}", file=sys.stderr)
+            print(f"        {len(known)} classes exist; run `make classes`", file=sys.stderr)
+            return 2
 
     results.append(_safe(check_all_tests_classified, "test-coverage-map"))
     results.append(_safe(check_known_classes_run, "class-coverage"))

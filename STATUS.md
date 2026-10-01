@@ -4,11 +4,10 @@ Last updated: 2026-10-01. This file replaces `LEARNING_STATUS.md`,
 `learning_daemon_summary.md`, `findings.md`, `progress.md` and `task_plan.md`,
 all of which described the system as running when it had been dead for 97 days.
 
-> **Dated section.** Everything below this line records the position at the time it was
-> written - including the figures, which were correct then. `minictrl doctor` is the source
-> of truth and it is running; run it rather than trusting this file over it. For what this
-> document states as fixed configuration, and which has not changed, see the table at the
-> top.
+> **Dated section starts here.** Everything below this line records the position at
+> the time it was written. Its figures were correct then and are not claims about
+> the present. For current numbers run `minictrl doctor`; the fixed configuration is
+> in the table above.
 
 ## Where things stand
 
@@ -84,11 +83,13 @@ three strategies carrying verified PnL are already `ACTIVE` or `RETIRED`, and th
 agent has just sold its last agent-owned share, so nothing is in `PROBATION` with a
 closed lot behind it. It needs a new round trip, not another fix.
 
-> **Dated section.** This records what was wrong and what was fixed, up to the point the
 > defects were closed. Its figures describe the system at that time - "908 cycles",
 > "the agent has never closed a lot" - and are not claims about the present. For current
 > numbers run `minictrl doctor`; for what this file states as fixed configuration, see the
 > table at the top.
+
+> **Dated section starts here.** Everything below records the position at the time
+> `minictrl doctor`; the fixed configuration is in the table above.
 
 ## What was wrong, and what is fixed
 
@@ -277,7 +278,6 @@ Alpaca UI.
 > Dated section. The figures below are what the gate reported on 2026-09-28 and are
 > correct for that date. For the current figures see `README.md`; the gate now runs
 > 45 check classes. The sections below are a record of what was true when each was
-> written, not a description of the present.
 
 **`make verify` is the single gate.** 17 check classes, 0 failed, 472 distinct
 tests, 61/61 defect audit, `doctor` RESULT OK, exit 0. Per-class re-runs:
