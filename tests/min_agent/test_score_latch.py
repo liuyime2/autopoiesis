@@ -32,9 +32,9 @@ from min_agent.models import (
     ExecutionResult,
     GuardianResult,
     StrategyResult,
+    StrategySpec,
     TradeDecision,
 )
-from min_agent.models import StrategySpec
 from min_agent.strategy_engine import StrategyLifecycleManager, StrategySelector
 
 

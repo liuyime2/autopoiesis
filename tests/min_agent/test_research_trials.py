@@ -80,6 +80,7 @@ def test_the_trial_log_is_not_the_production_journal(tmp_path):
     """The separation is the point: production must never read this, or a backtest
     could influence what trades."""
     import inspect
+
     from min_agent.research import trials as module
 
     source = inspect.getsource(module)

@@ -1,7 +1,12 @@
 from datetime import datetime, timezone
 
 from min_agent.models import AccountSnapshot, DataSnapshot, StrategyResult, StrategySpec
-from min_agent.strategy_engine import StrategyExecutor, StrategyLibrary, StrategyLifecycleManager, StrategySelector
+from min_agent.strategy_engine import (
+    StrategyExecutor,
+    StrategyLibrary,
+    StrategyLifecycleManager,
+    StrategySelector,
+)
 
 
 def make_snapshot(*, last_price=100, symbol="SPY", market_open=True):
@@ -867,10 +872,12 @@ def test_buy_and_sell_are_not_duplicates_of_each_other():
 
 
 def test_admission_rejects_a_strategy_that_would_behave_identically_to_one_in_the_library():
+    import pathlib
+    import tempfile
+
     from min_agent.guardian import Guardian
-    from min_agent.strategy_engine import StrategyLibrary
     from min_agent.strategy_admission import StrategyAdmission
-    import tempfile, pathlib
+    from min_agent.strategy_engine import StrategyLibrary
 
     with tempfile.TemporaryDirectory() as tmp:
         library = StrategyLibrary(pathlib.Path(tmp) / "strategies")

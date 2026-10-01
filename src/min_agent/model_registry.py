@@ -19,7 +19,6 @@ configured model, which would assert a fact about the past that is not known.
 
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass, field
 
 UNATTRIBUTED = "UNATTRIBUTED"

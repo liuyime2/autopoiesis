@@ -10,8 +10,8 @@ from min_agent.models import (
     ClosedLotAttribution,
     CycleRecord,
     EvaluationReport,
-    OpenLotAttribution,
     FillAttribution,
+    OpenLotAttribution,
     PnLEvidence,
     StrategyEvaluation,
 )

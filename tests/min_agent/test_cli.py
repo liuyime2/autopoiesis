@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from min_agent.cli import _evidence_report, _stop_daemon, _verify_profit_target
 from min_agent.config import AgentConfig
 from min_agent.journal import JsonlJournal
@@ -139,3 +141,29 @@ def test_verify_profit_target_succeeds_only_with_broker_verified_threshold(tmp_p
     output = capsys.readouterr().out
     assert exit_code == 0
     assert '"status": "satisfied"' in output
+
+
+def test_help_renders_without_crashing(capsys):
+    """`--help` must work, and argparse makes that easy to break.
+
+    argparse applies `%`-formatting to any help string containing a percent sign, so
+    `"the 10% daily target"` parsed as a `% d` conversion and raised
+    `TypeError: %d format: a real number is required, not dict` on every invocation
+    that printed usage. Nothing in the suite invoked `--help`, so it stayed broken
+    for as long as the string existed.
+
+    The parser is constructed inside `main()`, so this drives the real entry point and
+    asserts on its output rather than reaching for an internal builder that does not
+    exist.
+    """
+    from min_agent import cli
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["--help"])
+    assert exit_info.value.code == 0
+
+    out = capsys.readouterr().out
+    assert "usage:" in out
+    # The flags an operator needs to discover the system.
+    for flag in ("--daemon", "--status", "--doctor", "--once"):
+        assert flag in out, f"{flag} missing from --help output"

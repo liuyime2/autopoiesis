@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "min-agent"
+version = "0.1.0"
+description = "A paper-trading agent that grades its own strategies against broker evidence and retires the ones that do not earn their place."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+
+# The complete runtime dependency set. Three packages, all reachable by importing the
+# package: `alpaca_trade_api` in data_gateway/executor/cli/broker_evidence,
+# `pydantic` in models.py, `requests` in the three Alpaca call sites that use it
+# directly. There is no implicit dependency, no vendored copy and no import of a
+# stdlib-adjacent backport - this list was derived by scanning every `import` in
+# src/min_agent rather than by reading an existing manifest, because there wasn't one.
+dependencies = [
+    "alpaca-trade-api>=3.2,<4",
+    "pydantic>=2.9,<3",
+    "requests>=2.31,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+]
+
+[project.scripts]
+# The single canonical entry point. Every operational task is a subcommand here;
+# the Makefile delegates to this rather than reimplementing any of it.
+min-agent = "min_agent.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+# research/ is a deliberate quarantine: diagnosis, never execution. It ships with the
+# package because `tools/verify.py` scans it and the tests exercise it, but
+# check_production_research_separation() fails the build if production imports it.
+include = ["min_agent*"]
+
+[tool.mypy]
+python_version = "3.10"
+# Third-party stubs for the Alpaca client do not exist and the client is thin; the
+# agent's own model layer is where type errors actually matter.
+ignore_missing_imports = true
+# The codebase uses `from __future__ import annotations` throughout and relies on
+# forward references inside pydantic models.
+follow_imports = "silent"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+# Not enabled deliberately: `disallow_untyped_defs`. Turning it on would report every
+# function in the codebase, and the useful signal - an annotation that contradicts the
+# code - comes from the checks below. Enabling it would be a large diff that hides the
+# few real findings among hundreds of mechanical ones.
+check_untyped_defs = true
+no_implicit_optional = true
+strict_equality = true

@@ -31,9 +31,10 @@ Two properties are enforced rather than assumed:
 
 from __future__ import annotations
 
+import itertools
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Sequence
 
 TRENDING_UP = "TRENDING_UP"
 TRENDING_DOWN = "TRENDING_DOWN"
@@ -109,7 +110,7 @@ def classify(
     gap_limit = SAMPLING_MINUTES * GAP_MULTIPLE
     contiguous = all(
         (b.timestamp - a.timestamp).total_seconds() / 60.0 <= gap_limit
-        for a, b in zip(recent, recent[1:])
+        for a, b in itertools.pairwise(recent)
     )
     if not contiguous:
         return Regime(

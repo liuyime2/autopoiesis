@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from min_agent.atomicio import read_json, write_json_atomic
-from min_agent.models import CurriculumTask, ReflectionRecord, STRATEGY_PARAMETER_SCHEMAS, StrategySpec
+from min_agent.models import STRATEGY_PARAMETER_SCHEMAS, CurriculumTask, ReflectionRecord, StrategySpec
 
 CurriculumTransport = Callable[[dict[str, Any]], str]
 
@@ -863,7 +863,6 @@ def _unmet_capability(task: CurriculumTask, context: Mapping[str, object]) -> st
 def _capability_demand(attempts: list[str], context: Mapping[str, object]) -> dict[str, object]:
     coverage = context.get("capability_coverage")
     price = coverage.get("evaluated_at_last_price") if isinstance(coverage, Mapping) else None
-    positions = context.get("open_positions") or []
     return {
         "uncovered_actions_now": (
             coverage.get("uncovered_actions_now") if isinstance(coverage, Mapping) else None

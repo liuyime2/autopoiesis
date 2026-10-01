@@ -164,9 +164,8 @@ def test_exclusive_lock_is_mutually_exclusive(tmp_path):
 
 def test_shared_locks_do_not_block_each_other(tmp_path):
     lock = tmp_path / "x.lock"
-    with file_lock(lock, exclusive=False, timeout=5.0):
-        with file_lock(lock, exclusive=False, timeout=5.0):
-            pass
+    with file_lock(lock, exclusive=False, timeout=5.0), file_lock(lock, exclusive=False, timeout=5.0):
+        pass
 
 
 # --- strategy library --------------------------------------------------------

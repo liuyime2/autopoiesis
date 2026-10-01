@@ -5,9 +5,9 @@ import fcntl
 import json
 import os
 import tempfile
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 
 def write_text_atomic(path: Path | str, text: str, *, encoding: str = "utf-8") -> None:

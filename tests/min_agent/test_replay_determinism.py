@@ -9,14 +9,18 @@ Determinism also is what makes a failure reproducible: a bug found at 03:00 has 
 still be there at 09:00 when you try to look at it.
 """
 
-from datetime import datetime, timedelta, timezone
 import json
+from datetime import datetime, timedelta, timezone
 
 from min_agent import counterfactual as cf
 from min_agent.journal import JsonlJournal
 from min_agent.models import (
-    AccountSnapshot, CycleRecord, DataSnapshot, ExecutionResult,
-    GuardianResult, TradeDecision,
+    AccountSnapshot,
+    CycleRecord,
+    DataSnapshot,
+    ExecutionResult,
+    GuardianResult,
+    TradeDecision,
 )
 
 T0 = datetime(2026, 6, 1, 14, 30, tzinfo=timezone.utc)
@@ -196,5 +200,5 @@ def test_a_pending_placeholder_is_not_a_determinism_violation():
     )
     assert settled.verdict == GOOD_HOLD
     assert settled.net_return_pct == 0.95
-    again = CounterfactualRow(**{**dataclasses.asdict(settled)})
+    again = CounterfactualRow(**dataclasses.asdict(settled))
     assert (again.verdict, again.net_return_pct) == (settled.verdict, settled.net_return_pct)

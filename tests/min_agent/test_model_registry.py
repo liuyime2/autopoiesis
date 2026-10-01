@@ -17,7 +17,11 @@ import pytest
 from min_agent import model_registry
 from min_agent.llm_decision import parse_decision_json
 from min_agent.models import (
-    AccountSnapshot, CycleRecord, DataSnapshot, ExecutionResult, GuardianResult,
+    AccountSnapshot,
+    CycleRecord,
+    DataSnapshot,
+    ExecutionResult,
+    GuardianResult,
     TradeDecision,
 )
 
@@ -76,8 +80,9 @@ def test_a_model_named_inside_the_response_is_not_overwritten():
 
 def test_the_fallback_path_names_itself():
     """A fallback decision must never be counted as a model's work."""
-    from min_agent.policy_engine import PolicyEngine
     import inspect
+
+    from min_agent.policy_engine import PolicyEngine
     source = inspect.getsource(PolicyEngine)
     assert 'model="fallback_policy_engine"' in source
 
@@ -162,8 +167,9 @@ def test_an_empty_registry_is_honest_rather_than_crashy():
 
 def test_decisions_from_different_sources_are_not_merged_under_one_model():
     """A fallback decision naming itself must be separable from a model decision."""
-    from min_agent.policy_engine import PolicyEngine
     import inspect
+
+    from min_agent.policy_engine import PolicyEngine
     registry = model_registry.build([
         _cycle(model="qwen3.8:27b"),
         _cycle(model="fallback_policy_engine"),

@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 """Test real Alpaca connection and market status."""
-import os
 import sys
+
 sys.path.insert(0, 'src')
 
 import alpaca_trade_api as tradeapi
+
 from min_agent.config import AgentConfig
 from min_agent.data_gateway import AlpacaDataGateway
+
 
 def main():
     print("=" * 60)
@@ -41,7 +43,7 @@ def main():
 
     # Test 3: Get Positions
     print("\n[3/5] Getting Positions...")
-    positions = client.get_all_positions()
+    positions = client.list_positions()
     print(f"  Position count: {len(positions)}")
     for pos in positions:
         print(f"    {pos.side} {pos.qty} {pos.symbol}")

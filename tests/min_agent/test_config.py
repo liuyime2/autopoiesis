@@ -119,7 +119,7 @@ def test_the_model_is_pinned_in_the_same_three_places_everywhere():
     import re
 
     root = pathlib.Path(__file__).resolve().parents[2]
-    default = AgentConfig.from_env.__wrapped__ if False else None  # noqa: F841
+    default = AgentConfig.from_env.__wrapped__ if False else None
     from min_agent.config import AgentConfig as C
 
     expected = C.from_env().model

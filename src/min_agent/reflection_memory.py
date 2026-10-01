@@ -6,7 +6,13 @@ from pathlib import Path
 
 from min_agent.atomicio import write_text_atomic
 from min_agent.evaluator import DeterministicEvaluator
-from min_agent.models import BrokerEvidenceBatch, BrokerFillActivity, CycleRecord, ReflectionRecord, StrategyResult
+from min_agent.models import (
+    BrokerEvidenceBatch,
+    BrokerFillActivity,
+    CycleRecord,
+    ReflectionRecord,
+    StrategyResult,
+)
 
 
 class ReflectionMemory:

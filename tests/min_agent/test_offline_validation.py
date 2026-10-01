@@ -86,8 +86,8 @@ def test_the_screen_has_no_code_path_that_promotes():
     """The whole point. Promotion to ACTIVE requires prospective live cycles; if
     this stage could promote, a screen would short-circuit live evidence."""
     verdicts = set()
-    for holds in range(0, 30):
-        for trades in range(0, 5):
+    for holds in range(30):
+        for trades in range(5):
             decisions = [_d(ov.GOOD_HOLD, -1.0, cycle=f"h{i}") for i in range(holds)]
             decisions += [
                 _d(ov.MISSED_ALPHA, 1.0, cycle=f"m{i}") for i in range(30 - holds - trades)

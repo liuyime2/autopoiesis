@@ -19,8 +19,14 @@ from enum import Enum
 from pathlib import Path
 
 from min_agent import (
-    attribution, calibration, counterfactual, experiment_registry,
-    lineage, model_registry, regime, strategy_engine,
+    attribution,
+    calibration,
+    counterfactual,
+    experiment_registry,
+    lineage,
+    model_registry,
+    regime,
+    strategy_engine,
 )
 from min_agent.atomicio import write_json_atomic
 from min_agent.broker_evidence import latest_evidence_batch
@@ -33,9 +39,9 @@ from min_agent.evaluator import (
 from min_agent.fill_reconciler import FILL_EVENT
 from min_agent.health import HealthMonitor
 from min_agent.journal import JsonlJournal
-from min_agent.reflection_memory import ReflectionMemory
 from min_agent.knowledge_library import KnowledgeLibrary
-from min_agent.models import BrokerEvidenceBatch, StrategySpec
+from min_agent.models import StrategySpec
+from min_agent.reflection_memory import ReflectionMemory
 from min_agent.strategy_engine import StrategyLibrary
 
 OK = "ok"
@@ -536,7 +542,7 @@ def _check_decision_quality(
 
 
 def _check_experiment_chain(
-    report: DoctorReport, config: AgentConfig, journal: "JsonlJournal"
+    report: DoctorReport, config: AgentConfig, journal: JsonlJournal
 ) -> None:
     """Report whether each strategy's journey is fully accounted for.
 
@@ -600,7 +606,7 @@ def _check_experiment_chain(
 
 
 def _check_champion_and_search(
-    report: DoctorReport, config: AgentConfig, journal: "JsonlJournal"
+    report: DoctorReport, config: AgentConfig, journal: JsonlJournal
 ) -> None:
     """Name the benchmark, and report how hard the system searched for each candidate.
 
@@ -665,7 +671,7 @@ def _check_champion_and_search(
 def _check_model_calibration(
     report: DoctorReport,
     config: AgentConfig,
-    journal: "JsonlJournal",
+    journal: JsonlJournal,
     records: list,
 ) -> None:
     """Score the model's confidence against what actually happened.
@@ -707,7 +713,7 @@ def _check_model_calibration(
 def _check_pnl_attribution(
     report: DoctorReport,
     config: AgentConfig,
-    journal: "JsonlJournal",
+    journal: JsonlJournal,
     records: list,
 ) -> None:
     """State which cause produced the PnL, and refuse to guess where the data cannot.
@@ -736,11 +742,7 @@ def _check_pnl_attribution(
     latest = events[-1]
     # Point-in-time regime labels, so a lot is attributed to the market it was opened
     # in rather than to a regime computed over the whole history.
-    labels = {
-        ts: r for ts, r in regime.regime_timeline(
-            regime.bars_from_records(records)
-        )
-    }
+    labels = dict(regime.regime_timeline(regime.bars_from_records(records)))
     result = attribution.attribute(
         records, latest.payload["pnl"], latest.payload, regime_labels=labels
     )
@@ -908,9 +910,7 @@ def _check_model_registry(
 def _check_knowledge_value(report: DoctorReport, config: AgentConfig) -> None:
     """Flag a knowledge library that is growing without carrying information."""
     try:
-        artifacts = [
-            a for a in KnowledgeLibrary(config.knowledge_dir).list(status="ACCEPTED")
-        ]
+        artifacts = KnowledgeLibrary(config.knowledge_dir).list(status="ACCEPTED")
     except Exception as exc:
         report.add("knowledge value", WARN, f"library unreadable: {type(exc).__name__}")
         return
@@ -961,6 +961,12 @@ def _records(journal: JsonlJournal):
 def _check_environment(report: DoctorReport, config: AgentConfig) -> None:
     import sys
 
+    # Kept even though pyproject declares requires-python >= 3.10. `pip` refusing an
+    # incompatible install is not a substitute for the system reporting one: the env can
+    # be activated directly, or PYTHONPATH set, without any install step happening at
+    # all - which is how this project is run. A 3.9 interpreter under this source would
+    # break every dependency check below it, so it is worth naming here rather than
+    # discovering later as an unrelated ImportError.
     version = ".".join(str(p) for p in sys.version_info[:3])
     if sys.version_info < (3, 10):
         report.add("python", FAIL, f"{version} is too old (need >= 3.10)", "use the llm conda env")
@@ -1326,4 +1332,4 @@ def build_client(config: AgentConfig):
         return None
 
 
-__all__ = ["DoctorReport", "run_doctor", "build_client", "Status", "OK", "WARN", "FAIL", "SKIP"]
+__all__ = ["FAIL", "OK", "SKIP", "WARN", "DoctorReport", "Status", "build_client", "run_doctor"]

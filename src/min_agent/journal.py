@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import os
-import time
 from collections import deque
 from pathlib import Path
 
@@ -70,32 +68,30 @@ class JsonlJournal:
         count = 0
         self.last_dropped_lines = 0
         date_text = day.isoformat()
-        with self._read_lock():
-            with self.path.open("r", encoding="utf-8") as handle:
-                for line in handle:
-                    if _EVENT_MARKER in line or _CYCLE_MARKER not in line or date_text not in line:
-                        continue
-                    try:
-                        record = CycleRecord.model_validate_json(line)
-                    except Exception:
-                        self._note_drop(line)
-                        continue
-                    if record.snapshot.timestamp.date() != day:
-                        continue
-                    if record.execution.status != "SUBMITTED":
-                        continue
-                    if record.decision.action == "HOLD":
-                        continue
-                    count += 1
+        with self._read_lock(), self.path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if _EVENT_MARKER in line or _CYCLE_MARKER not in line or date_text not in line:
+                    continue
+                try:
+                    record = CycleRecord.model_validate_json(line)
+                except Exception:
+                    self._note_drop(line)
+                    continue
+                if record.snapshot.timestamp.date() != day:
+                    continue
+                if record.execution.status != "SUBMITTED":
+                    continue
+                if record.decision.action == "HOLD":
+                    continue
+                count += 1
         return count
 
     def stats(self) -> dict[str, object]:
         if not self.path.exists():
             return {"exists": False, "path": str(self.path), "bytes": 0, "lines": 0}
         size = self.path.stat().st_size
-        with self._read_lock():
-            with self.path.open("rb") as handle:
-                lines = sum(chunk.count(b"\n") for chunk in iter(lambda: handle.read(1 << 20), b""))
+        with self._read_lock(), self.path.open("rb") as handle:
+            lines = sum(chunk.count(b"\n") for chunk in iter(lambda: handle.read(1 << 20), b""))
         return {
             "exists": True,
             "path": str(self.path),

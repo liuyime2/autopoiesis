@@ -5,29 +5,27 @@ import json
 import os
 import signal
 import subprocess
-import sys
 import time
-
-import requests
-
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from min_agent.broker_evidence import BrokerEvidenceProvider
+import requests
+
+from min_agent.broker_evidence import BrokerEvidenceProvider, latest_evidence_batch
 from min_agent.config import AgentConfig
+from min_agent.curriculum import StructuredCurriculumAgent, generate_curriculum_task_json
 from min_agent.daemon import AgentDaemon
 from min_agent.data_gateway import AlpacaDataGateway
-from min_agent.executor import AlpacaPaperExecutor
-from min_agent.shadow import ShadowExecutor
-from min_agent.guardian import Guardian
-from min_agent.health import HealthMonitor
-from min_agent.broker_evidence import latest_evidence_batch
 from min_agent.evaluator import (
     PNL_EVIDENCE_ACCOUNT_VERIFIED,
     PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
     DeterministicEvaluator,
     confirmed_fill_activities,
 )
+from min_agent.executor import AlpacaPaperExecutor
+from min_agent.fill_reconciler import FillReconciler
+from min_agent.guardian import Guardian
+from min_agent.health import HealthMonitor
 from min_agent.journal import JsonlJournal
 from min_agent.knowledge_admission import KnowledgeAdmission
 from min_agent.knowledge_library import KnowledgeLibrary
@@ -37,15 +35,13 @@ from min_agent.llm_decision import (
     HybridDecisionEngine,
     OllamaDecisionEngine,
 )
-from min_agent.models import BrokerEvidenceBatch, JournalEvent
 from min_agent.loop import TradingLoop
-BrokerEvidenceBatch, JournalEvent
-from min_agent.fill_reconciler import FillReconciler
+from min_agent.models import BrokerEvidenceBatch, JournalEvent
 from min_agent.order_reconciler import OrderReconciler
-from min_agent.curriculum import StructuredCurriculumAgent, generate_curriculum_task_json
 from min_agent.policy_engine import PolicyEngine
 from min_agent.reflection_memory import ReflectionMemory
 from min_agent.scheduler import MarketScheduler
+from min_agent.shadow import ShadowExecutor
 from min_agent.strategy_admission import StrategyAdmission
 from min_agent.strategy_engine import StrategyLibrary, StrategyLifecycleManager
 from min_agent.trade_counter import TradeCounter
@@ -61,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reconcile", action="store_true", help="Compare recent journal orders with Alpaca open orders.")
     parser.add_argument("--ingest-evidence", action="store_true", help="Fetch broker paper evidence for the recent window.")
     parser.add_argument("--evidence-report", action="store_true", help="Report broker-backed PnL evidence from journal and latest ingest.")
-    parser.add_argument("--verify-profit-target", action="store_true", help="Verify the 10% daily paper-profit target using broker evidence only.")
+    parser.add_argument("--verify-profit-target", action="store_true", help="Verify the 10 percent daily paper-profit target using broker evidence only.")
     parser.add_argument("--max-cycles", type=int, default=None, help="Optional controlled daemon cycle limit for smoke tests.")
     parser.add_argument("--doctor", action="store_true", help="Check the whole system and exit non-zero on any fault.")
     parser.add_argument("--skip-broker", action="store_true", help="With --doctor, do not contact the broker.")

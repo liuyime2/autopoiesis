@@ -24,7 +24,11 @@ import pytest
 from min_agent.evaluator import DeterministicEvaluator
 from min_agent.journal import JsonlJournal
 from min_agent.models import (
-    AccountSnapshot, CycleRecord, DataSnapshot, ExecutionResult, GuardianResult,
+    AccountSnapshot,
+    CycleRecord,
+    DataSnapshot,
+    ExecutionResult,
+    GuardianResult,
     TradeDecision,
 )
 from min_agent.shadow import SHADOW_EVENT, ShadowExecutor
@@ -249,8 +253,8 @@ def test_the_real_loop_with_a_shadow_sink_reaches_no_broker(tmp_path):
     """The stage only means something if the *real* loop is what runs. This drives
     TradingLoop end to end with a broker client that raises on any use, so reaching
     the broker is a test failure rather than an untested assumption."""
-    from min_agent.loop import TradingLoop
     from min_agent.guardian import Guardian
+    from min_agent.loop import TradingLoop
 
     class Tripwire:
         def __getattr__(self, name):
@@ -310,9 +314,10 @@ def test_the_real_loop_with_a_shadow_sink_reaches_no_broker(tmp_path):
 def test_the_sink_choice_is_driven_only_by_the_config_flag():
     """One switch, one place. A shadow executor appearing anywhere else would be a
     second execution truth."""
+    from dataclasses import replace
+
     from min_agent.cli import _execution_sink
     from min_agent.config import AgentConfig
-    from dataclasses import replace
 
     cfg = AgentConfig(
         mode="paper", symbols=("SPY",), allowlist=frozenset({"SPY"}),

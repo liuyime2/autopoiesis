@@ -547,7 +547,7 @@ def test_two_phase_generation_handles_an_unknown_kind():
     def call(prompt, schema):
         if "action" not in schema.get("required", []):
             return '{"kind": "NONSENSE", "why": "w"}'
-        return json.dumps({  # noqa: E501
+        return json.dumps({
             "strategy_id": "x", "name": "X", "symbols": ["SPY"], "max_position_value": 100,
             "created_at": "2026-09-28T00:00:00Z", "rationale": "r",
             "action": "BUY", "quantity": 1, "confidence": 0.6,

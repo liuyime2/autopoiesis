@@ -38,7 +38,7 @@ Verdicts:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 
 from min_agent.models import CycleRecord
 

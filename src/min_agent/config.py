@@ -54,7 +54,7 @@ class AgentConfig:
     profit_target_return_pct: float = 0.10
 
     @classmethod
-    def from_env(cls) -> "AgentConfig":
+    def from_env(cls) -> AgentConfig:
         allowlist = _split_symbols(os.getenv("MIN_AGENT_ALLOWLIST", "SPY,QQQ,AAPL,MSFT,NVDA"))
         symbols = _split_symbols(os.getenv("MIN_AGENT_SYMBOLS", "SPY"))
         mode = os.getenv("MIN_AGENT_MODE", "paper").strip().lower()

@@ -38,7 +38,10 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from min_agent.models import (
-    ExecutionResult, GuardianResult, JournalEvent, TradeDecision,
+    ExecutionResult,
+    GuardianResult,
+    JournalEvent,
+    TradeDecision,
 )
 
 #: Emitted for every order that would have been submitted. Durable evidence that the

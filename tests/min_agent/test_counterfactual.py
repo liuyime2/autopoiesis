@@ -12,8 +12,12 @@ import pytest
 
 from min_agent import counterfactual as cf
 from min_agent.models import (
-    AccountSnapshot, CycleRecord, DataSnapshot, ExecutionResult,
-    GuardianResult, TradeDecision,
+    AccountSnapshot,
+    CycleRecord,
+    DataSnapshot,
+    ExecutionResult,
+    GuardianResult,
+    TradeDecision,
 )
 
 

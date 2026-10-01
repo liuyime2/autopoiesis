@@ -50,11 +50,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from min_agent.journal import JsonlJournal  # noqa: E402
-from min_agent.models import CycleRecord, JournalEvent, StrategyResult  # noqa: E402
-from min_agent.reflection_memory import ReflectionMemory  # noqa: E402
-from min_agent.evaluator import DeterministicEvaluator, is_system_rejection  # noqa: E402
-from min_agent.strategy_engine import StrategyLibrary, StrategyLifecycleManager  # noqa: E402
+from min_agent.evaluator import DeterministicEvaluator, is_system_rejection
+from min_agent.journal import JsonlJournal
+from min_agent.models import CycleRecord, JournalEvent, StrategyResult
+from min_agent.reflection_memory import ReflectionMemory
+from min_agent.strategy_engine import StrategyLibrary, StrategyLifecycleManager
 
 
 def _restore_candidates(journal: JsonlJournal) -> list[str]:

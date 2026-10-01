@@ -14,8 +14,8 @@ the feature. A backtest that printed a confident verdict on this little data wou
 be the defect.
 """
 
-from datetime import datetime, timedelta, timezone
 import math
+from datetime import datetime, timedelta, timezone
 
 import pytest
 

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timezone
-from typing import Iterable
 
-from min_agent.models import BrokerEvidenceBatch, BrokerFillActivity, BrokerOrderSnapshot, PortfolioHistoryPoint
+from min_agent.models import (
+    BrokerEvidenceBatch,
+    BrokerFillActivity,
+    BrokerOrderSnapshot,
+    PortfolioHistoryPoint,
+)
 
 
 class BrokerEvidenceProvider:
@@ -117,7 +122,9 @@ class BrokerEvidenceProvider:
                 history = self.client.get_portfolio_history()
                 self.window_fallback = f"unparameterised (requested {inclusive_days}d)"
                 return self._normalize_portfolio_history(history)
-            except Exception as exc:  # noqa: BLE001 - the next timeframe may work
+            # Several Alpaca endpoints reject one timeframe and accept another, so a
+            # failure here is not fatal - the next timeframe may work.
+            except Exception as exc:
                 last_error = exc
                 continue
             # Alpaca told us which timeframe it will accept, so if we had to step

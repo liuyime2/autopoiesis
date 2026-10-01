@@ -53,9 +53,9 @@ Rules implemented, matching what the models actually validate:
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable, Sequence
 
 #: Commission per side as a percent of notional. Alpaca paper reported 0.0 on every
 #: fill, so this stands in for what a real venue charges. It is an assumption, not
@@ -317,7 +317,7 @@ def run_backtest(
     result.net_pnl = realized
     if spent > 0:
         result.return_pct = realized / spent * 100.0
-    result.max_drawdown_pct = _max_drawdown([1.0] + [equity])
+    result.max_drawdown_pct = _max_drawdown([1.0, equity])
     return result
 
 

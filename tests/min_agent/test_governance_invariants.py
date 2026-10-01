@@ -15,8 +15,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from min_agent.config import AgentConfig
 from min_agent.atomicio import write_json_atomic
+from min_agent.config import AgentConfig
 from min_agent.doctor import RISK_BASELINE_PATH, run_doctor
 
 
@@ -64,11 +64,16 @@ def _detail(report, name):
 def test_an_order_submitted_without_guardian_approval_fails_the_check(tmp_path):
     """`executor.execute` refuses to submit an unapproved decision, but nothing ever
     checked that it did - and a reflection layer reads these same records."""
-    from min_agent.models import (
-        AccountSnapshot, DataSnapshot, ExecutionResult, GuardianResult,
-        StrategySpec, TradeDecision, CycleRecord,
-    )
     from min_agent.journal import JsonlJournal
+    from min_agent.models import (
+        AccountSnapshot,
+        CycleRecord,
+        DataSnapshot,
+        ExecutionResult,
+        GuardianResult,
+        StrategySpec,
+        TradeDecision,
+    )
 
     config = _config(tmp_path)
     journal = JsonlJournal(config.journal_path)
@@ -98,11 +103,15 @@ def test_an_order_submitted_without_guardian_approval_fails_the_check(tmp_path):
 
 def test_a_real_session_reports_no_bypass(tmp_path):
     """The other direction: the check must not cry wolf, or it gets ignored."""
-    from min_agent.models import (
-        AccountSnapshot, DataSnapshot, ExecutionResult, GuardianResult,
-        TradeDecision, CycleRecord,
-    )
     from min_agent.journal import JsonlJournal
+    from min_agent.models import (
+        AccountSnapshot,
+        CycleRecord,
+        DataSnapshot,
+        ExecutionResult,
+        GuardianResult,
+        TradeDecision,
+    )
 
     config = _config(tmp_path)
     journal = JsonlJournal(config.journal_path)

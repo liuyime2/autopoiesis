@@ -35,13 +35,16 @@ strategy's state.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import math
 import random
-from typing import Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 
 from min_agent.research.backtest import (
-    Bar, BacktestResult, DEFAULT_COMMISSION_PCT, DEFAULT_SLIPPAGE_PCT,
+    DEFAULT_COMMISSION_PCT,
+    DEFAULT_SLIPPAGE_PCT,
+    BacktestResult,
+    Bar,
     run_backtest,
 )
 
@@ -137,7 +140,7 @@ class WalkForwardResult:
         square-root schedule: search harder, and demand proportionally more of the
         only thing that is not negotiable.
         """
-        return int(math.ceil(BASE_REQUIRED_TRADES * math.sqrt(max(1, self.trials))))
+        return math.ceil(BASE_REQUIRED_TRADES * math.sqrt(max(1, self.trials)))
 
     def threshold(self) -> float:
         """The return a fold must clear. Kept separate from `required_trades` so a

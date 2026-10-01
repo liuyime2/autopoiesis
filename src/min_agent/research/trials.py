@@ -25,9 +25,9 @@ the run would be worse than losing the record.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 

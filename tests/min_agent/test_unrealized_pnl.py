@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from min_agent.evaluator import _open_lots, _Lot, _LotLedger
+from min_agent.evaluator import _Lot, _LotLedger, _open_lots
 from min_agent.models import OpenLotAttribution
 
 TS = datetime(2026, 6, 1, 14, 30, tzinfo=timezone.utc)

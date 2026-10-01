@@ -5,7 +5,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-
 Action = Literal["BUY", "SELL", "HOLD"]
 DecisionSource = Literal["llm", "fallback_policy_engine", "policy_engine", "baseline"]
 HoldReason = Literal["no_signal", "risk_limit_near", "market_uncertain", "await_confirmation", "other"]
@@ -456,7 +455,7 @@ class StrategySpec(BaseModel):
         return symbols
 
     @model_validator(mode="after")
-    def validate_executable_parameters(self) -> "StrategySpec":
+    def validate_executable_parameters(self) -> StrategySpec:
         if any(key.strip().lower() in _FORBIDDEN_EXECUTABLE_KEYS for key in self.parameters):
             raise ValueError("strategy specs must not contain executable code parameters")
 
@@ -543,7 +542,7 @@ class KnowledgeArtifact(BaseModel):
         return tuple(str(item).strip() for item in value if str(item).strip())
 
     @model_validator(mode="after")
-    def validate_knowledge_artifact(self) -> "KnowledgeArtifact":
+    def validate_knowledge_artifact(self) -> KnowledgeArtifact:
         _require_no_executable_text(self.answer, field_name="answer")
         _require_no_executable_text(self.summary, field_name="summary")
         _require_no_executable_text(self.rationale, field_name="rationale")
@@ -684,7 +683,7 @@ class CurriculumTask(BaseModel):
         return value.strip().upper()
 
     @model_validator(mode="after")
-    def require_strategy_spec_for_strategy_tasks(self) -> "CurriculumTask":
+    def require_strategy_spec_for_strategy_tasks(self) -> CurriculumTask:
         if self.task_type == "STRATEGY_SPEC" and self.strategy_spec is None:
             raise ValueError("STRATEGY_SPEC tasks require a strategy_spec")
         return self
@@ -790,7 +789,7 @@ class TradeDecision(BaseModel):
         return value.strip().upper()
 
     @model_validator(mode="after")
-    def require_quantity_for_orders(self) -> "TradeDecision":
+    def require_quantity_for_orders(self) -> TradeDecision:
         if self.action in {"BUY", "SELL"} and self.quantity <= 0:
             raise ValueError("BUY and SELL require positive quantity")
         if self.action == "HOLD" and self.quantity != 0:
@@ -805,7 +804,7 @@ class GuardianResult(BaseModel):
     reason: str
 
     @model_validator(mode="after")
-    def require_rejection_reason(self) -> "GuardianResult":
+    def require_rejection_reason(self) -> GuardianResult:
         if not self.approved and not self.reason.strip():
             raise ValueError("rejections require a reason")
         return self

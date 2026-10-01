@@ -19,8 +19,8 @@ no evaluation evidence, is reported as a broken link rather than quietly omitted
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Iterable, Sequence
 
 PROPOSAL = "CURRICULUM_PROPOSED"
 ADMISSION = "STRATEGY_ADMISSION_REVIEWED"

@@ -1,6 +1,7 @@
 import json
-import pytest
 from datetime import datetime, timezone
+
+import pytest
 
 from min_agent.curriculum import StructuredCurriculumAgent, parse_curriculum_task_json
 from min_agent.models import CurriculumTask, ReflectionRecord, StrategySpec
@@ -764,8 +765,9 @@ def test_curriculum_sees_the_open_book_and_the_capability_gap():
 
 
 def test_a_trend_follow_strategy_counts_as_covering_both_sides():
-    from min_agent.models import StrategySpec
     from datetime import datetime, timezone
+
+    from min_agent.models import StrategySpec
 
     strategy = StrategySpec(
         strategy_id="tf", name="tf", kind="TREND_FOLLOW", symbols=("SPY",),

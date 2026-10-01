@@ -10,7 +10,17 @@ from min_agent.health import HealthMonitor
 from min_agent.journal import JsonlJournal
 from min_agent.knowledge_admission import KnowledgeAdmission
 from min_agent.knowledge_library import KnowledgeLibrary
-from min_agent.models import AccountSnapshot, BrokerEvidenceBatch, CycleRecord, DataSnapshot, ExecutionResult, GuardianResult, PortfolioHistoryPoint, StrategySpec, TradeDecision
+from min_agent.models import (
+    AccountSnapshot,
+    BrokerEvidenceBatch,
+    CycleRecord,
+    DataSnapshot,
+    ExecutionResult,
+    GuardianResult,
+    PortfolioHistoryPoint,
+    StrategySpec,
+    TradeDecision,
+)
 from min_agent.order_reconciler import ReconciliationReport
 from min_agent.reflection_memory import ReflectionMemory
 from min_agent.strategy_admission import StrategyAdmission
@@ -534,8 +544,10 @@ def test_daemon_persists_lifecycle_updates(tmp_path):
     # OFFLINE_VALIDATION_COMPLETED event on the journal the gate correctly refuses,
     # so one is written first - a daemon that could never promote anything would be a
     # freeze, not a gate.
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+
     from min_agent.models import JournalEvent
-    from datetime import datetime as _dt, timezone as _tz
     assert strategy_library.load("trial").lifecycle == "PROBATION", (
         "no offline evidence was journalled, so the gate must refuse"
     )

@@ -9,8 +9,8 @@ an operator knob that silently does nothing when set.
 
 import dataclasses
 import os
-from pathlib import Path
 import re
+from pathlib import Path
 
 import pytest
 

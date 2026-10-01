@@ -15,7 +15,11 @@ from datetime import datetime, timezone
 
 from min_agent import attribution
 from min_agent.models import (
-    AccountSnapshot, CycleRecord, DataSnapshot, ExecutionResult, GuardianResult,
+    AccountSnapshot,
+    CycleRecord,
+    DataSnapshot,
+    ExecutionResult,
+    GuardianResult,
     TradeDecision,
 )
 
@@ -168,8 +172,8 @@ def test_severity_distinguishes_not_yet_traded_from_traded_and_failed(tmp_path):
     model contributed none of it. That is a model trading and failing to beat the
     baseline, which is a real problem.
     """
-    from min_agent.doctor import DoctorReport, _check_pnl_attribution
     from min_agent.config import AgentConfig
+    from min_agent.doctor import DoctorReport, _check_pnl_attribution
     from min_agent.journal import JsonlJournal
     from min_agent.models import JournalEvent
 

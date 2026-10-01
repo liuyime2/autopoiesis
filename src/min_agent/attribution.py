@@ -29,7 +29,6 @@ exists so that nobody has to guess which is which.
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 #: The seven causes the objective names. Reported as a table with an explicit
@@ -88,7 +87,7 @@ class Attribution:
         """
         return sum(
             qty for key, qty in self.open_lots_by_source.items()
-            if key.startswith("llm:") or key.startswith("fallback_policy_engine:")
+            if key.startswith(("llm:", "fallback_policy_engine:"))
         )
 
     @property

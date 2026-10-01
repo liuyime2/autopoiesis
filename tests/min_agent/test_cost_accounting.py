@@ -14,7 +14,8 @@ from datetime import datetime, timezone
 import pytest
 
 from min_agent.evaluator import (
-    DEFAULT_ASSUMED_ROUND_TRIP_COST_PCT, _assumed_cost_for_lots,
+    DEFAULT_ASSUMED_ROUND_TRIP_COST_PCT,
+    _assumed_cost_for_lots,
 )
 
 TS = datetime(2026, 6, 11, tzinfo=timezone.utc)

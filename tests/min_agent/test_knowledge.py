@@ -5,11 +5,12 @@ def test_an_identical_lesson_is_rejected_across_a_restart():
     an identical lesson re-derived the next day was accepted again: eleven accepted
     artifacts held two distinct statements, ten of them variants of one sentence, and
     all eleven were fed to every decision. Dedupe has to survive the process."""
+    import pathlib
+    from datetime import datetime, timezone
+
     from min_agent.knowledge_admission import KnowledgeAdmission
     from min_agent.knowledge_library import KnowledgeLibrary
     from min_agent.models import KnowledgeArtifact
-    from datetime import datetime, timezone
-    import pathlib
 
     class _Dir(pathlib.Path):
         pass

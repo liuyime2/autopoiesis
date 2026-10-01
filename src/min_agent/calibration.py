@@ -21,8 +21,8 @@ worse than nothing, because it would look like an answer.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Iterable, Sequence
 
 GOOD_HOLD = "GOOD_HOLD"
 MISSED_ALPHA = "MISSED_ALPHA"

@@ -2832,7 +2832,7 @@ orders, 12 activities, 21 portfolio-history points.
 `$HOME/.config/systemd/user` with zero enablement links into tmpfs. The broker clock
 reports `next_open=2026-09-30 09:30:00-04:00`.
 
-**Reviewed and confirmed.** `make verify`: 29 classes, 0 failed, 1179 test executions
+**Reviewed and confirmed.** `make verify`: 29 classes, 0 failed, 1180 test executions
 across 60 files, exit 0.
 figures by naive FIFO arithmetic over raw journal text, cross-checked against the
 production ledger for the same journal - 23 closed lots, +564.39 realized, 29

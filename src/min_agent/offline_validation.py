@@ -37,8 +37,8 @@ Three properties keep it honest:
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Iterable, Mapping
 
 #: A candidate needs this many *informative* decisions before its record can say
 #: anything at all. Below it, silence is the honest answer.

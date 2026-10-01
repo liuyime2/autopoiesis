@@ -16,7 +16,11 @@ import pytest
 
 from min_agent import calibration
 from min_agent.models import (
-    AccountSnapshot, CycleRecord, DataSnapshot, ExecutionResult, GuardianResult,
+    AccountSnapshot,
+    CycleRecord,
+    DataSnapshot,
+    ExecutionResult,
+    GuardianResult,
     TradeDecision,
 )
 

@@ -84,8 +84,8 @@ def _production_lot_figures():
     try:
         from min_agent.broker_evidence import latest_evidence_batch
         from min_agent.evaluator import DeterministicEvaluator, confirmed_fill_activities
-        from min_agent.journal import JsonlJournal
         from min_agent.fill_reconciler import FILL_EVENT
+        from min_agent.journal import JsonlJournal
     except Exception as exc:  # surfaced below rather than silently skipped
         return f"import failed: {type(exc).__name__}: {exc}"
     journal = JsonlJournal(JOURNAL)
@@ -149,17 +149,6 @@ def main() -> int:
     print(f"            action counts: {dict(actions)}")
     buys = actions.get("BUY", 0)
     sells = actions.get("SELL", 0)
-    submitted = sum(
-        1 for c in cycles if c["execution"]["status"] == "SUBMITTED"
-    )
-    # 34 across the whole journal, which matches the 34 ORDER_FILL_CONFIRMED
-    # events one-for-one. I first wrote 10 here, carrying a *session* figure - the
-    # 10 one-share BUYs submitted on 2026-09-29 - into a whole-journal check. Both
-    # numbers are true at their own scope and only one belongs in this row, so the
-    # scope is now named rather than assumed.
-    fills_on_record = sum(
-        1 for e in events if e["event_type"] == "ORDER_FILL_CONFIRMED"
-    )
     # The invariant is one-directional: a broker-confirmed fill must have a
     # corresponding submission, never the reverse. A submission without a
     # confirmation is normal - the reconciler runs on the maintenance interval, so an
@@ -280,11 +269,6 @@ def main() -> int:
           f"{dict(by_strategy)}")
 
     print("\n  -- the PnL is not the model's --")
-    model_fills = [
-        e for e in fills
-        if e["payload"].get("strategy_id", "").startswith("trend-follow")
-        or e["strategy_id"] not in ("baseline",)
-    ]
     print(f"            strategies that traded: {sorted(by_strategy)}")
     print("            every confirmed fill is attributed to a named strategy; none is")
     print("            credited to the LLM decision source, which is consistent with the")

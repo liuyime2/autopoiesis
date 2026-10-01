@@ -220,8 +220,8 @@ def test_curriculum_window_fits_its_own_prompt_and_answer():
     reachable. The offline fallback deliberately over-estimates tokens per
     character, because the estimate that caused this bug (chars/3.6) was 19% low.
     """
-    import json
     import glob
+    import json
     import pathlib
 
     import requests

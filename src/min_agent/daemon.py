@@ -5,21 +5,21 @@ import importlib.util
 import os
 import signal
 import time
+from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable
 from uuid import uuid4
 
+from min_agent import counterfactual, offline_validation
 from min_agent.atomicio import file_lock, write_text_atomic
 from min_agent.broker_evidence import latest_evidence_batch
-from min_agent import counterfactual, offline_validation
 from min_agent.config import AgentConfig
 from min_agent.curriculum import StructuredCurriculumAgent
 from min_agent.evaluator import (
-    DeterministicEvaluator,
     PNL_EVIDENCE_ACCOUNT_VERIFIED,
     PNL_EVIDENCE_MISSING,
     PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
+    DeterministicEvaluator,
     confirmed_fill_activities,
 )
 from min_agent.fill_reconciler import FILL_EVENT, FillReconciler
@@ -183,7 +183,7 @@ class AgentDaemon:
             self.error_count += 1
             self._heartbeat("BACKING_OFF", f"cycle error for {symbol}: {exc}")
 
-    def _request_stop(self, signum, frame) -> None:  # pragma: no cover - signal wiring is integration behavior
+    def _request_stop(self, signum, _frame) -> None:  # pragma: no cover - signal wiring is integration behavior
         self._stop_requested = True
         self._heartbeat("STOPPING", f"received signal {signum}")
 
@@ -882,7 +882,7 @@ class AgentDaemon:
         subtype, answer = self._diagnose_no_exploration(summary)
         # Content-hash-based artifact_id keeps the same lesson stable across runs
         # and lets KnowledgeAdmission's content-hash dedup do its job.
-        digest = hashlib.sha1(f"{subtype}|{answer}".encode("utf-8")).hexdigest()[:12]
+        digest = hashlib.sha1(f"{subtype}|{answer}".encode()).hexdigest()[:12]
         artifact_id = f"lesson-no-exploration-{subtype}-{digest}"
         artifact = KnowledgeArtifact(
             artifact_id=artifact_id,

@@ -21,17 +21,16 @@ Two properties matter more than the tally:
 from __future__ import annotations
 
 import argparse
-import ast
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
-import tempfile
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
@@ -626,7 +625,7 @@ def check_replay_audit() -> Result:
     ]
     return Result(
         "replay-audit", FAIL,
-        f"independent replay disagrees with the reported figures: "
+        "independent replay disagrees with the reported figures: "
         + "; ".join(bad[:4]) + f" (exit {proc.returncode})",
     )
 
