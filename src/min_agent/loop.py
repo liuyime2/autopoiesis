@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+from min_agent.fill_reconciler import FILL_EVENT
 from min_agent.models import CycleRecord, JournalEvent, TradeDecision
 
 
 class TradingLoop:
+    # An order submitted this recently, with no fill confirmation, is treated as still in
+    # flight. Long enough to cover a lost broker response and a restart; short enough that a
+    # genuinely stuck order is reconciled rather than silently blocking trading.
+    IN_FLIGHT_WINDOW_MINUTES = 30
+
     def __init__(self, *, data_gateway, decision_engine, guardian, executor, journal, mode: str, trade_counter=None):
         self.data_gateway = data_gateway
         self.decision_engine = decision_engine
@@ -18,6 +24,70 @@ class TradingLoop:
         self.journal = journal
         self.mode = mode
         self.trade_counter = trade_counter
+
+    def _identical_order_already_in_flight(self, decision: TradeDecision) -> str | None:
+        """A client_order_id of the client_order_id of a submission we never saw fill.
+
+        `AlpacaPaperExecutor.client_order_id` hashes the cycle id, and every cycle gets a
+        fresh uuid4 - so a retry produces a different id and the broker cannot deduplicate it.
+        The only backstop was Guardian's check against *resting broker* orders, which catches
+        an order the broker still holds open and misses the common case: the order filled
+        immediately and the response was lost.
+
+        So this reads the journal for a submission with the same symbol, action, quantity and
+        strategy that no ORDER_FILL_CONFIRMED event has since matched. That is exactly the
+        state where re-submitting doubles the position. Returning the reason lets the caller
+        record a skipped cycle rather than silently doing less than it appears to.
+
+        Scoped to a window: an order submitted hours ago with no fill confirmation is a
+        different problem - reconciliation, not duplication - and must not block trading
+        forever.
+        """
+        if self.journal is None or decision.action == "HOLD":
+            return None
+        window = timedelta(minutes=self.IN_FLIGHT_WINDOW_MINUTES)
+        now = datetime.now(timezone.utc)
+        confirmed: set[str] = set()
+        submitted: list[tuple[datetime, str, str]] = []
+        try:
+            for event in self.journal.read_events():
+                if event.event_type == FILL_EVENT:
+                    coid = event.payload.get("client_order_id")
+                    if isinstance(coid, str):
+                        confirmed.add(coid)
+                continue
+            for record in self.journal.last_n(200):
+                execution = record.execution
+                if execution.status != "SUBMITTED":
+                    continue
+                other = record.decision
+                if (
+                    other.action == decision.action
+                    and other.symbol == decision.symbol
+                    and float(other.quantity) == float(decision.quantity)
+                    and (other.strategy_id or "") == (decision.strategy_id or "")
+                ):
+                    submitted.append((
+                        record.snapshot.timestamp,
+                        execution.client_order_id or "",
+                        record.cycle_id,
+                    ))
+        except Exception as exc:
+            # Unavailable journal means the guard cannot vouch either way. Skipping is the
+            # safe direction: a missed order is recoverable, a doubled position is not.
+            return f"journal unavailable, refusing to re-submit without an in-flight check: {exc}"
+
+        for when, coid, cycle in submitted:
+            if coid and coid in confirmed:
+                continue
+            if now - when > window:
+                continue
+            return (
+                f"an identical order was submitted in cycle {cycle} at {when.isoformat()} "
+                f"({coid or 'no client_order_id'}) and no fill confirmation has been "
+                f"recorded since; re-submitting would double the position"
+            )
+        return None
 
     def _agent_holding(self, symbol: str) -> float | None:
         """Shares of `symbol` the agent itself bought and has not sold.
@@ -128,6 +198,22 @@ class TradingLoop:
             # position be sold.
             agent_position_quantity=self._agent_holding(decision.symbol),
         )
+        # Refuse to re-submit an order this agent already submitted and has not seen fill.
+        # A lost broker response looks exactly like a decision that was never acted on, and
+        # the two produce opposite results: one wasted cycle, or one doubled position.
+        in_flight = self._identical_order_already_in_flight(decision)
+        if in_flight is not None:
+            decision = decision.model_copy(update={
+                "action": "HOLD",
+                "quantity": 0,
+                "rationale": f"skip: {in_flight}",
+            })
+            guardian_result = self.guardian.review(
+                decision, snapshot, mode=self.mode, trades_today=trades_today,
+                agent_position_quantity=self._agent_holding(decision.symbol),
+            )
+            errors.append(f"in_flight_order: {in_flight}")
+
         execution = self.executor.execute(decision, guardian_result, cycle_id=cycle_id)
         record = CycleRecord(
             cycle_id=cycle_id,
