@@ -63,7 +63,7 @@ ignore = [
     # imports that are the entire point of the module.
     "E402",
     # Single-letter loop and lambda names in `tools/verify.py` (`for l in lines`,
-    # `lambda r: ...`). That file is 1,300 lines of check classes and reads as a list of
+    # `lambda r: ...`). That file is 2,047 lines of check classes and reads as a list of
     # independent assertions; one-letter names there are local and unambiguous. The
     # readability cost of renaming them exceeds the gain.
     "E741",
@@ -95,7 +95,7 @@ ignore = [
 "tests/*" = ["ARG001", "ARG002", "F401", "F811", "S101", "SLF001", "PT011", "B011",
                "B017", "F841", "SIM102", "B018", "C408", "RUF005", "PIE810", "B007"]
 # verify.py builds regexes and parses ASTs; its own imports are exercised dynamically.
-# verify.py is 1,300 lines of independent check classes, each a short block that
+# verify.py is 2,047 lines of independent check classes, each a short block that
 # reads top to bottom. The remaining findings there are readability preferences
 # (collapsible ifs, list() over [x for x in y], percent vs format) that would make
 # a diff across 39 sites for no behavioural gain. Correctness rules - F for

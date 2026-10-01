@@ -1,4 +1,20 @@
-# Architecture & Runtime Map (pre-refactor)
+> **Two documents, not one.** Sections 1-9 are the *pre-refactor* map: what the
+> repository looked like when the refactor began, recorded before anything was changed.
+> Those sections describe a state that no longer exists - no `pyproject.toml`, five shell
+> wrappers, a `src/voyager_quant/` package, no CI - and are kept because a refactor with no
+> record of its starting point cannot be audited. Sections 10 onward are the *current*
+> architecture. Every claim below in sections 1-9 is true of that earlier tree only.
+>
+> `STATUS.md` and `tools/README.md` describe the current system. This file is the only place
+> that describes the old one, and it does so explicitly.
+
+# Architecture & Runtime Map
+
+## Part I — Pre-refactor (recorded before any change)
+
+> **Dated section: the state of the tree at the start of this refactor.** Figures,
+> file lists and defect tables below describe that tree, not this one. Do not read them as
+> current. `README.md` is the current entry point.
 
 Produced by reconnaissance against the working tree, not by reading the existing plan
 documents, which this refactor is instructed to ignore. Every claim was checked; where a
@@ -201,6 +217,11 @@ The import surface in `cli.py` was left alone. Section 8 has the measurements: d
 `requests` made `--help` slower, and the Alpaca SDK is already deferred into the four
 functions that use it. Restructuring it would have added an indirection in exchange for
 nothing measurable.
+
+## Part II — Current (after the refactor)
+
+> Sections below describe the repository as it is now. This is the current architecture;
+> sections 1-9 above are the historical record it replaced.
 
 ## 10. What this refactor actually cost and saved
 

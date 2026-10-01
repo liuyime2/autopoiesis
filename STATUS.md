@@ -1,6 +1,6 @@
 # QuantGroup — status
 
-Last updated: 2026-09-28. This file replaces `LEARNING_STATUS.md`,
+Last updated: 2026-10-01. This file replaces `LEARNING_STATUS.md`,
 `learning_daemon_summary.md`, `findings.md`, `progress.md` and `task_plan.md`,
 all of which described the system as running when it had been dead for 97 days.
 
@@ -12,7 +12,7 @@ all of which described the system as running when it had been dead for 97 days.
 ./minictrl doctor
 ```
 
-Ollama is serving on `:11434` with `deepseek-r1:8b`, both LLM paths are
+Ollama is serving `qwen3.8:27b` on `:11434`, both LLM paths are
 verified live against the real model, and the credentials work. The credentials
 live in `$XDG_CONFIG_HOME/min-agent/env` (mode 600, outside the repository) — the
 earlier "credentials FAIL" in this file was stale. With the stack up, `doctor`
@@ -27,8 +27,8 @@ criterion:
 | proof: filled>0 | **PASS** — 75 shares filled, 24 broker-confirmed, `fill_quantity_ratio` 1.0 |
 | proof: per-strategy pnl | **PASS** — 3 strategies, broker-verified: `tiny-fixed-size-001` +362.66, `fixed-size-buy-001` +120.37, `trend-follow-buy-001` +81.36 |
 | pnl evidence | **PASS** — `broker_strategy_closed_lot_pnl_verified`, 23 closed lots, 0 open |
-| journal | OK — 18 MB, 916 cycles, 0 unparseable |
-| strategy library | OK — 23 strategies, 10 selectable, including one SELL strategy |
+| journal | OK — 66.3 MB, 10,505 lines, 1,048 cycles, 0 unparseable |
+| strategy library | OK — 40 total, 13 selectable, including one SELL strategy |
 
 ### The self-evolution loop now runs, and it closed a position
 
@@ -249,7 +249,7 @@ Alpaca UI.
 
 > Dated section. The figures below are what the gate reported on 2026-09-28 and are
 > correct for that date. For the current figures see `README.md`; the gate now runs
-> 38 check classes. The sections below are a record of what was true when each was
+> 39 check classes. The sections below are a record of what was true when each was
 > written, not a description of the present.
 
 **`make verify` is the single gate.** 17 check classes, 0 failed, 472 distinct

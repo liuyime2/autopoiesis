@@ -212,6 +212,7 @@ CHECK_CLASSES: tuple[str, ...] = (
     "doctor",
     "fact-docs-current",
     "bespoke-list-matches-run",
+    "status-matches-doctor",
 )
 
 
@@ -639,6 +640,73 @@ def check_no_unreferenced_design_notes_at_the_root() -> Result:
         "no-loose-design-notes", PASS,
         f"every root markdown file is a documented entry point ({', '.join(sorted(allowed))}) "
         "or declares itself historical",
+    )
+
+
+def check_status_agrees_with_doctor() -> Result:
+    """The current-state table in STATUS.md must match what doctor reports now.
+
+    STATUS.md said 18 MB and 916 cycles when the journal held 63 MB and 10,505, and
+    23 strategies against a real 40. Every figure was individually plausible and
+    collectively wrong, and no check connected them to the system: the class-count gate
+    checks that documents agree with *each other* about the gate, and nothing checked that
+    they agree with the *deployment*. A status file that is confidently stale is worse than
+    one that is absent, because it is the first thing an operator reads.
+
+    Scoped to the two summary rows and only where doctor has run - the same discipline as
+    the other live comparisons. Dated sections are exempt for the reason every other dated
+    section here is: they record a moment, and the moment is the point.
+    """
+    status = ROOT / "STATUS.md"
+    if not status.exists():
+        return Result("status-matches-doctor", SKIP, "STATUS.md is absent")
+    rc, out = _run(["./minictrl", "doctor"], timeout=900)
+    if rc != 0 and "RESULT" not in out:
+        return Result("status-matches-doctor", SKIP, "doctor produced no report to compare against")
+
+    text = status.read_text(encoding="utf-8")
+    skip = _dated_section_ranges(text)
+    journal = re.search(r"^\| journal \|[^|]*?([\d.]+) MB,\s*([\d,]+) lines", text, re.MULTILINE)
+    library = re.search(r"^\| strategy library \|[^|]*?(\d+) total, (\d+) selectable",
+                        text, re.MULTILINE)
+    if not journal or not library:
+        return Result(
+            "status-matches-doctor", FAIL,
+            "STATUS.md has no parseable `| journal |` or `| strategy library |` row in its "
+            "current-state table",
+        )
+    if any(lo <= journal.start() <= hi for lo, hi in skip) or \
+       any(lo <= library.start() <= hi for lo, hi in skip):
+        return Result("status-matches-doctor", SKIP, "the status rows are inside a dated section")
+
+    problems = []
+    # doctor's own wording, parsed rather than pattern-matched to the document
+    # doctor's real line is "[PASS] journal<spaces>66.3MB, 10505 lines, 1048 cycles" -
+    # status first, detail after. An earlier pattern assumed the label followed the status
+    # and matched nothing.
+    live_mb = re.search(r"^\[PASS\] journal\s+([\d.]+)MB,\s*([\d,]+) lines", out, re.MULTILINE)
+    live_total = re.search(r"^\[PASS\] strategy library\s+(\d+) total,\s*(\d+) selectable",
+                           out, re.MULTILINE)
+    if not live_mb or not live_total:
+        return Result(
+            "status-matches-doctor", SKIP,
+            "doctor ran but its journal/library lines were not found in the output",
+        )
+    stated_mb = journal.group(1).rstrip("0").rstrip(".")
+    if stated_mb != live_mb.group(1):
+        problems.append(f"journal size: STATUS says {stated_mb} MB, doctor says {live_mb.group(1)} MB")
+    if journal.group(2).replace(",", "") != live_mb.group(2).replace(",", ""):
+        problems.append(f"journal lines: STATUS says {journal.group(2)}, doctor says {live_mb.group(2)}")
+    if library.group(1) != live_total.group(1):
+        problems.append(f"strategies total: STATUS says {library.group(1)}, doctor says {live_total.group(1)}")
+    if library.group(2) != live_total.group(2):
+        problems.append(f"selectable: STATUS says {library.group(2)}, doctor says {live_total.group(2)}")
+    if problems:
+        return Result("status-matches-doctor", FAIL, f"{len(problems)}: {problems}")
+    return Result(
+        "status-matches-doctor", PASS,
+        f"STATUS.md agrees with doctor: {live_mb.group(1)} MB, {live_mb.group(2)} lines, "
+        f"{live_total.group(1)} strategies, {live_total.group(2)} selectable",
     )
 
 
@@ -1585,6 +1653,7 @@ REPOSITORY_CHECK_CLASSES: frozenset[str] = frozenset({
     # Inspects this repository: test-file accounting, dependency declarations, docs
     # freshness, the production/research boundary, hardcoded paths.
     "bespoke-list-matches-run",
+    "status-matches-doctor",
     "class-coverage",
     "test-coverage-map",
     "docs-not-stale",
@@ -1971,6 +2040,7 @@ def main() -> int:
     results.append(check_no_unreferenced_design_notes_at_the_root())
     results.append(check_the_fresh_clone_evidence_is_real())
     results.append(check_the_declared_bespoke_list_matches_what_runs())
+    results.append(check_status_agrees_with_doctor())
     results.append(check_config_example_names_are_real())
     results.append(check_unit_environment_files_exist())
     results.append(check_replay_audit())
