@@ -643,6 +643,54 @@ def check_no_unreferenced_design_notes_at_the_root() -> Result:
     )
 
 
+def check_the_documented_pipeline_targets_exist() -> Result:
+    """Every stage the objective names must be a Makefile target, not prose.
+
+    The objective asks for install/setup -> prepare/validate data -> run -> evaluate ->
+    reproduce, "as few standard commands as possible". For most of this refactor that chain
+    existed only as capability: `evaluate` was reachable solely by typing a CLI flag the
+    README never mentioned, and there was no way to validate the inputs before anything
+    consumed them. A pipeline a newcomer cannot see is not a pipeline.
+
+    So the stages are checked to exist as targets, in the Makefile's dependency order. The
+    names are read from `pipeline:`'s prerequisites rather than restated here, because a
+    second list of stage names is a second thing to forget to update - the same mistake as
+    BESPOKE_CHECK_NAMES, one layer over.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    match = re.search(r"^pipeline:([\s\\\n]+)(.*)$", makefile, re.MULTILINE)
+    if not match:
+        return Result("pipeline-targets-exist", FAIL, "Makefile has no `pipeline:` target")
+    stages = [s for s in match.group(2).replace("\\\n", " ").split() if s]
+    # `install` is deliberately not a pipeline stage: re-resolving dependencies partway
+    # through would mutate the environment the earlier stages are running in. The objective
+    # lists it first in the chain, and it is the documented first step - just a separate
+    # command, not something a verification run should do to itself.
+    required = {"validate-data", "test", "evaluate", "reproduce"}
+    if "install" in stages:
+        return Result(
+            "pipeline-targets-exist", FAIL,
+            "pipeline includes `install`; re-resolving dependencies mid-run mutates the "
+            "environment the other stages are using. Run `make install` first.",
+        )
+    missing_targets = [t for t in stages if not re.search(rf"^{re.escape(t)}:", makefile, re.M)]
+    if missing_targets:
+        return Result(
+            "pipeline-targets-exist", FAIL,
+            f"pipeline depends on {missing_targets}, which have no rule",
+        )
+    absent = sorted(required - set(stages))
+    if absent:
+        return Result(
+            "pipeline-targets-exist", FAIL,
+            f"pipeline is missing stage(s) {absent}; it runs {stages}",
+        )
+    return Result(
+        "pipeline-targets-exist", PASS,
+        f"pipeline runs {stages} and every stage has a rule",
+    )
+
+
 def check_status_agrees_with_doctor() -> Result:
     """The current-state table in STATUS.md must match what doctor reports now.
 
@@ -1692,6 +1740,7 @@ BESPOKE_CHECK_NAMES = (
     "fresh-clone-evidence-real",
     "config-example-names",
     "config-example-complete",
+    "pipeline-targets-exist",
     "gate-class-count-consistent",
     "fact-docs-current",
 )
@@ -1702,6 +1751,7 @@ REPOSITORY_CHECK_CLASSES: frozenset[str] = frozenset({
     "bespoke-list-matches-run",
     "status-matches-doctor",
     "config-example-complete",
+    "pipeline-targets-exist",
     "class-coverage",
     "test-coverage-map",
     "docs-not-stale",
@@ -2089,6 +2139,7 @@ def main() -> int:
     results.append(check_the_fresh_clone_evidence_is_real())
     results.append(check_the_declared_bespoke_list_matches_what_runs())
     results.append(check_status_agrees_with_doctor())
+    results.append(check_the_documented_pipeline_targets_exist())
     results.append(check_config_example_names_are_real())
     results.append(check_config_example_covers_every_variable())
     results.append(check_unit_environment_files_exist())

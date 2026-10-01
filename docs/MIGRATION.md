@@ -76,7 +76,7 @@ adding it surfaced an assertion about a `DRIFT` marker that only ever applied to
 | Kept | Why it was tempting to remove it |
 | --- | --- |
 | `src/min_agent/research/` | 845 lines imported by tests only, and `check_production_research_separation` fails the build if production imports it. That is a correct separation of diagnosis from execution. Wiring it into production to "reduce duplication" would destroy the property |
-| `tools/verify.py`'s 40 check classes | Not bloat. Real invariants: production may not import `research/`, every deployed unit's `EnvironmentFile` must resolve, the running daemon's fingerprint must match the worktree, replayed FIFO accounting must reproduce the reported PnL |
+| `tools/verify.py`'s 41 check classes | Not bloat. Real invariants: production may not import `research/`, every deployed unit's `EnvironmentFile` must resolve, the running daemon's fingerprint must match the worktree, replayed FIFO accounting must reproduce the reported PnL |
 | `runtime/min_agent/journal.jsonl` as source of truth | Everything else is derived from it and regenerable |
 
 ## If you are following along from the old version
