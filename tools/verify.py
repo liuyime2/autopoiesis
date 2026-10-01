@@ -1837,6 +1837,9 @@ def check_defect_audit() -> Result:
     return Result("defect-regression-audit", PASS if rc == 0 else FAIL, _tail(out, 3))
 
 
+_RUNTIME_PRESENT_AT_START: bool | None = None
+
+
 def _runtime_state_present() -> bool:
     """Whether this checkout has any deployment to check.
 
@@ -1844,7 +1847,16 @@ def _runtime_state_present() -> bool:
     cycle yet. What is being asked here is narrower than "is the agent healthy" - it is
     "is there a deployment to be healthy about".
     """
-    return (ROOT / "runtime" / "min_agent").is_dir()
+    # Checked *before* anything runs, not after: `status-matches-doctor` shells out to
+    # `minictrl doctor`, which creates runtime/min_agent as a side effect. Reading this
+    # after the fact meant a fresh clone - which starts with no runtime at all - looked like
+    # a deployment by the time doctor ran, and the gate demanded a clean health report from
+    # a machine that had never run a cycle. Found by deleting runtime/ and watching it
+    # reappear between two checks in a clone that had none.
+    global _RUNTIME_PRESENT_AT_START
+    if _RUNTIME_PRESENT_AT_START is None:
+        _RUNTIME_PRESENT_AT_START = (ROOT / "runtime" / "min_agent").is_dir()
+    return _RUNTIME_PRESENT_AT_START
 
 
 def _operator_credentials_present() -> bool:
