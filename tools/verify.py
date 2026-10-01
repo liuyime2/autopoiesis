@@ -505,6 +505,99 @@ def _durable_unit_dir() -> str | None:
     return str(Path(path).parent)
 
 
+def _dated_section_ranges(text: str) -> list[tuple[int, int]]:
+    """Character ranges of markdown sections that declare themselves dated history."""
+    ranges: list[tuple[int, int]] = []
+    # MULTILINE is required: `^` anchors to the start of the string without it, so the
+    # marker matched nothing and every dated section was treated as current. Found by
+    # running the function on the document it was written for.
+    marker = re.compile(r"^>\s*Dated section", re.IGNORECASE | re.MULTILINE)
+    heading = re.compile(r"^(#{1,6})\s", re.MULTILINE)
+    for m in marker.finditer(text):
+        start = m.start()
+        level = None
+        for h in heading.finditer(text, start + 1):
+            line_start = text.rfind("\n", 0, h.start()) + 1
+            if re.match(r"^>\s*Dated", text[line_start:line_start + 200]):
+                continue  # still inside the blockquote
+            level = h.group(1)
+            ranges.append((start, h.start()))
+            break
+        if level is None:
+            ranges.append((start, len(text)))
+    return ranges
+
+
+def check_the_gate_class_count_is_reported_consistently(total: int | None = None) -> Result:
+    """Every document that states the class count must state the one the gate reports.
+
+    The count appeared as 29, 30 and 33 in three documents while the gate ran a
+    different number in each case - a completion verifier caught it. Nothing connected the
+    prose to the code, and the `fact-docs-current` check only compared the current-state
+    blocks in two files, not the summary sentences elsewhere.
+
+    `34 check classes` is matched literally rather than by parsing, so a sentence that
+    gives a different number is found wherever it is. A count written in words rather
+    than digits would not be caught, which is a real limitation stated here rather than
+    left for the next reader to discover.
+    """
+    # `total` is the number of classes this run will report, supplied by the caller, which
+    # is the only place that knows it. Three earlier versions each got this wrong and each
+    # failed a document that was correct:
+    #   - `len(CHECK_CLASSES) + 4`, with the 4 written from memory of which bespoke checks
+    #     run outside the loop: reported 33 while the gate ran 34.
+    #   - `len(live)` read at the moment this check was appended: two checks are appended
+    #     after it, so it compared the documents against a count two short of its own.
+    #   - the same, plus a self-appended call that reported SKIP and inflated the total.
+    # The number is now passed down from the one place that knows it.
+    if total is None:
+        return Result(
+            "gate-class-count-consistent", SKIP,
+            "no total supplied; this check compares the documents against the running gate",
+        )
+    expected = f"{total} check classes"
+    problems = []
+    for path in sorted(ROOT.rglob("*.md")):
+        parts = path.relative_to(ROOT).parts
+        if parts[0] in {"runtime", ".git", ".opencode", "node_modules", "plans"}:
+            continue
+        # SYSTEM_AUDIT.md is a historical record in its entirety and opens by saying so;
+        # every figure in it is point-in-time. Its per-section markers are sparse, and
+        # comparing them to the live count would mean rewriting the record of what was
+        # once broken, which is the one thing that document exists to preserve.
+        if path.name == "SYSTEM_AUDIT.md":
+            continue
+        # A dated history section states the count as it was, and rewriting it would
+        # destroy the record: STATUS.md's 2026-09-28 section says 17 and is correct for
+        # that date. Such a section is one that opens with a "> Dated section" marker, and
+        # the exemption covers the whole markdown section from that marker to the next
+        # heading of the same or higher level. Matching a marker only on adjacent lines
+        # was the first attempt and missed, because the marker and the figure can be
+        # forty lines apart.
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        skip_ranges = _dated_section_ranges(text)
+        for match in re.finditer(r"\b\d+ check classes\b", text):
+            if any(lo <= match.start() <= hi for lo, hi in skip_ranges):
+                continue
+            if match.group(0) != expected:
+                line = text[: match.start()].count("\n") + 1
+                problems.append(
+                    f"{path.relative_to(ROOT)}:{line} says {match.group(0)!r}, gate reports {expected!r}"
+                )
+    if problems:
+        return Result(
+            "gate-class-count-consistent", FAIL,
+            f"{len(problems)}: {problems[:3]}",
+        )
+    return Result(
+        "gate-class-count-consistent", PASS,
+        f"every document that states the count says {expected!r}",
+    )
+
+
 def check_tools_readme_names_real_files() -> Result:
     """Every file `tools/README.md` names must exist, and every real tool must be named.
 
@@ -1123,7 +1216,7 @@ EXECUTING_CLASSES = frozenset({
 })
 
 
-def check_fact_docs_match_the_live_gate(live: list | None = None) -> Result:
+def check_fact_docs_match_the_live_gate(total: int | None = None, live: list | None = None) -> Result:
     """The current-state blocks in the fact-level docs must match this run's gate.
 
     The independent verifier rejected a completion claim twice over documentation that
@@ -1142,8 +1235,8 @@ def check_fact_docs_match_the_live_gate(live: list | None = None) -> Result:
     # script. The first version did spawn it, which re-entered this very check and
     # recursed until the command was killed - a gate that hangs the gate is worse
     # than no gate, and the recursion was mine.
-    if not live:
-        return Result("fact-docs-current", SKIP, "no live summary supplied")
+    if live is None:
+        return Result("fact-docs-current", SKIP, "no live results supplied")
     # A partial run (--only, or a hand-picked class list) reports a class and
     # execution count that describes the subset, not the build. The documents state
     # full-run figures, so comparing them to a subset is meaningless - and it made the
@@ -1155,12 +1248,15 @@ def check_fact_docs_match_the_live_gate(live: list | None = None) -> Result:
             "partial run: this gate compares against full-run figures, which this "
             "run does not represent",
         )
-    # +1 for this check, which appends itself to `results` immediately after being
-    # called. Without it the gate under-reports the class count by one and the
-    # documents then "match" a number that is one behind the run that produced it -
-    # a green gate certifying a stale figure, which is the exact failure it was
-    # written to prevent.
-    classes = str(len(live) + 1)
+    # `total` is the class count this run will report, supplied by the caller. This used
+    # to be `len(live) + 1`, counting on this check being the last one appended; it was
+    # correct only while that stayed true, and the sibling check one function away has
+    # already been appended after it. A green gate that certifies a figure one behind the
+    # run that produced it is the exact failure this was written to prevent, so the
+    # arithmetic is not repeated here.
+    if total is None:
+        return Result("fact-docs-current", SKIP, "no class total supplied")
+    classes = str(total)
     failed = str(sum(1 for r in live if r.status == FAIL))
     executions = str(sum(r.counts.get("passed", 0) for r in live))
     files = str(len({p.name for p in TESTS.glob("test_*.py")}))
@@ -1604,7 +1700,12 @@ def main() -> int:
     # Runs last, with the results already collected: the fact-level documents state
     # this run's own class and execution counts, so the check that keeps them honest
     # has to read those counts rather than spawn a second copy of this script.
-    results.append(check_fact_docs_match_the_live_gate(results))
+    # These two are part of the count they verify, so the count they compare against is
+    # this list's length plus one for each of them - derived here, next to the calls that
+    # determine it, instead of each check guessing from the results visible at its own call.
+    total_classes = len(results) + 2
+    results.append(check_the_gate_class_count_is_reported_consistently(total_classes))
+    results.append(check_fact_docs_match_the_live_gate(total_classes, results))
 
     width = max(len(r.name) for r in results)
     print()
