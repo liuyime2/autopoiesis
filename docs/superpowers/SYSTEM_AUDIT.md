@@ -1,5 +1,22 @@
 # Fact-level system audit — QuantGroup `min_agent`
 
+> **This is a historical record, not documentation of the current system.**
+>
+> It was written on 2026-09-29 against commit `ae7e78a`+ and describes the state of the
+> code that day. Sections 1 through 67 record defects that were found and fixed; the code
+> has changed substantially since, and several things this document lists as broken no
+> longer are.
+>
+> For how the system works now, read [`../../README.md`](../../README.md) and
+> [`../ARCHITECTURE.md`](../ARCHITECTURE.md). For what changed during the infrastructure
+> refactor and what replaced what, read [`../MIGRATION.md`](../MIGRATION.md).
+>
+> What is still worth reading it for: the *reason* certain decisions are the way they are.
+> Several are non-obvious - why `research/` is quarantined from production, why a
+> strategy may be retired for obeying the system, why `min_probation_cycles` and
+> `min_active_cycles` are different numbers - and the reasoning survives the refactor even
+> where the code does not.
+
 Audited 2026-09-29 against the working tree at `ae7e78a`+ and the live runtime
 under `runtime/min_agent/`. Every claim below was checked against code or against
 the real journal, not inferred from names.
