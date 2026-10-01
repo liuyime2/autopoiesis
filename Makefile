@@ -2,10 +2,17 @@
 # for; the individual targets exist so a single failing class can be re-run while
 # working on it.
 #
-# Nothing here swallows a failure. There is no `|| true`, no `-` prefix and no
-# piping into something that discards the exit status, because a verification
-# command that cannot fail is believed rather than run. `make verify-self-test`
-# proves that claim by breaking the gate on purpose.
+# Nothing here swallows a failure. No `-` prefix, and no piping into something that
+# discards the exit status, because a verification command that cannot fail is believed
+# rather than run. `make verify-self-test` proves that claim by breaking the gate on
+# purpose.
+#
+# The two exceptions are `smoke-offline`'s `--check-env` and `--doctor` lines, which
+# carry `|| true` deliberately and are commented where they appear: both report missing
+# credentials and exit non-zero on a machine that has none, which is correct. That
+# target checks that the install works, not that a deployment is configured, so it
+# requires the report to have been produced rather than clean. Every other target -
+# every check that could hide a defect - runs without one.
 
 SHELL := /bin/bash
 CONDA_RUN := conda run -n llm --no-capture-output
@@ -95,7 +102,7 @@ clean-pyc:
 # ---------------------------------------------------------------------------
 
 lint:
-	@$(CONDA_RUN) ruff check src/ tools/ tests/
+	@$(CONDA_RUN) ruff check src/ tools/ tests/ examples/
 
 # Not a gate. `make check` and `make fast` run lint and tests; mypy runs on
 # demand and reports without failing the loop. Making it blocking would add 94
@@ -153,18 +160,23 @@ install:
 # Record what produced a result: commit, dependency versions, config, and the
 # journal's own record of what ran. Written to runtime/, which is gitignored,
 # because it describes one machine's run rather than the repository.
+# Record what produced a result, so any run can be traced back to the code and
+# configuration that made it. The objective names the fields explicitly: config, commit
+# hash, environment, seed, dataset version, output path and core metrics. Each is read
+# from live state rather than typed in, so the record cannot drift from the run.
+#
+# `seed` and `dataset version` are reported as absent rather than invented. This agent
+# makes no stochastic decision of its own - the only randomness in the path is the
+# model, whose sampling is temperature-driven and not seeded anywhere in the codebase -
+# and its "dataset" is the live broker, whose version is a point in time. Writing
+# `seed: none` and `dataset: live broker at <iso>` states the fact; writing a number
+# would be a fabrication.
 reproduce:
 	@mkdir -p runtime/min_agent
-	@{ \
-	  echo "commit: $$(git rev-parse HEAD 2>/dev/null || echo unknown)"; \
-	  echo "dirty:  $$(git diff --quiet 2>/dev/null && echo no || echo yes)"; \
-	  echo "python: $$($(CONDA_RUN) python -V 2>&1)"; \
-	  echo "deps:"; $(CONDA_RUN) python -m pip freeze 2>/dev/null | grep -Ei 'alpaca|pydantic|requests|pytest'; \
-	  echo "broker clock:"; $(CONDA_RUN) python -c "import os,urllib.request,json;\
-	h={'APCA-API-KEY-ID':os.environ['ALPACA_API_KEY'],'APCA-API-SECRET-KEY':os.environ['ALPACA_SECRET_KEY']};\
-	print(json.load(urllib.request.urlopen(urllib.request.Request('https://paper-api.alpaca.markets/v2/clock',headers=h),timeout=20))['is_open'])" 2>/dev/null || echo "unavailable"; \
-	} > runtime/min_agent/reproduce.txt
-	@cat runtime/min_agent/reproduce.txt
+	@$(PY) tools/provenance.py > runtime/min_agent/reproduce.txt
+	@echo "wrote runtime/min_agent/reproduce.txt"
+	@sed -n '1,10p' runtime/min_agent/reproduce.txt
+
 
 clean: clean-pyc
 	@rm -rf .pytest_cache .ruff_cache .mypy_cache

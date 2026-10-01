@@ -505,6 +505,66 @@ def _durable_unit_dir() -> str | None:
     return str(Path(path).parent)
 
 
+def check_the_example_still_runs() -> Result:
+    """`examples/minimal_cycle.py` must execute, not merely exist.
+
+    An example that no longer runs is worse than none: it is the first thing a new
+    reader runs, and a failure there teaches them the project is broken before they have
+    read anything. This one drifted the moment it was written - it imported a
+    `Position` that the models module does not define, and constructed a `TradeDecision`
+    without its required `rationale` - and nothing noticed, because nothing executed it.
+
+    Runs it in a subprocess with no broker and no credentials, which is the property the
+    example claims for itself. Output is discarded; the exit status is the check.
+    """
+    example = ROOT / "examples" / "minimal_cycle.py"
+    if not example.exists():
+        return Result("example-runs", FAIL, "examples/minimal_cycle.py is missing")
+    proc = subprocess.run(
+        [sys.executable, str(example)],
+        capture_output=True, text=True, timeout=180,
+        cwd=ROOT,
+        env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
+    )
+    if proc.returncode != 0:
+        return Result(
+            "example-runs", FAIL,
+            f"examples/minimal_cycle.py exited {proc.returncode}: "
+            f"{(proc.stderr.strip() or proc.stdout.strip())[-180:]}",
+        )
+    return Result("example-runs", PASS, "examples/minimal_cycle.py runs with no broker or credentials")
+
+
+def check_config_example_names_are_real() -> Result:
+    """Every variable in configs/paper.env.example must exist in the codebase.
+
+    A configuration example is read by whoever is setting the system up, and a name that
+    nothing reads is a setting they will change in the belief it took effect. The names
+    are checked against config.py's own env reads plus the deployed env file's keys,
+    which together are where a variable can legitimately come from.
+    """
+    example = ROOT / "configs" / "paper.env.example"
+    if not example.exists():
+        return Result("config-example-names", FAIL, "configs/paper.env.example is missing")
+    names = set(re.findall(r"^(MIN_AGENT_[A-Z_]+|ALPACA_[A-Z_]+|OLLAMA_BASE_URL)=", example.read_text(), re.M))
+    if not names:
+        return Result("config-example-names", FAIL, "no variable names found in the example")
+    known = (ROOT / "src" / "min_agent" / "config.py").read_text(encoding="utf-8")
+    env_file = Path(os.environ.get("XDG_CONFIG_HOME", "")) / "min-agent" / "env"
+    if env_file.exists():
+        known += env_file.read_text(encoding="utf-8")
+    unknown = sorted(n for n in names if n not in known)
+    if unknown:
+        return Result(
+            "config-example-names", FAIL,
+            f"{len(unknown)} variable(s) in the example are read by nothing: {unknown}",
+        )
+    return Result(
+        "config-example-names", PASS,
+        f"all {len(names)} variable names in the example are read by config.py or the env file",
+    )
+
+
 def check_docs_do_not_instruct_deleted_commands() -> Result:
     """No document may tell a reader to run a command that no longer exists.
 
@@ -1453,6 +1513,8 @@ def main() -> int:
     results.append(check_units_are_where_systemd_looks())
     results.append(check_the_running_daemon_matches_the_worktree())
     results.append(check_docs_do_not_instruct_deleted_commands())
+    results.append(check_the_example_still_runs())
+    results.append(check_config_example_names_are_real())
     results.append(check_unit_environment_files_exist())
     results.append(check_replay_audit())
     results.append(check_shadow_cannot_count_as_executed())

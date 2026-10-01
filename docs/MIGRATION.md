@@ -49,6 +49,10 @@ adding it surfaced an assertion about a `DRIFT` marker that only ever applied to
 | `docs/ARCHITECTURE.md` | Architecture, execution path, state schema, pre-refactor map | No single document described the system as it is rather than as it was |
 | `docs/MIGRATION.md` | This file | The objective requires an explicit old→new map |
 | `tests/min_agent/test_syntax_import.py` | 40 tests for the `syntax-import` class | It was the last substantive check class with no test file |
+| `examples/minimal_cycle.py` | Smallest runnable example: a real `Guardian` verdict, no broker, no credentials, no network | The objective asks for minimal runnable examples. It is gated by `example-runs`, because an example that no longer runs teaches a newcomer the project is broken before they have read anything |
+| `configs/paper.env.example` | Every environment variable with its default and why | Configuration is read from the environment only, so an example is the documentation. Gated by `config-example-names`, which fails on any name nothing reads |
+| `.github/workflows/ci.yml` | lint, tests, offline smoke, and the gate's self-test | The objective asks for CI. It deliberately omits the broker-dependent targets, which need credentials |
+| `tools/provenance.py` | What `make reproduce` writes | The objective names the fields: config, commit hash, environment, seed, dataset version, output paths, core metrics. It is a file rather than a Makefile recipe because a `\`-continued Python program inside `$(...)` fails silently
 
 ## Changed behaviour
 

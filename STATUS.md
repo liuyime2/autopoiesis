@@ -241,6 +241,11 @@ Alpaca UI.
 
 ## 2026-09-28 — verification gate and the two missing loop stages
 
+> Dated section. The figures below are what the gate reported on 2026-09-28 and are
+> correct for that date. For the current figures see `README.md`; the gate now runs
+> 33 check classes. The sections below are a record of what was true when each was
+> written, not a description of the present.
+
 **`make verify` is the single gate.** 17 check classes, 0 failed, 472 distinct
 tests, 91/91 defect audit, `doctor` RESULT OK, exit 0. Per-class re-runs:
 `make verify CLASS=pnl-accounting`. `make verify-self-test` breaks the gate on

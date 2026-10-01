@@ -61,9 +61,18 @@ WRITE_CALL = re.compile(r"""write_text|json\.dump|\bopen\s*\(.*["']w""")
 
 
 def _source(name: str) -> str:
+    """Read a file the tests assert about.
+
+    A missing file is a FAILURE, not a skip. `_source` used to skip, which meant that
+    after the five shell wrappers and auto_reviewer.py were deleted, every assertion
+    about them went green by not running. A test that quietly stops testing is worse
+    than one that is removed, because the coverage it claims is still reported.
+    """
     path = ROOT / name
-    if not path.exists():
-        pytest.skip(f"{name} is not present")
+    assert path.exists(), (
+        f"{name} is asserted about by this module but does not exist. Either the "
+        "file came back, or the assertions that read it should be deleted with it."
+    )
     return path.read_text(encoding="utf-8")
 
 
@@ -125,15 +134,23 @@ def test_ops_scripts_do_not_write_runtime_state(script):
         assert forbidden not in text, f"{script} still contains a repair: {forbidden}"
 
 
-def test_auto_reviewer_uses_real_liveness_not_the_status_string():
-    text = _source("auto_reviewer.py")
-    assert "daemon_not_live" in text, "reviewer must judge liveness, not just the status string"
-    assert ".get(\"live\")" in text or "get('live')" in text
+# Removed: test_auto_reviewer_uses_real_liveness_not_the_status_string. It asserted
+# that auto_reviewer.py judged liveness rather than the status string - a real defect
+# once, fixed in that file. The file is now deleted as a duplicate of doctor's 94
+# checks, and `_source` skipping on a missing path had turned the assertion green
+# without reading anything. `_source` now asserts the file exists, so the deletion
+# surfaced as a failure rather than passing silently. The liveness property it guarded
+# is asserted against the code that now owns it, in doctor.py's own checks and in
+# test_doctor_infra_checks.py.
 
 
 def test_ops_scripts_use_an_absolute_conda_path():
     """`conda` is not on PATH here; bare `conda` silently produced exit 0."""
-    for script in OPS_SCRIPTS + ("monitor.sh", "observe.sh", "check-market-open.sh", "run_forever.sh", "minictrl"):
+    # minictrl only. The four shell wrappers this used to cover are deleted, and
+    # `_source` skips a missing file - so listing them made the loop body run zero
+    # times and the assertion pass without ever reading a file. A governance check
+    # that cannot fail is a comment wearing a test's clothes.
+    for script in OPS_SCRIPTS:
         text = _source(script)
         bare = re.findall(r"(?<![/\w-])conda run", text)
         assert not bare, f"{script} invokes bare `conda run` {len(bare)} time(s); use CONDA_BIN"
