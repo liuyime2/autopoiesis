@@ -931,6 +931,52 @@ def check_the_example_still_runs() -> Result:
     return Result("example-runs", PASS, "examples/minimal_cycle.py runs with no broker or credentials")
 
 
+def check_config_example_covers_every_variable() -> Result:
+    """Every variable config.py reads must appear in configs/paper.env.example.
+
+    The sibling `config-example-names` check runs the other direction - it stops the example
+    naming a setting nothing reads - and between them they left a hole. The example
+    documented 13 of the 38 variables the loader reads; the 25 it omitted were checked by
+    nothing, and README called the file "every environment variable, with its default", which
+    made an incomplete file an actively misleading one. Someone setting up the system would
+    not know which of their assumptions were real.
+
+    So this asks the loader directly rather than parsing its source: instantiate
+    `AgentConfig` and diff its fields against the names in the example. Both directions now
+    hold, and neither can rot silently, because the field list is the truth.
+
+    A variable read outside the dataclass - a broker alias, say - is genuinely absent from
+    the fields, so this complements the other check instead of duplicating it. The union of
+    both is what the example is required to document.
+    """
+    example = ROOT / "configs" / "paper.env.example"
+    if not example.exists():
+        return Result("config-example-complete", FAIL, "configs/paper.env.example is absent")
+    sys.path.insert(0, str(SRC))
+    from min_agent.config import AgentConfig
+    documented = set(re.findall(r"^\s*#?\s*([A-Z][A-Z0-9_]+)=", example.read_text(encoding="utf-8"), re.M))
+    # The dataclass field names and the env var names differ by prefix and word order
+    # (`max_position_value` reads MIN_AGENT_MAX_POSITION_VALUE), so the names are taken from
+    # the loader's own read sites rather than derived from the fields. An earlier version
+    # computed the field set and then never used it - ruff caught the dead assignment, which
+    # is the check working - so `fields` is gone and the scan below stands on its own.
+    loader = (SRC / "min_agent" / "config.py").read_text(encoding="utf-8")
+    read = set(re.findall(r'"(MIN_AGENT_[A-Z0-9_]+)"', loader)) | set(
+        re.findall(r'"(ALPACA_[A-Z0-9_]+)"', loader)
+    ) | set(re.findall(r'"(APCA_[A-Z0-9_]+)"', loader)) | set(re.findall(r'"(OLLAMA_[A-Z0-9_]+)"', loader))
+    missing = sorted(read - documented)
+    if missing:
+        return Result(
+            "config-example-complete", FAIL,
+            f"{len(missing)} variable(s) the loader reads are absent from the example: "
+            f"{missing[:6]}{' ...' if len(missing) > 6 else ''}",
+        )
+    return Result(
+        "config-example-complete", PASS,
+        f"all {len(read)} variable(s) the loader reads are documented in the example",
+    )
+
+
 def check_config_example_names_are_real() -> Result:
     """Every variable in configs/paper.env.example must exist in the codebase.
 
@@ -1645,6 +1691,7 @@ BESPOKE_CHECK_NAMES = (
     "no-loose-design-notes",
     "fresh-clone-evidence-real",
     "config-example-names",
+    "config-example-complete",
     "gate-class-count-consistent",
     "fact-docs-current",
 )
@@ -1654,6 +1701,7 @@ REPOSITORY_CHECK_CLASSES: frozenset[str] = frozenset({
     # freshness, the production/research boundary, hardcoded paths.
     "bespoke-list-matches-run",
     "status-matches-doctor",
+    "config-example-complete",
     "class-coverage",
     "test-coverage-map",
     "docs-not-stale",
@@ -2042,6 +2090,7 @@ def main() -> int:
     results.append(check_the_declared_bespoke_list_matches_what_runs())
     results.append(check_status_agrees_with_doctor())
     results.append(check_config_example_names_are_real())
+    results.append(check_config_example_covers_every_variable())
     results.append(check_unit_environment_files_exist())
     results.append(check_replay_audit())
     results.append(check_shadow_cannot_count_as_executed())
