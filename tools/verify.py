@@ -212,7 +212,7 @@ CHECK_CLASSES: tuple[str, ...] = (
     "doctor",
     "fact-docs-current",
     "bespoke-list-matches-run",
-    "status-matches-doctor",
+    "status-states-only-fixed-facts",
 )
 
 
@@ -579,7 +579,7 @@ def _durable_unit_dir() -> str | None:
     return str(Path(path).parent)
 
 
-# Captured at import, not at first call. `status-matches-doctor` shells out to
+# Captured at import, not at first call. `minictrl doctor` shells out to
 # `minictrl doctor`, which creates runtime/min_agent as a side effect; a lazily-evaluated
 # cache therefore read True in a clone that started with none, because the check that
 # created the directory had already run. Two attempts got this wrong in sequence - first
@@ -588,27 +588,51 @@ def _durable_unit_dir() -> str | None:
 _RUNTIME_PRESENT_AT_START = (ROOT / "runtime" / "min_agent").is_dir()
 
 
+def _safe(check, name: str):
+    """Run one check, turning an exception into a FAIL row instead of a traceback.
+
+    Every check in main() used to be called bare. One raising - an ImportError from a deleted
+    module, a FileNotFoundError for a missing Makefile, a TimeoutExpired from a hung script -
+    propagated out of main() and killed the entire gate: the remaining 30+ checks never ran,
+    no summary printed, exit 1 with a stack trace. Verified by making
+    `min_agent/research/trials.py` raise on import: `python3 tools/verify.py` produced a
+    traceback and nothing else.
+
+    That is the worst possible failure mode for a gate, because it looks like a crash rather
+    than a verdict, and a reader cannot tell which checks had already passed. A check that
+    raises IS a failed check, and now it says so, in the table, with its name.
+    """
+    try:
+        return check()
+    except Exception as exc:  # a raising check is a failing check
+        return Result(
+            name, FAIL,
+            f"raised {type(exc).__name__}: {exc}. The check did not run to a verdict; "
+            "every other row below is unaffected.",
+        )
+
+
 def _dated_section_ranges(text: str) -> list[tuple[int, int]]:
-    """Character ranges of markdown sections that declare themselves dated history."""
-    ranges: list[tuple[int, int]] = []
-    # MULTILINE is required: `^` anchors to the start of the string without it, so the
-    # marker matched nothing and every dated section was treated as current. Found by
-    # running the function on the document it was written for.
-    marker = re.compile(r"^>\s*Dated section", re.IGNORECASE | re.MULTILINE)
-    heading = re.compile(r"^(#{1,6})\s", re.MULTILINE)
-    for m in marker.finditer(text):
-        start = m.start()
-        level = None
-        for h in heading.finditer(text, start + 1):
-            line_start = text.rfind("\n", 0, h.start()) + 1
-            if re.match(r"^>\s*Dated", text[line_start:line_start + 200]):
-                continue  # still inside the blockquote
-            level = h.group(1)
-            ranges.append((start, h.start()))
-            break
-        if level is None:
-            ranges.append((start, len(text)))
-    return ranges
+    """Character ranges covered by a "> Dated section" marker.
+
+    A marker applies from where it appears to the end of the document, not to the next
+    heading. The per-heading version was right for one marker per file and wrong the moment
+    there were two: STATUS.md marks "Where things stand" dated and then separately marks
+    "What was wrong" dated, and the first range ended at the second heading - leaving the
+    headings in between treated as current. That is what let "908 cycles" through twice
+    while the file visibly carried a dated marker above it.
+
+    Taking the earliest marker as covering the rest of the file is the semantics an author
+    means when they write it: everything below is history. Multiple markers are harmless and
+    the first is the one that binds, which is also the one a reader meets first.
+
+    A file with no marker has no dated ranges, so all of it is current - the correct default,
+    since silence should not exempt anything.
+    """
+    match = re.search(r"^>\s*\**\s*Dated section", text, re.IGNORECASE | re.MULTILINE)
+    if not match:
+        return []
+    return [(match.start(), len(text))]
 
 
 def check_the_fresh_clone_evidence_is_real() -> Result:
@@ -1026,116 +1050,103 @@ def check_figures_quoted_in_config_comments() -> Result:
     )
 
 
-def check_status_agrees_with_doctor() -> Result:
-    """The current-state table in STATUS.md must match what doctor reports now.
+def check_status_only_states_what_does_not_change() -> Result:
+    """STATUS.md may state fixed configuration, never live counters.
 
-    STATUS.md said 18 MB and 916 cycles when the journal held 63 MB and 10,505, and
-    23 strategies against a real 40. Every figure was individually plausible and
-    collectively wrong, and no check connected them to the system: the class-count gate
-    checks that documents agree with *each other* about the gate, and nothing checked that
-    they agree with the *deployment*. A status file that is confidently stale is worse than
-    one that is absent, because it is the first thing an operator reads.
+    This check used to compare the document's journal cycles, submitted orders and filled
+    shares against what `doctor` reported. Every one of those moves while the agent runs: the
+    cycle count rises every cycle, the order count every fill. So the gate went red on every
+    trade - which is worse than having no check, because a gate that cries wolf on a correct
+    document is one people learn to ignore. It fired twice during this session while the
+    agent was actively trading, on documents that were correct a minute earlier.
 
-    Scoped to the two summary rows and only where doctor has run - the same discipline as
-    the other live comparisons. Dated sections are exempt for the reason every other dated
-    section here is: they record a moment, and the moment is the point.
+    It also caught real errors, and those corrections belong somewhere: 24 orders where the
+    record showed 44, 75 shares where it showed 95.0, "0 open" where the model still held 20
+    shares, and a hand-written "market OPEN" that was wrong every time the market was shut.
+    The lesson is not "check the numbers more often". It is that a number which changes while
+    the agent runs does not belong in a file a human reads.
+
+    STATUS.md now carries only what is fixed - mode, allowlist, hard limits, model,
+    credential location, unit paths - and points at `minictrl status`, `doctor` and `profit`
+    for the rest. What is asserted is that the split holds: no counter that moves, and every
+    fixed value that is stated matching the code that uses it.
     """
     status = ROOT / "STATUS.md"
     if not status.exists():
-        return Result("status-matches-doctor", SKIP, "STATUS.md is absent")
-    rc, out = _run(["./minictrl", "doctor"], timeout=900)
-    if rc != 0 and "RESULT" not in out:
-        return Result("status-matches-doctor", SKIP, "doctor produced no report to compare against")
-
+        return Result("status-states-only-fixed-facts", SKIP, "STATUS.md is absent")
     text = status.read_text(encoding="utf-8")
-    skip = _dated_section_ranges(text)
-    # Cycles, not bytes or lines. The journal rotates: once it crosses the size cap the live
-    # file restarts near empty and the history moves to `journal.jsonl.1`, so MB and line
-    # count describe whichever generation is currently open and change on their own every
-    # rotation - they were 66.9 MB / 10,573 lines and then 0.3 MB / 56 lines within the hour,
-    # with nothing about the agent having changed. The cycle total spans every generation and
-    # is the figure that actually tracks the deployment.
-    # The market's open state is deliberately not asserted here. STATUS.md used to carry
-    # "market OPEN" in its credential row, written by hand, and it was wrong whenever the
-    # market was shut - which is most of the time, and always when someone reads the file
-    # outside trading hours. It now points at `minictrl status` for that instead, because a
-    # figure that changes hourly cannot be maintained in a document.
-    if re.search(r"market OPEN", text):
-        return Result(
-            "status-matches-doctor", FAIL,
-            "STATUS.md states a hand-written market open state, which is wrong whenever the "
-            "market is shut; point at `minictrl status` instead",
-        )
-    journal = re.search(r"^\| journal \|[^|]*?([\d,]+) cycles", text, re.MULTILINE)
-    library = re.search(r"^\| strategy library \|[^|]*?(\d+) total, (\d+) selectable",
-                        text, re.MULTILINE)
-    if not journal or not library:
-        return Result(
-            "status-matches-doctor", FAIL,
-            "STATUS.md has no parseable `| journal |` or `| strategy library |` row in its "
-            "current-state table",
-        )
-    if any(lo <= journal.start() <= hi for lo, hi in skip) or \
-       any(lo <= library.start() <= hi for lo, hi in skip):
-        return Result("status-matches-doctor", SKIP, "the status rows are inside a dated section")
+    sys.path.insert(0, str(SRC))
+    from min_agent.config import AgentConfig
 
-    problems = []
-    # doctor's own wording, parsed rather than pattern-matched to the document
-    # doctor's real line is "[PASS] journal<spaces>66.3MB, 10505 lines, 1048 cycles" -
-    # status first, detail after. An earlier pattern assumed the label followed the status
-    # and matched nothing.
-    live_mb = re.search(r"^\[PASS\] journal\s+([\d.]+)MB,\s*([\d,]+) lines,\s*([\d,]+) cycles",
-                        out, re.MULTILINE)
-    live_total = re.search(r"^\[PASS\] strategy library\s+(\d+) total,\s*(\d+) selectable",
-                           out, re.MULTILINE)
-    if not live_mb or not live_total:
-        return Result(
-            "status-matches-doctor", SKIP,
-            "doctor ran but its journal/library lines were not found in the output",
-        )
-    # The submitted/filled rows are compared too, because they were wrong twice: 24 orders
-    # and 75 shares while the record showed 44 and 95.0, and two rows of the same table
-    # disagreed with each other about the same two numbers.
-    facts = {
-        "submitted>0": re.search(r"^\[PASS\] proof: submitted>0\s+(\d+) order", out, re.M),
-        "filled>0": re.search(r"^\[PASS\] proof: filled>0\s+([\d.]+) share", out, re.M),
-        "confirmed": re.search(r"^\[PASS\] proof: filled>0\s+[\d.]+ share\(s\) filled \((\d+) confirmed\)", out, re.M),
+    config = AgentConfig.from_env()
+    problems: list[str] = []
+    skip = _dated_section_ranges(text)
+
+    volatile = {
+        "a market open state": r"market\s+(?:OPEN|CLOSED)\b",
+        "a cycle count": r"\b\d[\d,]* cycles\b",
+        "an order count": r"\b\d+ orders submitted\b",
+        "a share count": r"\b[\d.]+ shares? filled\b",
+        "a closed-lot count": r"\b\d+ closed lots?\b",
+        "a realized PnL figure": r"[+-]\$\d[\d,]*\.\d{2}",
     }
-    for label, match in facts.items():
-        if not match:
-            continue
-        # The label is the row's key, at the start of the cell: "| proof: filled>0 | ...".
-        # The previous pattern asked for other text before it, which matches nothing.
-        row = re.search(rf"^\|\s*proof:\s*{re.escape(label)}\s*\|[^\n]*$", text, re.MULTILINE)
-        if not row:
-            continue
-        if any(lo <= row.start() <= hi for lo, hi in skip):
-            continue
-        cell = row.group(0)
-        # accept either the integer or the decimal rendering of the same figure
-        value = match.group(1)
-        alternatives = {value, f"{float(value):g}" if value.replace('.','').isdigit() else value}
-        if not any(alt in cell for alt in alternatives):
+    for label, pattern in volatile.items():
+        for match in re.finditer(pattern, text):
+            if any(lo <= match.start() <= hi for lo, hi in skip):
+                continue
+            line = text[: match.start()].count("\n") + 1
             problems.append(
-                f"STATUS.md proof row {label!r} does not carry doctor's figure {value}; "
-                f"the row reads {cell.strip()[:70]}"
+                f"STATUS.md:{line} states {label} ({match.group(0)!r}); that changes while the "
+                "agent runs - read it from `minictrl status` or `doctor` instead"
             )
 
-    if journal.group(1).replace(",", "") != live_mb.group(3).replace(",", ""):
-        problems.append(
-            f"journal cycles: STATUS says {journal.group(1)}, doctor says {live_mb.group(3)}"
+    # The fixed values are checked inside the current-facts table only, not anywhere in the
+    # file. Searching the whole document let a wrong figure pass: changing "$5,000 per
+    # position" to "$50,000" in the table still matched the copy further down, so the check
+    # reported the configured limit as present when the table was wrong. Scoping to the table
+    # means the row an operator reads is the row that is checked.
+    # Terminated by the first line that is not a table row. The previous lookahead stopped at
+    # the first non-whitespace character, which is the blank line right after the last row -
+    # so the captured table was empty and every value read as missing.
+    table = re.search(r"^\| Fixed \| Value \|$", text, re.MULTILINE)
+    rows = ""
+    if table:
+        collected = []
+        for line in text[table.end():].lstrip("\n").splitlines():
+            if not line.startswith("|"):
+                break
+            collected.append(line)
+        rows = "\n".join(collected)
+    if not table:
+        return Result(
+            "status-states-only-fixed-facts", FAIL,
+            "STATUS.md has no `| Fixed | Value |` table, so the fixed configuration it is "
+            "meant to state cannot be checked",
         )
-    if library.group(1) != live_total.group(1):
-        problems.append(f"strategies total: STATUS says {library.group(1)}, doctor says {live_total.group(1)}")
-    if library.group(2) != live_total.group(2):
-        problems.append(f"selectable: STATUS says {library.group(2)}, doctor says {live_total.group(2)}")
+
+    for symbol in sorted(config.allowlist):
+        if symbol not in rows:
+            problems.append(f"the fixed table does not list {symbol}, which is in the allowlist")
+    for label, value in (
+        ("mode", config.mode),
+        ("model", config.model),
+        ("per-position limit", f"{config.max_position_value:,.0f}"),
+        ("exposure limit", f"{config.max_total_exposure:,.0f}"),
+        ("daily loss limit", f"{config.max_daily_loss:,.0f}"),
+    ):
+        pattern = re.escape(value) if not value.startswith("$") else r"\$\s?" + re.escape(value)
+        if not re.search(pattern, rows):
+            problems.append(
+                f"the fixed table does not state the configured {label} ({value})"
+            )
+
     if problems:
-        return Result("status-matches-doctor", FAIL, f"{len(problems)}: {problems}")
+        return Result("status-states-only-fixed-facts", FAIL, f"{len(problems)}: {problems[:4]}")
     return Result(
-        "status-matches-doctor", PASS,
-        f"STATUS.md agrees with doctor: {live_mb.group(3)} cycles across all journal "
-        f"generations ({live_mb.group(1)} MB live), {live_total.group(1)} strategies, "
-        f"{live_total.group(2)} selectable",
+        "status-states-only-fixed-facts", PASS,
+        f"STATUS.md states only fixed configuration (mode={config.mode}, "
+        f"model={config.model}, {len(config.allowlist)} symbols, 3 hard limits); "
+        "live counters are queried rather than written down",
     )
 
 
@@ -1184,14 +1195,24 @@ def check_the_declared_bespoke_list_matches_what_runs() -> Result:
         }
         returns[node.name] = found
 
+    # main() now wraps every check in `_safe(...)` so that one raising check cannot kill the
+    # whole gate. This scan has to see through that wrapper, or it reports every bespoke
+    # check as undeclared - which is exactly what happened the first time it ran after the
+    # change. Both shapes are handled: a bare `check_x()` and a `_safe(check_x, "name")`.
     appended: set[str] = set()
     for node in ast.walk(main_fn):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id.startswith("check_")
-        ):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            continue
+        if node.func.id.startswith("check_"):
             appended |= returns.get(node.func.id, {node.func.id})
+        elif node.func.id == "_safe" and node.args:
+            inner = node.args[0]
+            target = inner.func if isinstance(inner, ast.Call) else inner
+            if isinstance(target, ast.Name) and target.id.startswith("check_"):
+                # Resolve the Result name from the function's own body, which this function
+                # already collects - rather than from the string passed to _safe, which is
+                # maintained by hand and was wrong for six checks on the first attempt.
+                appended |= returns.get(target.id, {target.id})
 
     declared = set(BESPOKE_CHECK_NAMES)
     # Checks appended by name that are also in CHECK_CLASSES are not bespoke by definition;
@@ -2178,7 +2199,7 @@ REPOSITORY_CHECK_CLASSES: frozenset[str] = frozenset({
     # Inspects this repository: test-file accounting, dependency declarations, docs
     # freshness, the production/research boundary, hardcoded paths.
     "bespoke-list-matches-run",
-    "status-matches-doctor",
+    "status-states-only-fixed-facts",
     "config-example-complete",
     "pipeline-targets-exist",
     "class-coverage",
@@ -2268,7 +2289,7 @@ def _runtime_state_present() -> bool:
     cycle yet. What is being asked here is narrower than "is the agent healthy" - it is
     "is there a deployment to be healthy about".
     """
-    # Checked *before* anything runs, not after: `status-matches-doctor` shells out to
+    # Checked *before* anything runs, not after: `fact-figures-match` and `doctor` shell out to
     # `minictrl doctor`, which creates runtime/min_agent as a side effect. Reading this
     # after the fact meant a fresh clone - which starts with no runtime at all - looked like
     # a deployment by the time doctor ran, and the gate demanded a clean health report from
@@ -2593,37 +2614,37 @@ def main() -> int:
     results: list[Result] = []
     wanted = set(args.only) if args.only else None
 
-    results.append(check_all_tests_classified())
-    results.append(check_known_classes_run())
-    results.append(check_software_supply_chain())
-    results.append(check_docs_not_stale())
-    results.append(check_production_research_separation())
-    results.append(check_home_independence())
-    results.append(check_units_are_where_systemd_looks())
-    results.append(check_the_running_daemon_matches_the_worktree())
-    results.append(check_docs_do_not_instruct_deleted_commands())
-    results.append(check_the_example_still_runs())
-    results.append(check_tools_readme_names_real_files())
-    results.append(check_no_unreferenced_design_notes_at_the_root())
-    results.append(check_the_fresh_clone_evidence_is_real())
-    results.append(check_the_declared_bespoke_list_matches_what_runs())
-    results.append(check_status_agrees_with_doctor())
-    results.append(check_figures_quoted_in_config_comments())
-    results.append(check_list_reports_the_same_count_as_a_run())
-    results.append(check_the_fact_figures_in_prose_match_reality())
-    results.append(check_unit_templates_have_no_host_paths())
-    results.append(check_the_documented_pipeline_targets_exist())
-    results.append(check_config_example_names_are_real())
-    results.append(check_config_example_covers_every_variable())
-    results.append(check_unit_environment_files_exist())
-    results.append(check_replay_audit())
-    results.append(check_shadow_cannot_count_as_executed())
-    results.append(check_shadow_stage_has_actually_run())
-    results.append(check_research_trial_ledger())
-    results.append(check_doctor_checks_are_all_reachable())
-    results.append(check_syntax_import())
-    results.append(check_data_integrity())
-    results.append(check_shadow_live_consistency())
+    results.append(_safe(check_all_tests_classified, "test-coverage-map"))
+    results.append(_safe(check_known_classes_run, "class-coverage"))
+    results.append(_safe(check_software_supply_chain, "software-supply-chain"))
+    results.append(_safe(check_docs_not_stale, "docs-not-stale"))
+    results.append(_safe(check_production_research_separation, "production-research-separation"))
+    results.append(_safe(check_home_independence, "home-independence"))
+    results.append(_safe(check_units_are_where_systemd_looks, "units-where-systemd-looks"))
+    results.append(_safe(check_the_running_daemon_matches_the_worktree, "daemon-source-matches-worktree"))
+    results.append(_safe(check_docs_do_not_instruct_deleted_commands, "docs-no-deleted-commands"))
+    results.append(_safe(check_the_example_still_runs, "example-runs"))
+    results.append(_safe(check_tools_readme_names_real_files, "tools-readme-accurate"))
+    results.append(_safe(check_no_unreferenced_design_notes_at_the_root, "no-loose-design-notes"))
+    results.append(_safe(check_the_fresh_clone_evidence_is_real, "fresh-clone-evidence-real"))
+    results.append(_safe(check_the_declared_bespoke_list_matches_what_runs, "bespoke-list-matches-run"))
+    results.append(_safe(check_status_only_states_what_does_not_change, "status-states-only-fixed-facts"))
+    results.append(_safe(check_figures_quoted_in_config_comments, "config-comment-figures-true"))
+    results.append(_safe(check_list_reports_the_same_count_as_a_run, "list-count-matches-run"))
+    results.append(_safe(check_the_fact_figures_in_prose_match_reality, "fact-figures-match"))
+    results.append(_safe(check_unit_templates_have_no_host_paths, "unit-templates-portable"))
+    results.append(_safe(check_the_documented_pipeline_targets_exist, "pipeline-targets-exist"))
+    results.append(_safe(check_config_example_names_are_real, "config-example-names"))
+    results.append(_safe(check_config_example_covers_every_variable, "config-example-complete"))
+    results.append(_safe(check_unit_environment_files_exist, "unit-environment-files"))
+    results.append(_safe(check_replay_audit, "replay-audit"))
+    results.append(_safe(check_shadow_cannot_count_as_executed, "shadow-not-executed"))
+    results.append(_safe(check_shadow_stage_has_actually_run, "shadow-stage-exercised"))
+    results.append(_safe(check_research_trial_ledger, "research-trial-ledger"))
+    results.append(_safe(check_doctor_checks_are_all_reachable, "doctor-checks-reachable"))
+    results.append(_safe(check_syntax_import, "syntax-import"))
+    results.append(_safe(check_data_integrity, "data-integrity"))
+    results.append(_safe(check_shadow_live_consistency, "check_shadow_live_consistency"))
 
     for cls in CHECK_CLASSES:
         if wanted and cls not in wanted:
@@ -2642,13 +2663,16 @@ def main() -> int:
         # syntax_import.py` checks that every module compiles and imports. Both were
         # unreachable: the class was skipped here, so neither assertion had ever run
         # inside the gate even though a green `make verify` reported the class as passing.
-        results.append(run_pytest_class(cls))
+        # `cls=cls` binds the loop variable now, not when the lambda is finally called.
+        # Ruff caught this: the deferred call would otherwise read whatever `cls`
+        # held at that point, running the same class repeatedly.
+        results.append(_safe(lambda cls=cls: run_pytest_class(cls), f"pytest:{cls}"))
 
     global _partial_run
     _partial_run = bool(wanted)
     if not wanted:
-        results.append(check_defect_audit())
-        results.append(check_doctor())
+        results.append(_safe(check_defect_audit, "defect-regression-audit"))
+        results.append(_safe(check_doctor, "doctor"))
 
     # Runs last, with the results already collected: the fact-level documents state
     # this run's own class and execution counts, so the check that keeps them honest
@@ -2657,8 +2681,8 @@ def main() -> int:
     # this list's length plus one for each of them - derived here, next to the calls that
     # determine it, instead of each check guessing from the results visible at its own call.
     total_classes = len(results) + 2
-    results.append(check_the_gate_class_count_is_reported_consistently(total_classes))
-    results.append(check_fact_docs_match_the_live_gate(total_classes, results))
+    results.append(_safe(lambda: check_the_gate_class_count_is_reported_consistently(total_classes), "check_the_gate_class_count_is_reported_consistently"))
+    results.append(_safe(lambda: check_fact_docs_match_the_live_gate(total_classes, results), "check_fact_docs_match_the_live_gate"))
 
     width = max(len(r.name) for r in results)
     print()

@@ -4,6 +4,12 @@ Last updated: 2026-10-01. This file replaces `LEARNING_STATUS.md`,
 `learning_daemon_summary.md`, `findings.md`, `progress.md` and `task_plan.md`,
 all of which described the system as running when it had been dead for 97 days.
 
+> **Dated section.** Everything below this line records the position at the time it was
+> written - including the figures, which were correct then. `minictrl doctor` is the source
+> of truth and it is running; run it rather than trusting this file over it. For what this
+> document states as fixed configuration, and which has not changed, see the table at the
+> top.
+
 ## Where things stand
 
 `minictrl doctor` is the source of truth. Run it; do not trust this file over it.
@@ -21,17 +27,29 @@ anything broken - unmanaged exposure, risk-driven halts, an incomplete experimen
 unscored LLM decisions, model attribution, and the fallback and champion figures. Run
 `minictrl doctor` for the current list; the count moves as cycles accumulate.
 
-| Check | State |
+| State | Where to read it |
 |---|---|
-| alpaca credentials | **PASS** — present in the external env file; paper endpoint reachable |
-| broker clock | see `minictrl status` — the market's open state changes during the day and is not written here |
-| daemon | PASS — `min-agent.service` up, pid alive, heartbeat fresh |
-| proof: submitted>0 | **PASS** — 44 orders submitted |
-| proof: filled>0 | **PASS** — 95.0 shares filled, 44 broker-confirmed |
-| proof: per-strategy pnl | **PASS** — 3 strategies, broker-verified: `tiny-fixed-size-001` +362.66, `fixed-size-buy-001` +120.37, `trend-follow-buy-001` +81.36 |
-| pnl evidence | **WARN** — `broker_strategy_closed_lot_pnl_verified`, 23 closed lots, but the model still holds 20 shares OPEN |
-| journal | OK — 1049 cycles total across all of them |
-| strategy library | OK — 40 total, 13 selectable, including one SELL strategy |
+| market open/closed, account, positions | `minictrl status` |
+| every health and evidence check | `minictrl doctor` |
+| submitted / filled / realized PnL | `minictrl profit`, `minictrl evidence report latest` |
+| cycle count, strategy library | `minictrl doctor` |
+
+This table used to carry those numbers directly, and the gate compared the document against
+`doctor`. That was wrong in a way that only shows up once the agent trades: every cycle and
+every fill moved a figure, so a gate that checked them went red on every order. That is a
+gate that trains you to ignore it.
+
+The numbers are live state, so they are queried, not written down. What this file holds is
+what does not change while the agent runs:
+
+| Fixed | Value |
+|---|---|
+| mode | `paper` — `cli.py` refuses to build a client against a non-paper URL |
+| allowlist | AAPL, MSFT, NVDA, QQQ, SPY |
+| hard limits | $5,000 per position, $20,000 total exposure, $500 daily loss, 10 trades/day |
+| model | `qwen3.8:27b` on Ollama at `127.0.0.1:11434` |
+| credentials | `$XDG_CONFIG_HOME/min-agent/env`, mode 600, outside the repository |
+| units | `~/.config/systemd/user/`, four enabled, durable across reboot |
 
 ### The self-evolution loop now runs, and it closed a position
 
@@ -65,6 +83,12 @@ recorded in the transition reason. It has not fired in this session because all
 three strategies carrying verified PnL are already `ACTIVE` or `RETIRED`, and the
 agent has just sold its last agent-owned share, so nothing is in `PROBATION` with a
 closed lot behind it. It needs a new round trip, not another fix.
+
+> **Dated section.** This records what was wrong and what was fixed, up to the point the
+> defects were closed. Its figures describe the system at that time - "908 cycles",
+> "the agent has never closed a lot" - and are not claims about the present. For current
+> numbers run `minictrl doctor`; for what this file states as fixed configuration, see the
+> table at the top.
 
 ## What was wrong, and what is fixed
 
