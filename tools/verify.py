@@ -1627,7 +1627,7 @@ def check_fact_docs_match_the_live_gate(total: int | None = None, live: list | N
     # as the doctor check above, one layer out. The class count must still match exactly,
     # because it does not depend on the environment; only the execution count may differ,
     # and only downwards, since skipping is the only legal difference.
-    if not _operator_credentials_present():
+    if not _operator_credentials_present() or not _runtime_state_present():
         return Result(
             "fact-docs-current", SKIP,
             f"no broker credentials: this host runs {_executions_live(live)} executions "
@@ -1832,6 +1832,16 @@ def check_defect_audit() -> Result:
     return Result("defect-regression-audit", PASS if rc == 0 else FAIL, _tail(out, 3))
 
 
+def _runtime_state_present() -> bool:
+    """Whether this checkout has any deployment to check.
+
+    A clone has no `runtime/min_agent`, and that is not a health problem: there has been no
+    cycle yet. What is being asked here is narrower than "is the agent healthy" - it is
+    "is there a deployment to be healthy about".
+    """
+    return (ROOT / "runtime" / "min_agent").is_dir()
+
+
 def _operator_credentials_present() -> bool:
     """Whether this shell can reach a broker, following the same resolution minictrl uses.
 
@@ -1862,7 +1872,12 @@ def check_doctor() -> Result:
     blocking finding still fails the gate, and the runtime checks above stay strict about
     state that exists.
     """
-    if not _operator_credentials_present():
+    # Presence of credentials is necessary but not sufficient: doctor also checks the
+    # deployed state, and a clone has none. Gating on credentials alone meant a clone that
+    # inherited this host's XDG_CONFIG_HOME found the keys, took the strict path, and failed
+    # on a strategy library that has never been created - a fresh clone reporting a blocking
+    # problem about state it was never meant to have.
+    if not _operator_credentials_present() or not _runtime_state_present():
         rc, out = _run(
             [sys.executable, "-m", "min_agent.cli", "--doctor", "--skip-broker", "--quiet"],
             timeout=900,
@@ -1879,9 +1894,14 @@ def check_doctor() -> Result:
         # A non-zero exit here is expected: --skip-broker still reports the absent
         # credential. What must hold is that the report was produced at all.
         produced = any(ln.startswith("RESULT") or ln.startswith("ok=") for ln in lines)
+        why = []
+        if not _operator_credentials_present():
+            why.append("no broker credentials")
+        if not _runtime_state_present():
+            why.append("no runtime state in this checkout")
         return Result(
             "doctor", PASS if produced else FAIL,
-            f"no broker credentials on this host; ran offline ({line}) - "
+            f"{' and '.join(why)}; ran offline ({line}) - "
             "install verified, deployment not checked",
         )
     # minictrl is a shell script, not Python. Running it through sys.executable

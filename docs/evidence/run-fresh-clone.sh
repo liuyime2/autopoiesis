@@ -73,6 +73,14 @@ run_step example "$PYTHON examples/minimal_cycle.py"
 run_step entry-point "min-agent --help"
 run_step provenance "$PYTHON tools/provenance.py"
 run_step self-test "$PYTHON tools/verify.py --self-test"
+# The gate itself, in the clone, with no credentials and no runtime directory. This is the
+# step that matters most and the one every earlier version of this script omitted: the other
+# six prove the package installs and runs, while this proves a newcomer can run the gate
+# before they have a paper account or have recorded a single cycle. It was red here for
+# several commits - a gitignored evidence log, two checks that treated absent state as
+# corruption, and doctor demanding credentials - and no amount of green lint would have
+# found that.
+run_step gate "$PYTHON tools/verify.py"
 
 if [ "$failures" -ne 0 ]; then
   echo "fresh clone: $failures step(s) failed, see $LOG" >&2
