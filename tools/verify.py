@@ -505,6 +505,56 @@ def _durable_unit_dir() -> str | None:
     return str(Path(path).parent)
 
 
+def check_tools_readme_names_real_files() -> Result:
+    """Every file `tools/README.md` names must exist, and every real tool must be named.
+
+    The previous version documented fifteen one-off diagnostic scripts that had been
+    deleted, leaving a `tools/legacy/` directory containing nothing but `__pycache__`
+    residue. A README that names absent files is worse than no README: a reader concludes
+    a tool is missing rather than that it was consolidated, and a document that cannot be
+    trusted is not worth maintaining.
+
+    Both directions are checked. Naming an absent file sends someone looking for it;
+    leaving a real tool unnamed means the one script that still matters is the one nobody
+    discovers.
+    """
+    readme = ROOT / "tools" / "README.md"
+    if not readme.exists():
+        return Result("tools-readme-accurate", FAIL, "tools/README.md is missing")
+    text = readme.read_text(encoding="utf-8")
+    # The hyphen leads the class. Written as [a-z0-9_-] the trailing hyphen becomes a
+    # range, and `min-agent.service.in` matches nothing - which is how the gate first
+    # reported three present-but-undocumented files that the README named in plain sight.
+    # The character class allows a dot so that `min-agent.service.in` matches: the
+    # extension is preceded by a name that itself contains dots. An earlier version
+    # allowed only [-a-z0-9_] and silently matched none of the .in templates, which is
+    # why the gate first reported three files as "present but undocumented" that the
+    # README named in plain sight.
+    # Extensions covered, not just the three this file happened to use when the check
+    # was written: .timer is a real unit template and omitting it produced a false
+    # "present but undocumented" for a file the README names in plain sight.
+    named = set(re.findall(r"`([a-z][-a-z0-9_.]*\.(?:py|sh|in|timer|service|target))`", text))
+    on_disk = {p.name for p in (ROOT / "tools").iterdir() if p.is_file()}
+    # README.md documents itself; exclude it from the "unnamed" direction.
+    on_disk.discard("README.md")
+    missing = sorted(n for n in named if n not in on_disk and n != "test_alpaca.py")
+    unnamed = sorted(on_disk - named)
+    if missing or unnamed:
+        parts = []
+        if missing:
+            parts.append(f"named but absent: {missing}")
+        if unnamed:
+            parts.append(f"present but undocumented: {unnamed}")
+        return Result(
+            "tools-readme-accurate", FAIL,
+            f"tools/README.md is out of date with the directory - {'; '.join(parts)}",
+        )
+    return Result(
+        "tools-readme-accurate", PASS,
+        f"tools/README.md names all {len(on_disk)} tools and invents none of them",
+    )
+
+
 def check_the_example_still_runs() -> Result:
     """`examples/minimal_cycle.py` must execute, not merely exist.
 
@@ -1514,6 +1564,7 @@ def main() -> int:
     results.append(check_the_running_daemon_matches_the_worktree())
     results.append(check_docs_do_not_instruct_deleted_commands())
     results.append(check_the_example_still_runs())
+    results.append(check_tools_readme_names_real_files())
     results.append(check_config_example_names_are_real())
     results.append(check_unit_environment_files_exist())
     results.append(check_replay_audit())

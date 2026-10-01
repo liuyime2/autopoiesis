@@ -73,7 +73,7 @@ wrappers each duplicated a flag below.
 | `make smoke` | one real cycle end to end against the broker | ~8s |
 | `make smoke-offline` | the same path with broker and model stubbed | <1s |
 | `make fast` | check + smoke + the full gate | ~90s |
-| `make verify` | 29 check classes, non-zero on any failure | ~50s |
+| `make verify` | 33 check classes, non-zero on any failure | ~100s |
 | `make test` | the whole suite | ~5min |
 | `make doctor` | health of the running system, non-zero on any fault | ~20s |
 | `make status` | is the daemon alive and what is it doing | ~1s |

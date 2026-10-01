@@ -19,9 +19,24 @@ set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 cd "$ROOT_DIR" || exit 2
 
-CONDA_BIN="${CONDA_BIN:-/home/liuyime2/miniconda3/bin/conda}"
-if [ ! -x "$CONDA_BIN" ]; then
-  echo "FATAL: conda not found at $CONDA_BIN. Set CONDA_BIN." >&2
+# Locate conda rather than assuming where it lives. The order is: an explicit
+# CONDA_BIN, then PATH, then this account's known install, then the usual suspects.
+# Previously the default was /home/liuyime2/miniconda3/bin/conda with no discovery, so
+# the documented fresh-clone path could not run anywhere but this host - which is the
+# portability problem the project was asked to remove, sitting in the operator's own
+# entry point.
+CONDA_BIN="${CONDA_BIN:-$(command -v conda 2>/dev/null || true)}"
+if [ -z "$CONDA_BIN" ]; then
+  for candidate in \
+      /home/liuyime2/miniconda3/bin/conda \
+      /opt/conda/bin/conda \
+      "$HOME/miniconda3/bin/conda" \
+      "$HOME/miniforge3/bin/conda"; do
+    if [ -x "$candidate" ]; then CONDA_BIN="$candidate"; break; fi
+  done
+fi
+if [ -z "$CONDA_BIN" ] || [ ! -x "$CONDA_BIN" ]; then
+  echo "FATAL: conda not found. Install it, put it on PATH, or set CONDA_BIN." >&2
   exit 2
 fi
 
@@ -34,7 +49,24 @@ export MIN_AGENT_MODEL="${MIN_AGENT_MODEL:-qwen3.8:27b}"
 export MIN_AGENT_CURRICULUM_ENABLED="${MIN_AGENT_CURRICULUM_ENABLED:-true}"
 
 SERVICE_NAME="min-agent.service"
-ENVBIN="${MIN_AGENT_ENVBIN:-/localscratch/liuyime2/conda_env/llm/bin}"
+# Same for the environment's bin directory: an explicit override, then the active
+# environment if this shell is already inside it, then this account's known prefix.
+# `make install` puts the package in whatever environment is active, so an operator who
+# followed the README has one and does not need to name it.
+ENVBIN="${MIN_AGENT_ENVBIN:-}"
+if [ -z "$ENVBIN" ] && [ -n "${CONDA_PREFIX:-}" ] && [ -x "$CONDA_PREFIX/bin/python" ]; then
+  ENVBIN="$CONDA_PREFIX/bin"
+fi
+if [ -z "$ENVBIN" ]; then
+  for candidate in /localscratch/liuyime2/conda_env/llm/bin "$HOME/miniconda3/envs/llm/bin"; do
+    if [ -x "$candidate/python" ]; then ENVBIN="$candidate"; break; fi
+  done
+fi
+if [ -z "$ENVBIN" ] || [ ! -x "$ENVBIN/python" ]; then
+  echo "FATAL: no python environment found. Activate the 'llm' environment, run" >&2
+  echo "       'make install', or set MIN_AGENT_ENVBIN to its bin directory." >&2
+  exit 2
+fi
 PYTHON_BIN="$ENVBIN/python"
 # Credentials live outside the working tree so git can never see them.
 ENV_FILE="${MIN_AGENT_ENV_FILE:-$XDG_CONFIG_HOME/min-agent/env}"

@@ -207,6 +207,12 @@ exactly that reason.
 
 ## What is NOT working, stated plainly
 
+> Dated section, written 2026-09-28. Each item below was true then and the causes
+> named in each were real bugs, since fixed. For whether any of them still holds, run
+> `minictrl doctor` - the file says so at the top and that instruction is the current
+> one. This block is kept because each bug it describes was found the expensive way,
+> and a reader who cannot see the failure is likely to reintroduce it.
+
 **The agent has never closed a lot, so per-strategy PnL is still empty.** The
 account holds 23 SPY bought in June. Four SELL decisions were attempted across the
 whole history and all four were rejected; the causes were real bugs, now fixed, but
