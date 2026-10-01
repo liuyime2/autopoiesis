@@ -53,16 +53,6 @@ and fails silently.
 
 ## Repairs
 
-**`adjudicate_unadmitted.py`** re-adjudicates strategy files that entered the library
-without a recorded admission verdict, running the real gate over each rather than
-rubber-stamping one.
-
-**`readmit_misattributed.py`** restores strategies retired by a lifecycle rule that was
-reading bad data. It selects candidates from the journal by retirement reason *and* by
-every recorded refusal being one the strategy could not have avoided, re-runs the real
-`StrategyLifecycleManager`, and applies whatever that decides. It is not a rubber stamp:
-if the current rules still say RETIRED, the strategy stays retired.
-
 **`prune_knowledge.py`** deduplicates the knowledge library by statement, preserving every
 `source_ref`.
 

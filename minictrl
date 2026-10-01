@@ -42,11 +42,15 @@ fi
 
 export PYTHONPATH="$ROOT_DIR/src:${PYTHONPATH:-}"
 export MIN_AGENT_MODE="${MIN_AGENT_MODE:-paper}"
-export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
-export APCA_API_BASE_URL="https://paper-api.alpaca.markets"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
 export MIN_AGENT_MODEL="${MIN_AGENT_MODEL:-qwen3.8:27b}"
 export MIN_AGENT_CURRICULUM_ENABLED="${MIN_AGENT_CURRICULUM_ENABLED:-true}"
+# The paper URL is set by default, never forced. It used to be assigned unconditionally,
+# which silently overrode an operator's own ALPACA_BASE_URL for every minictrl subcommand
+# including the ones the gate runs. cli.py already refuses to build a client against a
+# non-paper URL, so forcing it here bought no safety and cost the ability to configure it.
+export ALPACA_BASE_URL="${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}"
+export APCA_API_BASE_URL="${APCA_API_BASE_URL:-$ALPACA_BASE_URL}"
 
 SERVICE_NAME="min-agent.service"
 # Same for the environment's bin directory: an explicit override, then the active
@@ -69,7 +73,26 @@ if [ -z "$ENVBIN" ] || [ ! -x "$ENVBIN/python" ]; then
 fi
 PYTHON_BIN="$ENVBIN/python"
 # Credentials live outside the working tree so git can never see them.
-ENV_FILE="${MIN_AGENT_ENV_FILE:-$XDG_CONFIG_HOME/min-agent/env}"
+ENV_FILE="${MIN_AGENT_ENV_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env}"
+
+# And they are loaded here, not merely named. ENV_FILE was computed and then used only to
+# fill @ENVFILE@ into the unit templates, so an operator who followed the README - copy the
+# example to ~/.config/min-agent/env, fill in the keys, run ./minictrl - got "no alpaca
+# credentials" from every foreground command, and `minictrl doctor` could not report on the
+# deployment it was supposed to describe. `make` sources the same file via the Makefile's
+# ENVFILE, so the two entry points disagreed about what the configuration was.
+#
+# Sourced after the defaults above and before anything runs, so a file value wins over a
+# default, and an already-exported variable wins over both.
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+elif [ -z "${ALPACA_API_KEY:-}" ] && [ "${MIN_AGENT_REQUIRE_CREDENTIALS:-0}" = "1" ]; then
+  echo "FATAL: no credentials at $ENV_FILE" >&2
+  exit 2
+fi
 
 agent() {
   timeout "${MIN_AGENT_TIMEOUT:-180}" "$CONDA_BIN" run --no-capture-output -n llm python -m min_agent.cli "$@"
