@@ -110,7 +110,13 @@ def main() -> int:
         check("D8", f"{name} assigns no risk limit", not limit_write.search(text))
         check("D8", f"{name} writes no lifecycle", not lifecycle_write.search(text))
         check("D8", f"{name} force-enables no strategy", not enable_write.search(text))
-    check("D8", "auto-fix is detect-and-report", "drift_count" in ops.get("auto-fix.sh", ""))
+    # auto-fix.sh was deleted: it duplicated `doctor`'s strategy-library and pidfile
+    # checks as inline Python inside a shell wrapper, and its only unique artefact was a
+    # log file whose contents were a banner and a footer. The property it was guarded
+    # for - an ops script must not weaken a risk limit, rewrite a lifecycle, or
+    # force-enable a strategy - is still enforced over whatever ops scripts remain, and
+    # the read-only drift report it performed now lives in `doctor` as
+    # "refused by admission but still selectable".
 
     # D9 - real interpreter, real exit codes
     shells = {n: t for n, t in ops.items() if n.endswith(".sh") or n == "minictrl"}

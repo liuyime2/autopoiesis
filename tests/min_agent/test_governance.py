@@ -21,7 +21,15 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 # Shell/Python ops scripts that are allowed to touch runtime state at all.
-OPS_SCRIPTS = ("auto-fix.sh", "auto_reviewer.py")
+# auto-fix.sh, monitor.sh, observe.sh, check-market-open.sh and run_forever.sh were
+# deleted as part of the infrastructure refactor: each was a thin shell wrapper around
+# CLI flags the canonical entry point already provides, and auto-fix.sh additionally
+# re-implemented doctor's strategy-library and pidfile checks as inline Python. The
+# safety property this module guards - an ops script may not assign a risk limit,
+# rewrite a lifecycle, or force-enable a strategy - is unchanged and still enforced over
+# every ops script that remains. The tuple is the *current* set, not a historical one,
+# so a new ops script must be added here deliberately rather than audited by accident.
+OPS_SCRIPTS = ("auto_reviewer.py",)
 
 # Any write of these keys, from a script outside Guardian, is a forbidden
 # automatic risk relaxation.
@@ -100,13 +108,15 @@ def test_ops_scripts_do_not_write_runtime_state(script):
                 raise AssertionError(f"{script}:{line} writes runtime state: {source_line.strip()!r}")
 
 
-def test_auto_fix_script_is_read_only_by_construction():
-    """auto-fix.sh previously rewrote the four core strategy files in place."""
-    text = _source("auto-fix.sh")
-    assert "drift_count" in text, "auto-fix.sh should be a detect-and-report drift check"
-    assert "DRIFT" in text
+
+    # auto-fix.sh was checked here for a "DRIFT" marker and for the absence of in-place
+    # repair statements (`strategy["lifecycle"] = ...` and friends). It has been deleted
+    # as a duplicate of `doctor`, so those assertions went with it. The properties they
+    # guarded still hold and are still asserted above and in the three tests above:
+    # no ops script may assign a risk limit, write a lifecycle, force-enable a
+    # strategy, or touch strategy/knowledge/journal state.
     for forbidden in ("max_position_value\"] =", "lifecycle\"] =", "enabled\"] ="):
-        assert forbidden not in text, f"auto-fix.sh still contains a repair: {forbidden}"
+        assert forbidden not in text, f"{script} still contains a repair: {forbidden}"
 
 
 def test_auto_reviewer_uses_real_liveness_not_the_status_string():

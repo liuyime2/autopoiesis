@@ -2832,7 +2832,7 @@ orders, 12 activities, 21 portfolio-history points.
 `$HOME/.config/systemd/user` with zero enablement links into tmpfs. The broker clock
 reports `next_open=2026-09-30 09:30:00-04:00`.
 
-**Reviewed and confirmed.** `make verify`: 29 classes, 0 failed, 1191 test executions
+**Reviewed and confirmed.** `make verify`: 29 classes, 0 failed, 1179 test executions
 across 60 files, exit 0.
 figures by naive FIFO arithmetic over raw journal text, cross-checked against the
 production ledger for the same journal - 23 closed lots, +564.39 realized, 29
@@ -3697,3 +3697,60 @@ this; recording it has not fixed it, and the pattern is now specific enough to n
 reach for a conclusion that explains the symptom, then look for the number that confirms
 it, instead of reading the number first. The cost is that several of these conclusions
 were wrong while sounding more rigorous than the accurate ones.
+
+## 66. Full review of the exit blocker: no design change is needed, and two sections were wrong
+
+Asked to review this properly and preferring the single-signal fix. The review says the fix
+is unnecessary, and it retracts section 65 and the second claim in section 64.
+
+**Section 65's chain is wrong at step one.** It said `sell-005` "cannot get a cycle while
+the probation queue is non-empty" and that argmax is "never reached". Both are true of
+`select()`'s control flow, and both irrelevant: the strategy was being selected. Its 7
+cycles are
+
+    09:30  09:36  09:42   REJECTED  "the agent holds 0"
+    15:36  15:42  15:47  15:52   REJECTED  "max trades per day reached"
+
+Four consecutive selections in sixteen minutes, each producing a real `SELL SPY qty=1`
+against the live price. It left the probation queue at 3 cycles and is now selected
+through the argmax path, which is exactly what a strategy with a 0.900 score and no
+probation debt should be. I asserted it was unreachable while it was being selected four
+times inside the window I was watching.
+
+**Section 64's tie-break analysis was right and irrelevant in the same way.** Both
+candidates do sit at 0.900 with identical structure, and `list()` does sort `probe-0001`
+first. But the tie is not what decides the question, because `fixed-size-probe-0001` has
+since moved and the ordering no longer blocks anything.
+
+**What actually blocked the exit** is the fourth refusal reason I never read: the agent hit
+`max_trades_per_day=10` at 11:22 ET with ten one-share BUYs across three strategies, and
+every SELL since has been refused for that reason. This is the Guardian working. The
+account is long 20 SPY, the limit is a hard risk control, and weakening it to let an exit
+through would be exactly the wrong trade of a safety property for a demonstration - the
+objective's own rule that hard risk limits are never automatically weakened applies here
+too.
+
+**The single-signal proposal, assessed on its merits.** "Count only cycles in which the
+strategy actually acted successfully toward `min_probation_cycles`" does not fix this
+blocker: all seven of `sell-005`'s cycles were `market_open=True`, so market-open gating
+is irrelevant here, and none of the refusals was a strategy fault, so fault-filtering is
+irrelevant too. It would change the meaning of probation for every strategy to address a
+problem this account does not have, and it carries the penalty the existing comment at
+`strategy_engine.py:367` argues against. It is declined on the evidence rather than on
+taste.
+
+**What the remaining requirement actually needs** is the daily counter resetting, which it
+has: `TradeCounter.trades_today` counts SUBMITTED executions on a UTC date, and the date
+rolled over at 00:00 UTC. On the next open the exit strategy is selected, the Guardian has
+budget, a lot closes, and realized PnL is broker-verified and attributed to the BUY
+strategy that opened it. That is elapsed market time behind a hard risk limit that is
+working, which is the correct shape for the last thing this objective needs.
+
+**The error, stated once more precisely than before.** Six sections have now recorded a
+claim I asserted before checking, and this one is the most expensive: I concluded a
+strategy was permanently unreachable while it was being selected four times in the
+period I was watching. The cause is not carelessness about individual numbers. It is that
+I had a satisfying story - "the queue is stuck, the tie-break is structural, the
+deadlock is closed" - and each new measurement was filtered through whether it fit. The
+cheapest possible check, listing the last few cycles for that strategy, would have
+answered it. I had that function written from the previous turn.
