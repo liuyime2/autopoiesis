@@ -4,8 +4,11 @@ from datetime import datetime, timezone
 
 
 class MarketScheduler:
-    def __init__(self, *, clock_provider=None):
+    def __init__(self, *, clock_provider=None, stale_after_seconds: int = 900):
         self.clock_provider = clock_provider
+        # Mirrors config.stale_after_seconds. Supplied rather than imported so the
+        # scheduler stays a pure function of the clock, with no config dependency.
+        self.stale_after_seconds = stale_after_seconds
         self.last_error: str | None = None
 
     def market_is_open(self) -> bool:
@@ -47,7 +50,20 @@ class MarketScheduler:
         """
         if self.market_is_open():
             return max(1, min(default_interval, max_sleep))
-        return max(1, min(self.seconds_until_next_open(default_interval), max_sleep))
+        closed = max(1, min(self.seconds_until_next_open(default_interval), max_sleep))
+        # Stay comfortably inside the heartbeat's staleness budget.
+        #
+        # `max_sleep` and `stale_after_seconds` are both 900. Sleeping the full cap and
+        # writing the heartbeat only before sleeping means the beat lands exactly on the
+        # threshold: any check running in the second after it sees a stale daemon and
+        # reports the paper agent dead while it is provably alive and correctly parked
+        # until the open. That is the worst shape of liveness failure - it cries wolf
+        # overnight, every night, until someone stops believing it.
+        #
+        # Three quarters of the budget leaves room for a slow maintenance pass to
+        # overrun without the next beat landing late.
+        budget = max(1, int(self.stale_after_seconds * 0.75)) if self.stale_after_seconds else closed
+        return max(1, min(closed, budget))
 
     def _clock(self):
         if self.clock_provider is None:

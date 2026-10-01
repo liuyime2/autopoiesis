@@ -57,6 +57,10 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     # is *assigned*, not that some assigned class actually *runs* it; that is
     # a weaker guarantee than it looks, and this file is where it showed.
     "test_cli_startup.py": ("syntax-import", "unit-integration"),
+    # Was the only test file the syntax-import class ran. It asserted that every module
+    # compiles and imports, which is exactly the property, but it lived in a file named
+    # for what it imports rather than for what it checks.
+    "test_syntax_import.py": ("syntax-import",),
     "test_config.py": ("unit-integration", "shadow-live-consistency"),
     "test_config_wiring.py": (
         "unit-integration", "data-integrity", "shadow-live-consistency",
@@ -161,8 +165,21 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_trade_counter.py": ("data-integrity",),
 }
 
-#: The thirteen classes the objective names, plus the counterfactual class added
-#: with the decision-outcome ledger. Order is the order they are reported in.
+#: Every check class, in report order.
+#:
+#: This started as "the thirteen classes the objective names" and was never extended.
+#: Sixteen check classes were added since - the replay audit, the fact-doc freshness
+#: gate, the daemon/worktree fingerprint comparison, the systemd unit checks, the
+#: shadow-stage checks and others - and every one of them ran on every `make verify`
+#: while being absent from this tuple. Two consequences, both real:
+#:
+#:   - `check_known_classes_run` reported "all 13 classes have tests" while checking
+#:     13 of 29. A coverage gate that silently exempts two thirds of what it is
+#:     responsible for reads as a passing gate.
+#:   - `make classes-list` and `--list` printed 13 names, so a developer asking
+#:     "what does the gate actually check" got an answer missing half of it.
+#:
+#: Order is the order they are reported in, which is the order `main()` appends them.
 CHECK_CLASSES: tuple[str, ...] = (
     "software-supply-chain",
     "syntax-import",
@@ -177,6 +194,23 @@ CHECK_CLASSES: tuple[str, ...] = (
     "broker-reconciliation",
     "shadow-live-consistency",
     "decision-outcome-counterfactual",
+    # Added after the list above was frozen; see the note on CHECK_CLASSES.
+    "class-coverage",
+    "docs-not-stale",
+    "production-research-separation",
+    "home-independence",
+    "units-where-systemd-looks",
+    "daemon-source-matches-worktree",
+    "unit-environment-files",
+    "replay-audit",
+    "shadow-not-executed",
+    "shadow-stage-exercised",
+    "research-trial-ledger",
+    "doctor-checks-reachable",
+    "test-coverage-map",
+    "defect-regression-audit",
+    "doctor",
+    "fact-docs-current",
 )
 
 
@@ -924,11 +958,10 @@ def run_pytest_class(cls: str) -> Result:
 #: production modules and stops, so the file's one failing assertion stayed invisible
 #: behind a green gate while `make test` was red.
 EXECUTING_CLASSES = frozenset({
-    "unit-integration", "point-in-time-no-leakage", "pnl-accounting",
+    "unit-integration", "syntax-import", "point-in-time-no-leakage", "pnl-accounting",
     "data-integrity", "lifecycle-invariants", "guardian-bypass-prevention",
     "replay-determinism", "crash-recovery", "broker-reconciliation",
     "decision-outcome-counterfactual", "shadow-live-consistency",
-    "defect-regression-audit",
 })
 
 
@@ -1046,12 +1079,89 @@ def check_all_tests_classified() -> Result:
     return Result("test-coverage-map", FAIL if problems else PASS, detail)
 
 
+#: Check classes that assert something about the repository or about the running system
+#: rather than about trading behaviour, and so have no test file of their own by design.
+#:
+#: `check_known_classes_run` previously demanded a test file behind every class, and
+#: passed, because `CHECK_CLASSES` held only the 13 classes that run pytest and silently
+#: excluded the 16 added since. Naming the two kinds separately is what makes the
+#: distinction checkable: a class that is neither in EXECUTING_CLASSES nor here will fail
+#: `check_known_classes_run`, so a new substantive check cannot be added untested by
+#: accident.
+REPOSITORY_CHECK_CLASSES: frozenset[str] = frozenset({
+    # Inspects this repository: test-file accounting, dependency declarations, docs
+    # freshness, the production/research boundary, hardcoded paths.
+    "class-coverage",
+    "test-coverage-map",
+    "docs-not-stale",
+    "software-supply-chain",
+    "production-research-separation",
+    "home-independence",
+    # Runs tools/audit_defects.py, not pytest. Was listed in EXECUTING_CLASSES, which
+    # claimed it had test coverage it does not have and made `class-coverage` unable to
+    # distinguish "runs a script" from "runs the suite".
+    "defect-regression-audit",
+    # Runs ./minictrl doctor, not pytest. Same miscategorisation.
+    "doctor",
+    # Inspects the deployed system: systemd unit files, the running daemon, the
+    # journal, the shadow stage, doctor's own reachability.
+    "units-where-systemd-looks",
+    "unit-environment-files",
+    "daemon-source-matches-worktree",
+    "doctor-checks-reachable",
+    # replay-audit re-derives the load-bearing PnL numbers from the raw journal text.
+    # It is listed here because it reads the *deployed* journal rather than a fixture -
+    # it is a system check on live state, not a test of a code path in isolation.
+    "replay-audit",
+    "research-trial-ledger",
+    "fact-docs-current",
+    # The two shadow checks report whether a stage ever executed against real state.
+    "shadow-not-executed",
+    "shadow-stage-exercised",
+})
+
+
 def check_known_classes_run() -> Result:
-    """Every declared class must actually have tests behind it."""
-    empty = [c for c in CHECK_CLASSES if not _files_for((c,))]
-    if empty:
-        return Result("class-coverage", FAIL, f"classes with no tests: {empty}")
-    return Result("class-coverage", PASS, f"all {len(CHECK_CLASSES)} classes have tests")
+    """Every class that asserts trading behaviour must have tests behind it.
+
+    Repository-level checks are excluded by name, not by omission: the point of this
+    check is that a substantive class cannot be added without a test, and an exclusion
+    list that silently grows is exactly how the previous version of this check came to
+    pass while covering 13 of 29.
+    """
+    untested_meta = sorted(
+        cls for cls in CHECK_CLASSES
+        if cls not in EXECUTING_CLASSES
+        and cls not in REPOSITORY_CHECK_CLASSES
+        and not _files_for((cls,))
+    )
+    # Every class that claims to run pytest must actually have a test file behind it.
+    # This is separate from the check above and was the reason the self-test caught this
+    # version: `untested_meta` only looked at classes outside EXECUTING_CLASSES, so
+    # stripping the tests from a class that *is* in EXECUTING_CLASSES - `pnl-accounting`
+    # in the self-test - passed silently. A member of EXECUTING_CLASSES with no file
+    # would be reported as PASS by run_pytest_class only if the class were skipped, and
+    # skipped is not the same as covered.
+    untested_executing = sorted(
+        cls for cls in CHECK_CLASSES
+        if cls in EXECUTING_CLASSES and not _files_for((cls,))
+    )
+    if untested_meta or untested_executing:
+        return Result(
+            "class-coverage", FAIL,
+            f"behaviour classes with no test file: "
+            f"{sorted(untested_meta + untested_executing)}. "
+            "Add a test, or name the class in REPOSITORY_CHECK_CLASSES if it inspects "
+            "the repository or the deployed system rather than trading behaviour.",
+        )
+    substantive = len(CHECK_CLASSES) - len(
+        [c for c in CHECK_CLASSES if c in REPOSITORY_CHECK_CLASSES]
+    )
+    return Result(
+        "class-coverage", PASS,
+        f"all {substantive} behaviour classes have tests; "
+        f"{len(REPOSITORY_CHECK_CLASSES)} repository/system checks are exempt by name",
+    )
 
 
 def check_defect_audit() -> Result:
@@ -1124,6 +1234,28 @@ def self_test() -> int:
             failures.append("a class with no tests did not fail")
         else:
             print("  ok  a class with no tests fails instead of passing vacuously")
+
+        # 3b. The same must hold for a class that is real but has had its test files
+        # unassigned - which is the case `check_known_classes_run` is actually about.
+        # Step 3 only proves the lookup fails for a name that was never in the map; it
+        # cannot catch a real class quietly losing its coverage, which is exactly how
+        # `CHECK_CLASSES` had drifted for months while `class-coverage` reported a pass.
+        saved_map = {k: v for k, v in TEST_CLASS_MAP.items()}
+        try:
+            for name in list(TEST_CLASS_MAP):
+                if "pnl-accounting" in TEST_CLASS_MAP[name]:
+                    del TEST_CLASS_MAP[name]
+            uncovered = check_known_classes_run()
+            if uncovered.status != FAIL:
+                failures.append(
+                    "a behaviour class with its test files unassigned was still "
+                    "reported as covered"
+                )
+            else:
+                print("  ok  a behaviour class with its tests removed fails class-coverage")
+        finally:
+            TEST_CLASS_MAP.clear()
+            TEST_CLASS_MAP.update(saved_map)
 
         # 4. A test file nobody assigned to a class must fail the coverage map,
         #    so a new test cannot quietly leave the verified surface.
@@ -1285,9 +1417,20 @@ def main() -> int:
     for cls in CHECK_CLASSES:
         if wanted and cls not in wanted:
             continue
-        if cls in {"software-supply-chain", "syntax-import", "data-integrity",
-                   "shadow-live-consistency"}:
+        if cls in {"software-supply-chain", "data-integrity", "shadow-live-consistency"}:
             continue  # already run above as bespoke checks
+        if cls in REPOSITORY_CHECK_CLASSES:
+            # These inspect the repository or the deployed system and were each appended
+            # above as their own bespoke check. Running run_pytest_class on them produced
+            # "no test file is assigned to this class" for all 17 of them - noise that
+            # looks like a coverage failure and hides the real one.
+            continue
+        # `syntax-import` is deliberately NOT skipped. It runs compileall plus an import
+        # sweep above, and it also owns test files - `test_cli_startup.py` checks that
+        # every public name the entry points touch actually exists, and `test_
+        # syntax_import.py` checks that every module compiles and imports. Both were
+        # unreachable: the class was skipped here, so neither assertion had ever run
+        # inside the gate even though a green `make verify` reported the class as passing.
         results.append(run_pytest_class(cls))
 
     global _partial_run

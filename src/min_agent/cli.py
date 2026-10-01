@@ -305,7 +305,10 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         knowledge_admission=KnowledgeAdmission(knowledge_library=knowledge_library),
         startup_reconciler=OrderReconciler(client=client, journal=journal),
         fill_reconciler=FillReconciler(client=client, journal=journal),
-        scheduler=MarketScheduler(clock_provider=client.get_clock),
+        scheduler=MarketScheduler(
+            clock_provider=client.get_clock,
+            stale_after_seconds=config.stale_after_seconds,
+        ),
         reflect_every=config.reflect_every,
         curriculum_every=config.curriculum_every,
     )

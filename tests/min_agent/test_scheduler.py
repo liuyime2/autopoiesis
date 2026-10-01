@@ -69,13 +69,47 @@ def test_max_sleep_still_caps_the_interval():
 
 def test_a_closed_market_sleeps_until_the_next_open_but_still_wakes_for_maintenance():
     """Sleeping overnight at the cycle rate would wake 288 times a session for
-    nothing. Sleeping until the open, capped, is the right behaviour when closed."""
+    nothing. Sleeping until the open, capped, is the right behaviour when closed.
+
+    The cap is deliberately below `max_sleep` rather than equal to it. `max_sleep` and
+    `stale_after_seconds` are both 900, and the daemon beats once before sleeping, so
+    sleeping the full cap puts the next heartbeat exactly on the staleness threshold -
+    any liveness check in the second after it reports a provably live daemon as dead,
+    every night. Three quarters of the budget leaves room for maintenance to overrun.
+    """
     next_open = datetime.now(tz=timezone.utc) + timedelta(hours=8)
     scheduler = MarketScheduler(
-        clock_provider=lambda: Clock(False, next_open=next_open)
+        clock_provider=lambda: Clock(False, next_open=next_open),
+        stale_after_seconds=900,
     )
 
-    assert scheduler.sleep_seconds(default_interval=300, max_sleep=900) == 900
+    slept = scheduler.sleep_seconds(default_interval=300, max_sleep=900)
+    assert slept == 675, "closed-market sleep must stay inside the heartbeat budget"
+    assert slept < 900, "and must not sit on the staleness threshold"
+
+
+def test_a_short_sleep_until_open_is_not_shortened_by_the_budget():
+    """The budget only caps the sleep. An open 200s away must still be slept through."""
+    next_open = datetime.now(tz=timezone.utc) + timedelta(seconds=200)
+    scheduler = MarketScheduler(
+        clock_provider=lambda: Clock(False, next_open=next_open),
+        stale_after_seconds=900,
+    )
+
+    # int() truncation plus the microseconds elapsed while computing `next_open` means
+    # the remainder can be a second under 200. What matters is that the budget did not
+    # shorten it: 675 would mean the cap was applied where it should not be.
+    assert 150 <= scheduler.sleep_seconds(default_interval=300, max_sleep=900) <= 200
+
+
+def test_an_open_market_ignores_the_heartbeat_budget():
+    """While open, the cycle interval governs. It is already well inside the budget."""
+    scheduler = MarketScheduler(
+        clock_provider=lambda: Clock(True),
+        stale_after_seconds=900,
+    )
+
+    assert scheduler.sleep_seconds(default_interval=300, max_sleep=900) == 300
 
 
 def test_scheduler_fails_closed_when_the_clock_raises():
