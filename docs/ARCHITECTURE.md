@@ -178,3 +178,26 @@ a comment explaining why, in exchange for nothing - which is the opposite of the
 goal of reducing long-term complexity rather than line count. The real reduction already
 happened elsewhere: five duplicated shell entry points became one CLI, and one canonical
 `min-agent` console script replaced an absolute interpreter path baked into a script.
+
+## 9. Acceptance audit
+
+Each criterion the objective names, and the evidence for it. Not a claim of completion -
+a list of what was checked and what the check returned.
+
+| Criterion | Evidence |
+| --- | --- |
+| One authoritative implementation per concept | Risk limits are defined in `config.py` alone (`Guardian` takes them as parameters, so it cannot disagree); `submit_order` appears in exactly one module, `executor.py:38`; the journal is written in exactly one place, `journal.py:153`. Two other append sites exist - `doctor.py:144` and `research/trials.py:59` - and both write separate ledgers with their own schema (`doctor-history.jsonl`, `research_trials.jsonl`), not a second copy of the journal |
+| One primary execution path per core task | `loop.py` runs one cycle and only one: snapshot → decision → `Guardian.review` → `Executor.submit` → journal. `--daemon`, `--once` and `make run` all enter through it |
+| One source of truth for config and data semantics | `runtime/min_agent/journal.jsonl`; the other six state files are derived and the table in section 4 says which. Environment variables are read only by `config.py`; the other occurrences are documentation, assertions that a variable exists, or installer plumbing |
+| Tests for key behaviour | 61 test files, all mapped, no unclassified file and no ghost mapping. `class-coverage` now *requires* a test behind every behaviour class, so a substantive check added untested fails the gate |
+| Fresh clone runs from the documentation | Cloned to an empty directory, new `conda create`, `pip install -e ".[dev]"`, 794 tests pass, lint clean, `min-agent --help` works - with zero Alpaca credentials set |
+| Fast verification loop | `make check` ≈ 40s (lint + tests), `make smoke` ≈ 9s against the live broker |
+| Full experiment traceability | `make reproduce` writes commit, dirty state, interpreter, pinned dependency versions and broker clock to `runtime/min_agent/reproduce.txt` |
+| Understandable without the history | `README.md` (what/how/where/debug), `docs/ARCHITECTURE.md` (this file), `docs/MIGRATION.md` (what changed and what replaced it). `SYSTEM_AUDIT.md` opens by declaring itself historical |
+
+### One thing deliberately not done
+
+The import surface in `cli.py` was left alone. Section 8 has the measurements: deferring
+`requests` made `--help` slower, and the Alpaca SDK is already deferred into the four
+functions that use it. Restructuring it would have added an indirection in exchange for
+nothing measurable.
