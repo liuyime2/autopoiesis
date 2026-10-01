@@ -20,7 +20,7 @@ Companion documents:
 
 ## 1. Phase status, with verification results
 
-`make verify` — **44 classes, 0 failed, 1233 test executions across 61 files**, 91/91 defect audit, `doctor` RESULT OK, exit 0. `make verify-self-test` — green, and the findings it proves can go red include `shadow-stage-exercised`.
+`make verify` — **44 classes, 0 failed, 1233 test executions across 61 files**, 61/61 defect audit, `doctor` RESULT OK, exit 0. `make verify-self-test` — green, and the findings it proves can go red include `shadow-stage-exercised`.
 
 | phase | exit criteria | verification method | result |
 | --- | --- | --- | --- |
@@ -150,7 +150,7 @@ Different scopes, different periods. The 970.93 difference is not a loss.
 | decision-outcome scoring | 350 scored decisions, after cost, point-in-time with a proven leakage guard |
 | shadow cannot become a fill | 4 shadow orders produce realized PnL `None`; a gate fails if any module groups `SHADOWED` with an executed status |
 | promotion requires evidence | both PROBATION strategies blocked with reasons recorded |
-| the whole toolchain is green | 21 verify classes, 614 tests, 91/91 audit, self-test on 7 conditions |
+| the whole toolchain is green | 21 verify classes, 614 tests, 61/61 audit, self-test on 7 conditions |
 
 ### Design targets only — no evidence either way
 
@@ -251,7 +251,7 @@ means a real measurement, not a green test.
 | behavioural / semantic duplicate detection | 14 redundant copies exposed, incl. a strategy named "Trend Following" that was `FIXED_SIZE` |
 | offline backtest / walk-forward / cost / leakage / stress / overfitting | implemented and negative: **27 of 27 research trials `INSUFFICIENT`**; shadow/offline screening verdicts are separate and not all negative (540 `PASS_SCREENED`, 270 `REJECT_POOR_DECISIONS`, 1304 `INCONCLUSIVE`) |
 | shadow trading | real loop, shadow sink, zero PnL leakage, reachable by config |
-| `make verify`, 28 classes, `FAIL=0` | **generated from live output: 44 classes, 0 failed, 1233 test executions across 61 files, 91/91 audit, doctor OK, exit 0** |
+| `make verify`, 28 classes, `FAIL=0` | **generated from live output: 44 classes, 0 failed, 1233 test executions across 61 files, 61/61 audit, doctor OK, exit 0** |
 | documents ①–⑧ | `SYSTEM_AUDIT.md`, `PHASES.md`, `STEP_CONTRACT.md`, `STATUS.md` |
 
 ### 7.2 Not proven — and cannot be, yet

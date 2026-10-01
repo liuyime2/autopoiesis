@@ -29,7 +29,7 @@ unscored LLM decisions, model attribution, and the fallback and champion figures
 | proof: filled>0 | **PASS** — 75 shares filled, 24 broker-confirmed, `fill_quantity_ratio` 1.0 |
 | proof: per-strategy pnl | **PASS** — 3 strategies, broker-verified: `tiny-fixed-size-001` +362.66, `fixed-size-buy-001` +120.37, `trend-follow-buy-001` +81.36 |
 | pnl evidence | **PASS** — `broker_strategy_closed_lot_pnl_verified`, 23 closed lots, 0 open |
-| journal | OK — 56 lines live plus rotated generations, 1048 cycles total across all of them |
+| journal | OK — 1049 cycles total across all of them |
 | strategy library | OK — 40 total, 13 selectable, including one SELL strategy |
 
 ### The self-evolution loop now runs, and it closed a position
@@ -255,7 +255,7 @@ Alpaca UI.
 > written, not a description of the present.
 
 **`make verify` is the single gate.** 17 check classes, 0 failed, 472 distinct
-tests, 91/91 defect audit, `doctor` RESULT OK, exit 0. Per-class re-runs:
+tests, 61/61 defect audit, `doctor` RESULT OK, exit 0. Per-class re-runs:
 `make verify CLASS=pnl-accounting`. `make verify-self-test` breaks the gate on
 purpose and asserts it reports failure, because a verification command that cannot
 fail is believed rather than run.

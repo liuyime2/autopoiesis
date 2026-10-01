@@ -251,6 +251,16 @@ def check_software_supply_chain() -> Result:
     problems: list[str] = []
     env_path = os.environ.get("XDG_CONFIG_HOME", "")
     rc, out = _run(["git", "ls-files"])
+    if rc != 0:
+        # Outside a git checkout, `tracked` became the whitespace-split words of git's error
+        # message, so no filename ever matched and the credential scan passed vacuously while
+        # reporting "146 tracked files". A supply-chain check that cannot see the repository
+        # has to say so rather than report success.
+        return Result(
+            "software-supply-chain", FAIL,
+            f"could not list tracked files (git exited {rc}); the credential scan would be "
+            f"meaningless: {_tail(out, 1)}",
+        )
     tracked = set(out.split())
     for name in (".env", "env", ".env.local", "secrets.json"):
         if name in tracked:
@@ -799,7 +809,16 @@ def check_the_fact_figures_in_prose_match_reality() -> Result:
     warnings = len(re.findall(r"^\[WARN\]", doctor_out, re.MULTILINE))
     failures = len(re.findall(r"^\[FAIL\]", doctor_out, re.MULTILINE))
 
-    for name in ("STATUS.md", "README.md", "docs/MIGRATION.md"):
+    # PHASES.md was omitted, and it is the document carrying the "91/91 defect audit" figure
+    # that is actually wrong - the audit reports 61/61. A check scoped to the three documents
+    # nobody read past the first page misses the one that drifts.
+    for name in (
+        "STATUS.md",
+        "README.md",
+        "docs/MIGRATION.md",
+        "docs/superpowers/PHASES.md",
+        "docs/superpowers/CAPABILITY_CLASSIFICATION.md",
+    ):
         path = ROOT / name
         if not path.exists():
             continue
@@ -822,14 +841,20 @@ def check_the_fact_figures_in_prose_match_reality() -> Result:
                     f"{name}:{line} says {match.group(1)} tests pass; "
                     f"pytest collects {collected.group(1)}"
                 )
-        for match in re.finditer(r"(\d+) failures and (\d+) warnings", text):
+        # The pattern was "N failures and M warnings", a phrasing that appears in no document
+        # in this repository - so the branch compared nothing and reported PASS at zero
+        # assertions while STATUS.md claimed the figures. Match the forms actually written:
+        # "RESULT OK with N warning(s)" and "N failures with M warnings".
+        for match in re.finditer(
+            r"(?:RESULT:?\s+\w+(?:\s+with)?\s+)(\d+) warnings?", text
+        ):
             if any(lo <= match.start() <= hi for lo, hi in skip):
                 continue
-            if (match.group(1), match.group(2)) != (str(failures), str(warnings)):
+            if match.group(1) != str(warnings):
                 line = text[: match.start()].count("\n") + 1
                 problems.append(
-                    f"{name}:{line} says {match.group(1)} failures and {match.group(2)} "
-                    f"warnings; doctor reports {failures} and {warnings}"
+                    f"{name}:{line} says {match.group(1)} warnings; "
+                    f"doctor reports {warnings} (and {failures} failures)"
                 )
     if problems:
         return Result("fact-figures-match", FAIL, f"{len(problems)}: {problems[:4]}")
@@ -1076,6 +1101,17 @@ def check_the_gate_class_count_is_reported_consistently(total: int | None = None
         return Result(
             "gate-class-count-consistent", SKIP,
             "no total supplied; this check compares the documents against the running gate",
+        )
+    # A partial run reports a count describing the subset, so comparing the documents against
+    # it is meaningless - and it made `make verify CLASS=pnl-accounting` fail with "README says
+    # 44 check classes, gate reports 33", on a workflow that README, Makefile's help and
+    # STATUS.md all advertise. The gate was therefore red on arrival for anyone debugging one
+    # class. `fact-docs-current` has had this guard all along; this check needed the same one.
+    if _partial_run:
+        return Result(
+            "gate-class-count-consistent", SKIP,
+            "partial run: this check compares the documents against a full run's class count, "
+            "which this run does not represent",
         )
     expected = f"{total} check classes"
     problems = []
@@ -1636,11 +1672,44 @@ def check_research_trial_ledger() -> Result:
             "research-trial-ledger", SKIP,
             f"{path.name} does not exist yet; no search has run, so there is nothing to omit",
         )
+    # The check had no assertion at all. It printed a summary and returned PASS for whatever
+    # the ledger contained, so a 100%-failure ledger - which is what this host has, 27 of 27
+    # INSUFFICIENT - was reported green by the one class whose entire stated purpose is "do
+    # not omit the failures". A check that cannot fail is worse than no check: it appears in
+    # the count of classes that passed.
+    #
+    # What is actually asserted is the property the docstring claims: every trial is on the
+    # record, identifiable, and accounted for. A trial without a strategy_id cannot be
+    # traced back to anything; a verdict outside the known set means the ledger is being
+    # written by something this check does not understand.
+    problems = []
+    known_verdicts = {"PASS", "FAIL", "INCONCLUSIVE", "INSUFFICIENT"}
+    for index, record in enumerate(recorded):
+        if not record.get("strategy_id"):
+            problems.append(f"record {index} has no strategy_id, so it cannot be traced back")
+        verdict = str(record.get("verdict", "")).upper()
+        if verdict and verdict not in known_verdicts:
+            problems.append(f"record {index} has an unrecognised verdict {verdict!r}")
+    identities = [r.get("strategy_id") for r in recorded if r.get("strategy_id")]
+    duplicates = len(identities) - len(set(identities))
+    if duplicates:
+        problems.append(f"{duplicates} duplicate strategy_id(s): a trial recorded twice")
+
     summary = trials.summarise(recorded)
+    if summary["trials_run"] != len(recorded):
+        problems.append(
+            f"summary reports {summary['trials_run']} trials but {len(recorded)} records exist"
+        )
+    if problems:
+        return Result(
+            "research-trial-ledger", FAIL,
+            f"{len(problems)}: {problems[:3]}",
+        )
     return Result(
         "research-trial-ledger", PASS,
         f"{summary['trials_run']} trial(s), {summary['passed']} passed, "
-        f"{summary['failed']} failed; {summary['by_verdict']}",
+        f"{summary['failed']} failed; {summary['by_verdict']}; "
+        "every record traceable and accounted for",
     )
 
 
