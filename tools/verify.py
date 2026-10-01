@@ -1704,8 +1704,8 @@ def check_shadow_stage_has_actually_run() -> Result:
     an honest starting state, not a defect - but it must not be able to say "MET".
     """
     sys.path.insert(0, str(SRC))
-    from min_agent.journal import JsonlJournal
     from min_agent.config import AgentConfig
+    from min_agent.journal import JsonlJournal
 
     journal = JsonlJournal(AgentConfig.from_env().journal_path)
     generations = journal.history_paths()
