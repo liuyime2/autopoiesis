@@ -705,6 +705,71 @@ def check_the_documented_pipeline_targets_exist() -> Result:
     )
 
 
+def check_list_reports_the_same_count_as_a_run() -> Result:
+    """`--list` and a real run must state the same number of classes.
+
+    They disagreed for the whole refactor, in both directions and for two separate reasons.
+    `--list` summed CHECK_CLASSES, BESPOKE_CHECK_NAMES and a `full_only` pair, which counted
+    `fact-docs-current`, `doctor` and `defect-regression-audit` twice and printed 43 while
+    the run said 41. Deduplicating by union then printed 40, because `syntax-import`
+    produces two Result rows in one run - `check_syntax_import()` for the compile-and-import
+    sweep, and `run_pytest_class()` for the test files that class owns - so the run counts it
+    twice and `--list` counted it once.
+
+    Neither drift was visible to `gate-class-count-consistent`, which compares documents
+    against the run and never compares the run against the command that documents the gate.
+    So this does exactly that, by running the gate's own counting the way main() does and
+    comparing.
+
+    `syntax-import` emitting two rows is itself the underlying oddity. It is left as-is and
+    reported rather than fixed here: collapsing it would change what the gate actually
+    checks, which is a different decision from making the two counts agree.
+    """
+    import contextlib
+    import io
+
+    seen: list[str] = []
+    for name in CHECK_CLASSES:
+        seen.append(name)
+    for name in BESPOKE_CHECK_NAMES:
+        if name not in seen:
+            seen.append(name)
+    for name in ("defect-regression-audit", "doctor"):
+        if name not in seen:
+            seen.append(name)
+
+    buffer = io.StringIO()
+    argv = sys.argv
+    try:
+        sys.argv = ["verify.py", "--list"]
+        with contextlib.redirect_stdout(buffer):
+            main()
+    except SystemExit:
+        pass
+    finally:
+        sys.argv = argv
+    match = re.search(r"^(\d+) classes on a full run", buffer.getvalue(), re.MULTILINE)
+    if not match:
+        return Result("list-count-matches-run", FAIL, "--list printed no total to compare")
+    listed = int(match.group(1))
+
+    # The run prints `len(results)` after every append. One class contributes two rows, so
+    # the run's count is the distinct names plus that one duplicate.
+    duplicates = 1  # syntax-import: check_syntax_import() and run_pytest_class("syntax-import")
+    expected = len(seen) + duplicates
+    if listed != expected:
+        return Result(
+            "list-count-matches-run", FAIL,
+            f"--list says {listed}, the run produces {expected} "
+            f"({len(seen)} distinct names + {duplicates} for syntax-import, which emits two rows)",
+        )
+    return Result(
+        "list-count-matches-run", PASS,
+        f"--list says {listed}; the run produces {expected} for the same set "
+        f"(syntax-import contributes the extra row)",
+    )
+
+
 def check_status_agrees_with_doctor() -> Result:
     """The current-state table in STATUS.md must match what doctor reports now.
 
@@ -1761,6 +1826,7 @@ BESPOKE_CHECK_NAMES = (
     "fresh-clone-evidence-real",
     "config-example-names",
     "config-example-complete",
+    "list-count-matches-run",
     "pipeline-targets-exist",
     "gate-class-count-consistent",
     "fact-docs-current",
@@ -2151,15 +2217,29 @@ def main() -> int:
             print(f"{cls:<34} {len(files):>2} test file(s)")
         for name in BESPOKE_CHECK_NAMES:
             print(f"{name:<34}  -  bespoke check, not a pytest class")
-        # Two more run outside the loop on a full run and are conditional on it being
-        # full, so they are named here rather than counted silently. Leaving them out is
-        # how this command came to under-report the gate in the first place.
         full_only = ("defect-regression-audit", "doctor")
-        print(f"\n{len(CHECK_CLASSES) + len(BESPOKE_CHECK_NAMES) + len(full_only)} classes "
-              f"on a full run: {len(CHECK_CLASSES)} map to test files, "
-              f"{len(BESPOKE_CHECK_NAMES) + len(full_only)} are bespoke checks run in main()")
         for name in full_only:
             print(f"{name:<34}  -  bespoke check, full runs only")
+
+        # The total is the union, never the sum. Adding the two sets counted
+        # `fact-docs-current` twice - it is in CHECK_CLASSES *and* in BESPOKE_CHECK_NAMES,
+        # because the loop reaches it through a different path - and `doctor` and
+        # `defect-regression-audit` are in CHECK_CLASSES *and* re-listed as full_only. So
+        # this printed 43 while the run reported 41, and every document in the repository
+        # said 41. The check written to catch count drift could not see it, because it
+        # compares documents against the run, never the run against `--list`.
+        names = set(CHECK_CLASSES) | set(BESPOKE_CHECK_NAMES) | set(full_only)
+        bespoke_only = (set(BESPOKE_CHECK_NAMES) | set(full_only)) - set(CHECK_CLASSES)
+        # `syntax-import` produces two Result rows in a run - check_syntax_import() for the
+        # compile-and-import sweep, run_pytest_class() for the test files the class owns -
+        # so the run's `classes:` total is one higher than the number of distinct names. It
+        # is counted here rather than left as a mystery, because this number has to equal the
+        # run's for the figure to mean anything.
+        extra_rows = 1
+        print(f"\n{len(names) + extra_rows} classes on a full run: "
+              f"{len(CHECK_CLASSES)} declared in CHECK_CLASSES, "
+              f"{len(bespoke_only)} appended by main() only, "
+              f"{extra_rows} extra result row from syntax-import")
         return 0
     if args.self_test:
         return self_test()
@@ -2186,6 +2266,7 @@ def main() -> int:
     results.append(check_the_fresh_clone_evidence_is_real())
     results.append(check_the_declared_bespoke_list_matches_what_runs())
     results.append(check_status_agrees_with_doctor())
+    results.append(check_list_reports_the_same_count_as_a_run())
     results.append(check_the_documented_pipeline_targets_exist())
     results.append(check_config_example_names_are_real())
     results.append(check_config_example_covers_every_variable())

@@ -15,9 +15,41 @@
 # every check that could hide a defect - runs without one.
 
 SHELL := /bin/bash
-CONDA_RUN := conda run -n llm --no-capture-output
+
+# One interpreter, discovered rather than assumed - the same resolution `minictrl` performs,
+# in the same order: an explicit CONDA_BIN, then PATH, then the usual install prefixes.
+#
+# The first version was a bare `conda run -n llm`, which meant every target below it died with
+# "conda: command not found" on any shell where conda was not already on PATH - 19 of 28
+# targets, including verify, test, lint and install. The project's own runbook records that
+# this environment does not have conda on PATH and tells the reader to export CONDA_BIN,
+# which the Makefile never read. Every figure this repository quotes came from a shell where
+# the author had activated the environment by hand.
+CONDA_ENV ?= llm
+CONDA_BIN ?= $(shell command -v conda 2>/dev/null)
+ifeq ($(strip $(CONDA_BIN)),)
+  CONDA_BIN := $(firstword $(wildcard /opt/conda/bin/conda                                       $(HOME)/miniconda3/bin/conda                                       $(HOME)/miniforge3/bin/conda                                       $(HOME)/anaconda3/bin/conda))
+endif
+
+# When conda is unavailable entirely, fall back to the active environment's python rather than
+# failing every target. A clone on a machine with no conda at all can then still run the gate,
+# which is what docs/evidence/run-fresh-clone.sh relies on.
+ifeq ($(strip $(CONDA_BIN)),)
+  CONDA_RUN :=
+  RUN_HINT := (no conda found; using the active environment's python)
+else
+  CONDA_RUN := $(CONDA_BIN) run -n $(CONDA_ENV) --no-capture-output
+  RUN_HINT :=
+endif
+
 PY := PYTHONPATH=src $(CONDA_RUN) python
-ENVFILE := $(XDG_CONFIG_HOME)/min-agent/env
+
+# The credentials file, resolved the same way `minictrl` resolves it. It used to be
+# `$(XDG_CONFIG_HOME)/min-agent/env`, which becomes `/min-agent/env` when XDG_CONFIG_HOME is
+# unset - the state CI and the runbook are in - so `make` silently proceeded with no
+# credentials and no warning, while `minictrl` looked in the right place. Two entry points
+# disagreeing about the configuration is exactly what this refactor set out to remove.
+ENVFILE ?= $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/min-agent/env
 
 # Credentials live outside the repo. Every target that touches the broker or the
 # model loads them from there; nothing reads a checked-in secret.
@@ -27,22 +59,39 @@ export
 endif
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install check lint type test smoke fast verify verify-self-test \
-        doctor audit integrity classes classes-list run stop restart status \
-        validate-data evaluate pipeline reproduce clean clean-pyc
+.PHONY: help setup install check lint type test smoke smoke-offline fast fast-no-broker \
+        verify verify-self-test doctor audit integrity classes classes-list \
+        run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc
 
 help:
+	@echo "Interpreter: $(if $(strip $(CONDA_RUN)),$(CONDA_BIN) run -n $(CONDA_ENV),$$(command -v python3) - active environment)$(RUN_HINT)"
+	@echo "Config:      $(ENVFILE)$(if $(wildcard $(ENVFILE)), [present],[absent - broker checks will skip])"
+	@echo ""
+	@echo "Setup:"
+	@echo "  make setup           create the '$(CONDA_ENV)' environment and install into it"
+	@echo "  make install         install this package and its dev dependencies"
+	@echo ""
+	@echo "Verify:"
 	@echo "make verify           run every check class; non-zero on any failure"
 	@echo "make verify-self-test prove the gate can fail, then exit"
 	@echo "make test             unit and integration tests only"
 	@echo "make classes          list the check classes and their test files"
-	@echo "make classes-list     print the class names only"
+	@echo "make lint             ruff over src/ tools/ tests/ examples/"
+	@echo "make type             mypy over src/min_agent; reports without gating"
+	@echo "make check            lint + type + the fast gate"
+	@echo "make test             unit and integration tests only"
+	@echo "make smoke            one real cycle against the paper broker"
+	@echo "make smoke-offline    the widest check needing no broker and no credentials"
+	@echo "make fast             lint + test + smoke + verify"
+	@echo "make fast-no-broker   lint + test + smoke-offline, no credentials needed"
+	@echo "make reproduce        write runtime/min_agent/reproduce.txt (provenance)"
+	@echo "make clean            remove caches; clean-pyc removes only bytecode"
 	@echo "make integrity        runtime state integrity only"
 	@echo "make doctor           health and evidence checks"
 	@echo "make audit            the 15-defect regression audit"
 	@echo "make validate-data    parse and check the inputs before anything consumes them"
 	@echo "make evaluate         score the current paper record: strategies, PnL, counterfactuals"
-	@echo "make pipeline         install -> validate-data -> test -> evaluate -> reproduce"
+	@echo "make pipeline         validate-data -> test -> evaluate -> reproduce (run make install first)"
 	@echo "make run|stop|restart the trading daemon"
 	@echo "make status           daemon and account status"
 	@echo ""
@@ -70,16 +119,19 @@ audit:
 integrity:
 	@$(PY) tools/check_runtime_integrity.py
 
+# The classes the gate actually runs, which is not CHECK_CLASSES: the bespoke checks are
+# appended in verify.py's main() and never appear in that tuple. Printing the tuple
+# under-reported the gate, which is the drift the class-count gate exists to catch, reported
+# by the command meant to show the count.
+#
+# `classes` and `classes-list` were byte-identical rules describing different things, and the
+# comment above claimed a distinction that no longer existed. One target now, printing the
+# full table; the alias remains because both names are in use, and it delegates rather than
+# duplicating the command.
 classes:
 	@$(PY) tools/verify.py --list
 
-# Prints the classes the gate actually runs, which is not CHECK_CLASSES: eight bespoke
-# checks are appended in verify.py's main() and never appear in that tuple. Printing the
-# tuple under-reported the gate by those eight, which is the drift the class-count gate
-# exists to catch, reported by the command meant to show the count. `--list` is the gate's
-# own answer and cannot drift from it.
-classes-list:
-	@$(PY) tools/verify.py --list
+classes-list: classes
 
 run:
 	@systemctl --user start min-agent.service
