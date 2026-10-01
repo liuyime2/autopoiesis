@@ -260,14 +260,28 @@ validate-data:
 # printed with its verdict intact and the stage succeeds, and a genuine failure - an
 # unreadable journal, missing credentials - still surfaces because the report cannot be
 # produced at all.
+# `--verify-profit-target` exits 1 when the 10% daily target is not met, which is a
+# measurement, and 2 when it cannot produce the report at all, which is a failure. An earlier
+# version used `|| true`, which swallowed both, so a missing interpreter, a crash and an unmet
+# target were indistinguishable - and the comment claiming a genuine failure still surfaced
+# was simply wrong. Only the absence of a report fails this stage.
+EVAL_REPORT := runtime/min_agent/evaluate.txt
+
 evaluate:
+	@mkdir -p runtime/min_agent
 	@if [ ! -f runtime/min_agent/journal.jsonl ]; then \
 		echo "evaluate: no journal yet; run 'make run' for at least one cycle first"; \
+	elif $(CONDA_RUN) python -m min_agent.cli --verify-profit-target > $(EVAL_REPORT); then \
+		cat $(EVAL_REPORT); \
+		echo "evaluate: target met"; \
 	else \
-		$(CONDA_RUN) python -m min_agent.cli --verify-profit-target || true; \
-		echo "evaluate: report above; a target not being met is a result, not a gate failure"; \
+		rc=$$?; cat $(EVAL_REPORT); \
+		if [ $$rc -gt 1 ]; then \
+			echo "evaluate: FAILED (exit $$rc): the report could not be produced"; \
+			exit $$rc; \
+		fi; \
+		echo "evaluate: target NOT met (exit 1). That is a measurement, not a gate failure."; \
 	fi
-
 reproduce:
 	@mkdir -p runtime/min_agent
 	@$(PY) tools/provenance.py > runtime/min_agent/reproduce.txt

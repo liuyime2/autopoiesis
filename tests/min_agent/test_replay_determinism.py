@@ -12,6 +12,8 @@ still be there at 09:00 when you try to look at it.
 import json
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from min_agent import counterfactual as cf
 from min_agent.journal import JsonlJournal
 from min_agent.models import (
@@ -120,7 +122,11 @@ def test_replaying_the_live_journal_reproduces_the_recorded_verdicts():
         "COUNTERFACTUAL_EVALUATED"
     )
     if not events:
-        return  # nothing recorded yet; nothing to contradict
+        # skip, not a bare return. A silent `return` makes pytest report this as one passed
+        # test that asserted nothing, which is how a class in the gate came to pass on every
+        # fresh clone and in CI without ever checking anything. A skip says plainly that the
+        # check could not run, and `--strict-markers` in pytest.ini keeps it visible.
+        pytest.skip("no COUNTERFACTUAL_EVALUATED events recorded yet")
 
     recorded = {}
     for event in events:

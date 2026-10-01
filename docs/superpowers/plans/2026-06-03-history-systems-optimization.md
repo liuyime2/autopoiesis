@@ -1,3 +1,5 @@
+> **SUPERSEDED — historical plan, not current instructions.** This document describes a design that was never built: it references `history_version/*` modules that do not exist in `src/min_agent/`. It is kept as a record of what was considered, and nothing in it is a task to perform. The architecture that actually exists is in `docs/ARCHITECTURE.md` Part II.
+
 # History Systems Optimization Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

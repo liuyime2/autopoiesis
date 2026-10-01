@@ -332,16 +332,37 @@ def check_docs_not_stale() -> Result:
 
     problems: list[str] = []
     for plan in plans:
-        text = plan.read_text(errors="ignore").lower()
+        raw = plan.read_text(errors="ignore")
+        text = raw.lower()
+        marked = "superseded" in text[:2000]
         stale = [c for c in STALE_STATUS_CLAIMS if c in text]
-        if not stale:
-            continue
-        if "superseded" in text[:2000]:
-            continue  # explicitly marked as a historical record
-        problems.append(
-            f"{plan.relative_to(ROOT)} still claims {stale[0]!r} and is not "
-            "marked SUPERSEDED"
+
+        # Beyond the literal claims: a plan that names source files the repository does not
+        # contain is describing a system that was never built, and unless it says so, a
+        # reader - or an agent picking the next task - will treat it as pending work. Both
+        # 2026-06-03 plans did exactly this, and both opened with "implement this plan
+        # task-by-task" while referencing modules like `modes.py` and `reflector.py` that do
+        # not exist. The phrase list alone reported those two as clean.
+        absent = sorted(
+            m for m in re.findall(r"src/min_agent/([a-z_]+)\.py", raw)
+            if not (SRC / "min_agent" / f"{m}.py").exists()
         )
+        absent += sorted(
+            m for m in re.findall(r"tests/min_agent/(test_[a-z_]+)\.py", raw)
+            if not (ROOT / "tests" / "min_agent" / f"{m}.py").exists()
+        )
+        if marked:
+            continue  # explicitly marked as a historical record
+        if stale:
+            problems.append(
+                f"{plan.relative_to(ROOT)} still claims {stale[0]!r} and is not "
+                "marked SUPERSEDED"
+            )
+        elif absent:
+            problems.append(
+                f"{plan.relative_to(ROOT)} references source files that do not exist "
+                f"({', '.join(absent[:3])}) and is not marked SUPERSEDED"
+            )
 
     detail = "; ".join(problems) if problems else (
         f"{len(plans)} plan document(s), none asserting an unacted state"
