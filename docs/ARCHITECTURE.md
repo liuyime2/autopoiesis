@@ -152,3 +152,29 @@ Ordered by the objective's own rule (delete -> merge -> simplify -> reuse -> rew
    existing audit demoted to history rather than being the entry point.
 5. **Keep.** `research/` separation, the 29 verify classes, the journal as sole source of
    truth. These are the parts that make the system trustworthy; they are not bloat.
+
+## 8. Import cost: measured, not assumed
+
+`cli.py` imports 24 `min_agent` modules at module level, which looks like the coupling
+problem this refactor was supposed to reduce. It was measured instead of restructured.
+
+```
+--help                          0.62s   (of which bare interpreter start is 0.10s)
+import min_agent.cli             0.76s
+import alpaca_trade_api          1.83s
+```
+
+`--help` is *faster* than importing the Alpaca SDK alone, because `cli.py` already defers
+`import alpaca_trade_api` into the four functions that need it (`cli.py:172, 219, 398,
+536`). The heavy dependency is already off the help path.
+
+`requests` shows 175ms of the profile via `min_agent.broker_evidence`. Deferring it was
+tried by measurement rather than by taste: removing the top-level import and adding a
+function-local one made `--help` **14ms slower**, not faster, because `alpaca_trade_api`
+imports `requests` itself and the cost is paid either way once any subcommand runs.
+
+So the import surface was left alone. Restructuring it would have added an indirection and
+a comment explaining why, in exchange for nothing - which is the opposite of the stated
+goal of reducing long-term complexity rather than line count. The real reduction already
+happened elsewhere: five duplicated shell entry points became one CLI, and one canonical
+`min-agent` console script replaced an absolute interpreter path baked into a script.
