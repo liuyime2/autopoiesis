@@ -73,7 +73,7 @@ wrappers each duplicated a flag below.
 | `make smoke` | one real cycle end to end against the broker | ~8s |
 | `make smoke-offline` | the same path with broker and model stubbed | <1s |
 | `make fast` | check + smoke + the full gate | ~90s |
-| `make verify` | 36 check classes, non-zero on any failure | ~100s |
+| `make verify` | 37 check classes, non-zero on any failure | ~100s |
 | `make test` | the whole suite | ~5min |
 | `make doctor` | health of the running system, non-zero on any fault | ~20s |
 | `make status` | is the daemon alive and what is it doing | ~1s |
@@ -108,7 +108,7 @@ src/min_agent/          the package. 40 modules, 3 external dependencies.
   strategy_engine.py    strategy library, selection, lifecycle
   evaluator.py          scoring from broker-confirmed evidence
   research/             diagnosis only. production may not import it, and a gate enforces that
-tools/verify.py         the gate: 36 check classes
+tools/verify.py         the gate: 37 check classes
 tools/provenance.py     what `make reproduce` records
 tests/min_agent/        61 test files
 examples/minimal_cycle.py   the smallest runnable example, no broker needed
@@ -190,3 +190,19 @@ wired and reproducible so the debt is visible rather than forgotten.
 `docs/superpowers/SYSTEM_AUDIT.md` is a historical defect log, kept because it records
 why specific decisions were made. It is not documentation of how the system works - this
 file and `docs/ARCHITECTURE.md` are.
+
+## Verifying a clone
+
+The figures quoted elsewhere in this repository are reproduced by one script, and its
+output is committed:
+
+```bash
+docs/evidence/run-fresh-clone.sh
+```
+
+It clones the committed tree into a scratch directory, installs it, and runs lint, the full
+test suite, the example cycle, the entry point, provenance, and the gate's own self-test. No
+credentials are needed. The result is written to `docs/evidence/fresh-clone.log` and the
+gate checks that log against the script and the commit it names, so a green claim here is
+traceable to a run rather than to prose. `make verify` runs the same checks in place; the
+clone exists to prove they pass from nothing but a checkout.
