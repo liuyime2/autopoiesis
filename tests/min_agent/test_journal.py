@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from min_agent.journal import JsonlJournal
 from min_agent.models import (
@@ -168,3 +168,97 @@ def test_history_paths_is_empty_when_nothing_has_run(tmp_path):
     journal = JsonlJournal(tmp_path / "journal.jsonl")
     assert journal.history_paths() == []
     assert journal.read_all() == []
+
+
+def test_daily_trade_count_survives_rotation(tmp_path):
+    """The daily trade cap must count orders that rotation moved to a backup.
+
+    This one is safety-relevant rather than bookkeeping. `count_submitted_on` is what
+    Guardian's `max_trades_per_day` is measured against, and it read only the live journal
+    file. A rotation partway through a trading day moves the day's orders to `journal.jsonl.1`
+    and the counter returns 0 - so the 10-trades-per-day limit silently stops limiting for the
+    rest of the day, with nothing in any record to explain why. The report would still say the
+    limit is in force.
+
+    On this host the rotation that exposed it fell pre-market, so today's count was correct
+    by luck: 6 both before and after the fix. The next mid-session rotation would have
+    removed the cap entirely.
+    """
+    day = date(2026, 6, 3)
+    journal = JsonlJournal(tmp_path / "journal.jsonl", max_bytes=4096, backups=4)
+
+    # Fewer records than an earlier version used, deliberately. `backups` is a retention
+    # bound, not a guarantee: the fifth rotation deletes `.4`. With 24 records and 4 backups
+    # the count came back 20 of 24 - which is the retention policy working correctly, and the
+    # test was asserting on discarded history. The count now forces several rotations while
+    # staying inside what is retained.
+    total = 12
+    submitted = 0
+    for index in range(total):
+        # Rebuilt rather than mutated: CycleRecord is a frozen pydantic model, so assigning
+        # to its fields raises, and `model_copy(update=...)` on a nested field needs the parent
+        # to be reconstructed too. make_record already takes the cycle_id.
+        base = make_record(f"cycle-{index}")
+        journal.append(
+            CycleRecord(
+                cycle_id=base.cycle_id,
+                snapshot=base.snapshot.model_copy(update={
+                    "timestamp": datetime(2026, 6, 3, 14, 30 + index, tzinfo=timezone.utc),
+                }),
+                decision=base.decision.model_copy(update={"action": "BUY", "quantity": 1}),
+                guardian=base.guardian,
+                execution=ExecutionResult(
+                    status="SUBMITTED", order_id=f"order-{index}",
+                    client_order_id=f"coid-{index}", filled_quantity=1.0,
+                    filled_avg_price=100.0, fees=0.0, filled_at=None, submitted_at=None,
+                    broker_status="accepted", message="submitted",
+                ),
+                strategy_id=base.strategy_id,
+                error=base.error,
+            )
+        )
+        submitted += 1
+        if (index + 1) % 3 == 0:
+            journal._rotate_if_needed(0)  # force a rotation every three records
+
+    assert len(journal.history_paths()) > 1, "the test must actually rotate"
+    assert journal.count_submitted_on(day) == submitted, (
+        f"the daily trade cap counted {journal.count_submitted_on(day)} of {submitted} "
+        f"submitted orders across generations "
+        f"{[p.name for p in journal.history_paths()]}"
+    )
+
+
+def test_daily_trade_count_ignores_holds_and_other_days(tmp_path):
+    """HOLDs, non-SUBMITTED statuses and other dates must not consume the daily cap."""
+    from datetime import date as _date
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    target = _date(2026, 6, 3)
+
+    def at(base, when, action, execution=None):
+        updates = {"action": action}
+        # CycleRecord validates that a BUY or SELL carries a positive quantity; HOLD needs
+        # none. Set both rather than guessing, so the fixture obeys the same invariant the
+        # agent does.
+        updates["quantity"] = 0 if action == "HOLD" else 1
+        return CycleRecord(
+            cycle_id=base.cycle_id,
+            snapshot=base.snapshot.model_copy(update={"timestamp": when}),
+            decision=base.decision.model_copy(update=updates),
+            guardian=base.guardian,
+            execution=execution or base.execution,
+            strategy_id=base.strategy_id,
+            error=base.error,
+        )
+
+    accepted = ExecutionResult(
+        status="SUBMITTED", order_id="o1", client_order_id="c1", filled_quantity=1.0,
+        filled_avg_price=100.0, fees=0.0, filled_at=None, submitted_at=None,
+        broker_status="accepted", message="submitted",
+    )
+    journal.append(at(make_record("hold"), datetime(2026, 6, 3, 14, 30, tzinfo=timezone.utc), "HOLD"))
+    journal.append(at(make_record("yesterday"), datetime(2026, 6, 2, 14, 30, tzinfo=timezone.utc), "BUY"))
+    journal.append(at(make_record("today"), datetime(2026, 6, 3, 14, 31, tzinfo=timezone.utc), "BUY", accepted))
+
+    assert journal.count_submitted_on(target) == 1

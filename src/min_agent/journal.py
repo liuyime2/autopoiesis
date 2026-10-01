@@ -70,8 +70,23 @@ class JsonlJournal:
         count = 0
         self.last_dropped_lines = 0
         date_text = day.isoformat()
-        with self._read_lock(), self.path.open("r", encoding="utf-8") as handle:
-            for line in handle:
+        # Across every generation, not just the live file. This is the daily trade cap that
+        # Guardian enforces, and it read only `journal.jsonl`: a rotation partway through a
+        # session moved the day's orders to `.1` and the counter returned 0, so the
+        # 10-trades-per-day limit stopped binding for the rest of the day with nothing in any
+        # record to show why. Reproduced in a scratch directory - 30 real SUBMITTED orders
+        # spread over four generations, count 0.
+        #
+        # `_scan` was fixed for exactly this when rotation was first handled; this method
+        # sits below it and reads the file directly, and its own docstring still names it as a
+        # reader that concluded the agent had never run. A limit that can silently stop
+        # limiting is worse than no limit, because the report says it is in force.
+        paths = self.history_paths()
+        if not paths:
+            return 0
+        with self._read_lock(), contextlib.ExitStack() as stack:
+            handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in paths]
+            for line in itertools.chain.from_iterable(handles):
                 if _EVENT_MARKER in line or _CYCLE_MARKER not in line or date_text not in line:
                     continue
                 try:
