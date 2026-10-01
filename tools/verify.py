@@ -528,6 +528,54 @@ def _dated_section_ranges(text: str) -> list[tuple[int, int]]:
     return ranges
 
 
+def check_no_unreferenced_design_notes_at_the_root() -> Result:
+    """A root-level markdown file must be current documentation or declare itself history.
+
+    `react_agent_design.md` sat beside README.md for the whole refactor, describing a
+    `ReactAgent` with a `Reasoner`, a `ToolSelector` and an `ActionExecutor`. None of those
+    five components exists in `src/min_agent/`, no code or document referenced the file, and
+    git shows it predating the refactor. It was a design for a system that was never built,
+    so the repository root documented an architecture it does not contain. Three completion
+    verifiers passed over it before one named it.
+
+    The rule is deliberately narrow, because "delete every loose note" would be wrong -
+    `STATUS.md` and `AGENTS.md` both belong at the root. A root markdown file must be one of
+    the documented entry points or open by marking itself as a historical record. The
+    allow-list is explicit rather than inferred from inbound links, because a file nobody
+    links to is exactly the case this exists to catch.
+    """
+    allowed = {"README.md", "AGENTS.md", "STATUS.md"}
+    history = re.compile(r"^\s*>?\s*(?:\*\*)?(?:Historical|This file is a record)", re.IGNORECASE)
+    problems = []
+    for path in sorted(ROOT.glob("*.md")):
+        if path.name in allowed:
+            continue
+        try:
+            head = path.read_text(encoding="utf-8")[:1500]
+        except OSError:
+            continue
+        if not history.search(head):
+            referenced = any(
+                path.name in other.read_text(encoding="utf-8", errors="ignore")
+                for other in ROOT.rglob("*.md")
+                if other != path and ".opencode" not in other.parts
+            )
+            problems.append(
+                f"{path.name}: at the root, not a documented entry point, does not mark "
+                f"itself as history, and is {'referenced' if referenced else 'referenced by nothing'}"
+            )
+    if problems:
+        return Result(
+            "no-loose-design-notes", FAIL,
+            f"{len(problems)}: {problems[:3]}",
+        )
+    return Result(
+        "no-loose-design-notes", PASS,
+        f"every root markdown file is a documented entry point ({', '.join(sorted(allowed))}) "
+        "or declares itself historical",
+    )
+
+
 def check_the_gate_class_count_is_reported_consistently(total: int | None = None) -> Result:
     """Every document that states the class count must state the one the gate reports.
 
@@ -1661,6 +1709,7 @@ def main() -> int:
     results.append(check_docs_do_not_instruct_deleted_commands())
     results.append(check_the_example_still_runs())
     results.append(check_tools_readme_names_real_files())
+    results.append(check_no_unreferenced_design_notes_at_the_root())
     results.append(check_config_example_names_are_real())
     results.append(check_unit_environment_files_exist())
     results.append(check_replay_audit())

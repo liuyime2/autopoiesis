@@ -249,7 +249,7 @@ Alpaca UI.
 
 > Dated section. The figures below are what the gate reported on 2026-09-28 and are
 > correct for that date. For the current figures see `README.md`; the gate now runs
-> 35 check classes. The sections below are a record of what was true when each was
+> 36 check classes. The sections below are a record of what was true when each was
 > written, not a description of the present.
 
 **`make verify` is the single gate.** 17 check classes, 0 failed, 472 distinct
