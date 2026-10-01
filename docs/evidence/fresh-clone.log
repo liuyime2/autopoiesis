@@ -7,7 +7,7 @@ $ git clone <repo> fc && cd fc
 $ python -m pip install -e ".[dev]"
 
 ## commit under test
-02acbe8 Make evaluate able to fail again; mark two plans superseded; no vacuous tests
+ce9ada3 Fix import ordering in provenance.py
 
 ## environment (no credentials present)
 interpreter: /localscratch/liuyime2/conda_env/freshclone-test/bin/python3
@@ -16,7 +16,7 @@ credentials: none present; the gate's broker checks skip rather than fail
 
 ## install
 $ python3 -m pip install -e ".[dev]"
-Obtaining file:///tmp/opencode/fc-final3
+Obtaining file:///tmp/opencode/fc-z2
   Installing build dependencies: started
   Installing build dependencies: finished with status 'done'
   Checking if build backend supports build_editable: started
@@ -72,8 +72,8 @@ Requirement already satisfied: six>=1.5 in /localscratch/liuyime2/conda_env/fres
 Building wheels for collected packages: min-agent
   Building editable for min-agent (pyproject.toml): started
   Building editable for min-agent (pyproject.toml): finished with status 'done'
-  Created wheel for min-agent: filename=min_agent-0.1.0-0.editable-py3-none-any.whl size=5999 sha256=20e1078a89d7e0daec888a287b320fd471ccbc5a1ba0b3b887915a6c8b7ab99d
-  Stored in directory: /tmp/pip-ephem-wheel-cache-1jb4tnri/wheels/77/c2/4c/80bc536a060335e211fae7de0629b7ba9cf90eb69d12f2b49e
+  Created wheel for min-agent: filename=min_agent-0.1.0-0.editable-py3-none-any.whl size=6085 sha256=e79f021ebd4ff8ccc9bbe03f32e404594bb98a9e7e5901a3eab002a2c06d79c4
+  Stored in directory: /tmp/pip-ephem-wheel-cache-gohimvwp/wheels/9c/f9/b6/a00fb001b46194046091296f35a53e6de496f735890007606c
 Successfully built min-agent
 Installing collected packages: min-agent
   Attempting uninstall: min-agent
@@ -101,7 +101,7 @@ $ python3 -m pytest -q
 ......................s................................................. [ 90%]
 ........................................................................ [ 99%]
 ........                                                                 [100%]
-797 passed, 3 skipped in 85.04s (0:01:25)
+797 passed, 3 skipped in 11.22s
 RESULT: PASS
 
 ## example
@@ -155,10 +155,10 @@ RESULT: PASS
 ## provenance
 $ python3 tools/provenance.py
 # provenance for one run of min-agent
-generated: 2026-10-01T10:58:11Z
+generated: 2026-10-01T11:21:06Z
 
 ## code
-commit: 02acbe8d4c2fbbd7043905f00ab0640e87cbcd70
+commit: ce9ada379e304cdc43deaed1cf87c630b86a8800
 dirty:  yes
 
 ## environment
@@ -197,7 +197,7 @@ packages:
   this record     runtime/min_agent/reproduce.txt
 
 ## metrics at the time of this record
-  (journal unavailable: FileNotFoundError)
+  (no cycle records yet)
 RESULT: PASS
 
 ## self-test
@@ -238,11 +238,12 @@ verify: every check class, one gate
 [PASS] example-runs                     examples/minimal_cycle.py runs with no broker or credentials
 [PASS] tools-readme-accurate            tools/README.md names all 12 tools and invents none of them
 [PASS] no-loose-design-notes            every root markdown file is a documented entry point (AGENTS.md, README.md, STATUS.md) or declares itself historical
-[PASS] fresh-clone-evidence-real        log records 7 steps from commit d7399dd, regenerable by run-fresh-clone.sh
-[PASS] bespoke-list-matches-run         12 bespoke names, all appended by main() and all reported by --list
+[PASS] fresh-clone-evidence-real        log records 7 steps from commit 02acbe8, regenerable by run-fresh-clone.sh
+[PASS] bespoke-list-matches-run         13 bespoke names, all appended by main() and all reported by --list
 [SKIP] status-matches-doctor            doctor ran but its journal/library lines were not found in the output
-[PASS] list-count-matches-run           --list says 43; the run produces 43 for the same set (syntax-import contributes the extra row)
+[PASS] list-count-matches-run           --list says 44; the run produces 44 for the same set (syntax-import contributes the extra row)
 [PASS] fact-figures-match               prose agrees with the commands: audit 61/61, 800 tests collected, doctor 1 failures / 14 warnings
+[PASS] unit-templates-portable          4 unit template(s) carry no host path and every placeholder is substituted
 [PASS] pipeline-targets-exist           pipeline runs ['validate-data', 'test', 'evaluate', 'reproduce'] and every stage has a rule
 [PASS] config-example-names             all 34 variable names in the example are read by config.py or the env file
 [PASS] config-example-complete          all 38 variable(s) the loader reads are documented in the example
@@ -255,7 +256,7 @@ verify: every check class, one gate
 [PASS] syntax-import                    imported 35 modules
 [PASS] data-integrity                   runtime integrity: OK (0 cycles, 0 events, 0 strategies) |   no journal yet |   no strategy registry yet |   6 previously-missing strategies recorded 
 [PASS] shadow-live-consistency          live mode hard-blocked; probation gate enforced; shadow implemented, reachable by MIN_AGENT_SHADOW=1, off by default, strict boolean
-[PASS] syntax-import                    ...............................................                          [100%] | 47 passed in 3.53s
+[PASS] syntax-import                    ...............................................                          [100%] | 47 passed in 3.47s
 [PASS] unit-integration                 ........................................................................ [ 25%] | ....................................................................
 [PASS] point-in-time-no-leakage         ...........................................s............................ [ 92%] | ......                                                              
 [PASS] pnl-accounting                   ........................................................................ [ 60%] | ................................................                    
@@ -263,14 +264,14 @@ verify: every check class, one gate
 [PASS] guardian-bypass-prevention       ........................................................................ [ 72%] | ...........................                                         
 [PASS] replay-determinism               ........................................................................ [ 69%] | ..............................s.                                    
 [PASS] crash-recovery                   ........................................................................ [ 54%] | ...........................................................         
-[PASS] broker-reconciliation            .............................................................            [100%] | 61 passed in 1.49s
-[PASS] decision-outcome-counterfactual  ................................................................         [100%] | 64 passed in 0.36s
+[PASS] broker-reconciliation            .............................................................            [100%] | 61 passed in 1.39s
+[PASS] decision-outcome-counterfactual  ................................................................         [100%] | 64 passed in 0.38s
 [PASS] defect-regression-audit          D15  archived projects are out of the tree  PASS | D15  a plan document exists  PASS | 61/61 checks pass across 15 defects
 [PASS] doctor                           no runtime state in this checkout; ran offline (ok=False exit=1 failures=[alpaca credentials,strategy library] warnings=[daemon,journal,knowledge libr
-[PASS] gate-class-count-consistent      every document that states the count says '43 check classes'
+[PASS] gate-class-count-consistent      every document that states the count says '44 check classes'
 [SKIP] fact-docs-current                no broker credentials: this host runs 1230 executions against the 1233 the documents state for a configured host; skipped rather than failed, and the 
 
-classes: 43   passed: 43   failed: 0   test executions: 1230 across 61 test files
+classes: 44   passed: 44   failed: 0   test executions: 1230 across 61 test files
 
 OK - all check classes pass
 RESULT: PASS
