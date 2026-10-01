@@ -29,7 +29,13 @@ ROOT = Path(__file__).resolve().parents[2]
 # rewrite a lifecycle, or force-enable a strategy - is unchanged and still enforced over
 # every ops script that remains. The tuple is the *current* set, not a historical one,
 # so a new ops script must be added here deliberately rather than audited by accident.
-OPS_SCRIPTS = ("auto_reviewer.py",)
+# auto-fix.sh, monitor.sh, observe.sh, check-market-open.sh, run_forever.sh and
+# auto_reviewer.py were all deleted as duplicates of the CLI and `doctor`, and nothing
+# scheduled any of them. The three properties asserted below - no ops script may assign a
+# risk limit, rewrite a lifecycle, or force-enable a strategy - still hold, and are now
+# asserted over the one ops script that remains. The tuple is the *current* set, so a new
+# ops script must be added here deliberately rather than audited by accident.
+OPS_SCRIPTS = ("minictrl",)
 
 # Any write of these keys, from a script outside Guardian, is a forbidden
 # automatic risk relaxation.

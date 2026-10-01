@@ -74,7 +74,7 @@ configured for `:11434` and GPU 0. Check both before blaming the model.
 
 The unit has `Restart=always` with `StartLimitBurst=5` inside 15 minutes, so a
 permanently broken daemon stops being restarted instead of spinning forever.
-`run_forever.sh` has the same protection for interactive use, and is otherwise a
+`min-agent --once` has the same protection for a single interactive cycle. `run_forever.sh` was deleted as a duplicate of `min-agent.service`, which is `enabled` and carries `Restart=always`.
 thin wrapper kept for muscle memory.
 
 ## Tuning

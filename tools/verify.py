@@ -505,6 +505,54 @@ def _durable_unit_dir() -> str | None:
     return str(Path(path).parent)
 
 
+def check_docs_do_not_instruct_deleted_commands() -> Result:
+    """No document may tell a reader to run a command that no longer exists.
+
+    Found by the completion verifier, after the deliverables were already written and
+    every target was green. `AUTO_REVIEW_README.md` documented `auto-fix.sh`,
+    `check-market-open.sh` and `monitor.sh`; the two runbooks told a reader to
+    `bash run_forever.sh`. Every one of those files was deleted as a duplicate, and
+    nothing failed, because no check connected the documentation to the filesystem.
+
+    A document that names a script is an executable instruction whether or not anyone
+    runs it, and an instruction that cannot work is worse than a missing one: the reader
+    concludes the tool is broken rather than that it moved. `docs/MIGRATION.md` is
+    exempt by name - its entire purpose is to name removed paths - and matches on the
+    command form (`bash x.sh`, `python x.py`) so prose describing a past event is not
+    mistaken for a live instruction.
+    """
+    removed = (
+        "auto-fix.sh", "monitor.sh", "observe.sh", "run_forever.sh",
+        "check-market-open.sh", "auto_reviewer.py",
+    )
+    patterns = [re.compile(rf"\b(?:bash|python3?|\./)\s*{re.escape(name)}\b") for name in removed]
+    problems = []
+    for path in sorted(ROOT.rglob("*.md")):
+        parts = path.relative_to(ROOT).parts
+        if parts[0] in {"runtime", ".git", ".opencode", "node_modules"}:
+            continue
+        if path.name == "MIGRATION.md":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for pattern in patterns:
+            for match in pattern.finditer(text):
+                line = text[: match.start()].count("\n") + 1
+                problems.append(f"{path.relative_to(ROOT)}:{line}: {match.group(0)!r}")
+    if problems:
+        return Result(
+            "docs-no-deleted-commands", FAIL,
+            f"{len(problems)} instruction(s) name a deleted script: {problems[:4]}. "
+            "Point them at the replacement in docs/MIGRATION.md.",
+        )
+    return Result(
+        "docs-no-deleted-commands", PASS,
+        f"no document instructs a reader to run one of the {len(removed)} removed scripts",
+    )
+
+
 def check_the_running_daemon_matches_the_worktree() -> Result:
     """The daemon's heartbeat must carry the source fingerprint of what is on disk.
 
@@ -1404,6 +1452,7 @@ def main() -> int:
     results.append(check_home_independence())
     results.append(check_units_are_where_systemd_looks())
     results.append(check_the_running_daemon_matches_the_worktree())
+    results.append(check_docs_do_not_instruct_deleted_commands())
     results.append(check_unit_environment_files_exist())
     results.append(check_replay_audit())
     results.append(check_shadow_cannot_count_as_executed())

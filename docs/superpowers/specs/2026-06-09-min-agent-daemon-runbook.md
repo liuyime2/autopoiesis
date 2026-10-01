@@ -154,25 +154,19 @@ PYTHONPATH=src conda run -n llm python -m min_agent.cli --reconcile
 
 ## Use the Shell Wrapper
 
-The updated `run_forever.sh` script starts the `min_agent` daemon (not the unsafe `voyager_quant/main.py`):
+The daemon runs under systemd, which is the supported way to start it:
 
 ```bash
-conda activate llm
-bash run_forever.sh
+make run        # systemctl --user start min-agent.service
+make status     # is it alive, and what is it doing
+make stop
 ```
 
-## Safety Checklist Before Long Run
-
-1. Credentials present and paper URL exact.
-2. `--check-env` reports no missing credentials, Ollama reachable, model present.
-3. `--reconcile` reports no unexpected open broker orders.
-4. Journal is writable.
-5. Guardian limits displayed correctly.
-6. No `voyager_quant/main.py` process running.
-
-## Verification Commands
-
-```bash
+`run_forever.sh` was a foreground supervisor for the same job and has been deleted;
+`min-agent.service` carries `Restart=always` and is `enabled`, which is what the
+supervisor provided. For a bounded run without systemd, `make run` followed by
+`make status` covers the same ground, and `min-agent --once` runs a single cycle
+in the foreground.bash
 conda run -n llm python -m pytest tests/min_agent -q
 grep -R --exclude-dir='__pycache__' "exec(" -n src/min_agent || true
 grep -R --exclude-dir='__pycache__' "shell=True\|return True" -n src/min_agent || true

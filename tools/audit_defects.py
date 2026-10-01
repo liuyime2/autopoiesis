@@ -42,9 +42,11 @@ def function_body(text: str, name: str) -> str:
 def main() -> int:
     py = {p.name: p.read_text(encoding="utf-8") for p in SRC.glob("*.py") if p.is_file()}
     py = {k: v for k, v in py.items() if k != "__init__.py"}
+    # The five shell wrappers and auto_reviewer.py were deleted: each duplicated CLI
+    # flags or doctor's checks, and nothing scheduled them. `minictrl` is the only ops
+    # script that remains, and the D8 properties are asserted over whatever is here.
     ops = {name: (ROOT / name).read_text(encoding="utf-8") for name in (
-        "auto-fix.sh", "auto_reviewer.py", "monitor.sh", "observe.sh",
-        "check-market-open.sh", "run_forever.sh", "minictrl",
+        "minictrl",
     ) if (ROOT / name).exists()}
 
     dg, g, ev, se = py["data_gateway.py"], py["guardian.py"], py["evaluator.py"], py["strategy_engine.py"]
