@@ -81,3 +81,75 @@ adding it surfaced an assertion about a `DRIFT` marker that only ever applied to
    returns hits only inside comments that narrate why the scripts went - in
    `atomicio.py`, `test_durability.py`, `test_governance.py` and
    `test_governance_invariants.py`. Those are history, not dependencies.
+
+## Phases, acceptance criteria, and how each was verified
+
+Five phases, executed in the objective's order. Each states what had to be true before the
+next began, and what was actually run to establish it.
+
+### Phase 1 — Reconnaissance
+
+**Done when** every claim about the existing system is checkable rather than recalled.
+
+- Recorded the pre-refactor baseline so "still green" means something:
+  all six targets passing, 759 tests, 29 verify classes, 1191 executions.
+- `docs/ARCHITECTURE.md` written from the working tree, not from `docs/superpowers/plans/`,
+  which this refactor is explicitly told to ignore.
+- Two first readings found wrong and corrected in place: "11 modules are unimported" (they
+  are imported, by a `from X import Y` form the scan missed) and "the journal has no
+  rotation" (it does, wired into `append`).
+
+### Phase 2 — Delete
+
+**Done when** nothing removed is referenced, and no property it guarded is lost.
+
+| Criterion | How it was established |
+| --- | --- |
+| No dead code remains | `src/` contains exactly one package; `grep -rn` for each deleted script matches only comments narrating the deletion |
+| Properties preserved | D8 still asserted over remaining ops scripts, by both `tools/audit_defects.py` and `tests/min_agent/test_governance.py` |
+| System still green | `make test` 753 passed, `make verify` 29 classes 0 failed |
+
+Baseline after: 753 passed (was 759 — 6 tests belonged to deleted behaviour), 29 classes.
+
+### Phase 3 — Infrastructure
+
+**Done when** a fresh clone installs and runs without this machine's state.
+
+| Criterion | How it was established |
+| --- | --- |
+| Dependencies declared | Scan of every `import` in `src/min_agent` agrees exactly with `pyproject.toml`: no undeclared, none declared-but-unused |
+| Package installable | `pip install -e ".[dev]"` in a clean conda env; `min-agent` console script resolves |
+| Lint is a gate | `make lint` passes; every `ruff.toml` exemption carries a reason |
+| Iteration loop exists | `make check` / `smoke` / `fast` / `reproduce`, each run and timed |
+
+**This phase failed its own criterion twice**, which is why it is recorded rather than
+summarised: `make smoke` had never run (`get_all_positions` does not exist in
+alpaca-trade-api 3.2), and `--help` crashed on argparse's `%` interpolation. Both now have
+tests verified to fail against the unfixed code.
+
+### Phase 4 — Make the gate mean what it says
+
+**Done when** a check cannot pass by excluding what it is responsible for.
+
+| Criterion | How it was established |
+| --- | --- |
+| Class list is complete | `CHECK_CLASSES` matches the 29 classes that actually run, exactly, both directions |
+| Coverage gate is honest | `REPOSITORY_CHECK_CLASSES` names the exemption; stripping `pnl-accounting`'s test files makes `class-coverage` FAIL — verified by direct call and by `verify --self-test` step 3b |
+| Every class runs its tests | `syntax-import` no longer skipped in `main()`; 47 tests execute inside the gate |
+| The gate can still fail | `make verify-self-test` passes, including the new step 3b |
+
+### Phase 5 — Fresh-clone verification
+
+**Done when** a clean clone in a clean environment, with no credentials and no `runtime/`,
+runs the documented commands.
+
+| Criterion | How it was established |
+| --- | --- |
+| Clones | `git clone` to an empty directory; `runtime/` absent, as gitignore intends |
+| Installs | New `conda create -n freshclone-test python=3.10`, then `pip install -e ".[dev]"` |
+| Runs | `min-agent --help` works; 794 tests pass; lint clean |
+| Works without credentials | All of the above with zero Alpaca variables set |
+
+**Three defects found only here**, none of which reproduces on the live machine: `ruff` and
+`mypy` missing from `[dev]`; a test reading the gitignored strategy library; and
+`smoke-offline` passing `--skip-broker` to a flag that only applies to `--doctor`.
