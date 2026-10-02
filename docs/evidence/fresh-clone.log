@@ -7,7 +7,7 @@ $ git clone <repo> fc && cd fc
 $ python -m pip install -e ".[dev]"
 
 ## commit under test
-a2207e2 Regenerate fresh-clone evidence at 47 classes
+e96177e Scan for the credential names this project uses; make the clone log stop claiming isolation
 
 ## environment
 interpreter: /localscratch/liuyime2/conda_env/freshclone-test/bin/python3
@@ -16,7 +16,7 @@ credentials: none present (verified by probing, after unset)
 
 ## install
 $ python3 -m pip install -e ".[dev]"
-Obtaining file:///tmp/opencode/fc-iso
+Obtaining file:///tmp/opencode/fc-final10
   Installing build dependencies: started
   Installing build dependencies: finished with status 'done'
   Checking if build backend supports build_editable: started
@@ -72,8 +72,8 @@ Requirement already satisfied: six>=1.5 in /localscratch/liuyime2/conda_env/fres
 Building wheels for collected packages: min-agent
   Building editable for min-agent (pyproject.toml): started
   Building editable for min-agent (pyproject.toml): finished with status 'done'
-  Created wheel for min-agent: filename=min_agent-0.1.0-0.editable-py3-none-any.whl size=6582 sha256=9ec25dfa4880b553062484b51053c4ccf0269074067b95124b9062b99bf361dd
-  Stored in directory: /tmp/pip-ephem-wheel-cache-s7ell795/wheels/1f/e9/4b/9fa216e93b2f0f666a558ad26ba154eb4440a532945725ec03
+  Created wheel for min-agent: filename=min_agent-0.1.0-0.editable-py3-none-any.whl size=6589 sha256=71ca60fca3185866d7aa2caeff7ca3fdd32568abd884083ffeb6ebef5da6e4ba
+  Stored in directory: /tmp/pip-ephem-wheel-cache-ao1azlg6/wheels/21/86/e7/7e3629a5590ad8c3248072e4e21707324f45158fd388ec842f
 Successfully built min-agent
 Installing collected packages: min-agent
   Attempting uninstall: min-agent
@@ -101,7 +101,7 @@ $ python3 -m pytest -q
 ................................s....................................... [ 88%]
 ........................................................................ [ 97%]
 ..................                                                       [100%]
-806 passed, 4 skipped in 14.24s
+806 passed, 4 skipped in 11.20s
 RESULT: PASS
 
 ## example
@@ -157,10 +157,10 @@ RESULT: PASS
 ## provenance
 $ python3 tools/provenance.py
 # provenance for one run of min-agent
-generated: 2026-10-02T02:25:46Z
+generated: 2026-10-02T02:41:01Z
 
 ## code
-commit: a2207e28ebc30437bc4d6c158bc10aa23ba2451a
+commit: e96177e5d9197f3eb30d9287330d9afc9faa427c
 dirty:  yes
 
 ## environment
@@ -240,11 +240,11 @@ verify: every check class, one gate
 [PASS] example-runs                     examples/minimal_cycle.py runs with no broker or credentials
 [PASS] tools-readme-accurate            tools/README.md names all 12 tools and invents none of them
 [PASS] no-loose-design-notes            every root markdown file is a documented entry point (AGENTS.md, README.md, STATUS.md) or declares itself historical
-[PASS] fresh-clone-evidence-real        log records 7 steps from commit 85e7ce2, regenerable by run-fresh-clone.sh
-[PASS] shell-scripts-well-formed        2 shell script(s) parse cleanly under bash -n
+[PASS] fresh-clone-evidence-real        log records 7 steps from commit a2207e2, regenerable by run-fresh-clone.sh
+[PASS] shell-scripts-well-formed        3 shell script(s) parse cleanly under bash -n
 [PASS] bespoke-list-matches-run         16 bespoke names, all appended by main() and all reported by --list
 [PASS] status-states-only-fixed-facts   STATUS.md states only fixed configuration (mode=paper, model=qwen3.8:27b, 5 symbols, 3 hard limits); live counters are queried rather than written dow
-[PASS] config-comment-figures-true      ruff.toml's measured figures hold: verify.py 3,079 lines, 62 BLE001 findings, 24 deferred imports
+[PASS] config-comment-figures-true      ruff.toml's measured figures hold: verify.py 3,122 lines, 62 BLE001 findings, 24 deferred imports
 [PASS] list-count-matches-run           --list says 47; the run produces 47 for the same set (syntax-import contributes the extra row)
 [PASS] fact-figures-match               prose agrees with the commands: audit 61/61, 810 tests collected; and no document claims a doctor warnings count (live value is 14, which is why none 
 [PASS] unit-templates-portable          4 unit template(s) carry no host path and every placeholder is substituted
@@ -261,7 +261,7 @@ verify: every check class, one gate
 [PASS] syntax-import                    imported 35 modules
 [PASS] data-integrity                   runtime integrity: OK (0 cycles, 0 events, 0 strategies) |   no journal yet |   no strategy registry yet |   6 previously-missing strategies recorded 
 [PASS] shadow-live-consistency          live mode hard-blocked; probation gate enforced; shadow implemented, reachable by MIN_AGENT_SHADOW=1, off by default, strict boolean
-[PASS] syntax-import                    ................................................                         [100%] | 48 passed in 3.77s
+[PASS] syntax-import                    ................................................                         [100%] | 48 passed in 3.60s
 [PASS] unit-integration                 .............................................................s.......... [ 25%] | ....................................................................
 [PASS] point-in-time-no-leakage         ...........................................s............................ [ 92%] | ......                                                              
 [PASS] pnl-accounting                   ........................................................................ [ 60%] | ................................................                    
@@ -269,8 +269,8 @@ verify: every check class, one gate
 [PASS] guardian-bypass-prevention       ........................................................................ [ 69%] | ...............................                                     
 [PASS] replay-determinism               ........................................................................ [ 69%] | ..............................s.                                    
 [PASS] crash-recovery                   ........................................................................ [ 53%] | ..............................................................      
-[PASS] broker-reconciliation            .............................................................            [100%] | 61 passed in 1.51s
-[PASS] decision-outcome-counterfactual  ................................................................         [100%] | 64 passed in 0.39s
+[PASS] broker-reconciliation            .............................................................            [100%] | 61 passed in 1.57s
+[PASS] decision-outcome-counterfactual  ................................................................         [100%] | 64 passed in 0.38s
 [PASS] defect-regression-audit          D15  archived projects are out of the tree  PASS | D15  a plan document exists  PASS | 61/61 checks pass across 15 defects
 [PASS] doctor                           no broker credentials and no runtime state in this checkout; ran offline (ok=False exit=1 failures=[alpaca credentials,strategy library] warnings=[dae
 [PASS] gate-class-count-consistent      every document that states the count says '47 check classes'
