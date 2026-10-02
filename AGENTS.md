@@ -111,7 +111,26 @@ modify → run → evaluate → locate the problem → next modification
 The next change is decided by the result of this one, not by intuition or by a
 queue of features to add.
 
-### 11. Done Means Verified
+### 11. Keep the Todo Reconciled With Reality
+
+The Todo list is the plan; the Goal is the boundary. Reconcile them against measured
+progress at the end of every working unit, not only at the start of a session.
+
+Three inputs decide what the Todo should say:
+
+- **progress** — what has actually been run and verified, not what was attempted;
+- **objective** — what must be true at the end, restated in the item's wording;
+- **current task** — what this cycle is for.
+
+Do not resolve an uncomfortable item by deleting it. An item that is blocked,
+superseded, or newly irrelevant is **modified** to record that, with the reason and
+the evidence, or **added** to a follow-up. Deleting without that record destroys the
+only trace of why the work stopped, and the next session repeats it.
+
+Marking an item done is not a claim that it happened. The proof is the command that
+ran and its output; the Todo only records that someone looked.
+
+### 12. Done Means Verified
 
 "Code is written" is not completion. A task is done only when all of these hold:
 
@@ -121,7 +140,7 @@ queue of features to add.
 - the result is reproducible;
 - the documentation is updated to match.
 
-### 12. Git Version Management
+### 13. Git Version Management
 
 One coherent change per commit — not one file per commit, and not a sweep of
 unrelated fixes. Before committing, inspect `git status`, `git diff`, and
@@ -145,18 +164,18 @@ it, fix the problem and make a new commit.
 
 ## Standing Constraints
 
-### 13. Optimization Mechanism First
+### 14. Optimization Mechanism First
 
 Problems in Skill scripts must be discovered and fixed through the optimization
 mechanism. Do not manually edit Skills to bypass the mechanism. Record reusable
 failure lessons where they belong.
 
-### 14. Skill Usage Standard
+### 15. Skill Usage Standard
 
 Use the Superpowers skill system by default. `planning-with-files` is the default
 gate before implementation work.
 
-### 15. Core Mission: Autonomous Self-Evolving Trading Agent
+### 16. Core Mission: Autonomous Self-Evolving Trading Agent
 
 The project goal is to build a self-evolving autonomous trading agent whose
 ultimate success metric is real profitability over time.
@@ -174,7 +193,7 @@ The minimum viable system must start with paper trading and a complete feedback
 loop. Live trading is forbidden until paper-trading behavior is audited and hard
 risk controls are verified.
 
-### 16. Non-Negotiable Safety Rules
+### 17. Non-Negotiable Safety Rules
 
 Autonomy is bounded by rules that are never traded away to satisfy a narrower
 success criterion:
