@@ -19,12 +19,19 @@ Environment=OLLAMA_BASE_URL=http://127.0.0.1:11434
 # No leading `-`: a missing credentials file should stop the unit with the
 # real reason, not start it and surface as a confusing health failure later.
 EnvironmentFile=@ENVFILE@
-ExecStart=@PYTHON@ -m min_agent.cli --doctor --quiet
+ExecStart=@PYTHON@ -m min_agent.cli --watchdog
 
 # The whole point: an unattended system that never notices it is broken is the
 # failure mode this project spent a refactor removing. A daemon was dead for 97
 # days and 112 consecutive automated reviews said "ok" because they replayed a
-# heartbeat file. This runs the real check on a timer and records the outcome.
+# heartbeat file.
+#
+# It used to run `--doctor` here, which made it a reporter: with StartLimitBurst=5 in
+# the daemon's unit, five crashes inside fifteen minutes left the daemon stopped for
+# good, and the only thing still running was the thing that noticed. `--watchdog`
+# starts the daemon when it is not running and clears the latched start-limit state,
+# so recovery does not need a human. Everything it writes to watchdog.log is a report;
+# the recovery is the one action.
 #
 # ExecStartCondition is not used on purpose: the watchdog must run *because* the
 # daemon may be down, not skip when it is.

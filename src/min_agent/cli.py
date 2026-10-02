@@ -60,6 +60,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--verify-profit-target", action="store_true", help="Verify the 10 percent daily paper-profit target using broker evidence only.")
     parser.add_argument("--max-cycles", type=int, default=None, help="Optional controlled daemon cycle limit for smoke tests.")
     parser.add_argument("--doctor", action="store_true", help="Check the whole system and exit non-zero on any fault.")
+    parser.add_argument(
+        "--watchdog", action="store_true",
+        help="Run the recovery check: start the daemon if it is not running, and report why.",
+    )
     parser.add_argument("--skip-broker", action="store_true", help="With --doctor, do not contact the broker.")
     parser.add_argument("--quiet", action="store_true", help="With --doctor, one compact line for logging.")
     args = parser.parse_args(argv)
@@ -87,9 +91,61 @@ def main(argv: list[str] | None = None) -> int:
         return _evidence_report(config)
     if args.verify_profit_target:
         return _verify_profit_target(config)
+    if args.watchdog:
+        return _watchdog(config)
 
     parser.print_help()
     return 2
+
+
+SERVICE_NAME = "min-agent.service"
+
+
+def _watchdog(config: AgentConfig) -> int:
+    """Start the daemon if it is not running. Report; never kill what is alive.
+
+    The watchdog unit ran `--doctor` every ten minutes and wrote the result to a log, which
+    made it a reporter and nothing more. Combined with `StartLimitBurst=5` in the daemon's
+    unit, that meant five crashes inside fifteen minutes left the daemon permanently stopped:
+    systemd had given up and the only thing still running was the thing that noticed.
+
+    So the unit's ExecStart is this instead. `reset-failed` clears the start-limit state
+    systemd latched after the burst, then `start` retries. Every other action is a report.
+
+    Deliberately conservative about the two ways this could do harm:
+      * it never stops or restarts a unit that is active, so a healthy daemon is untouched;
+      * a start that immediately fails is recorded as a failure rather than retried in a
+        tight loop, and the next attempt is ten minutes away, which is the timer's period.
+
+    Exit 0 whether or not a recovery was needed - the timer's job is to have acted, not to
+    signal. A non-zero exit here would make the unit look failed while having succeeded.
+    """
+    import subprocess
+
+    def systemctl(*words: str) -> tuple[int, str]:
+        proc = subprocess.run(
+            ["systemctl", "--user", *words], capture_output=True, text=True, timeout=60,
+        )
+        return proc.returncode, (proc.stdout + proc.stderr).strip()
+
+    active_rc, active_out = systemctl("is-active", SERVICE_NAME)
+    if active_rc == 0 and active_out.strip() == "active":
+        print(f"watchdog: {SERVICE_NAME} is active; nothing to do")
+        return 0
+
+    # `failed` or `inactive` or `activating`: systemd has latched a start limit, or the unit
+    # was never started. reset-failed is what makes another attempt possible.
+    systemctl("reset-failed", SERVICE_NAME)
+    start_rc, start_out = systemctl("start", SERVICE_NAME)
+    if start_rc != 0:
+        print(f"watchdog: could not start {SERVICE_NAME}: {start_out}")
+        return 0
+
+    print(f"watchdog: {SERVICE_NAME} was not running ({active_out or 'unknown'}) and has been started")
+    verify_rc, verify_out = systemctl("is-active", SERVICE_NAME)
+    if verify_rc != 0 or verify_out.strip() != "active":
+        print(f"watchdog: start returned success but the unit is {verify_out!r}; it will fail again")
+    return 0
 
 
 def _doctor(config: AgentConfig, *, skip_broker: bool = False, quiet: bool = False) -> int:

@@ -97,3 +97,67 @@ def test_cli_entry_points_are_present(name):
     import min_agent.cli as cli
 
     assert callable(getattr(cli, name))
+
+
+def test_watchdog_restarts_a_dead_daemon_and_leaves_a_live_one_alone(tmp_path, monkeypatch):
+    """The timer unit ran `--doctor`, so it reported a dead daemon and never revived it.
+
+    With `StartLimitBurst=5` and `StartLimitIntervalSec=900` in the daemon's unit, five
+    crashes inside fifteen minutes left it stopped permanently - systemd had latched the
+    limit - and the only process still running was the one that noticed. The fix is that the
+    watchdog acts rather than reports, and these are the two ways that could do harm if it
+    got them wrong: restarting a healthy daemon, and retrying in a tight loop.
+    """
+    import subprocess
+
+    from min_agent.cli import SERVICE_NAME, _watchdog
+    from min_agent.config import AgentConfig
+
+    config = AgentConfig.from_env()
+
+    calls: list[tuple[str, ...]] = []
+
+    class Result:
+        def __init__(self, code, out=""):
+            self.returncode = code
+            self.stdout = out
+            self.stderr = ""
+
+    def fake_run(args, **_kwargs):
+        calls.append(tuple(args))
+        # `systemctl --user <verb> <unit>`: the verb is args[2]. Reading args[-1] looked at
+        # the unit name, so the first version of this test asserted against 'min-agent.service'
+        # four times and reported that reset-failed was never called.
+        verb = args[2]
+        if verb == "is-active":
+            state = state_holder["value"]
+            return Result(0 if state == "active" else 3, state)
+        if verb == "start":
+            if state_holder["value"] != "active":
+                state_holder["value"] = "active"
+            return Result(0)
+        return Result(0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    # A healthy daemon: nothing is started, and nothing is stopped.
+    state_holder = {"value": "active"}
+    calls.clear()
+    assert _watchdog(config) == 0
+    assert not any(c[2] in {"start", "stop", "restart"} for c in calls), (
+        f"the watchdog touched a running daemon: {calls}"
+    )
+
+    # A dead one: reset-failed then start, and never a stop.
+    state_holder = {"value": "failed"}
+    calls.clear()
+    assert _watchdog(config) == 0
+    verbs = [c[2] for c in calls]
+    assert "reset-failed" in verbs, f"the latched start limit was never cleared: {verbs}"
+    assert "start" in verbs, f"a dead daemon was never started: {verbs}"
+    assert "stop" not in verbs and "restart" not in verbs, (
+        f"the watchdog may only start, never stop: {verbs}"
+    )
+    assert verbs.index("reset-failed") < verbs.index("start"), (
+        "reset-failed must come first, or systemd refuses the start"
+    )
