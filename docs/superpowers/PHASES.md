@@ -20,7 +20,7 @@ Companion documents:
 
 ## 1. Phase status, with verification results
 
-`make verify` — **45 classes, 0 failed, 1250 test executions across 61 files**, 61/61 defect audit, `doctor` RESULT OK, exit 0. `make verify-self-test` — green, and the findings it proves can go red include `shadow-stage-exercised`.
+`make verify` — **45 classes, 0 failed, 1250 test executions across 61 files**, 61/61 defect audit, `doctor` RESULT OK at the time. `make verify-self-test` — green, and the findings it proves can go red include `shadow-stage-exercised`.
 
 | phase | exit criteria | verification method | result |
 | --- | --- | --- | --- |

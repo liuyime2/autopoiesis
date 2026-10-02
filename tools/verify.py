@@ -950,6 +950,22 @@ def check_the_fact_figures_in_prose_match_reality() -> Result:
                 "every cycle, so it cannot be maintained in a document - read it from "
                 "`minictrl doctor`"
             )
+        # And the same for a RESULT line claiming a clean bill of health. A document that
+        # says "RESULT OK" is making a claim about the running system, which is true for a
+        # moment and then is not. Only a run where doctor is genuinely clean makes the
+        # absence of such a claim checkable, which is exactly when a stale one would hurt.
+        if failures == 0:
+            # Requires no qualifier: "RESULT OK, exit 0" is a claim about now, while
+            # "RESULT OK at the time" is a claim about a recorded run. The first version
+            # matched both and so flagged the very sentence that had been corrected to say so.
+            for match in re.finditer(r"RESULT:?\s+OK\b(?!\s+(?:at|when|on|as))", text):
+                if any(lo <= match.start() <= hi for lo, hi in skip):
+                    continue
+                line = text[: match.start()].count("\n") + 1
+                problems.append(
+                    f"{name}:{line} claims doctor reported RESULT OK; that is a statement "
+                    "about the running system at one moment - read it from `minictrl doctor`"
+                )
 
     if problems:
         return Result("fact-figures-match", FAIL, f"{len(problems)}: {problems[:4]}")
