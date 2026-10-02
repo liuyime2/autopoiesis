@@ -25,6 +25,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
+from min_agent import coerce
+
 PROPOSAL = "CURRICULUM_PROPOSED"
 ADMISSION = "STRATEGY_ADMISSION_REVIEWED"
 VALIDATION = "OFFLINE_VALIDATION_COMPLETED"
@@ -34,12 +36,6 @@ EVALUATION = "STRATEGY_EVALUATION_RECORDED"
 CHAMPION = "CHAMPION"
 CHALLENGER = "CHALLENGER"
 UNRATED = "UNRATED"
-
-
-def _field(obj, name, default=None):
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default)
 
 
 @dataclass
@@ -116,13 +112,15 @@ def build_origins(events: Sequence[object]) -> dict[str, CandidateOrigin]:
     task_counts: dict[str, int] = {}
 
     for event in events:
-        if _field(event, "event_type") != PROPOSAL:
+        if coerce.field_of(event, "event_type") != PROPOSAL:
             continue
-        payload = _field(event, "payload", None) or {}
-        strategy_id = payload.get("strategy_id") or _field(event, "strategy_id")
+        payload = coerce.field_dict(coerce.field_of(event, "payload"), "event.payload")
+        strategy_id = coerce.field_str(
+            payload.get("strategy_id") or coerce.field_of(event, "strategy_id"), "strategy_id"
+        )
         if not strategy_id:
             continue
-        task_id = _field(event, "task_id")
+        task_id = coerce.field_str(coerce.field_of(event, "task_id"), "task_id")
         if task_id:
             task_counts[task_id] = task_counts.get(task_id, 0) + 1
         proposals[strategy_id] = {
@@ -146,16 +144,20 @@ def build_origins(events: Sequence[object]) -> dict[str, CandidateOrigin]:
         )
 
     for event in events:
-        event_type = _field(event, "event_type")
-        strategy_id = _field(event, "strategy_id")
-        payload = _field(event, "payload", None) or {}
+        event_type = coerce.field_str(coerce.field_of(event, "event_type"), "event_type")
+        strategy_id = coerce.field_str(coerce.field_of(event, "strategy_id"), "strategy_id")
+        payload = coerce.field_dict(coerce.field_of(event, "payload"), "event.payload")
         if event_type == ADMISSION and strategy_id in origins:
             origins[strategy_id].accepted = bool(payload.get("accepted"))
             origins[strategy_id].admission_reason = str(payload.get("reason", ""))
         elif event_type == VALIDATION and strategy_id in origins:
             origins[strategy_id].offline_verdict = str(payload.get("verdict", ""))
-            origins[strategy_id].offline_scored = int(payload.get("scored", 0) or 0)
-            origins[strategy_id].offline_good_hold_ratio = payload.get("good_hold_ratio")
+            origins[strategy_id].offline_scored = coerce.field_int(
+                payload.get("scored"), "payload.scored"
+            )
+            origins[strategy_id].offline_good_hold_ratio = coerce.field_float(
+                payload.get("good_hold_ratio"), "payload.good_hold_ratio"
+            )
         elif event_type == LIFECYCLE and strategy_id in origins:
             if payload.get("phase") == "applied" and payload.get("new_lifecycle"):
                 origins[strategy_id].lifecycle = str(payload["new_lifecycle"])
@@ -205,11 +207,17 @@ def designate_champion(
     verified: list[tuple[float, str]] = []
 
     for spec in strategies:
-        strategy_id = _field(spec, "strategy_id")
-        lifecycle = _field(spec, "lifecycle", "")
+        strategy_id = coerce.field_str(coerce.field_of(spec, "strategy_id"), "strategy_id")
+        lifecycle = coerce.field_str(coerce.field_of(spec, "lifecycle"), "lifecycle")
         result = results_by_id.get(strategy_id)
-        pnl = _field(result, "realized_pnl") if result is not None else None
-        evidence = _field(result, "pnl_evidence") if result is not None else None
+        pnl = coerce.field_float(
+            coerce.field_of(result, "realized_pnl") if result is not None else None,
+            f"{strategy_id}.realized_pnl",
+        )
+        evidence = coerce.field_str(
+            coerce.field_of(result, "pnl_evidence") if result is not None else None,
+            f"{strategy_id}.pnl_evidence",
+        )
         origin = (origins or {}).get(strategy_id)
 
         if (

@@ -37,8 +37,10 @@ Three properties keep it honest:
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass, field
+
+from min_agent import coerce
 
 #: A candidate needs this many *informative* decisions before its record can say
 #: anything at all. Below it, silence is the honest answer.
@@ -110,19 +112,6 @@ class OfflineValidationResult:
         }
 
 
-def _field(obj, name, default=None):
-    """Read a field from a JournalEvent model or a plain dict.
-
-    `JsonlJournal.read_events` returns `JournalEvent` objects, not dicts. The
-    first cut called `.get` on them, so every real call raised AttributeError and
-    the daemon swallowed it into a FAILED event - a screen that looked wired and
-    was never reached.
-    """
-    if isinstance(obj, Mapping):
-        return obj.get(name, default)
-    return getattr(obj, name, default)
-
-
 def collect_decisions(
     counterfactual_events: Iterable[object],
     strategy_id: str,
@@ -135,17 +124,18 @@ def collect_decisions(
     """
     latest: dict[str, DecisionRecord] = {}
     for event in counterfactual_events:
-        for row in (_field(event, "payload", None) or {}).get("rows", []):
-            if row.get("strategy_id") != strategy_id:
+        payload = coerce.field_dict(coerce.field_of(event, "payload"), "event.payload")
+        for row in coerce.field_dict_tuple(payload.get("rows"), "payload.rows"):
+            if coerce.field_str(row.get("strategy_id"), "row.strategy_id") != strategy_id:
                 continue
-            cycle_id = row.get("cycle_id")
+            cycle_id = coerce.field_str(row.get("cycle_id"), "row.cycle_id")
             if not cycle_id:
                 continue
             latest[cycle_id] = DecisionRecord(
                 cycle_id=cycle_id,
-                action=row.get("action", ""),
-                verdict=row.get("verdict", ""),
-                net_return_pct=row.get("net_return_pct"),
+                action=coerce.field_str(row.get("action"), "row.action"),
+                verdict=coerce.field_str(row.get("verdict"), "row.verdict"),
+                net_return_pct=coerce.field_float(row.get("net_return_pct"), "row.net_return_pct"),
             )
     return [latest[key] for key in sorted(latest)]
 

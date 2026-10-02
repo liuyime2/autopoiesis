@@ -56,12 +56,6 @@ class Experiment:
         return not self.missing_links
 
 
-def _field(obj, name, default=None):
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default)
-
-
 def build(
     events: Sequence[object],
     strategies: Iterable[object] = (),
@@ -80,16 +74,17 @@ def build(
         return registry[strategy_id]
 
     for spec in strategies:
-        strategy_id = coerce.field_str(_field(spec, "strategy_id"), "strategy.strategy_id")
+        strategy_id = coerce.field_str(coerce.field_of(spec, "strategy_id"), "strategy.strategy_id")
         experiment = slot(strategy_id)
-        experiment.kind = _field(spec, "kind", "") or ""
-        experiment.rationale = _field(spec, "rationale", "") or ""
-        experiment.lifecycle = _field(spec, "lifecycle", "") or ""
+        experiment.kind = coerce.field_str(coerce.field_of(spec, "kind"), "kind")
+        experiment.rationale = coerce.field_str(coerce.field_of(spec, "rationale"), "rationale")
+        experiment.lifecycle = coerce.field_str(coerce.field_of(spec, "lifecycle"), "lifecycle")
+
 
     for event in events:
-        event_type = _field(event, "event_type", "")
-        strategy_id = _field(event, "strategy_id")
-        payload = _field(event, "payload", None) or {}
+        event_type = coerce.field_str(coerce.field_of(event, "event_type"), "event_type")
+        strategy_id = coerce.field_str(coerce.field_of(event, "strategy_id"), "strategy_id")
+        payload = coerce.field_dict(coerce.field_of(event, "payload"), "event.payload")
 
         if event_type == PROPOSAL and strategy_id:
             slot(strategy_id).proposed += 1
@@ -103,8 +98,10 @@ def build(
             experiment = slot(strategy_id)
             experiment.offline_verdict = str(payload.get("verdict", ""))
             experiment.offline_reason = str(payload.get("reason", ""))
-            experiment.offline_scored = int(payload.get("scored", 0) or 0)
-            experiment.offline_good_hold_ratio = payload.get("good_hold_ratio")
+            experiment.offline_scored = coerce.field_int(payload.get("scored"), "payload.scored")
+            experiment.offline_good_hold_ratio = coerce.field_float(
+                payload.get("good_hold_ratio"), "payload.good_hold_ratio"
+            )
 
         elif event_type == LIFECYCLE and strategy_id:
             experiment = slot(strategy_id)
@@ -119,7 +116,7 @@ def build(
             # field reported "tradable with no evaluation evidence" for strategies
             # that had been evaluated 663 times - the same mistake as reading
             # entry_rules that StrategySpec never had.
-            metrics = payload.get("strategy_metrics") or {}
+            metrics = coerce.field_dict(payload.get("strategy_metrics"), "payload.strategy_metrics")
             for metrics_id in metrics:
                 slot(str(metrics_id)).evaluations += 1
 
