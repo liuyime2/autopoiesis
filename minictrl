@@ -162,7 +162,7 @@ case "$cmd" in
   install-service)
     # The systemd user manager resolves unit paths from ITS OWN start-time
     # environment, not this shell's. On this host it has no XDG_CONFIG_HOME, so
- Detect that instead of silently
+    # Detect that instead of silently
     # writing somewhere the manager will never read.
     unit_dir="$("$ROOT_DIR/tools/systemd_unit_dir.sh")" || exit 2
     mkdir -p "$unit_dir" || { echo "FATAL: cannot create $unit_dir" >&2; exit 2; }

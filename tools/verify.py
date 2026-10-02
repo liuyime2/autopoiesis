@@ -667,6 +667,116 @@ def _research_verdict_codes() -> set[str]:
     return codes
 
 
+# Shell keywords and metacharacters. A line built only from these is code; a multi-word line
+# containing none of them is prose, and prose at column 0 inside an indented block is bash
+# executing English.
+# Function words that appear in English but in no shell command. A line built only from
+# ordinary words and punctuation-free is prose that bash will try to execute.
+_ENGLISH_FUNCTION_WORDS = frozenset({
+    "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "for", "with", "without",
+    "that", "this", "these", "those", "it", "its", "is", "are", "was", "were", "be", "been",
+    "instead", "silently", "where", "when", "while", "after", "before", "from", "into",
+    "so", "than", "then", "there", "their", "them", "they", "we", "you", "not", "but",
+    "detect", "check", "checks", "write", "writing", "use", "using", "only",
+    "also", "because", "which", "what", "whose", "does", "must", "can", "will", "would",
+})
+
+_SHELL_KEYWORDS = frozenset({
+    "if", "then", "else", "elif", "fi", "case", "esac", "for", "while", "until", "do",
+    "done", "in", "function", "select", "time", "return", "break", "continue", "local",
+    "export", "readonly", "declare", "typeset", "unset", "shift", "source", "exec", "eval",
+    "trap", "set", "exit", "true", "false", "test", "render", "usage", "agent",
+})
+# Built from character codes so the literal contains no quote or backslash that a
+# later edit could mangle - three syntax errors came from writing this inline.
+_SHELL_METACHARACTERS = frozenset(map(chr, (124, 59, 38, 40, 41, 60, 62, 36, 92, 96, 34, 39, 61, 42, 63, 91, 93, 123, 125, 33, 35, 126, 94)))
+
+
+def check_shell_scripts_have_no_orphaned_lines() -> Result:
+    """No shell script may run a line of English as a command.
+
+    `minictrl:165` held ` Detect that instead of silently` - a fragment of a wrapped comment
+    that lost both its `#` and its indentation. `bash -n` passes, because it is valid syntax,
+    and ruff does not lint shell. But it sat at column 0 inside the `install-service)` branch,
+    so bash executed `Detect` as a command and `./minictrl install-service` printed
+    "Detect: command not found" to stderr on the way to doing its real work.
+
+    `bash -n` alone is therefore not enough, and neither is an indentation heuristic: an
+    earlier version of this check flagged four legitimate `)` line-continuations and a `done`.
+    The shape of the defect is narrow and all three properties are required together - the line
+    starts at column 0, the line before it was indented, and the line is two or more words of
+    which none is a shell keyword and none contains shell punctuation. `done` fails the third
+    test; `)` fails it on punctuation; `Detect that instead of silently` passes all three.
+
+    The limit is stated rather than implied: this finds de-indented prose, not every malform-
+    ation a text editor can produce in a shell script.
+    """
+    scripts = sorted(ROOT.glob("*.sh")) + sorted((ROOT / "tools").glob("*.sh")) + [ROOT / "minictrl"]
+    scripts = [p for p in scripts if p.exists()]
+    problems: list[str] = []
+    for path in scripts:
+        syntax = subprocess.run(
+            ["bash", "-n", str(path)], capture_output=True, text=True, timeout=60,
+        )
+        if syntax.returncode != 0:
+            problems.append(
+                f"{path.name}: bash -n reports a syntax error: {syntax.stderr.strip()[:110]}"
+            )
+            continue
+        # Heredoc bodies are data, not code: `systemd_unit_dir.sh` prints eight lines of
+        # English instructions through `cat >&2 <<MSG`, and an earlier version flagged four of
+        # them. A heredoc is opened by a line ending in `<<` and closed by its delimiter.
+        in_heredoc: str | None = None
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.strip()
+            if in_heredoc is not None:
+                if stripped == in_heredoc:
+                    in_heredoc = None
+                continue
+            if not stripped or stripped.startswith("#"):
+                continue
+            opened = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", stripped)
+            if opened:
+                in_heredoc = opened.group(1)
+                continue
+            # The discriminator is not indentation - the broken line was indented one space,
+            # and two earlier versions of this check keyed on column 0 and therefore missed it
+            # entirely. It is that the line is English: no shell punctuation anywhere, and at
+            # least two words that are function words no shell command contains. `done` is one
+            # word, `)` is punctuation, `echo hello world` has no function word - all three
+            # appear legitimately at low indentation in these scripts and must not be flagged.
+            # A path in the line settles it: `render tools/ollama.service.in ollama.service`
+            # contains the English word "in" only because of the `.in` template suffix, and
+            # matching on substring is what made that a false positive.
+            if any(ch in _SHELL_METACHARACTERS for ch in stripped):
+                continue
+            if "/" in stripped or "." in stripped:
+                continue
+            # Whole words only, and never a single-letter flag: `set -a` matched on "a" and
+            # `set -uo pipefail` on nothing, so a second pass was needed to exclude them.
+            words = [w for w in re.findall(r"[A-Za-z']{2,}", stripped)]
+            if len(words) >= 2 and any(w.lower() in _ENGLISH_FUNCTION_WORDS for w in words):
+                problems.append(
+                    f"{path.name}:{line_no} reads as English, not shell: {stripped[:60]!r} - "
+                    "bash will run this as a command"
+                )
+
+    if problems:
+        return Result("shell-scripts-well-formed", FAIL, f"{len(problems)}: {problems[:3]}")
+    return Result(
+        "shell-scripts-well-formed", PASS,
+        f"{len(scripts)} shell script(s) parse cleanly under bash -n",
+    )
+
+
+    if problems:
+        return Result("shell-scripts-well-formed", FAIL, f"{len(problems)}: {problems[:3]}")
+    return Result(
+        "shell-scripts-well-formed", PASS,
+        f"{len(scripts)} shell script(s): no line orphaned at column 0 inside a block",
+    )
+
+
 def check_the_fresh_clone_evidence_is_real() -> Result:
     """The committed fresh-clone log must record a real run and stay regenerable.
 
@@ -2276,6 +2386,7 @@ BESPOKE_CHECK_NAMES = (
     "tools-readme-accurate",
     "no-loose-design-notes",
     "fresh-clone-evidence-real",
+    "shell-scripts-well-formed",
     "config-example-names",
     "config-example-complete",
     "config-comment-figures-true",
@@ -2734,6 +2845,7 @@ def main() -> int:
     results.append(_safe(check_tools_readme_names_real_files, "tools-readme-accurate"))
     results.append(_safe(check_no_unreferenced_design_notes_at_the_root, "no-loose-design-notes"))
     results.append(_safe(check_the_fresh_clone_evidence_is_real, "fresh-clone-evidence-real"))
+    results.append(_safe(check_shell_scripts_have_no_orphaned_lines, "shell-scripts-well-formed"))
     results.append(_safe(check_the_declared_bespoke_list_matches_what_runs, "bespoke-list-matches-run"))
     results.append(_safe(check_status_only_states_what_does_not_change, "status-states-only-fixed-facts"))
     results.append(_safe(check_figures_quoted_in_config_comments, "config-comment-figures-true"))
