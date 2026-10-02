@@ -16,7 +16,6 @@ from min_agent.models import CycleRecord, JournalEvent
 # events rather than cycles.
 _CYCLE_MARKER = '"execution":'
 _EVENT_MARKER = '"event_id":'
-_EVENT_MARKER_ABSENT = '"event_id":'
 
 
 class JsonlJournal:

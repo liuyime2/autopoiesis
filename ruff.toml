@@ -63,7 +63,7 @@ ignore = [
     # imports that are the entire point of the module.
     "E402",
     # Single-letter loop and lambda names in `tools/verify.py` (`for l in lines`,
-    # `lambda r: ...`). That file is long - thousands of lines - and reads as a list of and reads as a list of
+    # `lambda r: ...`). That file is long - thousands of lines - and reads as a list of
     # independent assertions; one-letter names there are local and unambiguous. The
     # readability cost of renaming them exceeds the gain.
     "E741",

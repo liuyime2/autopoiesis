@@ -588,6 +588,26 @@ def _durable_unit_dir() -> str | None:
 _RUNTIME_PRESENT_AT_START = (ROOT / "runtime" / "min_agent").is_dir()
 
 
+def _wanted(name: str) -> bool:
+    """Whether a check should run under `--only`.
+
+    Every bespoke check was appended unconditionally, so `make verify CLASS=pnl-accounting`
+    ran 34 of the gate's 45 rows and took 32 seconds - while README, Makefile help and
+    tools/README all describe that command as re-running one class alone. The loop filtered
+    on `wanted`; the 35 bespoke checks appended before it did not, and nobody noticed because
+    the advertised use is precisely the one nobody runs on a failing build.
+
+    One predicate, consulted by one wrapper, so a new bespoke check cannot forget.
+    """
+    global _partial_run
+    if not _partial_run_filter:
+        return True
+    return name in _partial_run_filter
+
+
+_partial_run_filter: set[str] = set()
+
+
 def _safe(check, name: str):
     """Run one check, turning an exception into a FAIL row instead of a traceback.
 
@@ -602,6 +622,8 @@ def _safe(check, name: str):
     than a verdict, and a reader cannot tell which checks had already passed. A check that
     raises IS a failed check, and now it says so, in the table, with its name.
     """
+    if not _wanted(name):
+        return None  # not requested; see _wanted
     try:
         return check()
     except (Exception, SystemExit) as exc:  # a raising check is a failing check
@@ -2829,8 +2851,15 @@ def main() -> int:
         unknown = sorted(wanted - known)
         if unknown:
             print(f"verify: no such check class: {', '.join(unknown)}", file=sys.stderr)
-            print(f"        {len(known)} classes exist; run `make classes`", file=sys.stderr)
+            # +1 for the extra syntax-import result row, which --list and
+            # list-count-matches-run both account for; without it this said 45 while the gate
+            # runs 46.
+            print(f"        {len(known) + 1} classes exist; run `make classes`", file=sys.stderr)
             return 2
+
+    global _partial_run, _partial_run_filter
+    _partial_run = bool(wanted)
+    _partial_run_filter = set(wanted) if wanted else set()
 
     results.append(_safe(check_all_tests_classified, "test-coverage-map"))
     results.append(_safe(check_known_classes_run, "class-coverage"))
@@ -2885,10 +2914,13 @@ def main() -> int:
         # `cls=cls` binds the loop variable now, not when the lambda is finally called.
         # Ruff caught this: the deferred call would otherwise read whatever `cls`
         # held at that point, running the same class repeatedly.
-        results.append(_safe(lambda cls=cls: run_pytest_class(cls), f"pytest:{cls}"))
+        # The filter name is the class itself, not "pytest:<class>": the `pytest:` prefix
+        # existed only so bespoke-list-matches-run could tell the two sources apart, and it
+        # meant `--only pnl-accounting` matched nothing at all - the per-class workflow ran
+        # zero classes and printed "no check class ran". The distinction is recovered from
+        # the call shape in that check instead, which already looks at the inner function.
+        results.append(_safe(lambda cls=cls: run_pytest_class(cls), cls))
 
-    global _partial_run
-    _partial_run = bool(wanted)
     if not wanted:
         results.append(_safe(check_defect_audit, "defect-regression-audit"))
         results.append(_safe(check_doctor, "doctor"))
@@ -2903,6 +2935,13 @@ def main() -> int:
     results.append(_safe(lambda: check_the_gate_class_count_is_reported_consistently(total_classes), "check_the_gate_class_count_is_reported_consistently"))
     results.append(_safe(lambda: check_fact_docs_match_the_live_gate(total_classes, results), "check_fact_docs_match_the_live_gate"))
 
+    results = [r for r in results if r is not None]
+    if not results:
+        # Every requested class was filtered out, which happens when the only matches are
+        # checks that skip under a partial run. Saying so is better than `max()` on an empty
+        # sequence, and better than printing "OK - all check classes pass" for nothing.
+        print(f"verify: no check class ran; requested {sorted(_partial_run_filter)}")
+        return 2
     width = max(len(r.name) for r in results)
     print()
     executions = 0
