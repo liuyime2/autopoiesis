@@ -67,7 +67,9 @@ class Attribution:
     #: only *closed* lots. A strategy that has opened ten positions and closed none
     #: has zero closed lots, and reading that as "it never traded" is the opposite
     #: of the truth - which is exactly what the model did on its first live day.
-    open_lots_by_source: dict[str, int] = field(default_factory=dict)
+    #: Share quantities, so float: a fractional lot would be truncated by an
+    #: `int` annotation that the summation below has always ignored.
+    open_lots_by_source: dict[str, float] = field(default_factory=dict)
     unrealized_pnl: float | None = None
     #: Observed broker fees and the configured cost assumption, kept apart. On paper
     #: the observed figure is 0.00, so the assumption is the only cost in the live

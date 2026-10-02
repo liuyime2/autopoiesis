@@ -5,7 +5,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from min_agent import coerce
+
 Action = Literal["BUY", "SELL", "HOLD"]
+#: Spelled inline in five model fields before this alias existed, so "which way"
+#: had five independent spellings to keep in step.
+Side = Literal["BUY", "SELL"]
+#: Whether a broker evidence batch could be assembled at all.
+BrokerEvidenceStatus = Literal["SUCCESS", "PARTIAL", "FAILED"]
 DecisionSource = Literal["llm", "fallback_policy_engine", "policy_engine", "baseline"]
 HoldReason = Literal["no_signal", "risk_limit_near", "market_uncertain", "await_confirmation", "other"]
 AttributionStatus = Literal["LINKED", "UNLINKED"]
@@ -129,7 +136,7 @@ class OpenOrderSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     symbol: str
-    side: Literal["BUY", "SELL"]
+    side: Side
     quantity: float = Field(gt=0)
     status: str = Field(min_length=1)
 
@@ -175,7 +182,7 @@ class BrokerFillActivity(BaseModel):
     order_id: str | None = None
     client_order_id: str | None = None
     symbol: str
-    side: Literal["BUY", "SELL"]
+    side: Side
     quantity: float = Field(gt=0)
     price: float = Field(gt=0)
     gross_amount: float | None = None
@@ -206,7 +213,7 @@ class BrokerOrderSnapshot(BaseModel):
     order_id: str = Field(min_length=1)
     client_order_id: str | None = None
     symbol: str
-    side: Literal["BUY", "SELL"]
+    side: Side
     quantity: float = Field(gt=0)
     filled_quantity: float = Field(default=0, ge=0)
     filled_avg_price: float | None = Field(default=None, gt=0)
@@ -256,7 +263,7 @@ class BrokerEvidenceBatch(BaseModel):
     activities: tuple[BrokerFillActivity, ...] = Field(default_factory=tuple)
     portfolio_history: tuple[PortfolioHistoryPoint, ...] = Field(default_factory=tuple)
     source_account: str = "alpaca_paper"
-    status: Literal["SUCCESS", "PARTIAL", "FAILED"] = "SUCCESS"
+    status: BrokerEvidenceStatus = "SUCCESS"
     missing_reasons: tuple[str, ...] = Field(default_factory=tuple)
 
     @field_validator("source_account")
@@ -273,7 +280,7 @@ class FillAttribution(BaseModel):
     client_order_id: str | None = None
     strategy_id: str | None = None
     symbol: str
-    side: Literal["BUY", "SELL"]
+    side: Side
     quantity: float = Field(gt=0)
     price: float = Field(gt=0)
     fees: float = Field(default=0, ge=0)
@@ -460,8 +467,8 @@ class StrategySpec(BaseModel):
             raise ValueError("strategy specs must not contain executable code parameters")
 
         schema = STRATEGY_PARAMETER_SCHEMAS[self.kind]
-        allowed = set(schema["allowed"])
-        required = set(schema["required"])
+        allowed = set(coerce.field_str_tuple(schema.get("allowed"), f"{self.kind}.allowed"))
+        required = set(coerce.field_str_tuple(schema.get("required"), f"{self.kind}.required"))
         keys = set(self.parameters)
         unknown = keys - allowed
         missing = required - keys
@@ -476,11 +483,12 @@ class StrategySpec(BaseModel):
             confidence = self.parameters["confidence"]
             if action not in {"BUY", "SELL", "HOLD"}:
                 raise ValueError("FIXED_SIZE action must be BUY, SELL, or HOLD")
-            if not _is_integer_like(quantity) or quantity < 0:
+            if not _is_integer_like(quantity) or coerce.field_int(quantity, "quantity") < 0:
                 raise ValueError("FIXED_SIZE quantity must be a non-negative integer")
-            if action in {"BUY", "SELL"} and quantity <= 0:
+            quantity_value = coerce.field_int(quantity, "quantity")
+            if action in {"BUY", "SELL"} and quantity_value <= 0:
                 raise ValueError("FIXED_SIZE BUY and SELL require positive quantity")
-            if action == "HOLD" and quantity != 0:
+            if action == "HOLD" and quantity_value != 0:
                 raise ValueError("FIXED_SIZE HOLD requires zero quantity")
             if not isinstance(confidence, int | float) or isinstance(confidence, bool) or not 0 <= float(confidence) <= 1:
                 raise ValueError("FIXED_SIZE confidence must be in [0, 1]")
@@ -494,7 +502,7 @@ class StrategySpec(BaseModel):
                 raise ValueError("TREND_FOLLOW reference_price must be positive")
             if not isinstance(threshold_pct, int | float) or isinstance(threshold_pct, bool) or not 0 < float(threshold_pct) <= 0.20:
                 raise ValueError("TREND_FOLLOW threshold_pct must be in (0, 0.20]")
-            if not _is_integer_like(quantity) or quantity <= 0:
+            if not _is_integer_like(quantity) or coerce.field_int(quantity, "quantity") <= 0:
                 raise ValueError("TREND_FOLLOW quantity must be a positive integer")
             if not isinstance(confidence, int | float) or isinstance(confidence, bool) or not 0 <= float(confidence) <= 1:
                 raise ValueError("TREND_FOLLOW confidence must be in [0, 1]")

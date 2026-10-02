@@ -35,6 +35,7 @@ import itertools
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 
 TRENDING_UP = "TRENDING_UP"
 TRENDING_DOWN = "TRENDING_DOWN"
@@ -61,6 +62,32 @@ SAMPLING_MINUTES = 5.0
 class Bar:
     timestamp: datetime
     price: float
+
+
+class SnapshotLike(Protocol):
+    """What `bars_from_records` needs from whatever holds the quotes."""
+
+    symbol: str
+    timestamp: datetime
+    last_price: float
+
+
+def snapshot_of(record: object) -> SnapshotLike | None:
+    """The snapshot on a journal record, or ``None`` if it has none.
+
+    ``bars_from_records`` takes ``Sequence[object]`` because its callers hand it
+    whatever they replayed - real ``JournalRecord``s in production, stand-ins in
+    tests. Reading the snapshot through one named helper is what keeps the
+    attribute access typed: the old ``getattr(getattr(r, "snapshot", None),
+    "symbol", None) == symbol and r.snapshot.last_price > 0`` tested one thing
+    defensively and then used another unguarded.
+    """
+    snapshot = getattr(record, "snapshot", None)
+    if snapshot is None:
+        return None
+    if not hasattr(snapshot, "last_price") or not hasattr(snapshot, "timestamp"):
+        return None
+    return snapshot
 
 
 @dataclass(frozen=True)
@@ -188,19 +215,21 @@ def regime_timeline(
 
 
 def bars_from_records(records: Sequence[object], symbol: str = "SPY") -> list[Bar]:
-    """Real observations, with repeated quotes collapsed.
+    """Real observations from journal records, with repeated quotes collapsed.
 
-    Uses the same collapse rule as the counterfactual. 49% of consecutive journaled
-    quotes are byte-identical because the gateway reports the same last trade when
-    nothing traded; counting them would halve the sample and make a flat market look
-    volatile.
+    Uses the same collapse rule as the counterfactual on purpose. 49% of
+    consecutive journaled quotes are byte-identical, because the gateway reports
+    the same last trade when nothing traded. Keyed on timestamp instead, the 920
+    records look like 920 observations; keyed on price, as they should be, they
+    are 467. A backtest run over the inflated count would measure the 5-minute
+    polling interval rather than the market, and would report a far larger sample
+    than exists.
     """
     ordered = sorted(
         (
-            (r.snapshot.timestamp, r.snapshot.last_price)
-            for r in records
-            if getattr(getattr(r, "snapshot", None), "symbol", None) == symbol
-            and r.snapshot.last_price > 0
+            (snapshot.timestamp, snapshot.last_price)
+            for snapshot in (snapshot_of(record) for record in records)
+            if snapshot is not None and snapshot.symbol == symbol and snapshot.last_price > 0
         ),
         key=lambda item: item[0],
     )

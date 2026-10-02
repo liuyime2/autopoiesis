@@ -24,6 +24,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
+from min_agent import coerce
+
 GOOD_HOLD = "GOOD_HOLD"
 MISSED_ALPHA = "MISSED_ALPHA"
 FALSE_TRADE = "FALSE_TRADE"
@@ -114,7 +116,9 @@ class CalibrationReport:
     buckets: list[Bucket] = field(default_factory=list)
     passed_gate_n: int = 0
     passed_gate_accuracy: float | None = None
-    top_bucket: dict | None = None
+    #: `Bucket.to_payload()`; kept as the serialised form because it is what
+    #: the report publishes and what a reader outside this module sees.
+    top_bucket: dict[str, object] | None = None
     top_bucket_accuracy: float | None = None
     verdict: str = ""
     notes: list[str] = field(default_factory=list)
@@ -288,9 +292,9 @@ def calibrate(
         and report.base_rate is not None
         and report.top_bucket_accuracy <= report.base_rate
     ):
-        top = report.top_bucket["range"] if report.top_bucket else "?"
+        top_range = coerce.field_str(report.top_bucket.get("range"), "top_bucket.range") if report.top_bucket else "?"
         report.verdict = (
-            f"NO_SIGNAL: the most confident bucket ({top}) was right "
+            f"NO_SIGNAL: the most confident bucket ({top_range}) was right "
             f"{report.top_bucket_accuracy:.1%} of the time against a "
             f"{report.base_rate:.1%} base rate, so the stated confidence is not "
             "identifying the good decisions and the gate is not earning its place"
@@ -298,7 +302,7 @@ def calibrate(
     else:
         report.verdict = (
             f"SIGNAL: the most confident bucket "
-            f"({report.top_bucket['range'] if report.top_bucket else '?'}) was right "
+            f"({coerce.field_str(report.top_bucket.get('range'), 'top_bucket.range') if report.top_bucket else '?'}) was right "
             f"{report.top_bucket_accuracy:.1%} against a {report.base_rate:.1%} base "
             f"rate, Brier {report.brier:.3f} (0.25 is a constant 0.5 claim). Still a "
             "hypothesis, not a result."

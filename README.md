@@ -73,15 +73,15 @@ wrappers each duplicated a flag below.
 | `make smoke` | one real cycle end to end against the broker | ~8s |
 | `make smoke-offline` | config and CLI end to end with `--skip-broker`; no broker, no model | ~20s |
 | `make fast` | check + smoke + the full gate | ~90s |
-| `make verify` | 48 check classes, non-zero on any failure | ~100s |
+| `make verify` | 49 check classes, non-zero on any failure | ~100s |
 | `make test` | the whole suite | ~5min |
 | `make doctor` | health of the running system, non-zero on any fault | ~20s |
 | `make status` | is the daemon alive and what is it doing | ~1s |
 | `make run` / `make stop` / `make restart` | control the daemon via systemd | ~2s |
 | `make reproduce` | record commit, config, versions, broker clock, metrics for this run | ~5s |
 
-`make type` runs mypy. It reports rather than blocking: see
-[Known debt](#known-debt).
+`make type` runs mypy and blocks. It is part of `make check`, so a type
+regression fails the fast loop rather than waiting for review.
 
 ### The iteration loop
 
@@ -108,7 +108,7 @@ src/min_agent/          the package. 40 modules, 3 external dependencies.
   strategy_engine.py    strategy library, selection, lifecycle
   evaluator.py          scoring from broker-confirmed evidence
   research/             diagnosis only. production may not import it, and a gate enforces that
-tools/verify.py         the gate: 48 check classes
+tools/verify.py         the gate: 49 check classes
 tools/provenance.py     what `make reproduce` records
 tests/min_agent/        61 test files
 examples/minimal_cycle.py   the smallest runnable example, no broker needed
@@ -184,9 +184,33 @@ owns is refused rather than allowed to guess.
 
 ## Known debt
 
-`make type` reports 95 mypy findings and is not a gate. All of them are annotation
-precision at `Callable` and `dict` boundaries; none is a known runtime defect. It is
-wired and reproducible so the debt is visible rather than forgotten.
+`make type` is a gate and reports 0 findings. It used to report 95 and block
+nothing: the recipe was `-@$(CONDA_RUN) mypy ...`, and the leading `-` makes make
+ignore the exit code, so the findings were printed on every run while the command
+still passed. Paying that debt is what found four real defects, none of them
+annotation noise:
+
+- `cli.py` passed `cost_basis` as a one-argument callable to a parameter typed as
+  taking none. The engine's zero-argument call raised `TypeError`, a surrounding
+  `except Exception` turned it into an empty mapping, and the model was silently
+  given no cost basis - so it could not tell profit from loss, which is the one
+  thing that context exists to provide.
+- `llm_decision.py` defined `Transport` twice at module level with incompatible
+  signatures. Python bound the second, so the type readers saw was not the type
+  that ran, and the first was unreachable.
+- `research/backtest.py` carried its own `Bar` and `bars_from_records`,
+  byte-identical to `min_agent.regime`'s. A bar built by the research copy was a
+  *different class* from the one production returns, so a rule could be handed
+  something structurally right and nominally wrong. It now imports both.
+- `strategy_engine.py` printed "kept X which has N cycles against this one's N",
+  reading the duplicate's result for both numbers, so the justification for a
+  retirement compared a strategy against itself.
+
+The remaining 91 were annotation precision at `Callable` and `dict` boundaries.
+They were fixed at the boundaries rather than silenced: one canonical
+`min_agent.coerce` now does every payload narrowing, and reports the field name
+and the offending value when a record is unreadable, instead of raising a bare
+`invalid literal for int()`.
 
 `docs/superpowers/SYSTEM_AUDIT.md` is a historical defect log, kept because it records
 why specific decisions were made. It is not documentation of how the system works - this

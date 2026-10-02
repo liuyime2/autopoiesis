@@ -22,6 +22,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
+from min_agent import coerce
+
 PROPOSAL = "CURRICULUM_PROPOSED"
 ADMISSION = "STRATEGY_ADMISSION_REVIEWED"
 VALIDATION = "OFFLINE_VALIDATION_COMPLETED"
@@ -78,7 +80,8 @@ def build(
         return registry[strategy_id]
 
     for spec in strategies:
-        experiment = slot(spec.strategy_id)
+        strategy_id = coerce.field_str(_field(spec, "strategy_id"), "strategy.strategy_id")
+        experiment = slot(strategy_id)
         experiment.kind = _field(spec, "kind", "") or ""
         experiment.rationale = _field(spec, "rationale", "") or ""
         experiment.lifecycle = _field(spec, "lifecycle", "") or ""

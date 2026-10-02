@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime, timezone
+from typing import cast
 
+from min_agent.coerce import datetime_utc
 from min_agent.models import (
     BrokerEvidenceBatch,
+    BrokerEvidenceStatus,
     BrokerFillActivity,
     BrokerOrderSnapshot,
     PortfolioHistoryPoint,
+    Side,
 )
 
 
@@ -40,7 +44,7 @@ class BrokerEvidenceProvider:
             orders=tuple(orders),
             activities=tuple(activities),
             portfolio_history=tuple(portfolio_history),
-            status=status,
+            status=cast("BrokerEvidenceStatus", status),
             missing_reasons=tuple(missing_reasons),
         )
 
@@ -145,17 +149,19 @@ class BrokerEvidenceProvider:
         status = _text(_get(order, "status", "unknown"))
         if not order_id or not symbol or side not in {"BUY", "SELL"} or quantity is None or quantity <= 0:
             return None
+        # `side not in {"BUY", "SELL"}` above is the validation; the cast only tells
+        # mypy that the guard already proved it. Pydantic still checks it.
         return BrokerOrderSnapshot(
             order_id=order_id,
             client_order_id=_text(_get(order, "client_order_id", None)) or None,
             symbol=symbol,
-            side=side,
+            side=cast("Side", side),
             quantity=quantity,
             filled_quantity=_float(_get(order, "filled_qty", _get(order, "filled_quantity", 0))) or 0,
             filled_avg_price=_float(_get(order, "filled_avg_price", None)),
             status=status or "unknown",
-            submitted_at=_datetime(_get(order, "submitted_at", None)),
-            filled_at=_datetime(_get(order, "filled_at", None)),
+            submitted_at=datetime_utc(_get(order, "submitted_at", None)),
+            filled_at=datetime_utc(_get(order, "filled_at", None)),
         )
 
     def _normalize_activity(self, activity) -> BrokerFillActivity | None:
@@ -164,15 +170,16 @@ class BrokerEvidenceProvider:
         side = _text(_get(activity, "side", None)).upper()
         quantity = _float(_get(activity, "qty", _get(activity, "quantity", None)))
         price = _float(_get(activity, "price", None))
-        transaction_time = _datetime(_get(activity, "transaction_time", _get(activity, "date", None)))
+        transaction_time = datetime_utc(_get(activity, "transaction_time", _get(activity, "date", None)))
         if not activity_id or not symbol or side not in {"BUY", "SELL"} or not quantity or not price or transaction_time is None:
             return None
+        # Guarded above; see the note in _normalize_order.
         return BrokerFillActivity(
             activity_id=activity_id,
             order_id=_text(_get(activity, "order_id", None)) or None,
             client_order_id=_text(_get(activity, "client_order_id", None)) or None,
             symbol=symbol,
-            side=side,
+            side=cast("Side", side),
             quantity=quantity,
             price=price,
             gross_amount=_float(_get(activity, "net_amount", _get(activity, "gross_amount", None))),
@@ -187,7 +194,7 @@ class BrokerEvidenceProvider:
         profit_loss_pct = list(_values(history, "profit_loss_pct"))
         points = []
         for index, raw_timestamp in enumerate(timestamps):
-            timestamp = _datetime(raw_timestamp)
+            timestamp = datetime_utc(raw_timestamp)
             equity = _float(equities[index] if index < len(equities) else None)
             if timestamp is None or equity is None:
                 continue
@@ -233,19 +240,6 @@ def _api_time(value: datetime) -> str:
     return timestamp.replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _datetime(value) -> datetime | None:
-    if value is None or value == "":
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value
-    if isinstance(value, int | float):
-        return datetime.fromtimestamp(value, tz=timezone.utc)
-    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed
 
 
 def latest_evidence_batch(journal) -> BrokerEvidenceBatch | None:

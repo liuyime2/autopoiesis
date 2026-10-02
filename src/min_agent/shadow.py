@@ -41,12 +41,13 @@ from min_agent.models import (
     ExecutionResult,
     GuardianResult,
     JournalEvent,
+    JournalEventType,
     TradeDecision,
 )
 
 #: Emitted for every order that would have been submitted. Durable evidence that the
 #: path ran, which is the entire point of the stage.
-SHADOW_EVENT = "SHADOW_ORDER_INTENT"
+SHADOW_EVENT: JournalEventType = "SHADOW_ORDER_INTENT"
 
 
 class ShadowExecutor:

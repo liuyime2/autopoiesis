@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from min_agent import counterfactual, offline_validation
+from min_agent import coerce, counterfactual, offline_validation
 from min_agent.atomicio import file_lock, write_text_atomic
 from min_agent.broker_evidence import latest_evidence_batch
 from min_agent.config import AgentConfig
@@ -26,7 +26,15 @@ from min_agent.fill_reconciler import FILL_EVENT, FillReconciler
 from min_agent.health import HealthMonitor
 from min_agent.journal import JsonlJournal
 from min_agent.knowledge_admission import KnowledgeAdmission
-from min_agent.models import BrokerEvidenceBatch, HeartbeatPayload, JournalEvent, KnowledgeArtifact
+from min_agent.models import (
+    BrokerEvidenceBatch,
+    DaemonStatus,
+    HeartbeatPayload,
+    JournalEvent,
+    JournalEventStatus,
+    JournalEventType,
+    KnowledgeArtifact,
+)
 from min_agent.reflection_memory import ReflectionMemory
 from min_agent.strategy_admission import StrategyAdmission
 from min_agent.strategy_engine import StrategyLibrary, StrategyLifecycleManager
@@ -212,7 +220,7 @@ class AgentDaemon:
         if self.startup_reconciler is None:
             return True
         report = self.startup_reconciler.reconcile()
-        status = "SUCCESS" if report.matched else "FAILED"
+        status: JournalEventStatus = "SUCCESS" if report.matched else "FAILED"
         payload = {
             "matched": report.matched,
             "submitted_order_ids": list(report.submitted_order_ids),
@@ -250,6 +258,8 @@ class AgentDaemon:
             self._curriculum_proposal()
 
     def _reflect(self, *, evidence: BrokerEvidenceBatch | None = None) -> None:
+        if self.journal is None or self.reflection_memory is None:
+            return
         try:
             recent = self.journal.last_n(self.config.reflection_window)
             reflection = self.reflection_memory.reflect(
@@ -342,12 +352,18 @@ class AgentDaemon:
                 strategy_id=event.strategy_id,
                 verdict=str(event.payload.get("verdict", "")),
                 reason=str(event.payload.get("reason", "")),
-                decisions=int(event.payload.get("decisions", 0) or 0),
-                scored=int(event.payload.get("scored", 0) or 0),
-                good_holds=int(event.payload.get("good_holds", 0) or 0),
-                missed_alpha=int(event.payload.get("missed_alpha", 0) or 0),
-                false_trades=int(event.payload.get("false_trades", 0) or 0),
-                good_hold_ratio=event.payload.get("good_hold_ratio"),
+                decisions=coerce.field_int(event.payload.get("decisions"), f"{event.event_id}.decisions"),
+                scored=coerce.field_int(event.payload.get("scored"), f"{event.event_id}.scored"),
+                good_holds=coerce.field_int(event.payload.get("good_holds"), f"{event.event_id}.good_holds"),
+                missed_alpha=coerce.field_int(
+                    event.payload.get("missed_alpha"), f"{event.event_id}.missed_alpha"
+                ),
+                false_trades=coerce.field_int(
+                    event.payload.get("false_trades"), f"{event.event_id}.false_trades"
+                ),
+                good_hold_ratio=coerce.field_float(
+                    event.payload.get("good_hold_ratio"), f"{event.event_id}.good_hold_ratio"
+                ),
             )
         return latest
 
@@ -496,6 +512,8 @@ class AgentDaemon:
 
     def _last_market(self) -> tuple[float | None, str]:
         """The most recent real broker price, for evaluating executable capability."""
+        if self.journal is None:
+            return None, (self.config.symbols[0] if self.config.symbols else "SPY")
         for record in reversed(self.journal.read_all()):
             return record.snapshot.last_price, record.snapshot.symbol
         return None, (self.config.symbols[0] if self.config.symbols else "SPY")
@@ -505,6 +523,8 @@ class AgentDaemon:
 
         Only the fields an exit decision needs, and only what the broker reported.
         """
+        if self.journal is None:
+            return []
         for record in reversed(self.journal.read_all()):
             held = [
                 {
@@ -546,6 +566,8 @@ class AgentDaemon:
         ]
 
     def _curriculum_proposal(self) -> None:
+        if self.reflection_memory is None or self.curriculum_agent is None:
+            return
         try:
             reflection = self.reflection_memory.load()
             if reflection is None:
@@ -758,9 +780,13 @@ class AgentDaemon:
             return None
 
     def _confirmed_fill_activities(self):
+        if self.journal is None:
+            return []
         return confirmed_fill_activities(self.journal, self.journal.read_all())
 
     def _record_pnl_evidence(self, evidence: BrokerEvidenceBatch | None) -> None:
+        if self.journal is None:
+            return
         report = DeterministicEvaluator().evaluate(
             self.journal.read_all(),
             evidence=evidence,
@@ -776,6 +802,8 @@ class AgentDaemon:
         )
 
     def _verify_profit_target(self, evidence: BrokerEvidenceBatch | None) -> None:
+        if self.journal is None:
+            return
         report = DeterministicEvaluator().evaluate(
             self.journal.read_all(),
             evidence=evidence,
@@ -897,7 +925,7 @@ class AgentDaemon:
     def _record_no_exploration_lesson(self, summary: dict[str, object]) -> None:
         if self.knowledge_admission is None or not summary.get("no_exploration"):
             return
-        cycle_ids = tuple(str(cycle_id) for cycle_id in summary.get("cycle_ids", []) if str(cycle_id))
+        cycle_ids = coerce.field_str_tuple(summary.get("cycle_ids"), "summary.cycle_ids")
         if not cycle_ids:
             return
         subtype, answer = self._diagnose_no_exploration(summary)
@@ -940,9 +968,9 @@ class AgentDaemon:
         window.
         """
         action_counts = summary.get("action_counts") or {}
-        skipped = int(summary.get("skipped_orders", 0) or 0)
-        rejected = int(summary.get("rejected_orders", 0) or 0)
-        strategy_ids = tuple(summary.get("strategy_ids") or ())
+        skipped = coerce.field_int(summary.get("skipped_orders"), "summary.skipped_orders")
+        rejected = coerce.field_int(summary.get("rejected_orders"), "summary.rejected_orders")
+        strategy_ids = coerce.field_str_tuple(summary.get("strategy_ids"), "summary.strategy_ids")
         if isinstance(action_counts, dict) and action_counts and set(action_counts) == {"HOLD"}:
             return (
                 "all-hold",
@@ -1030,9 +1058,9 @@ class AgentDaemon:
 
     def _append_event(
         self,
-        event_type: str,
+        event_type: JournalEventType,
         *,
-        status: str,
+        status: JournalEventStatus,
         message: str,
         payload: dict[str, object] | None = None,
         strategy_id: str | None = None,
@@ -1061,7 +1089,7 @@ class AgentDaemon:
         self.journal.append_event(event)
         return event.event_id
 
-    def _heartbeat(self, status: str, message: str) -> None:
+    def _heartbeat(self, status: DaemonStatus, message: str) -> None:
         payload = HeartbeatPayload(
             pid=os.getpid(),
             status=status,

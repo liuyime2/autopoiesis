@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from min_agent.journal import JsonlJournal
+from min_agent.models import JournalEventType
 
-FILL_EVENT = "ORDER_FILL_CONFIRMED"
+FILL_EVENT: JournalEventType = "ORDER_FILL_CONFIRMED"
 
 # Broker order statuses that mean the order will never fill again.
 TERMINAL_STATUSES = frozenset({"filled", "canceled", "expired", "rejected", "replaced", "pending_cancel"})

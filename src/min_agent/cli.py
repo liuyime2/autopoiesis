@@ -18,6 +18,7 @@ from min_agent.daemon import AgentDaemon
 from min_agent.data_gateway import AlpacaDataGateway
 from min_agent.evaluator import (
     PNL_EVIDENCE_ACCOUNT_VERIFIED,
+    PNL_EVIDENCE_MISSING,
     PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
     DeterministicEvaluator,
     confirmed_fill_activities,
@@ -36,7 +37,7 @@ from min_agent.llm_decision import (
     OllamaDecisionEngine,
 )
 from min_agent.loop import TradingLoop
-from min_agent.models import BrokerEvidenceBatch, JournalEvent
+from min_agent.models import BrokerEvidenceBatch, JournalEvent, JournalEventStatus
 from min_agent.order_reconciler import OrderReconciler
 from min_agent.policy_engine import PolicyEngine
 from min_agent.reflection_memory import ReflectionMemory
@@ -308,10 +309,17 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
     # outside --once: every trade decision was a static JSON lookup.
     agent_lots = _agent_open_lots(journal)
 
-    def cost_basis(symbol: str) -> dict[str, object] | None:
+    def cost_basis() -> dict[str, dict[str, object]]:
         # Frozen at start-up: the lots can only change through a fill, and a fill
         # does not happen inside a decision.
-        return dict(agent_lots.get(symbol, {})) or None
+        #
+        # Takes no symbol and returns every symbol's lots, because that is the
+        # contract `HybridDecisionEngine` declares. It used to take a symbol and
+        # return one symbol's lots, so the engine's zero-argument call raised
+        # TypeError, the surrounding `except Exception` turned it into an empty
+        # mapping, and the model was silently given no cost basis at all - the one
+        # thing it needs to tell profit from loss.
+        return {symbol: dict(lots) for symbol, lots in agent_lots.items() if lots}
 
     decision_engine = HybridDecisionEngine(
         llm=OllamaDecisionEngine(
@@ -530,11 +538,15 @@ def _evidence_report(config: AgentConfig) -> int:
     report = DeterministicEvaluator().evaluate(
         journal.read_all(), evidence=batch, seeded_fills=confirmed_fill_activities(journal, journal.read_all())
     )
-    event_status = "SUCCESS" if report.pnl_evidence != "missing_fill_price_and_broker_activity" else "SKIPPED"
+    event_status: JournalEventStatus = (
+        "SUCCESS" if report.pnl_evidence != PNL_EVIDENCE_MISSING else "SKIPPED"
+    )
     journal.append_event(
         JournalEvent(
             event_id=str(uuid4()),
-            event_type="PNL_EVIDENCE_RECORDED" if event_status == "SUCCESS" else "PNL_EVIDENCE_FAILED",
+            event_type=(
+                "PNL_EVIDENCE_RECORDED" if event_status == "SUCCESS" else "PNL_EVIDENCE_FAILED"
+            ),
             timestamp=datetime.now(tz=timezone.utc),
             status=event_status,
             message=report.pnl_evidence,

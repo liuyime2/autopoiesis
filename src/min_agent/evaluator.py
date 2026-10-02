@@ -3,8 +3,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import cast
 
 from min_agent.models import (
+    AttributionStatus,
     BrokerEvidenceBatch,
     BrokerFillActivity,
     ClosedLotAttribution,
@@ -13,6 +15,7 @@ from min_agent.models import (
     FillAttribution,
     OpenLotAttribution,
     PnLEvidence,
+    Side,
     StrategyEvaluation,
 )
 
@@ -423,7 +426,7 @@ def _pnl_evidence(
 
     for activity in sorted(stream.values(), key=lambda item: item.transaction_time):
         strategy_id = _activity_strategy(activity, order_to_strategy)
-        status = "LINKED" if strategy_id else "UNLINKED"
+        status: AttributionStatus = "LINKED" if strategy_id else "UNLINKED"
         in_window = any(_order_key(activity) == _order_key(item) for item in fill_candidates)
         fill_attributions.append(
             _fill_attribution(
@@ -471,11 +474,11 @@ def _pnl_evidence(
         if last_seen is None or snap.timestamp > last_seen:
             last_seen = snap.timestamp
     open_lots = _open_lots(ledger, last_prices, last_seen)
-    unrealized = (
-        sum(lot.unrealized_pnl for lot in open_lots)
-        if open_lots and all(lot.unrealized_pnl is not None for lot in open_lots)
-        else (0.0 if not open_lots else None)
-    )
+    # Only a fully-priced book has a meaningful unrealized figure; one lot with an
+    # unknown price makes the total unknowable, and reporting 0.0 would read as
+    # "flat" rather than "unknown".
+    priced = [p for p in (lot.unrealized_pnl for lot in open_lots) if isinstance(p, float)]
+    unrealized = sum(priced) if len(priced) == len(open_lots) else (0.0 if not open_lots else None)
     realized_total = sum(strategy_realized.values()) if strategy_realized else 0.0
     fees_total = sum(strategy_fees.values()) if strategy_fees else 0.0
     # Charged on the notional actually traded, both sides, per owning strategy. On
@@ -513,18 +516,22 @@ def _pnl_evidence(
         account_pnl = last_point.profit_loss
         account_return_pct = last_point.profit_loss_pct
 
-    status = PNL_EVIDENCE_MISSING
+    # Named `evidence_status`, not `status`: this function also builds fill
+    # attributions, whose `status` is a LINKED/UNLINKED flag. Two unrelated
+    # meanings under one name in one 150-line function is how the wrong one gets
+    # passed to the wrong constructor.
+    evidence_status = PNL_EVIDENCE_MISSING
     if strategy_realized:
-        status = PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+        evidence_status = PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
     elif evidence.portfolio_history:
-        status = PNL_EVIDENCE_ACCOUNT_VERIFIED
+        evidence_status = PNL_EVIDENCE_ACCOUNT_VERIFIED
     elif evidence.activities or evidence.orders:
-        status = PNL_EVIDENCE_PARTIAL_FILLS
+        evidence_status = PNL_EVIDENCE_PARTIAL_FILLS
     else:
         missing_reasons.append("broker evidence contained no fills, orders, or portfolio history")
 
     return PnLEvidence(
-        status=status,
+        status=evidence_status,
         account_realized_or_reported_pnl=account_pnl,
         account_return_pct=account_return_pct,
         strategy_realized_pnl=strategy_realized,
@@ -645,7 +652,7 @@ def confirmed_fill_activities(journal, records: Sequence[CycleRecord] | None = N
                     order_id=payload.get("order_id") if isinstance(payload.get("order_id"), str) else None,
                     client_order_id=coid,
                     symbol=symbol,
-                    side=side.strip().upper(),
+                    side=cast("Side", side.strip().upper()),
                     quantity=float(quantity),
                     price=float(price),
                     transaction_time=anchor.get(coid, event.timestamp),
@@ -694,7 +701,11 @@ def _fill_candidates(evidence: BrokerEvidenceBatch) -> tuple[list[BrokerFillActi
 
 
 def _fill_attribution(
-    activity: BrokerFillActivity, *, strategy_id: str | None, status: str, seeded: bool = False
+    activity: BrokerFillActivity,
+    *,
+    strategy_id: str | None,
+    status: AttributionStatus,
+    seeded: bool = False,
 ) -> FillAttribution:
     return FillAttribution(
         fill_id=activity.activity_id,

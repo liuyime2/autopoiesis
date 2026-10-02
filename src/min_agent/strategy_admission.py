@@ -12,7 +12,12 @@ from min_agent.strategy_engine import StrategyLibrary, behavioural_signature
 class StrategyAdmissionResult:
     accepted: bool
     reason: str
-    strategy_id: str | None = None
+    #: Always the id of the spec that was screened. It was ``str | None = None``
+    #: because a rejection "has" no strategy, but `admit` takes a `StrategySpec`
+    #: whose id is required, so every verdict names the candidate it judged - and
+    #: callers that then need to look the candidate up (the offline screen) would
+    #: otherwise have to guard against a state that cannot occur.
+    strategy_id: str
 
 
 class StrategyAdmission:

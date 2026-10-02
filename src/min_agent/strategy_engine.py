@@ -3,10 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 
 from min_agent.atomicio import file_lock, write_text_atomic
+from min_agent.coerce import is_number
 from min_agent.evaluator import PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
-from min_agent.models import DataSnapshot, StrategyResult, StrategySpec, TradeDecision
+from min_agent.models import Action, DataSnapshot, StrategyResult, StrategySpec, TradeDecision
 
 
 class StrategyLibrary:
@@ -137,21 +139,23 @@ class StrategyLifecycleManager:
             placed and PnL actually realized are the evidence.
             """
             result = result_by_id.get(strategy.strategy_id)
-            verified = (
-                result is not None
-                and result.pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
-                and result.realized_pnl is not None
+            # Read the verified PnL once, so "is this copy the evidenced one" and
+            # "what did it earn" cannot drift apart the way a `verified` flag plus
+            # a second `result.realized_pnl` lookup could.
+            verified_pnl = (
+                result.realized_pnl
+                if result is not None and result.pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+                else None
             )
             return (
-                1 if verified else 0,
-                result.realized_pnl if verified else 0.0,
+                1 if verified_pnl is not None else 0,
+                verified_pnl if verified_pnl is not None else 0.0,
                 result.submitted_orders if result is not None else 0,
                 result.filled_quantity if result is not None else 0.0,
                 result.cycles if result is not None else 0,
                 # Oldest first, so the longest-lived copy survives a full tie.
                 -strategy.created_at.timestamp(),
             )
-
         decisions: list[StrategyLifecycleDecision] = []
         for signature, members in groups.items():
             if len(members) < 2:
@@ -159,12 +163,14 @@ class StrategyLifecycleManager:
             ordered = sorted(members, key=evidence_rank, reverse=True)
             keeper, duplicates = ordered[0], ordered[1:]
             for duplicate in duplicates:
-                result = result_by_id.get(duplicate.strategy_id)
+                keeper_cycles = result_by_id.get(keeper.strategy_id)
+                duplicate_cycles = result_by_id.get(duplicate.strategy_id)
                 detail = (
                     f"; kept {keeper.strategy_id} which has "
-                    f"{result.cycles if result else 0} cycle(s) against this one's "
-                    f"{result_by_id.get(duplicate.strategy_id).cycles if result_by_id.get(duplicate.strategy_id) else 0}"
-                    if result is not None
+                    f"{keeper_cycles.cycles if keeper_cycles is not None else 0} cycle(s) "
+                    f"against this one's "
+                    f"{duplicate_cycles.cycles if duplicate_cycles is not None else 0}"
+                    if keeper_cycles is not None and duplicate_cycles is not None
                     else f"; kept {keeper.strategy_id}"
                 )
                 decisions.append(
@@ -488,7 +494,10 @@ class StrategyExecutor:
         return self._hold(snapshot, strategy, "unsupported strategy kind")
 
     def _fixed_size(self, strategy: StrategySpec, snapshot: DataSnapshot) -> TradeDecision:
-        action = str(strategy.parameters["action"]).upper()
+        # `TradeDecision.action` is a Literal, so pydantic rejects an action this
+        # strategy never declared. Validating here instead would duplicate that
+        # rule in a second place; the cast only records that the check exists.
+        action = cast("Action", str(strategy.parameters["action"]).upper())
         quantity = int(strategy.parameters["quantity"]) if action != "HOLD" else 0
         if action == "BUY":
             # The cap bounds new exposure, so it applies to entries only. Applying
@@ -519,6 +528,7 @@ class StrategyExecutor:
 
         if quantity <= 0:
             return self._hold(snapshot, strategy, "position size is zero after risk cap")
+        action: Action
         if snapshot.last_price >= reference_price * (1 + threshold_pct):
             action = "BUY"
         elif snapshot.last_price <= reference_price * (1 - threshold_pct):
@@ -620,10 +630,7 @@ def behavioural_signature(strategy: StrategySpec) -> tuple | None:
         reference = strategy.parameters.get("reference_price")
         threshold = strategy.parameters.get("threshold_pct")
         quantity = strategy.parameters.get("quantity")
-        if not all(
-            isinstance(v, (int, float)) and not isinstance(v, bool)
-            for v in (reference, threshold, quantity)
-        ):
+        if not (is_number(reference) and is_number(threshold) and is_number(quantity)):
             return None
         return (
             strategy.kind,

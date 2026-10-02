@@ -2836,28 +2836,41 @@ the only way to find that out is to let real data arrive.
 
 Six facts, each re-measured against live state immediately before being recorded.
 
-**Real.** 988 of 988 journal cycles carry `source: alpaca`. There is no synthetic
+**Real.** 1127 of 1127 journal cycles carry `source: alpaca`. There is no synthetic
 or placeholder source anywhere in the decision path.
 
 **Alpaca link complete.** Six of six endpoints reachable by live API call - `get_clock`,
 `get_account`, `list_positions`, `list_assets`, `get_activities`, `list_orders` - and
-the production ingestor returns a 30-day broker batch with zero missing reasons: 11
-orders, 12 activities, 21 portfolio-history points.
+the production ingestor returns a 30-day broker batch with zero missing reasons: 34
+orders, 35 activities, 21 portfolio-history points, `status=SUCCESS`.
 
-**Running and waiting for the open.** `ollama.service`, `min-agent.service` and
-`quant-watchdog.timer` are all active and enabled, loading from durable paths under
+**Running, and trading rather than waiting.** `ollama.service`, `min-agent.service`
+and `quant-watchdog.timer` are all active and enabled, loading from durable paths under
 `$HOME/.config/systemd/user` with zero enablement links into tmpfs. The broker clock
-reports `next_open=2026-09-30 09:30:00-04:00`.
+reports the market **open**, `next_open=2026-10-05 09:30:00-04:00`. This section was
+first written when the system was waiting for an open; it has since traded a full
+session, so the claim moved from "waiting" to "trading" rather than being left to
+expire as a stale positive.
 
-**Reviewed and confirmed.** `make verify`: 48 classes, 1 failed, 1250 test executions
-across 61 files, exit 0.
+**Reviewed and confirmed.** `make verify`: 49 classes, 1 failed, 1251 test executions
+across 61 files, exit 1.
+
+The one failure is `doctor`'s `pnl attribution`, and it is a fact about the trading
+result rather than a fault in the code: of +563.41 realized across 27 closed lots the
+model contributed -0.98 while the baseline contributed +564.39. The severity is
+deliberate and test-guarded - an earlier implementation compared against `== 0.0` and
+reported OK while the model was losing money. `make check`, the gate that speaks only
+about the repository, is green. Exit 0 here would mean the check had been weakened to
+match the result, which is the failure mode this project is trying to avoid.
 figures by naive FIFO arithmetic over raw journal text, cross-checked against the
 production ledger for the same journal - 23 closed lots, +564.39 realized, 29
 unmatched sell shares, agreeing by both routes.
 
-**The daemon path completes against the live broker.** One real cycle recorded
-`src=llm model=qwen3.8:27b HOLD qty=0`, Guardian approved, execution `SKIPPED` with
-the market closed. The model authored the decision; there was no fallback.
+**The daemon path completes against the live broker.** 263 cycles were decided by the
+model itself (`decision_source=llm`, `model=qwen3.8:27b`), 261 of them with the market
+open; 13 fell back to the policy engine and 1 was the baseline, all recorded as such
+rather than disguised. The most recent recorded model decision is
+`qwen3.8:27b HOLD qty=0`, Guardian approved, execution `SKIPPED`.
 
 **Every *defect* previously reported is closed.** Every row filed as *broken* in
 `CAPABILITY_CLASSIFICATION.md` is one that was repaired, and the single open row

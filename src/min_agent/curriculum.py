@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from min_agent import coerce
 from min_agent.atomicio import read_json, write_json_atomic
 from min_agent.models import STRATEGY_PARAMETER_SCHEMAS, CurriculumTask, ReflectionRecord, StrategySpec
 
@@ -224,9 +225,22 @@ class StructuredCurriculumAgent:
             },
             "supported_strategy_schemas": {
                 kind: {
-                    "required_params": list(schema["required"]),
-                    "allowed_params": list(schema["allowed"]),
-                    "description": schema["description"],
+                    "required_params": list(
+                        coerce.field_str_tuple(
+                            coerce.field_dict(schema, f"schema[{kind}]").get("required"),
+                            f"schema[{kind}].required",
+                        )
+                    ),
+                    "allowed_params": list(
+                        coerce.field_str_tuple(
+                            coerce.field_dict(schema, f"schema[{kind}]").get("allowed"),
+                            f"schema[{kind}].allowed",
+                        )
+                    ),
+                    "description": coerce.field_str(
+                        coerce.field_dict(schema, f"schema[{kind}]").get("description"),
+                        f"schema[{kind}].description",
+                    ),
                 }
                 for kind, schema in STRATEGY_PARAMETER_SCHEMAS.items()
             },
@@ -255,7 +269,7 @@ class StructuredCurriculumAgent:
         # 'strategy_generation' and arbitrary parameters). Rather than encode a
         # conditional the decoder will not honour, retry once with the failure
         # reason appended. Both attempts are still validated.
-        attempts = []
+        attempts: list[str] = []
         for attempt in range(1 + self.max_parse_retries):
             gap_attempt = attempt > 0 and "capability gap" in (attempts[-1] if attempts else "")
             ctx = prompt_context if attempt == 0 else {
@@ -340,7 +354,7 @@ class StructuredCurriculumAgent:
         if len(strategies) <= self.max_strategies_in_prompt:
             ordered = strategies
         else:
-            def rank(spec: StrategySpec) -> tuple[int, str]:
+            def rank(spec: StrategySpec) -> tuple[int, datetime]:
                 selectable = spec.enabled and spec.lifecycle not in {"PAUSED", "RETIRED"}
                 return (0 if selectable else 1, spec.created_at)
 
@@ -753,7 +767,7 @@ def _required_action(coverage: Mapping[str, object]) -> str | None:
     uncovered = coverage.get("uncovered_actions_now")
     if not uncovered:
         return None
-    actions = [str(item).upper() for item in uncovered]
+    actions = [item.upper() for item in coerce.field_str_tuple(uncovered, "uncovered_actions_now")]
     return actions[0] if len(actions) == 1 else "|".join(actions)
 
 
@@ -868,7 +882,9 @@ def _capability_demand(attempts: list[str], context: Mapping[str, object]) -> di
             coverage.get("uncovered_actions_now") if isinstance(coverage, Mapping) else None
         ),
         "evaluated_at_last_price": price,
-        "strategy_ids_already_in_use": list(context.get("strategy_ids_in_use") or [])[-25:],
+        "strategy_ids_already_in_use": list(
+            coerce.field_str_tuple(context.get("strategy_ids_in_use"), "strategy_ids_in_use")
+        )[-25:],
         "instruction": (
             "The library cannot express the uncovered action at the real last "
             "price, so the positions in open_positions have no working exit. "

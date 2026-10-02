@@ -211,9 +211,10 @@ CHECK_CLASSES: tuple[str, ...] = (
     "defect-regression-audit",
     "doctor",
     "fact-docs-current",
-    "bespoke-list-matches-run",
-    "status-states-only-fixed-facts",
-)
+      "bespoke-list-matches-run",
+      "status-states-only-fixed-facts",
+      "type-checking-is-a-gate",
+  )
 
 
 @dataclass
@@ -982,6 +983,56 @@ def check_the_documented_pipeline_targets_exist() -> Result:
     return Result(
         "pipeline-targets-exist", PASS,
         f"pipeline runs {stages} and every stage has a rule",
+    )
+
+
+def check_type_checking_is_a_real_gate() -> Result:
+    """`make type` must block, and `make check` must run it.
+
+    `type:` was written `-@$(CONDA_RUN) mypy src/min_agent`. The leading `-` tells
+    make to ignore a non-zero exit, so mypy reported 95 findings on every run and
+    the command still exited 0 - the findings were visible and nothing acted on
+    them, which is worse than not running it. `check:` did not depend on `type:`
+    either, so the fast loop never saw it.
+
+    This asserts the wiring rather than re-running mypy, because `make verify`
+    already runs the full command and a second mypy pass would double the slowest
+    gate for no extra signal. It catches the specific regression: someone
+    re-adding the `-`, or dropping `type` from `check`.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    match = re.search(r"^type:([\s\\@\-]*)(.*)$", makefile, re.MULTILINE)
+    if not match:
+        return Result("type-checking-is-a-gate", FAIL, "Makefile has no `type:` target")
+    prefix, body = match.group(1), match.group(2)
+    if prefix.strip() == "-":
+        return Result(
+            "type-checking-is-a-gate", FAIL,
+            "`type:` starts with `-`, so make ignores mypy's exit code: findings are "
+            "printed and the command still passes. Drop the `-`.",
+        )
+    if "mypy" not in body:
+        return Result(
+            "type-checking-is-a-gate", FAIL,
+            f"`type:` does not invoke mypy; it runs {body.strip()!r}",
+        )
+    if "@" not in prefix:
+        return Result(
+            "type-checking-is-a-gate", WARN,
+            "`type:` echoes the mypy command line; add `@` to match every other target",
+        )
+    check = re.search(r"^check:([\s\\+]*)(.*)$", makefile, re.MULTILINE)
+    if not check:
+        return Result("type-checking-is-a-gate", FAIL, "Makefile has no `check:` target")
+    if "type" not in check.group(2).split():
+        return Result(
+            "type-checking-is-a-gate", FAIL,
+            f"`check:` runs {check.group(2).split()} but not `type`, so the fast loop "
+            "never type-checks",
+        )
+    return Result(
+        "type-checking-is-a-gate", PASS,
+        "`type:` runs mypy and blocks; `check:` runs lint, type and test",
     )
 
 
@@ -2642,9 +2693,10 @@ REPOSITORY_CHECK_CLASSES: frozenset[str] = frozenset({
     # freshness, the production/research boundary, hardcoded paths.
     "bespoke-list-matches-run",
     "status-states-only-fixed-facts",
-    "config-example-complete",
-    "pipeline-targets-exist",
-    "class-coverage",
+      "config-example-complete",
+      "pipeline-targets-exist",
+      "type-checking-is-a-gate",
+      "class-coverage",
     "test-coverage-map",
     "docs-not-stale",
     "software-supply-chain",
@@ -3099,6 +3151,7 @@ def main() -> int:
     results.append(_safe(check_the_fact_figures_in_prose_match_reality, "fact-figures-match"))
     results.append(_safe(check_unit_templates_have_no_host_paths, "unit-templates-portable"))
     results.append(_safe(check_the_documented_pipeline_targets_exist, "pipeline-targets-exist"))
+    results.append(_safe(check_type_checking_is_a_real_gate, "type-checking-is-a-gate"))
     results.append(_safe(check_config_example_names_are_real, "config-example-names"))
     results.append(_safe(check_config_example_covers_every_variable, "config-example-complete"))
     results.append(_safe(check_no_production_function_is_unreachable, "no-unreachable-production-code"))

@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
+from min_agent import coerce
 from min_agent.atomicio import write_text_atomic
 from min_agent.evaluator import DeterministicEvaluator
 from min_agent.models import (
@@ -69,22 +70,51 @@ class ReflectionMemory:
                 results.append(
                     StrategyResult(
                         strategy_id=strategy_id,
-                        cycles=metrics.get("cycles", 0),
-                        submitted_orders=metrics.get("submitted_orders", 0),
-                        rejected_orders=metrics.get("rejected_orders", 0),
-                        errors=metrics.get("errors", 0),
+                        cycles=coerce.field_int(metrics.get("cycles"), f"{strategy_id}.cycles"),
+                        submitted_orders=coerce.field_int(
+                            metrics.get("submitted_orders"), f"{strategy_id}.submitted_orders"
+                        ),
+                        rejected_orders=coerce.field_int(
+                            metrics.get("rejected_orders"), f"{strategy_id}.rejected_orders"
+                        ),
+                        errors=coerce.field_int(metrics.get("errors"), f"{strategy_id}.errors"),
                         score=record.strategy_scores.get(strategy_id, 0.0),
                         evaluated_at=record.generated_at,
-                        skipped_orders=metrics.get("skipped_orders", 0),
-                        action_counts=metrics.get("action_counts", {}),
-                        guardian_rejections=metrics.get("guardian_rejections", {}),
-                        intended_notional=metrics.get("intended_notional", 0.0),
-                        filled_quantity=metrics.get("filled_quantity", 0.0),
-                        realized_pnl=metrics.get("realized_pnl"),
-                        fees=metrics.get("fees"),
-                        pnl_evidence=metrics.get("pnl_evidence", "missing_fill_price_and_broker_activity"),
-                        trade_attempts=metrics.get("trade_attempts", 0),
-                        strategy_fault_rejections=metrics.get("strategy_fault_rejections", 0),
+                        skipped_orders=coerce.field_int(
+                            metrics.get("skipped_orders"), f"{strategy_id}.skipped_orders"
+                        ),
+                        action_counts=coerce.field_count_dict(
+                            metrics.get("action_counts"), f"{strategy_id}.action_counts"
+                        ),
+                        guardian_rejections=coerce.field_count_dict(
+                            metrics.get("guardian_rejections"), f"{strategy_id}.guardian_rejections"
+                        ),
+                        intended_notional=coerce.field_float_or(
+                            metrics.get("intended_notional"), f"{strategy_id}.intended_notional", 0.0
+                        ),
+                        filled_quantity=coerce.field_float_or(
+                            metrics.get("filled_quantity"), f"{strategy_id}.filled_quantity", 0.0
+                        ),
+                        realized_pnl=coerce.field_float(
+                            metrics.get("realized_pnl"), f"{strategy_id}.realized_pnl"
+                        ),
+                        fees=coerce.field_float(metrics.get("fees"), f"{strategy_id}.fees"),
+                        pnl_evidence=coerce.field_str(
+                            metrics.get("pnl_evidence"),
+                            f"{strategy_id}.pnl_evidence",
+                            "missing_fill_price_and_broker_activity",
+                        ),
+                        trade_attempts=coerce.field_int(
+                            metrics.get("trade_attempts"), f"{strategy_id}.trade_attempts"
+                        ),
+                        strategy_fault_rejections=(
+                            coerce.field_int(
+                                metrics.get("strategy_fault_rejections"),
+                                f"{strategy_id}.strategy_fault_rejections",
+                            )
+                            if metrics.get("strategy_fault_rejections") is not None
+                            else None
+                        ),
                     )
                 )
             return results

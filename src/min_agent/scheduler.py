@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from min_agent.coerce import datetime_utc
+
 
 class MarketScheduler:
     def __init__(self, *, clock_provider=None, stale_after_seconds: int = 900):
@@ -82,20 +84,9 @@ class MarketScheduler:
 
 
 def _seconds_until(value, default: int) -> int:
-    timestamp = _datetime(value)
+    timestamp = datetime_utc(value)
     if timestamp is None:
         return default
     return max(1, int((timestamp - datetime.now(tz=timezone.utc)).total_seconds()))
 
 
-def _datetime(value) -> datetime | None:
-    if value is None or value == "":
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
-    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)

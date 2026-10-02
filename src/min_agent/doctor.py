@@ -21,6 +21,7 @@ from pathlib import Path
 from min_agent import (
     attribution,
     calibration,
+    coerce,
     counterfactual,
     experiment_registry,
     lineage,
@@ -40,7 +41,7 @@ from min_agent.fill_reconciler import FILL_EVENT
 from min_agent.health import HealthMonitor
 from min_agent.journal import JsonlJournal
 from min_agent.knowledge_library import KnowledgeLibrary
-from min_agent.models import StrategySpec
+from min_agent.models import StrategyLifecycle, StrategySpec
 from min_agent.reflection_memory import ReflectionMemory
 from min_agent.strategy_engine import StrategyLibrary
 
@@ -427,7 +428,12 @@ def _check_admission_provenance(
                 and strategy.lifecycle in NOT_SELECTABLE)
 
     gate_since = min(e.timestamp for e in reviews)
-    bypasses, legacy = [], []
+    # The two appends below fill positions 3 and 4 in opposite orders: an
+    # unadjudicated file has a note and no write time, a post-gate file has a
+    # write time and no note. Annotated, so neither branch silently fixes the
+    # tuple shape for the other.
+    bypasses: list[tuple[str, StrategyLifecycle, datetime | None, str | None]] = []
+    legacy: list[str] = []
     for strategy in strategies:
         if accounted(strategy):
             continue
@@ -727,7 +733,7 @@ def _check_pnl_attribution(
     try:
         events = [
             e for e in journal.read_events("PNL_EVIDENCE_RECORDED")
-            if (e.payload.get("pnl") or {}).get("closed_lots")
+            if coerce.field_dict(e.payload.get("pnl"), "pnl").get("closed_lots")
         ]
     except Exception as exc:
         report.add("pnl attribution", WARN, f"journal unreadable: {type(exc).__name__}")
@@ -744,12 +750,12 @@ def _check_pnl_attribution(
     # in rather than to a regime computed over the whole history.
     labels = dict(regime.regime_timeline(regime.bars_from_records(records)))
     result = attribution.attribute(
-        records, latest.payload["pnl"], latest.payload, regime_labels=labels
+        records, coerce.field_dict(latest.payload.get("pnl"), "pnl"), latest.payload, regime_labels=labels
     )
     causes = "; ".join(f"{c.cause}={c.verdict}" for c in result.causes)
-    pnl = latest.payload.get("pnl") or {}
-    net = pnl.get("net_pnl")
-    unrealized = pnl.get("unrealized_pnl")
+    pnl = coerce.field_dict(latest.payload.get("pnl"), "pnl")
+    net = coerce.field_float(pnl.get("net_pnl"), "pnl.net_pnl")
+    unrealized = coerce.field_float(pnl.get("unrealized_pnl"), "pnl.unrealized_pnl")
     # net = realized + unrealized, stated so the two cannot be confused for the
     # account figure, which covers the whole account over all time.
     # Tolerates a payload that predates the unrealized fields. Every stored
@@ -768,10 +774,23 @@ def _check_pnl_attribution(
         f"| {causes} | by regime: "
         f"{ {k: round(v, 2) for k, v in result.by_regime.items()} }"
     )
-    if pnl.get("unmatched_sell_quantity"):
+    # `unmatched_sell_quantity` is keyed by strategy, e.g.
+    # {"trend-follow-sell-002": 29.0} - not a scalar. The message used to interpolate
+    # the raw dict, so it read "UNMATCHED SELLS {'trend-follow-sell-002': 29.0}"
+    # while claiming to name a number of shares. Total the shares, and keep the
+    # breakdown, because which strategy produced them is the actionable part.
+    unmatched_by_strategy = coerce.field_dict(
+        pnl.get("unmatched_sell_quantity"), "pnl.unmatched_sell_quantity"
+    )
+    unmatched_shares = sum(
+        coerce.field_float_or(qty, f"pnl.unmatched_sell_quantity[{sid}]", 0.0)
+        for sid, qty in unmatched_by_strategy.items()
+    )
+    if unmatched_shares:
         detail += (
-            f" | UNMATCHED SELLS {pnl['unmatched_sell_quantity']}: shares were sold "
-            "that no linked BUY could account for, so that PnL is unproven"
+            f" | UNMATCHED SELLS {unmatched_shares:g}: shares were sold "
+            f"that no linked BUY could account for ({unmatched_by_strategy}), "
+            "so that PnL is unproven"
         )
 
     # Severity follows a distinction that has to be stated, because it decides
@@ -812,7 +831,7 @@ def _check_pnl_attribution(
     # 29 shares are unmatched - the FAIL could never fire and the severity test in
     # test_attribution.py only passed because its fixture has no unmatched sells. Two
     # conditions that are each independently a failure have to be reported as such.
-    if pnl.get("unmatched_sell_quantity"):
+    if unmatched_shares:
         report.add(
             "pnl attribution", WARN,
             detail + "; shares were sold that no BUY accounts for, so part of this PnL "
@@ -1177,7 +1196,11 @@ def _check_journal(report: DoctorReport, config: AgentConfig) -> None:
         report.add("journal", WARN, "absent; no cycles recorded yet", "run one cycle: min_agent.cli --once")
         return
     records = journal.read_all()
-    detail = f"{stats['bytes'] / 1e6:.1f}MB, {stats['lines']} lines, {len(records)} cycles"
+    size_mb = coerce.field_float_or(stats.get("bytes"), "stats.bytes", 0.0) / 1e6
+    detail = (
+        f"{size_mb:.1f}MB, {coerce.field_int(stats.get('lines'), 'stats.lines')} lines, "
+        f"{len(records)} cycles"
+    )
     if journal.last_dropped_lines:
         report.add(
             "journal", WARN,
@@ -1186,13 +1209,16 @@ def _check_journal(report: DoctorReport, config: AgentConfig) -> None:
         )
     else:
         report.add("journal", OK, detail)
-    if stats["utilization"] and stats["utilization"] > 0.8:
+    utilization = coerce.field_float(stats.get("utilization"), "stats.utilization") or 0.0
+    if utilization > 0.8:
         report.add(
             "journal headroom", WARN,
-            f"{stats['utilization']:.0%} of the {stats['max_bytes'] / 1e6:.0f}MB cap used; rotation imminent",
+            f"{utilization:.0%} of the "
+            f"{coerce.field_float_or(stats.get('max_bytes'), 'stats.max_bytes', 0.0) / 1e6:.0f}MB cap used; "
+            "rotation imminent",
         )
     else:
-        report.add("journal headroom", OK, f"{stats['utilization']:.0%} of cap used")
+        report.add("journal headroom", OK, f"{utilization:.0%} of cap used")
     if not records:
         report.add("journal recency", WARN, "no cycle records in the journal")
     else:
@@ -1263,7 +1289,7 @@ def _check_proof(report: DoctorReport, config: AgentConfig) -> None:
             report.add(name, WARN, detail, "run one: minictrl once")
         return
 
-    fills = {}
+    fills: dict[str, float] = {}
     for event in journal.read_events(FILL_EVENT):
         coid = event.payload.get("client_order_id")
         qty = event.payload.get("filled_quantity")

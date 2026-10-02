@@ -57,6 +57,20 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
+#: Reused, not re-declared. The separation rule is one-way - production must never
+#: import research - so research may import production. This module previously had
+#: zero `min_agent` imports and therefore carried its own copies of `Bar` and
+#: `bars_from_records`, byte-identical to `min_agent.regime`'s apart from a
+#: docstring. That made a bar built here a *different class* from the one
+#: `regime.bars_from_records` returns, so a rule handed a real bar could fail an
+#: `isinstance` check on nominal grounds alone.
+from min_agent.regime import Bar, bars_from_records
+
+#: `bars_from_records` is re-exported on purpose: it is part of this module's
+#: public shape and callers reach it as `backtest.bars_from_records`. Naming it
+#: here is what stops the import being seen as unused and deleted again.
+__all__ = ["Bar", "bars_from_records"]
+
 #: Commission per side as a percent of notional. Alpaca paper reported 0.0 on every
 #: fill, so this stands in for what a real venue charges. It is an assumption, not
 #: an observation, and it is recorded in every result.
@@ -70,14 +84,6 @@ KIND_FIXED_SIZE = "FIXED_SIZE"
 KIND_TREND_FOLLOW = "TREND_FOLLOW"
 KIND_HOLD_BASELINE = "HOLD_BASELINE"
 SUPPORTED_KINDS = frozenset({KIND_FIXED_SIZE, KIND_TREND_FOLLOW, KIND_HOLD_BASELINE})
-
-
-@dataclass(frozen=True)
-class Bar:
-    """One real observation. The only thing a rule is ever allowed to see."""
-
-    timestamp: datetime
-    price: float
 
 
 @dataclass
@@ -319,30 +325,3 @@ def run_backtest(
         result.return_pct = realized / spent * 100.0
     result.max_drawdown_pct = _max_drawdown([1.0, equity])
     return result
-
-
-def bars_from_records(records: Sequence[object], symbol: str = "SPY") -> list[Bar]:
-    """Real observations from journal records, with repeated quotes collapsed.
-
-    Uses the same collapse rule as the production counterfactual on purpose. 49% of
-    consecutive journaled quotes are byte-identical, because the gateway reports the
-    same last trade when nothing traded. Keyed on timestamp instead, the 920 records
-    look like 920 observations; keyed on price, as they should be, they are 467. A
-    backtest run over the inflated count would measure the 5-minute polling interval
-    rather than the market, and would report a far larger sample than exists.
-    """
-    ordered = sorted(
-        (
-            (r.snapshot.timestamp, r.snapshot.last_price)
-            for r in records
-            if getattr(getattr(r, "snapshot", None), "symbol", None) == symbol
-            and r.snapshot.last_price > 0
-        ),
-        key=lambda item: item[0],
-    )
-    bars: list[Bar] = []
-    for timestamp, price in ordered:
-        if bars and bars[-1].price == price:
-            continue
-        bars.append(Bar(timestamp, price))
-    return bars

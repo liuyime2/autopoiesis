@@ -7,9 +7,9 @@ from typing import Any
 
 import requests
 
+from min_agent import coerce
+from min_agent.coerce import is_number
 from min_agent.models import DataSnapshot, KnowledgeArtifact, TradeDecision
-
-Transport = Callable[[str, dict[str, Any], int], dict[str, Any]]
 
 
 def parse_decision_json(text: str, *, model_name: str | None = None) -> TradeDecision:
@@ -30,6 +30,12 @@ def parse_decision_json(text: str, *, model_name: str | None = None) -> TradeDec
 
 Transport = Callable[[str, Mapping[str, Any], int], Mapping[str, Any]]
 
+#: The one transport contract: (prompt, context, num_ctx) -> the parsed body.
+#: There was a second, identical-looking definition of this name further up the
+#: file, differing only in dict-vs-Mapping. Python bound the later one and the
+#: earlier one was unreachable, so the type readers saw was not the type that
+#: ran. Only one definition now.
+#:
 #: Two ollama call sites, two different jobs, two different context budgets.
 #:
 #: These were once one number applied to both, and a test asserted they stayed
@@ -175,7 +181,7 @@ class HybridDecisionEngine:
         policy_engine,
         lessons: Callable[[str], list[KnowledgeArtifact]] | None = None,
         max_lessons: int = 5,
-        risk_limits: dict[str, float] | None = None,
+        risk_limits: dict[str, object] | None = None,
         cost_basis: Callable[[], dict[str, dict[str, object]]] | None = None,
     ):
         self.llm = llm
@@ -309,12 +315,14 @@ class HybridDecisionEngine:
         if held is not None:
             context["sellable_quantity"] = int(held.quantity)
             lot = lots.get(snapshot.symbol)
-            if isinstance(lot, Mapping) and isinstance(lot.get("average_price"), (int, float)):
-                average = float(lot["average_price"])
+            if isinstance(lot, Mapping) and is_number(lot.get("average_price")):
+                average = coerce.field_float_or(lot["average_price"], "average_price", 0.0)
                 context["average_cost"] = round(average, 4)
                 context["unrealized_pnl_per_share"] = round(snapshot.last_price - average, 4)
                 context["unrealized_pnl"] = round(
-                    (snapshot.last_price - average) * min(held.quantity, float(lot.get("quantity", 0) or 0)), 2
+                    (snapshot.last_price - average)
+                    * min(held.quantity, coerce.field_float_or(lot.get("quantity"), "quantity", 0.0)),
+                    2,
                 )
         if lots:
             context["open_lots"] = lots

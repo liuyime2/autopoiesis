@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import cast
 
-from min_agent.models import AccountSnapshot, DataSnapshot, OpenOrderSnapshot, PositionSnapshot
+from min_agent.models import (
+    AccountSnapshot,
+    DataSnapshot,
+    OpenOrderSnapshot,
+    PositionSnapshot,
+    Side,
+)
 
 
 class BrokerDataUnavailable(RuntimeError):
@@ -36,7 +43,12 @@ class AlpacaDataGateway:
         portfolio_value = float(account.portfolio_value)
         day_start_equity = self._safe_float(account, "last_equity")
         day_start_equity_known = day_start_equity is not None and day_start_equity > 0
-        daily_loss = max(0.0, day_start_equity - equity) if day_start_equity_known else 0.0
+        # The `..._known` flag cannot narrow `day_start_equity` for the arithmetic, so
+        # the check is repeated here rather than inferred. One source of truth for the
+        # flag, one visible guard for the subtraction.
+        daily_loss = (
+            max(0.0, day_start_equity - equity) if day_start_equity is not None and day_start_equity > 0 else 0.0
+        )
 
         timestamp = getattr(clock, "timestamp", None) or datetime.now(timezone.utc)
         if timestamp.tzinfo is None:
@@ -101,7 +113,7 @@ class AlpacaDataGateway:
                 symbol=str(_required(getattr(order, "symbol", None), "open order", "symbol")),
                 # Alpaca returns side lowercase; OpenOrderSnapshot is Literal["BUY","SELL"].
                 # Without this normalisation every order is dropped as invalid.
-                side=str(_required(getattr(order, "side", None), "open order", "side")).upper(),
+                side=cast("Side", str(_required(getattr(order, "side", None), "open order", "side")).upper()),
                 quantity=_required_float(getattr(order, "qty", None), "open order", "qty"),
                 status=str(_required(getattr(order, "status", None), "open order", "status")),
             )

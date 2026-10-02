@@ -163,16 +163,17 @@ clean-pyc:
 lint:
 	@$(CONDA_RUN) ruff check src/ tools/ tests/ examples/
 
-# Not a gate. `make check` and `make fast` run lint and tests; mypy runs on
-# demand and reports without failing the loop. Making it blocking would add 94
-# annotation-precision findings that cannot be fixed inside a single edit, which
-# is the opposite of a fast iteration loop. It is kept wired and reproducible so
-# the debt is visible and can be paid down deliberately. Baseline: 95 findings,
-# all in Callable and dict boundaries, none a known runtime defect.
+# Type checking, and now part of `make check`.
+#
+# It used to be `-@$(CONDA_RUN) mypy ...`: the leading `-` swallowed the exit code,
+# so mypy reported 95 findings on every run without failing anything. That is the
+# worst of both - the debt was visible but nothing stopped it growing, and a
+# passing `make type` meant nothing at all. It is now 0 findings and blocking, so a
+# regression is caught by the fast loop rather than discovered at review time.
 type:
-	-@$(CONDA_RUN) mypy src/min_agent
+	@$(CONDA_RUN) mypy src/min_agent
 
-check: lint test
+check: lint type test
 
 # Smoke: one real cycle end to end against the broker. This is the cheapest test
 # that touches the network and the model, and the first one that can catch a

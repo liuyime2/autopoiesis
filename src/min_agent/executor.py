@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
 
+from min_agent.coerce import datetime_utc
 from min_agent.config import is_paper_endpoint
 from min_agent.models import ExecutionResult, GuardianResult, TradeDecision
 
@@ -58,8 +58,8 @@ class AlpacaPaperExecutor:
                 message=str(exc),
             )
 
-        submitted_at = _datetime_or_none(getattr(order, "submitted_at", None))
-        filled_at = _datetime_or_none(getattr(order, "filled_at", None))
+        submitted_at = datetime_utc(getattr(order, "submitted_at", None))
+        filled_at = datetime_utc(getattr(order, "filled_at", None))
         broker_status = str(getattr(order, "status", "submitted")) or "submitted"
 
         return ExecutionResult(
@@ -94,14 +94,3 @@ def _float_or_none(value) -> float | None:
     return float(value)
 
 
-def _datetime_or_none(value) -> datetime | None:
-    if value is None or value == "":
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value
-    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed

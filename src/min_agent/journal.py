@@ -149,7 +149,7 @@ class JsonlJournal:
         paths = self.history_paths()
         if not paths:
             return [], 0
-        collected: deque = deque(maxlen=limit) if limit else None
+        collected: deque | None = deque(maxlen=limit) if limit else None
         kept: list = []
         dropped = 0
         want_events = model is JournalEvent
