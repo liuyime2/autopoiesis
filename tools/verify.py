@@ -1020,15 +1020,35 @@ def check_the_fact_figures_in_prose_match_reality() -> Result:
     rc, audit_out = _run([sys.executable, "tools/audit_defects.py"], timeout=900)
     match = re.search(r"(\d+)/(\d+) checks pass", audit_out)
     if not match:
-        return Result("fact-figures-match", SKIP, "the defect audit printed no total to compare")
+        # Not SKIP. The audit's own exit code is ignored here, so a crashing
+        # audit_defects.py produced no total and was reported as "nothing to compare" -
+        # the same shape as a defect check that hides a real defect behind a skip.
+        return Result(
+            "fact-figures-match", FAIL,
+            f"the defect audit produced no 'N/M checks pass' line (exit {rc}); "
+            f"the figures cannot be checked against a run that did not finish: "
+            f"{_tail(audit_out, 1)}",
+        )
     passed, total = match.group(1), match.group(2)
 
     rc, pytest_out = _run([sys.executable, "-m", "pytest", "-q", "--collect-only"], timeout=900)
     collected = re.search(r"(\d+) tests? collected", pytest_out)
     if not collected:
-        return Result("fact-figures-match", SKIP, "pytest printed no collection total to compare")
+        return Result(
+            "fact-figures-match", FAIL,
+            f"pytest --collect-only printed no total (exit {rc}); the test figure in the "
+            f"documents cannot be checked against a collection that did not finish",
+        )
 
     rc, doctor_out = _run(["./minictrl", "doctor"], timeout=900)
+    if "RESULT" not in doctor_out and "ok=" not in doctor_out:
+        # Without this, a doctor that never ran left `failures == 0`, which *activated* the
+        # branch forbidding documents from claiming RESULT OK - a check enforcing a rule on
+        # the strength of a run that did not happen.
+        return Result(
+            "fact-figures-match", SKIP,
+            f"minictrl doctor produced no report (exit {rc}); nothing to compare against",
+        )
     warnings = len(re.findall(r"^\[WARN\]", doctor_out, re.MULTILINE))
     failures = len(re.findall(r"^\[FAIL\]", doctor_out, re.MULTILINE))
 
@@ -1209,10 +1229,23 @@ def check_figures_quoted_in_config_comments() -> Result:
     verify_lines = len((ROOT / "tools" / "verify.py").read_text(encoding="utf-8").splitlines())
 
     proc = _sp.run(
-        ["python3", "-m", "ruff", "check", "--isolated", "--select", "BLE001", "src/min_agent"],
+        # sys.executable, as everywhere else in this file. A hardcoded "python3" measures a
+        # different interpreter than the one running the gate, and on a host where `python3`
+        # is not the gate's environment ruff may not even be importable - in which case the
+        # count silently became "?" and the check passed.
+        [sys.executable, "-m", "ruff", "check", "--isolated", "--select", "BLE001", "src/min_agent"],
         cwd=str(ROOT), capture_output=True, text=True,
     )
     found = _re.search(r"Found (\d+) error", proc.stdout)
+    if not found:
+        # The BLE001 half is then skipped entirely while the PASS message still printed a
+        # figure for it, as "?". A check that reports PASS for a comparison it could not
+        # make is worse than one that fails.
+        return Result(
+            "config-comment-figures-true", FAIL,
+            f"could not read a BLE001 count from ruff (exit {proc.returncode}); the "
+            f"permitted-exception figure in ruff.toml cannot be checked: {_tail(proc.stdout, 1)}",
+        )
     if found:
         # The pattern required the digits immediately after the keyword, so it matched
         # nothing - ruff.toml reads "would have produced 60 findings" with a space. The check
