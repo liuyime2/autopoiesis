@@ -24,9 +24,11 @@ The defects this file exists to prevent:
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
+
+TS = datetime(2026, 6, 20, 15, 0, tzinfo=timezone.utc)
 
 from min_agent.curriculum import StructuredCurriculumAgent
 from min_agent.guardian import Guardian
@@ -863,3 +865,113 @@ def test_a_flat_account_is_not_reported_as_exposure_blocked():
     assert exposure["agent_book_value"] == 0.0
     assert exposure["buy_blocked_by_exposure_limit"] is False
     assert "position_in_this_symbol" not in exposure
+
+
+def _fill_journal(tmp_path, fills):
+    """A journal whose ORDER_FILL_CONFIRMED events are enough for the real
+    `confirmed_fill_activities` to rebuild activities, so `_agent_open_lots`
+    executes rather than being handed a pre-made cost basis."""
+    from min_agent.journal import JsonlJournal
+    from min_agent.models import JournalEvent
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    for i, (coid, side, quantity, price) in enumerate(fills):
+        journal.append_event(JournalEvent(
+            event_id=f"f{i}", event_type="ORDER_FILL_CONFIRMED",
+            timestamp=TS + timedelta(seconds=i * 60), status="SUCCESS",
+            message="filled", payload={
+                "client_order_id": coid, "order_id": f"o{i}", "symbol": "SPY",
+                "side": side, "filled_quantity": float(quantity),
+                "filled_avg_price": float(price), "strategy_id": "s",
+            },
+        ))
+    return journal
+
+
+def test_selling_consumes_the_lots_it_sold(tmp_path):
+    """`open_lots` counted every fill, so a sell *increased* the reported holding.
+
+    `_agent_open_lots` appended each confirmed fill to a list and then summed the
+    list, with no consumption - so `quantity` was buys + sells. On this project's
+    own journal that reported 116 SPY shares against a broker holding of 17, in
+    the same context that separately said `positions` 17 and `sellable_quantity` 17.
+    The model could not trust the one number that would have told it whether the
+    position was up or down.
+
+    Buys and sells are now netted FIFO: 10 bought then 4 sold leaves 6, and the
+    average is over those 6 rather than over all 14 fills.
+    """
+    from min_agent.cli import _agent_open_lots
+
+    journal = _fill_journal(tmp_path, [
+        ("c1", "BUY", 10, 100.0),
+        ("c2", "SELL", 4, 120.0),
+    ])
+    lots = _agent_open_lots(journal)
+
+    assert lots["SPY"]["quantity"] == 6.0
+    assert lots["SPY"]["average_price"] == 100.0, (
+        "the average must be over the shares still held, not over the sells too"
+    )
+
+
+def test_a_sell_beyond_the_visible_buys_is_not_reported_as_a_whole_average(tmp_path):
+    """When sells outrun the buys this journal can see, there is no average to give.
+
+    29 of the shares sold on this account belonged to the owner, so no cost in the
+    journal prices them. Averaging buys together with those sells produced a number
+    that meant nothing. So the unpriced part is named and the average is omitted -
+    the consumer already skips a lot without one, and a missing average is honest
+    where a fabricated one is not.
+
+    20 bought at 100, then 25 sold: 20 are consumed FIFO, 5 liquidated shares this
+    journal never saw bought, and nothing attributable is left, so the symbol is
+    dropped entirely rather than reported at a made-up price.
+    """
+    from min_agent.cli import _agent_open_lots
+
+    journal = _fill_journal(tmp_path, [
+        ("c1", "BUY", 20, 100.0),
+        ("c2", "SELL", 25, 120.0),
+    ])
+    assert "SPY" not in _agent_open_lots(journal), (
+        "nothing attributable remains, so no lot may be reported at all"
+    )
+
+    # 20 bought, 22 sold: 2 survive FIFO and 2 were unpriced. The surviving 2 have
+    # a real cost, but the position as a whole is not fully priced, so the flag is
+    # what tells a reader the average covers only part of it.
+    # The shape this account actually has: the agent liquidated shares it never
+    # bought here, then kept buying. The 5 bought after the oversized sell are the
+    # only ones with an attributable cost, and the 15 unpriced shares are named
+    # rather than folded into an average.
+    partial = _fill_journal(tmp_path / "partial", [
+        ("c1", "BUY", 10, 100.0),
+        ("c2", "SELL", 25, 120.0),
+        ("c3", "BUY", 5, 140.0),
+    ])
+    lot = _agent_open_lots(partial)["SPY"]
+    assert lot["quantity"] == 5.0
+    assert lot["cost_basis_incomplete"] is True
+    assert lot["unpriced_sold_quantity"] == 15.0
+    assert "average_price" not in lot, (
+        "5 shares do have a cost, but reporting their average as the position's "
+        "would be the same defect in miniature - a partial figure presented as the "
+        "whole. `_context` already skips a lot without an average, so the model "
+        "gets no `average_cost` rather than one it cannot trust."
+    )
+
+
+def test_open_lots_can_never_report_more_than_a_sell_left_behind(tmp_path):
+    """The regression in one assertion: the old sum grew with every sell."""
+    from min_agent.cli import _agent_open_lots
+
+    held = 10
+    for extra_sell in (0, 1, 3):
+        journal = _fill_journal(tmp_path / f"s{extra_sell}", [
+            ("c1", "BUY", 10, 100.0),
+            ("c2", "SELL", 1 + extra_sell, 110.0),
+        ])
+        reported = float(_agent_open_lots(journal)["SPY"]["quantity"])
+        assert reported == held - (1 + extra_sell)
+        assert reported <= held

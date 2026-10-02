@@ -510,25 +510,67 @@ def _agent_open_lots(journal: JsonlJournal) -> dict[str, dict[str, object]]:
     The decision context previously carried market_value but no cost, so the model
     could not tell whether the position it held was in profit. Every price here is
     one the broker reported on a fill the reconciler re-polled to a terminal state.
+
+    Sells consume buys. They did not: every activity was appended and then summed,
+    so `quantity` was buys + sells and **selling increased the reported position**.
+    On this journal that reported 116 SPY shares against a broker holding of 17, in
+    the same context that also carries `positions` saying 17 and `sellable_quantity`
+    saying 17. The model was handed three numbers for one fact and two of them
+    contradicted the broker; `average_cost` and `unrealized_pnl` were then computed
+    over that invented average, so the one number that would have told the model
+    whether it was up or down was the one number it could not use.
+
+    When sells outrun the buys this journal can see, the shortfall was liquidated
+    from shares acquired before it - 29 SPY belonging to the account owner, which
+    `_agent_holding` documents. Nothing here can price those, so `average_price` is
+    omitted rather than averaged over buys and sells together: the consumer already
+    skips a lot without one, and a missing average is honest where a fabricated one
+    is not. `sellable_quantity` remains the authority for how many shares can
+    actually be sold.
     """
     records = journal.read_all()
-    lots: dict[str, list[tuple[float, float]]] = {}
+    by_symbol: dict[str, list] = {}
     for activity in confirmed_fill_activities(journal, records):
-        lots.setdefault(activity.symbol, []).append((activity.quantity, activity.price))
+        by_symbol.setdefault(activity.symbol, []).append(activity)
+
     out: dict[str, dict[str, object]] = {}
-    for symbol, entries in lots.items():
-        # FIFO consumption, so the average is over the shares still held.
-        total = sum(quantity for quantity, _ in entries)
+    for symbol, activities in by_symbol.items():
+        activities.sort(key=lambda a: a.transaction_time)
+        # FIFO: the oldest buys are the ones a sell liquidates, so the average is
+        # over the shares that survived rather than over everything ever traded.
+        lots: list[list[float]] = []
+        unpriced_sold = 0.0
+        for activity in activities:
+            if activity.side == "BUY":
+                lots.append([activity.quantity, activity.price])
+                continue
+            remaining = activity.quantity
+            while remaining > 0 and lots:
+                take = min(remaining, lots[0][0])
+                lots[0][0] -= take
+                remaining -= take
+                if lots[0][0] <= 0:
+                    lots.pop(0)
+            if remaining > 0:
+                # Liquidated shares this journal never saw bought.
+                unpriced_sold += remaining
+
+        total = sum(quantity for quantity, _ in lots)
         if total <= 0:
             continue
-        out[symbol] = {
+        lot: dict[str, object] = {
             "quantity": total,
-            "average_price": round(
-                sum(quantity * price for quantity, price in entries) / total, 4
-            ),
-            "fill_count": len(entries),
+            "fill_count": len(activities),
             "source": "broker_confirmed_fills",
         }
+        if unpriced_sold:
+            lot["cost_basis_incomplete"] = True
+            lot["unpriced_sold_quantity"] = round(unpriced_sold, 4)
+        else:
+            lot["average_price"] = round(
+                sum(quantity * price for quantity, price in lots) / total, 4
+            )
+        out[symbol] = lot
     return out
 
 
