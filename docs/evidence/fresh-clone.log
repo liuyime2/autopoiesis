@@ -7,7 +7,7 @@ $ git clone <repo> fc && cd fc
 $ python -m pip install -e ".[dev]"
 
 ## commit under test
-8063f4d Stop documents claiming the running system is healthy; assert that instead
+85e7ce2 Put the current architecture before the dated one; correct figures an audit measured
 
 ## environment (no credentials present)
 interpreter: /localscratch/liuyime2/conda_env/freshclone-test/bin/python3
@@ -16,7 +16,7 @@ credentials: none present; the gate's broker checks skip rather than fail
 
 ## install
 $ python3 -m pip install -e ".[dev]"
-Obtaining file:///tmp/opencode/fc-final9
+Obtaining file:///tmp/opencode/fc-z9
   Installing build dependencies: started
   Installing build dependencies: finished with status 'done'
   Checking if build backend supports build_editable: started
@@ -72,8 +72,8 @@ Requirement already satisfied: six>=1.5 in /localscratch/liuyime2/conda_env/fres
 Building wheels for collected packages: min-agent
   Building editable for min-agent (pyproject.toml): started
   Building editable for min-agent (pyproject.toml): finished with status 'done'
-  Created wheel for min-agent: filename=min_agent-0.1.0-0.editable-py3-none-any.whl size=6571 sha256=5a423a86dc7d4130471c5025fc31723f59ec3e745356c6fdbb9ad905d2d0bcfa
-  Stored in directory: /tmp/pip-ephem-wheel-cache-o3j24j1i/wheels/c9/23/b5/837d73f679d9837af64b09dae11b3875e1e9927a1521b259a5
+  Created wheel for min-agent: filename=min_agent-0.1.0-0.editable-py3-none-any.whl size=6581 sha256=66a20c9ba98a4357a54ce5212c9dba2137d410573c5d5333c8f73a72070965c0
+  Stored in directory: /tmp/pip-ephem-wheel-cache-fowpmv36/wheels/5c/79/08/78e736d40d6b382781d628eb1f491abef191392e144c3311a4
 Successfully built min-agent
 Installing collected packages: min-agent
   Attempting uninstall: min-agent
@@ -101,7 +101,7 @@ $ python3 -m pytest -q
 ................................s....................................... [ 88%]
 ........................................................................ [ 97%]
 ..................                                                       [100%]
-807 passed, 3 skipped in 12.23s
+807 passed, 3 skipped in 11.75s
 RESULT: PASS
 
 ## example
@@ -157,10 +157,10 @@ RESULT: PASS
 ## provenance
 $ python3 tools/provenance.py
 # provenance for one run of min-agent
-generated: 2026-10-02T00:25:09Z
+generated: 2026-10-02T02:03:06Z
 
 ## code
-commit: 8063f4d11277aae7594f982496bda9ae2c410324
+commit: 85e7ce255e596eb4eca84b9d41ae8576dd1c1b8b
 dirty:  yes
 
 ## environment
@@ -240,16 +240,18 @@ verify: every check class, one gate
 [PASS] example-runs                     examples/minimal_cycle.py runs with no broker or credentials
 [PASS] tools-readme-accurate            tools/README.md names all 12 tools and invents none of them
 [PASS] no-loose-design-notes            every root markdown file is a documented entry point (AGENTS.md, README.md, STATUS.md) or declares itself historical
-[PASS] fresh-clone-evidence-real        log records 7 steps from commit ce9ada3, regenerable by run-fresh-clone.sh
-[PASS] bespoke-list-matches-run         14 bespoke names, all appended by main() and all reported by --list
+[PASS] fresh-clone-evidence-real        log records 7 steps from commit 8063f4d, regenerable by run-fresh-clone.sh
+[PASS] shell-scripts-well-formed        2 shell script(s) parse cleanly under bash -n
+[PASS] bespoke-list-matches-run         16 bespoke names, all appended by main() and all reported by --list
 [PASS] status-states-only-fixed-facts   STATUS.md states only fixed configuration (mode=paper, model=qwen3.8:27b, 5 symbols, 3 hard limits); live counters are queried rather than written dow
-[PASS] config-comment-figures-true      ruff.toml's measured figures hold: verify.py 2,821 lines, 62 BLE001 findings, 24 deferred imports
-[PASS] list-count-matches-run           --list says 45; the run produces 45 for the same set (syntax-import contributes the extra row)
+[PASS] config-comment-figures-true      ruff.toml's measured figures hold: verify.py 3,079 lines, 62 BLE001 findings, 24 deferred imports
+[PASS] list-count-matches-run           --list says 47; the run produces 47 for the same set (syntax-import contributes the extra row)
 [PASS] fact-figures-match               prose agrees with the commands: audit 61/61, 810 tests collected; and no document claims a doctor warnings count (live value is 15, which is why none 
 [PASS] unit-templates-portable          4 unit template(s) carry no host path and every placeholder is substituted
 [PASS] pipeline-targets-exist           pipeline runs ['validate-data', 'test', 'evaluate', 'reproduce'] and every stage has a rule
 [PASS] config-example-names             all 34 variable names in the example are read by config.py or the env file
 [PASS] config-example-complete          all 38 variable(s) the loader reads are documented in the example
+[PASS] one-credentials-path             Makefile, minictrl and the config example all resolve $XDG_CONFIG_HOME/min-agent/env with a $HOME/.config fallback
 [PASS] unit-environment-files           2 EnvironmentFile reference(s) across the deployed units all resolve
 [SKIP] replay-audit                     no runtime/min_agent/journal.jsonl yet; nothing to replay
 [PASS] shadow-not-executed              no module treats SHADOWED as an executed order
@@ -259,7 +261,7 @@ verify: every check class, one gate
 [PASS] syntax-import                    imported 35 modules
 [PASS] data-integrity                   runtime integrity: OK (0 cycles, 0 events, 0 strategies) |   no journal yet |   no strategy registry yet |   6 previously-missing strategies recorded 
 [PASS] shadow-live-consistency          live mode hard-blocked; probation gate enforced; shadow implemented, reachable by MIN_AGENT_SHADOW=1, off by default, strict boolean
-[PASS] syntax-import                    ................................................                         [100%] | 48 passed in 3.98s
+[PASS] syntax-import                    ................................................                         [100%] | 48 passed in 3.51s
 [PASS] unit-integration                 ........................................................................ [ 25%] | ....................................................................
 [PASS] point-in-time-no-leakage         ...........................................s............................ [ 92%] | ......                                                              
 [PASS] pnl-accounting                   ........................................................................ [ 60%] | ................................................                    
@@ -267,14 +269,14 @@ verify: every check class, one gate
 [PASS] guardian-bypass-prevention       ........................................................................ [ 69%] | ...............................                                     
 [PASS] replay-determinism               ........................................................................ [ 69%] | ..............................s.                                    
 [PASS] crash-recovery                   ........................................................................ [ 53%] | ..............................................................      
-[PASS] broker-reconciliation            .............................................................            [100%] | 61 passed in 1.14s
-[PASS] decision-outcome-counterfactual  ................................................................         [100%] | 64 passed in 0.48s
+[PASS] broker-reconciliation            .............................................................            [100%] | 61 passed in 1.32s
+[PASS] decision-outcome-counterfactual  ................................................................         [100%] | 64 passed in 0.37s
 [PASS] defect-regression-audit          D15  archived projects are out of the tree  PASS | D15  a plan document exists  PASS | 61/61 checks pass across 15 defects
 [PASS] doctor                           no runtime state in this checkout; ran offline (ok=False exit=1 failures=[alpaca credentials,strategy library] warnings=[daemon,journal,knowledge libr
-[PASS] gate-class-count-consistent      every document that states the count says '45 check classes'
+[PASS] gate-class-count-consistent      every document that states the count says '47 check classes'
 [SKIP] fact-docs-current                no broker credentials: this host runs 1247 executions against the 1250 the documents state for a configured host; skipped rather than failed, and the 
 
-classes: 45   passed: 45   failed: 0   test executions: 1247 across 61 test files
+classes: 47   passed: 47   failed: 0   test executions: 1247 across 61 test files
 
 OK - all check classes pass
 RESULT: PASS
