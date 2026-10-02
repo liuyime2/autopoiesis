@@ -184,7 +184,7 @@ owns is refused rather than allowed to guess.
 
 ## Known debt
 
-`make type` reports 94 mypy findings and is not a gate. All of them are annotation
+`make type` reports 95 mypy findings and is not a gate. All of them are annotation
 precision at `Callable` and `dict` boundaries; none is a known runtime defect. It is
 wired and reproducible so the debt is visible rather than forgotten.
 

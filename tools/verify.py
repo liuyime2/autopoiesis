@@ -388,6 +388,10 @@ def check_docs_not_stale() -> Result:
                 f"{plan.relative_to(ROOT)} uses bare `conda run`, which does not work on a "
                 "host where conda is not on PATH, and is not marked SUPERSEDED"
             )
+        # `test_alpaca.py` is named in tools/README.md as a historical path. It is exempt
+        # deliberately: the file was renamed long before this refactor and the README says so.
+        # An earlier version carried that exemption with no explanation, which reads as an
+        # arbitrary hole in the check.
         absent = sorted(
             m for m in re.findall(r"src/min_agent/([a-z_]+)\.py", raw)
             if not (SRC / "min_agent" / f"{m}.py").exists()
@@ -2369,8 +2373,10 @@ def check_fact_docs_match_the_live_gate(total: int | None = None, live: list | N
     Scoped deliberately. Sections 17 onward record what the gate said *when that work
     was done* - 1111 or 1140 executions are correct for their moments - so only the
     blocks that describe the *present* are compared: the generated header and summary
-    line in `PHASES.md`, section 49 of `SYSTEM_AUDIT`, and the `make verify` row in
-    `STATUS.md`.
+    line in `PHASES.md`, and section 49 of `SYSTEM_AUDIT`. STATUS.md is not among them: it
+    deliberately carries no current-state figures to compare - `status-states-only-fixed-facts`
+    checks what it *does* state instead. An earlier version of this docstring claimed a
+    STATUS.md row that `targets` has never contained.
     """
     # The live summary is passed in rather than re-derived by spawning this same
     # script. The first version did spawn it, which re-entered this very check and

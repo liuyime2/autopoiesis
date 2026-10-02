@@ -167,7 +167,7 @@ lint:
 # demand and reports without failing the loop. Making it blocking would add 94
 # annotation-precision findings that cannot be fixed inside a single edit, which
 # is the opposite of a fast iteration loop. It is kept wired and reproducible so
-# the debt is visible and can be paid down deliberately. Baseline: 94 findings,
+# the debt is visible and can be paid down deliberately. Baseline: 95 findings,
 # all in Callable and dict boundaries, none a known runtime defect.
 type:
 	-@$(CONDA_RUN) mypy src/min_agent

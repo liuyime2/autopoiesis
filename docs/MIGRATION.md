@@ -33,9 +33,10 @@ had been the script. It was not:
   that no script assigns a risk limit, writes a `lifecycle` field, force-enables a
   strategy, or touches runtime strategy/knowledge state.
 - **`tests/min_agent/test_governance.py`** asserts the same three properties
-  parameterised over `OPS_SCRIPTS`, which is now `("minictrl",)`.
+  parameterised over `OPS_SCRIPTS`, which is now `("minictrl",)` - the only
+  surviving operator script.
 
-`minictrl` is deliberately *not* in `OPS_SCRIPTS`: it is a service-control wrapper, and
+`minictrl` is in `OPS_SCRIPTS`: it is the operator entry point, and
 adding it surfaced an assertion about a `DRIFT` marker that only ever applied to
 `auto-fix.sh`.
 
@@ -68,7 +69,7 @@ adding it surfaced an assertion about a `DRIFT` marker that only ever applied to
 | `cli.py --verify-profit-target` help | `"the 10% daily paper-profit target"` | `"the 10 percent ..."` | argparse applies `%`-formatting to help strings, so `10% d` parsed as a `% d` conversion and `--help` raised `TypeError` on every invocation. Nothing in the suite called `--help` |
 | `tools/alpaca_smoke.py` | `client.get_all_positions()` | `client.list_positions()` | `get_all_positions` has never existed in `alpaca-trade-api` 3.2, so `make smoke` had never run |
 | `README.md` risk limits | "not configurable at runtime" | Table of env var + default per limit | All five are read from the environment by `config.py`. I asserted otherwise and the assertion was wrong |
-| `test_governance.py::OPS_SCRIPTS` | `("auto-fix.sh", "auto_reviewer.py")` | `("auto_reviewer.py",)` | The deleted script no longer exists; keeping it would have made the parameterisation vacuous |
+| `test_governance.py::OPS_SCRIPTS` | `("auto-fix.sh", "auto_reviewer.py")` | `("minictrl",)` | The deleted script no longer exists; keeping it would have made the parameterisation vacuous |
 | `tools/audit_defects.py` check `D8` | Included `check("auto-fix is detect-and-report", "drift_count" in ops["auto-fix.sh"])` | Removed, with the reason recorded | The script it asserted about is gone. The three properties it guarded are still asserted over the ops scripts that remain |
 
 ## Unchanged, and deliberately so
@@ -118,6 +119,10 @@ next began, and what was actually run to establish it.
 
 Baseline after: 753 passed (was 759 — 6 tests belonged to deleted behaviour), 29 classes.
 
+Those are the figures at the moment this phase was completed and are kept as the record of
+how the criterion was established. The current figures are in `README.md`, and the gate
+checks the current ones; rewriting these would falsify what happened.
+
 ### Phase 3 — Infrastructure
 
 **Done when** a fresh clone installs and runs without this machine's state.
@@ -140,7 +145,7 @@ tests verified to fail against the unfixed code.
 
 | Criterion | How it was established |
 | --- | --- |
-| Class list is complete | `CHECK_CLASSES` matches the 29 classes that actually run, exactly, both directions |
+| Class list is complete | `CHECK_CLASSES` matches the 31 classes the loop runs, exactly, both directions |
 | Coverage gate is honest | `REPOSITORY_CHECK_CLASSES` names the exemption; stripping `pnl-accounting`'s test files makes `class-coverage` FAIL — verified by direct call and by `verify --self-test` step 3b |
 | Every class runs its tests | `syntax-import` no longer skipped in `main()`; 47 tests execute inside the gate |
 | The gate can still fail | `make verify-self-test` passes, including the new step 3b |

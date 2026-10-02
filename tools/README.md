@@ -29,7 +29,7 @@ journal text, with no production code involved, and compares them to what the sy
 reported. It is deliberately naive arithmetic over the record: if it agreed with the
 system by construction it would prove nothing.
 
-**`audit_defects.py`** checks the 62 assertions across 15 recorded regressions are still fixed, and asserts the
+**`audit_defects.py`** checks the 61 assertions across 15 recorded regressions are still fixed, and asserts the
 D8 safety properties over the ops scripts that remain — that no script assigns a risk
 limit, writes a `lifecycle` field, force-enables a strategy, or touches runtime
 strategy state.

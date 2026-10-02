@@ -1,26 +1,62 @@
-> **Two documents, not one.** Sections 1-9 are the *pre-refactor* map: what the
-> repository looked like when the refactor began, recorded before anything was changed.
-> Those sections describe a state that no longer exists - no `pyproject.toml`, five shell
-> wrappers, a `src/voyager_quant/` package, no CI - and are kept because a refactor with no
-> record of its starting point cannot be audited. Sections 10 onward are the *current*
-> architecture. Every claim below in sections 1-9 is true of that earlier tree only.
->
-> `STATUS.md` and `tools/README.md` describe the current system. This file is the only place
-> that describes the old one, and it does so explicitly.
-
 # Architecture & Runtime Map
 
+## Current architecture (after the refactor)
+
+What this repository is now. The pre-refactor tree it replaced is recorded at the end of
+this file, behind a dated marker - a refactor with no record of its starting point cannot
+be audited, but that record must not read as a description of the present.
+
+
+> Sections below describe the repository as it is now. This is the current architecture;
+> sections 1-9 above are the historical record it replaced.
+
+### What the refactor cost and saved
+
+The objective is explicit that line count is not the acceptance criterion, so the honest
+account is given rather than a flattering one.
+
+```
+76 files changed, 1560 insertions(+), 651 deletions(-)
+
+deleted    437 lines   5 shell wrappers, each a thin duplicate of CLI flags
+added      545 lines   README, ARCHITECTURE, MIGRATION
+added      264 lines   pyproject.toml, ruff.toml, Makefile targets
+added      368 lines   tests, of which 40 are the syntax-import class's own
+production +131 / -98   net +33 lines in src/min_agent
+```
+
+The production-code number is the one that matters, and +33 is almost entirely comments
+recording why a thing is the way it is: why the closed-market sleep stays inside the
+heartbeat budget, why `is_system_rejection` matches prefixes, why `research/` is
+quarantined, why the import surface was deliberately left alone. That is the kind of line
+that costs nothing to carry and saves the next reader a wrong change.
+
+What was genuinely removed, in the objective's own order:
+
+- **Delete** - 437 lines of five entry points that did the same things as the CLI; a dead
+  package; every unused import and dead local ruff could identify (12 and 2, before the
+  rules were scoped down to what is worth enforcing).
+- **Merge** - five ways to start the daemon became one `min-agent` console script.
+- **Simplify** - `CHECK_CLASSES` was a list that had stopped matching reality; it now does.
+- **Reuse** - the D8 safety property outlived the script it was written next to.
+- **Rewrite** - `smoke-offline` and the `--help` string, both of which had never worked.
+- **Add** - `pyproject.toml`, `ruff.toml`, `README.md`, `ARCHITECTURE.md`, `MIGRATION.md`,
+  and one test file.
+
+Six real defects were found and fixed that had nothing to do with the refactor's shape and
+everything to do with looking: `smoke` calling an SDK method that does not exist, `--help`
+crashing on argparse's `%` interpolation, a coverage gate passing while checking 13 of 29
+classes, `syntax-import`'s tests never executing inside a green gate, doctor reporting a
+live daemon dead every night, and a test protecting the curriculum's context window
+depending on gitignored state so it could not run on a fresh clone.
+
+---
+
+> **Dated section starts here.** Everything below records the repository as it stood
+> before the refactor: its defect table, its test baseline, and its execution path.
+> None of it is a claim about the system as it is now.
+
 ## Part I — Pre-refactor (recorded before any change)
-
-> **Dated section: the state of the tree at the start of this refactor.** Figures,
-> file lists and defect tables below describe that tree, not this one. Do not read them as
-> current. `README.md` is the current entry point.
-
-Produced by reconnaissance against the working tree, not by reading the existing plan
-documents, which this refactor is instructed to ignore. Every claim was checked; where a
-first reading was wrong the correction is recorded rather than dropped, because three of
-the four largest findings were initially misread.
-
 ## 1. What this project fundamentally is
 
 A paper-trading agent that proposes and executes trades, decides for itself whether its own
@@ -218,47 +254,3 @@ The import surface in `cli.py` was left alone. Section 8 has the measurements: d
 functions that use it. Restructuring it would have added an indirection in exchange for
 nothing measurable.
 
-## Part II — Current (after the refactor)
-
-> Sections below describe the repository as it is now. This is the current architecture;
-> sections 1-9 above are the historical record it replaced.
-
-## 10. What this refactor actually cost and saved
-
-The objective is explicit that line count is not the acceptance criterion, so the honest
-account is given rather than a flattering one.
-
-```
-76 files changed, 1560 insertions(+), 651 deletions(-)
-
-deleted    437 lines   5 shell wrappers, each a thin duplicate of CLI flags
-added      545 lines   README, ARCHITECTURE, MIGRATION
-added      264 lines   pyproject.toml, ruff.toml, Makefile targets
-added      368 lines   tests, of which 40 are the syntax-import class's own
-production +131 / -98   net +33 lines in src/min_agent
-```
-
-The production-code number is the one that matters, and +33 is almost entirely comments
-recording why a thing is the way it is: why the closed-market sleep stays inside the
-heartbeat budget, why `is_system_rejection` matches prefixes, why `research/` is
-quarantined, why the import surface was deliberately left alone. That is the kind of line
-that costs nothing to carry and saves the next reader a wrong change.
-
-What was genuinely removed, in the objective's own order:
-
-- **Delete** - 437 lines of five entry points that did the same things as the CLI; a dead
-  package; every unused import and dead local ruff could identify (12 and 2, before the
-  rules were scoped down to what is worth enforcing).
-- **Merge** - five ways to start the daemon became one `min-agent` console script.
-- **Simplify** - `CHECK_CLASSES` was a list that had stopped matching reality; it now does.
-- **Reuse** - the D8 safety property outlived the script it was written next to.
-- **Rewrite** - `smoke-offline` and the `--help` string, both of which had never worked.
-- **Add** - `pyproject.toml`, `ruff.toml`, `README.md`, `ARCHITECTURE.md`, `MIGRATION.md`,
-  and one test file.
-
-Six real defects were found and fixed that had nothing to do with the refactor's shape and
-everything to do with looking: `smoke` calling an SDK method that does not exist, `--help`
-crashing on argparse's `%` interpolation, a coverage gate passing while checking 13 of 29
-classes, `syntax-import`'s tests never executing inside a green gate, doctor reporting a
-live daemon dead every night, and a test protecting the curriculum's context window
-depending on gitignored state so it could not run on a fresh clone.
