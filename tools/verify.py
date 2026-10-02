@@ -932,27 +932,35 @@ def check_the_fact_figures_in_prose_match_reality() -> Result:
                     f"{name}:{line} says {match.group(1)} tests pass; "
                     f"pytest collects {collected.group(1)}"
                 )
-        # The pattern was "N failures and M warnings", a phrasing that appears in no document
-        # in this repository - so the branch compared nothing and reported PASS at zero
-        # assertions while STATUS.md claimed the figures. Match the forms actually written:
-        # "RESULT OK with N warning(s)" and "N failures with M warnings".
-        for match in re.finditer(
-            r"(?:RESULT:?\s+\w+(?:\s+with)?\s+)(\d+) warnings?", text
-        ):
+        # A doctor warnings count is a live figure and belongs in no document: it changes
+        # every cycle and every fill. This branch used to *compare* such a count against
+        # doctor, and its only match in the repository sat inside a dated section, so it
+        # compared nothing while reporting that prose agreed with the commands. A check that
+        # passes at zero assertions is the same defect as one that cannot fail.
+        #
+        # So it now asserts the opposite, which is the enforceable claim: no current-state
+        # document may carry a warnings figure, because any it carried would be stale the
+        # moment it was written. Run `minictrl doctor` for the live number.
+        for match in re.finditer(r"(?:RESULT:?\s+\w+(?:\s+with)?\s+)(\d+) warnings?", text):
             if any(lo <= match.start() <= hi for lo, hi in skip):
                 continue
-            if match.group(1) != str(warnings):
-                line = text[: match.start()].count("\n") + 1
-                problems.append(
-                    f"{name}:{line} says {match.group(1)} warnings; "
-                    f"doctor reports {warnings} (and {failures} failures)"
-                )
+            line = text[: match.start()].count("\n") + 1
+            problems.append(
+                f"{name}:{line} states {match.group(1)} doctor warnings; that count changes "
+                "every cycle, so it cannot be maintained in a document - read it from "
+                "`minictrl doctor`"
+            )
+
     if problems:
         return Result("fact-figures-match", FAIL, f"{len(problems)}: {problems[:4]}")
     return Result(
         "fact-figures-match", PASS,
+        # Says what it actually compared. It previously reported "doctor 0 failures / 8
+        # warnings" while the warnings branch compared nothing, which made the message a
+        # claim the check had not earned.
         f"prose agrees with the commands: audit {passed}/{total}, "
-        f"{collected.group(1)} tests collected, doctor {failures} failures / {warnings} warnings",
+        f"{collected.group(1)} tests collected; and no document claims a doctor warnings "
+        f"count (live value is {warnings}, which is why none may)",
     )
 
 

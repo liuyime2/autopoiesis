@@ -3,11 +3,54 @@
 Last updated: 2026-10-01. This file replaces `LEARNING_STATUS.md`,
 `learning_daemon_summary.md`, `findings.md`, `progress.md` and `task_plan.md`,
 all of which described the system as running when it had been dead for 97 days.
+| State | Where to read it |
+|---|---|
+| market open/closed, account, positions | `minictrl status` |
+| every health and evidence check | `minictrl doctor` |
+| submitted / filled / realized PnL | `minictrl profit`, `minictrl evidence report latest` |
+| cycle count, strategy library | `minictrl doctor` |
 
-> **Dated section starts here.** Everything below this line records the position at
-> the time it was written. Its figures were correct then and are not claims about
-> the present. For current numbers run `minictrl doctor`; the fixed configuration is
-> in the table above.
+Live numbers are queried, not written down. A figure that moves while the agent trades
+cannot be maintained in a document: an earlier version of this file carried the cycle count
+and the order count, and the gate that compared them against `doctor` went red on every
+fill - which teaches an operator to ignore the one gate that matters. What this file holds is
+what does not change:
+
+| Fixed | Value |
+|---|---|
+| mode | `paper` - `cli.py` refuses to build a client against any host but Alpaca's paper |
+| allowlist | AAPL, MSFT, NVDA, QQQ, SPY |
+| hard limits | $5,000 per position, $20,000 total exposure, $500 daily loss, 10 trades/day |
+| model | `qwen3.8:27b` on Ollama at `127.0.0.1:11434` |
+| credentials | `$XDG_CONFIG_HOME/min-agent/env`, mode 600, outside the repository |
+| units | `~/.config/systemd/user/`, four enabled, durable across reboot |
+
+## Open finding: shares sold that no BUY accounts for
+
+`minictrl doctor` reports `UNMATCHED SELLS {'trend-follow-sell-002': 29.0}`: 29 shares were
+sold with no linked BUY inside that strategy's lot tracker. The journal covers 2026-06-09
+onward and the sells are later than that, so this is not a gap at the start of the record -
+the tracker genuinely cannot pair them. Run `minictrl doctor` for the current figure; it moves
+as the agent trades.
+
+What it does to the numbers: the headline realized PnL includes part that cannot be
+attributed to a strategy, so it is an upper bound rather than an exact result. `minictrl
+profit` evaluates the target against the same figures.
+
+Not yet diagnosed. The likeliest explanation is that `trend-follow-sell-002` was re-admitted
+mid-flight - it is the strategy restored after the `loop._agent_holding` defect - and its BUY
+history predates its current admission, so the tracker starts with no open lots to sell
+against. That is a hypothesis, not a finding.
+
+Recorded rather than fixed because this is a domain question, not a repository defect, and
+getting it wrong would change reported PnL. It is a WARN rather than a FAIL for the same
+reason `make evaluate` exits zero when the profit target is unmet: a property of the data is
+not a property of the code.
+
+
+> **Dated section starts here.** Everything below records the position at the time it was
+> written. Its figures were correct then and are not claims about the present. For current
+> numbers run `minictrl doctor`.
 
 ## Where things stand
 
@@ -82,36 +125,6 @@ recorded in the transition reason. It has not fired in this session because all
 three strategies carrying verified PnL are already `ACTIVE` or `RETIRED`, and the
 agent has just sold its last agent-owned share, so nothing is in `PROBATION` with a
 closed lot behind it. It needs a new round trip, not another fix.
-
-> defects were closed. Its figures describe the system at that time - "908 cycles",
-> "the agent has never closed a lot" - and are not claims about the present. For current
-> numbers run `minictrl doctor`; for what this file states as fixed configuration, see the
-> table at the top.
-
-> **Dated section starts here.** Everything below records the position at the time
-> `minictrl doctor`; the fixed configuration is in the table above.
-
-## Open finding: 29 shares sold that no BUY accounts for
-
-`minictrl doctor` reports `UNMATCHED SELLS {'trend-follow-sell-002': 29.0}`: 29 shares were
-sold with no linked BUY inside that strategy's lot tracker. The journal covers 2026-06-09
-onward and the sells are from 2026-09-28 and 2026-10-01, so this is not a coverage gap at the
-start of the record - the tracker genuinely cannot pair them.
-
-What it does to the numbers: `pnl attribution` reports +563.41 across 27 closed lots, but
-part of that cannot be attributed to a strategy, so the headline is an upper bound rather than
-an exact result. `minictrl profit` is the command that evaluates the target, and it reads the
-same figures.
-
-Not yet diagnosed. The likeliest explanation is that `trend-follow-sell-002` was re-admitted
-mid-flight - it is the strategy `readmit_misattributed.py` restored after the
-`loop._agent_holding` defect - and its BUY history predates its current admission, so the
-tracker starts with no open lots to sell against. That is a hypothesis, not a finding.
-
-This is recorded here rather than fixed because it is a domain question, not a repository
-defect, and getting it wrong would change reported PnL. It is a WARN rather than a FAIL for
-the same reason `make evaluate` exits zero when the profit target is unmet: a property of the
-data is not a property of the code.
 
 ## What was wrong, and what is fixed
 
@@ -257,12 +270,6 @@ exactly that reason.
 
 ## What is NOT working, stated plainly
 
-> Dated section, written 2026-09-28. Each item below was true then and the causes
-> named in each were real bugs, since fixed. For whether any of them still holds, run
-> `minictrl doctor` - the file says so at the top and that instruction is the current
-> one. This block is kept because each bug it describes was found the expensive way,
-> and a reader who cannot see the failure is likely to reintroduce it.
-
 **The agent has never closed a lot, so per-strategy PnL is still empty.** The
 account holds 23 SPY bought in June. Four SELL decisions were attempted across the
 whole history and all four were rejected; the causes were real bugs, now fixed, but
@@ -296,10 +303,6 @@ document that made the claim, so the two can no longer disagree.
 Alpaca UI.
 
 ## 2026-09-28 — verification gate and the two missing loop stages
-
-> Dated section. The figures below are what the gate reported on 2026-09-28 and are
-> correct for that date. For the current figures see `README.md`; the gate now runs
-> 45 check classes. The sections below are a record of what was true when each was
 
 **`make verify` is the single gate.** 17 check classes, 0 failed, 472 distinct
 tests, 61/61 defect audit, `doctor` RESULT OK, exit 0. Per-class re-runs:
