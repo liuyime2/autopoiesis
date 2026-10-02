@@ -13,7 +13,7 @@ this refactor removed.
 
 ## The gate — `verify.py`
 
-**`python tools/verify.py`** is the project gate: 47 check classes, non-zero exit on any
+**`python tools/verify.py`** is the project gate: 48 check classes, non-zero exit on any
 failure. `make verify` runs it. Three modes:
 
 - `--self-test` breaks the gate on purpose and asserts it reports failure, because a

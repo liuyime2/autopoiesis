@@ -72,9 +72,6 @@ class StrategyAdmission:
             strategy_id=strategy.strategy_id,
         )
 
-    def _has_kind(self, kind: str) -> bool:
-        return any(strategy.kind == kind for strategy in self.strategy_library.list())
-
     def _reference_price_rejection_reason(self, strategy: StrategySpec) -> str | None:
         """Reject a TREND_FOLLOW anchored to a price the market never had.
 

@@ -1,9 +1,10 @@
-# Runs the same gate a developer runs locally, on every push and pull request.
+# Runs the gate a developer runs locally, on every push and pull request.
 #
-# Deliberately not a superset of `make verify`. The broker-dependent targets need
-# credentials and a paper account, so they are not in CI; `make smoke-offline` is the
-# broadest check that runs without either, and it is included. The credentialed path is
-# covered by the unattended watchdog on the deployment host, not here.
+# It can, now. `make verify` used to be broker-dependent, so CI ran only its self-test
+# while the file's own first line claimed otherwise. The gate now detects a missing
+# broker and a missing runtime directory and runs offline in that case - the same path
+# `make smoke`, which really does need a paper account, is not in CI; the credentialed
+# path is covered by the watchdog on the deployment host.
 name: ci
 
 on:
@@ -27,7 +28,7 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: lint
-        run: ruff check src/ tools/ tests/
+        run: ruff check src/ tools/ tests/ examples/
 
       - name: unit and integration tests
         run: python -m pytest -q
@@ -40,3 +41,6 @@ jobs:
 
       - name: the gate can fail
         run: python tools/verify.py --self-test
+
+      - name: the gate itself
+        run: python tools/verify.py

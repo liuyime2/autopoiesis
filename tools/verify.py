@@ -1736,6 +1736,73 @@ def check_one_credentials_path_everywhere() -> Result:
     )
 
 
+def check_no_production_function_is_unreachable() -> Result:
+    """Every function under src/min_agent must be called by something.
+
+    An audit listed 25 definitions that no code path reaches. Most were pydantic validators
+    and properties, which the framework invokes without a name and which must not be
+    deleted - so the check has to know the difference, or it becomes a machine for breaking
+    schema validation.
+
+    What counts as dead here: a method whose name appears nowhere in src/, tools/, tests/,
+    examples/ or the Makefile, and which is not a pydantic hook. The pydantic hooks are
+    identified by name - `normalize_*`, `require_*`, `validate_*`, `model_*`, `parse_*` -
+    plus anything declared as a property. That list is a heuristic, and the honest limit is
+    stated here: a hand-written validator with an unrelated name would still be flagged.
+
+    It also skips `research/`, which is deliberately reachable only from tests.
+    """
+    import ast
+
+    roots = [SRC / "min_agent", ROOT / "tools", ROOT / "tests", ROOT / "examples"]
+    haystack = []
+    for base in roots:
+        if not base.exists():
+            continue
+        for path in base.rglob("*.py"):
+            try:
+                haystack.append(path.read_text(encoding="utf-8"))
+            except OSError:
+                continue
+    haystack.append((ROOT / "Makefile").read_text(encoding="utf-8"))
+    haystack.append((ROOT / "minictrl").read_text(encoding="utf-8"))
+    combined = "\n".join(haystack)
+
+    pydantic_hooks = re.compile(
+        r"^(normalize_|require_|validate_|model_|parse_|is_|has_|get_|set_|__)"
+    )
+    dead: list[str] = []
+    for path in sorted((SRC / "min_agent").rglob("*.py")):
+        if "research" in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef) or node.name.startswith("__"):
+                continue
+            decorators = {
+                d.attr if isinstance(d, ast.Attribute) else getattr(d, "id", "")
+                for d in node.decorator_list
+            }
+            if decorators & {"property", "cached_property", "validator", "field_validator"}:
+                continue
+            if pydantic_hooks.match(node.name):
+                continue
+            if len(re.findall(rf"\b{re.escape(node.name)}\b", combined)) <= 1:
+                dead.append(f"{path.name}:{node.lineno} {node.name}()")
+    if dead:
+        return Result(
+            "no-unreachable-production-code", FAIL,
+            f"{len(dead)} definition(s) nothing calls: {dead[:4]}",
+        )
+    return Result(
+        "no-unreachable-production-code", PASS,
+        "every function under src/min_agent is called, or is a pydantic hook or property",
+    )
+
+
 def check_config_example_covers_every_variable() -> Result:
     """Every variable config.py reads must appear in configs/paper.env.example.
 
@@ -2560,6 +2627,7 @@ BESPOKE_CHECK_NAMES = (
     "config-example-names",
     "config-example-complete",
     "one-credentials-path",
+    "no-unreachable-production-code",
     "config-comment-figures-true",
     "unit-templates-portable",
     "fact-figures-match",
@@ -3033,6 +3101,7 @@ def main() -> int:
     results.append(_safe(check_the_documented_pipeline_targets_exist, "pipeline-targets-exist"))
     results.append(_safe(check_config_example_names_are_real, "config-example-names"))
     results.append(_safe(check_config_example_covers_every_variable, "config-example-complete"))
+    results.append(_safe(check_no_production_function_is_unreachable, "no-unreachable-production-code"))
     results.append(_safe(check_one_credentials_path_everywhere, "one-credentials-path"))
     results.append(_safe(check_unit_environment_files_exist, "unit-environment-files"))
     results.append(_safe(check_replay_audit, "replay-audit"))
