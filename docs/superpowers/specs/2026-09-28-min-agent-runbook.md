@@ -34,12 +34,12 @@ export ALPACA_API_KEY="..."     # paper key
 export ALPACA_SECRET_KEY="..."
 ```
 
-For the systemd unit, put them in `~/.config/min-agent/env` (`chmod 600`) so no
+For the systemd unit, put them in `"${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env"` (`chmod 600`) so no
 secret is baked into a unit file:
 
 ```bash
-install -Dm600 /dev/null ~/.config/min-agent/env
-printf 'ALPACA_API_KEY=...\nALPACA_SECRET_KEY=...\n' >> ~/.config/min-agent/env
+install -Dm600 /dev/null "${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env"
+printf 'ALPACA_API_KEY=...\nALPACA_SECRET_KEY=...\n' >> "${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env"
 ```
 
 ### Local model

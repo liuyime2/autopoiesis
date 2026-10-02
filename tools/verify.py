@@ -1637,6 +1637,66 @@ def check_the_example_still_runs() -> Result:
     return Result("example-runs", PASS, "examples/minimal_cycle.py runs with no broker or credentials")
 
 
+def check_one_credentials_path_everywhere() -> Result:
+    """Every entry point and document must resolve the credentials file the same way.
+
+    Three destinations were documented and two of them were wrong on this host. The Makefile
+    used `$(XDG_CONFIG_HOME)/min-agent/env`, which becomes `/min-agent/env` when
+    `XDG_CONFIG_HOME` is unset; `minictrl` used `${XDG_CONFIG_HOME:-$HOME/.config}/...`;
+    `configs/paper.env.example` and the operator runbook both hardcoded `~/.config/min-agent`.
+    Here `XDG_CONFIG_HOME` points at `/localscratch/liuyime2/ohome/.config` and
+    `~/.config/min-agent` does not exist - so following the example put the credentials
+    somewhere nothing reads them, and the operator's first symptom would be "no credentials"
+    with no indication where they had been written.
+
+    The resolution is one expression, `$XDG_CONFIG_HOME/min-agent/env` with a `$HOME/.config`
+    fallback, and this checks that all four agree on it.
+    """
+    patterns = {
+        "Makefile": (ROOT / "Makefile").read_text(encoding="utf-8"),
+        "minictrl": (ROOT / "minictrl").read_text(encoding="utf-8"),
+        "configs/paper.env.example": (ROOT / "configs" / "paper.env.example").read_text(encoding="utf-8"),
+    }
+    problems = []
+    for name, text in patterns.items():
+        if "min-agent/env" not in text:
+            problems.append(f"{name} does not mention the credentials file at all")
+            continue
+        # The line that actually resolves the file, rather than whether the word
+        # XDG_CONFIG_HOME appears anywhere in the file. A first version tested the latter and a
+        # version of the example with the fallback stripped from every command but one
+        # unrelated sentence still passed.
+        # Setup instructions count: in a commented example block the `cp` line that creates
+        # the file is the instruction. A first version filtered out comment lines and so
+        # never examined the one line that matters.
+        # Executable or copy-pasteable lines only: a prose sentence that *describes* the
+        # path is not an instruction, and one such sentence was enough to make a file full of
+        # hardcoded `~` paths pass. An instruction is one naming a shell verb.
+        # `.` was in this list and matched every sentence containing a filename, so a prose line
+# describing the path satisfied the check on its own.
+        verbs = re.compile(r"^\s*#?\s*(mkdir|cp|install|chmod|export|EDITOR|cat|tee|source)\b")
+        resolution = [
+            line for line in text.splitlines()
+            if "min-agent/env" in line and verbs.search(line)
+        ]
+        if resolution and not any("XDG_CONFIG_HOME" in line for line in resolution):
+            problems.append(
+                f"{name} resolves the credentials file without XDG_CONFIG_HOME "
+                f"(lines: {[l.strip()[:50] for l in resolution[:2]]}); on a host where "
+                "XDG_CONFIG_HOME points elsewhere that path is not read"
+            )
+    # verify.py's own resolution must carry the same fallback.
+    if "XDG_CONFIG_HOME" not in patterns["Makefile"] or "HOME" not in patterns["Makefile"]:
+        problems.append("Makefile's ENVFILE does not fall back to $HOME/.config")
+    if problems:
+        return Result("one-credentials-path", FAIL, f"{len(problems)}: {problems}")
+    return Result(
+        "one-credentials-path", PASS,
+        "Makefile, minictrl and the config example all resolve "
+        "$XDG_CONFIG_HOME/min-agent/env with a $HOME/.config fallback",
+    )
+
+
 def check_config_example_covers_every_variable() -> Result:
     """Every variable config.py reads must appear in configs/paper.env.example.
 
@@ -2450,6 +2510,7 @@ BESPOKE_CHECK_NAMES = (
     "shell-scripts-well-formed",
     "config-example-names",
     "config-example-complete",
+    "one-credentials-path",
     "config-comment-figures-true",
     "unit-templates-portable",
     "fact-figures-match",
@@ -2923,6 +2984,7 @@ def main() -> int:
     results.append(_safe(check_the_documented_pipeline_targets_exist, "pipeline-targets-exist"))
     results.append(_safe(check_config_example_names_are_real, "config-example-names"))
     results.append(_safe(check_config_example_covers_every_variable, "config-example-complete"))
+    results.append(_safe(check_one_credentials_path_everywhere, "one-credentials-path"))
     results.append(_safe(check_unit_environment_files_exist, "unit-environment-files"))
     results.append(_safe(check_replay_audit, "replay-audit"))
     results.append(_safe(check_shadow_cannot_count_as_executed, "shadow-not-executed"))
