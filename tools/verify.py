@@ -1319,7 +1319,13 @@ def check_status_only_states_what_does_not_change() -> Result:
         "an order count": r"\b\d+ orders submitted\b",
         "a share count": r"\b[\d.]+ shares? filled\b",
         "a closed-lot count": r"\b\d+ closed lots?\b",
-        "a realized PnL figure": r"[+-]\$\d[\d,]*\.\d{2}",
+        # A PnL figure in this project's own notation. The pattern required both a sign and
+        # a dollar sign, so it matched `+$564.39` and nothing else - and every document here
+        # writes it as bare `+564.39`. The check meant to forbid a live PnL in the document
+        # therefore permitted the exact form the documents use. `\$` is optional because the
+        # figure is also written with it, and a bare number with a sign and two decimals is
+        # unambiguously money in context.
+        "a realized PnL figure": r"[+-]\$?\d[\d,]*\.\d{2}",
     }
     for label, pattern in volatile.items():
         for match in re.finditer(pattern, text):

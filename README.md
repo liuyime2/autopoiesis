@@ -219,12 +219,13 @@ CI. `make verify` additionally runs `minictrl doctor` against the live deploymen
 host where the agent is trading it also answers "is the agent doing well?".
 
 That means `make verify` can legitimately go **red for a trading result rather than a code
-defect**. The clearest case is `pnl attribution`: a model that opened lots and subtracted from
-a positive total is reported FAIL, deliberately, and
-`tests/min_agent/test_attribution.py` guards that with an explicit message - an earlier version
-used `== 0.0` instead of `<= 0.0` and reported OK while the model lost money. It is a health
-failure, not a build failure, and the distinction matters when you are reading a red run: check
-which class failed before concluding anything is wrong with the code.
+defect**, and on this host it does. `pnl attribution` is FAIL right now: the model opened four
+lots and contributed -0.98 to a total of +563.41. That is a health failure and not a build
+failure, and `tests/min_agent/test_attribution.py` guards the severity deliberately - an
+earlier version used `== 0.0` instead of `<= 0.0` and reported OK while the model lost money.
+
+So when you read a red run, read which class failed before concluding anything is wrong with
+the code. `make check` (lint + tests) is the one that speaks only about the repository.
 
 Findings that are limits on the *record* rather than outcomes - currently the 29 shares sold
 that no BUY accounts for, written up in `STATUS.md` - are WARN. They are stated prominently

@@ -807,6 +807,11 @@ def _check_pnl_attribution(
     #   original bug was a `== 0.0` test that reported OK when the model merely subtracted,
     #   and downgrading it again to keep a gate green is the same defect a second time. I
     #   briefly downgraded it and the test caught it, correctly.
+    # Evaluated independently, not as an elif chain. An earlier version made unmatched sells
+    # the `if` arm and left the model-subtraction FAIL in the `elif`, so on this host - where
+    # 29 shares are unmatched - the FAIL could never fire and the severity test in
+    # test_attribution.py only passed because its fixture has no unmatched sells. Two
+    # conditions that are each independently a failure have to be reported as such.
     if pnl.get("unmatched_sell_quantity"):
         report.add(
             "pnl attribution", WARN,
@@ -815,7 +820,7 @@ def _check_pnl_attribution(
             "rather than an exact result. This is an open finding, not a fault in the "
             "trading path - see STATUS.md",
         )
-    elif result.closed_lots and model_lots > 0 and result.model_pnl <= 0.0:
+    if result.closed_lots and model_lots > 0 and result.model_pnl <= 0.0:
         report.add(
             "pnl attribution", FAIL,
             detail + f"; the model opened {model_lots} lot(s) and contributed "
