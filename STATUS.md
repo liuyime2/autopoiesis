@@ -270,7 +270,9 @@ exactly that reason.
 
 ## What is NOT working, stated plainly
 
-**The agent has never closed a lot, so per-strategy PnL is still empty.** The
+**The agent had not closed a lot at the time of writing, so per-strategy PnL was still
+empty.** It is not empty now: 27 closed lots, and per-strategy PnL is broker-verified -
+see the acceptance audit above. The
 account holds 23 SPY bought in June. Four SELL decisions were attempted across the
 whole history and all four were rejected; the causes were real bugs, now fixed, but
 no SELL has reached the broker since. The agent has also bought 49 times and been
@@ -300,7 +302,8 @@ freed - and it contradicted the RESOLVED entry above it. Corrected here, in the 
 document that made the claim, so the two can no longer disagree.
 
 **The key pair was pasted into a conversation and should be rotated** in the
-Alpaca UI.
+Alpaca UI. This was closed by operator decision on 2026-09-30, recorded above; it is
+left here as the original finding rather than deleted.
 
 ## 2026-09-28 — verification gate and the two missing loop stages
 

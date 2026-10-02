@@ -21,6 +21,18 @@ LOG="$REPO/docs/evidence/fresh-clone.log"
 # is the point of this script.
 PYTHON="${PYTHON:-python3}"
 
+# Isolation is performed, not asserted. The log used to print
+#   "credentials: none present"
+# from a hardcoded echo, while the script inherited the operator's environment - so the
+# committed evidence claimed a clean-room run that had not happened. The clone's own gate
+# output gave it away: it reported only "no runtime state in this checkout", which the gate
+# reaches when credentials ARE present. Both the variables and the env file are removed below,
+# and the log records what was actually found rather than a claim.
+unset ALPACA_API_KEY ALPACA_SECRET_KEY APCA_API_KEY APCA_API_SECRET_KEY \
+      ALPACA_BASE_URL APCA_API_BASE_URL XDG_CONFIG_HOME
+CLEAN_ENV=(env -u ALPACA_API_KEY -u ALPACA_SECRET_KEY -u APCA_API_KEY -u APCA_API_SECRET_KEY
+           -u ALPACA_BASE_URL -u APCA_API_BASE_URL -u XDG_CONFIG_HOME)
+
 rm -rf "$DEST"
 git clone --quiet "$REPO" "$DEST"
 
@@ -36,10 +48,20 @@ git clone --quiet "$REPO" "$DEST"
   echo "## commit under test"
   git -C "$DEST" log --oneline -1
   echo
-  echo "## environment (no credentials present)"
+  echo "## environment"
   echo "interpreter: $($PYTHON -c 'import sys; print(sys.executable)')"
   echo "version: $($PYTHON -c 'import sys; print(sys.version.split()[0])')"
-  echo "credentials: none present; the gate's broker checks skip rather than fail"
+  # Probed, not assumed. Every one of these is cleared above; if any survives, the log says
+  # so rather than claiming a clean room that did not happen.
+  leaked=""
+  for var in ALPACA_API_KEY ALPACA_SECRET_KEY APCA_API_KEY APCA_API_SECRET_KEY XDG_CONFIG_HOME; do
+    if [ -n "${!var:-}" ]; then leaked="$leaked $var"; fi
+  done
+  if [ -n "$leaked" ]; then
+    echo "credentials: NOT ISOLATED - still set:$leaked"
+  else
+    echo "credentials: none present (verified by probing, after unset)"
+  fi
   echo
   echo "## install"
   echo "\$ $PYTHON -m pip install -e \".[dev]\""
@@ -59,7 +81,7 @@ run_step() {
     echo "## $name"
     echo "\$ $cmd"
   } >> "$LOG"
-  if (cd "$DEST" && eval "$cmd") >> "$LOG" 2>&1; then
+  if (cd "$DEST" && "${CLEAN_ENV[@]}" bash -c "$cmd") >> "$LOG" 2>&1; then
     echo "RESULT: PASS" >> "$LOG"
   else
     echo "RESULT: FAIL" >> "$LOG"
@@ -70,7 +92,7 @@ run_step() {
 run_step lint    "$PYTHON -m ruff check src/ tools/ tests/ examples/"
 run_step test    "$PYTHON -m pytest -q"
 run_step example "$PYTHON examples/minimal_cycle.py"
-run_step entry-point "min-agent --help"
+run_step entry-point "$PYTHON -m min_agent.cli --help"
 run_step provenance "$PYTHON tools/provenance.py"
 run_step self-test "$PYTHON tools/verify.py --self-test"
 # The gate itself, in the clone, with no credentials and no runtime directory. This is the

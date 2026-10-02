@@ -71,7 +71,7 @@ wrappers each duplicated a flag below.
 | --- | --- | --- |
 | `make check` | lint + test, no broker | ~15s |
 | `make smoke` | one real cycle end to end against the broker | ~8s |
-| `make smoke-offline` | the same path with broker and model stubbed | <1s |
+| `make smoke-offline` | config and CLI end to end with `--skip-broker`; no broker, no model | ~20s |
 | `make fast` | check + smoke + the full gate | ~90s |
 | `make verify` | 47 check classes, non-zero on any failure | ~100s |
 | `make test` | the whole suite | ~5min |
@@ -115,7 +115,7 @@ examples/minimal_cycle.py   the smallest runnable example, no broker needed
 configs/paper.env.example   every environment variable, with its default
 .github/workflows/      CI: lint, tests, offline smoke, and the gate's self-test
 runtime/min_agent/      all state. gitignored, regenerable except journal.jsonl
-docs/ARCHITECTURE.md    current architecture (Part II) and the pre-refactor map (Part I)
+docs/ARCHITECTURE.md    the current architecture, then the pre-refactor map behind a dated marker
 docs/MIGRATION.md       what changed and what replaced it
 ```
 
@@ -125,7 +125,7 @@ docs/MIGRATION.md       what changed and what replaced it
 from it and can be deleted and regenerated: `reflection.json`, `heartbeat.json`,
 `risk_baseline.json`, `market-state.json` (written by nothing since the deleted `check-market-open.sh`), `curriculum_state.json`, `strategies/`.
 
-`docs/ARCHITECTURE.md` Part II has the full table and the data flow; Part I records
+`docs/ARCHITECTURE.md` has the full table and the data flow; its final section records
 what the repository looked like before this refactor.
 
 ## Debugging

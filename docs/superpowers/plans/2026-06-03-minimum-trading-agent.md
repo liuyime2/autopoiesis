@@ -1,4 +1,4 @@
-> **SUPERSEDED — historical plan, not current instructions.** This document describes a design that was never built: it references `src/min_agent/modes.py` and `src/min_agent/reflector.py`, neither of which exists. It is kept as a record of what was considered, and nothing in it is a task to perform. The architecture that actually exists is in `docs/ARCHITECTURE.md` Part II.
+> **SUPERSEDED — historical plan, not current instructions.** This document describes a design that was never built: it references `src/min_agent/modes.py` and `src/min_agent/reflector.py`, neither of which exists. It is kept as a record of what was considered, and nothing in it is a task to perform. The architecture that actually exists is in `docs/ARCHITECTURE.md`.
 
 # Minimum Trading Agent Implementation Plan
 

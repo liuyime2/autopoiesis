@@ -272,7 +272,19 @@ def check_software_supply_chain() -> Result:
 
     # A tracked file containing a plausible Alpaca key is a real incident, not a
     # style note. Alpaca keys are 32 chars of [A-Z0-9].
-    key_re = re.compile(r"\b(APCA_API[A-Z_]*(?:ID|KEY|SECRET))\s*[=:]\s*['\"]?([A-Z0-9]{16,})")
+    # Both spellings the project actually uses. The pattern only knew `APCA_API*`, so the
+    # one class whose entire purpose is preventing a committed credential could not see
+    # ALPACA_API_KEY or ALPACA_SECRET_KEY - the two names configs/paper.env.example, README
+    # and minictrl all use. Demonstrated by committing a plausible paper key pair into a
+    # README in a throwaway clone: software-supply-chain reported "no credentials".
+    #
+    # The key shape is also matched as a standalone value, not only after a recognised name,
+    # because Alpaca paper keys are `PK...` and Alpaca secrets are 40 characters of uppercase
+    # alphanumerics; a name-anchored pattern misses any other variable that carries one.
+    key_re = re.compile(
+        r"\b((?:APCA|ALPACA)_[A-Z_]*(?:ID|KEY|SECRET))\s*[=:]\s*['\"]?([A-Z0-9]{16,})"
+    )
+    bare_key_re = re.compile(r"\b(PK[A-Z0-9]{16,})\b")
     for path in sorted(ROOT.rglob("*")):
         rel = path.relative_to(ROOT).as_posix()
         if not tracked or rel not in tracked or not path.is_file():
@@ -285,6 +297,10 @@ def check_software_supply_chain() -> Result:
             continue
         for match in key_re.finditer(text):
             problems.append(f"possible credential in {rel}: {match.group(1)}")
+        for match in bare_key_re.finditer(text):
+            problems.append(
+                f"possible Alpaca key in {rel}: a PK-prefixed value appears with no variable name"
+            )
             break
 
     detail = "; ".join(problems) if problems else (
@@ -603,7 +619,6 @@ def _wanted(name: str) -> bool:
 
     One predicate, consulted by one wrapper, so a new bespoke check cannot forget.
     """
-    global _partial_run
     if not _partial_run_filter:
         return True
     return name in _partial_run_filter
@@ -737,7 +752,14 @@ def check_shell_scripts_have_no_orphaned_lines() -> Result:
     The limit is stated rather than implied: this finds de-indented prose, not every malform-
     ation a text editor can produce in a shell script.
     """
-    scripts = sorted(ROOT.glob("*.sh")) + sorted((ROOT / "tools").glob("*.sh")) + [ROOT / "minictrl"]
+    # docs/evidence/run-fresh-clone.sh is included: the whole evidence story rests on
+    # it, and an earlier version of this check did not look at it.
+    scripts = (
+        sorted(ROOT.glob("*.sh"))
+        + sorted((ROOT / "tools").glob("*.sh"))
+        + sorted((ROOT / "docs" / "evidence").glob("*.sh"))
+        + [ROOT / "minictrl"]
+    )
     scripts = [p for p in scripts if p.exists()]
     problems: list[str] = []
     for path in scripts:
@@ -1533,8 +1555,8 @@ def check_the_gate_class_count_is_reported_consistently(total: int | None = None
         # A dated history section states the count as it was, and rewriting it would
         # destroy the record: STATUS.md's 2026-09-28 section says 17 and is correct for
         # that date. Such a section is one that opens with a "> Dated section" marker, and
-        # the exemption covers the whole markdown section from that marker to the next
-        # heading of the same or higher level. Matching a marker only on adjacent lines
+        # the exemption covers everything from the marker to the end of the file - see
+        # `_dated_section_ranges`, which is the definition and states that explicitly. Matching a marker only on adjacent lines
         # was the first attempt and missed, because the marker and the figure can be
         # forty lines apart.
         try:
@@ -1678,12 +1700,25 @@ def check_one_credentials_path_everywhere() -> Result:
         # hardcoded `~` paths pass. An instruction is one naming a shell verb.
         # `.` was in this list and matched every sentence containing a filename, so a prose line
 # describing the path satisfied the check on its own.
-        verbs = re.compile(r"^\s*#?\s*(mkdir|cp|install|chmod|export|EDITOR|cat|tee|source)\b")
+        # Either an instruction or the assignment that defines the path. The Makefile sets
+        # `ENVFILE ?= .../min-agent/env` and only `include`s the variable, so a version of
+        # this that required a shell verb found nothing in the Makefile and, once that was
+        # made a failure rather than a pass, failed on the one entry point that is correct.
+        verbs = re.compile(
+            r"^\s*#?\s*(mkdir|cp|install|chmod|export|EDITOR|cat|tee|source|[A-Z_]+\s*[?:]?=)"
+        )
         resolution = [
             line for line in text.splitlines()
             if "min-agent/env" in line and verbs.search(line)
         ]
-        if resolution and not any("XDG_CONFIG_HOME" in line for line in resolution):
+        if not resolution:
+            problems.append(
+                f"{name} has no instruction that names min-agent/env, so its credentials "
+                "path cannot be checked - an entry point that never reads the file would "
+                "pass this check"
+            )
+            continue
+        if not any("XDG_CONFIG_HOME" in line for line in resolution):
             problems.append(
                 f"{name} resolves the credentials file without XDG_CONFIG_HOME "
                 f"(lines: {[l.strip()[:50] for l in resolution[:2]]}); on a host where "
@@ -2444,7 +2479,15 @@ def check_fact_docs_match_the_live_gate(total: int | None = None, live: list | N
             if not line.startswith(anchor) and anchor not in line:
                 continue
             window = " ".join(lines[i : i + 2])
-            if f"{classes} classes" not in window or f"{executions} test executions" not in window:
+            # `failed` is compared too. It was computed, embedded in the PASS detail and never
+            # `failed` is compared too. It was computed, embedded in the PASS detail and
+            # never asserted, so the documents said "0 failed" while the gate reported 1 -
+            # and the detail line printed the real number beside a comparison that never ran.
+            if (
+                f"{classes} classes" not in window
+                or f"{executions} test executions" not in window
+                or f"{failed} failed" not in window
+            ):
                 problems.append(f"{label} does not state {current}")
             break
         else:
@@ -2999,7 +3042,7 @@ def main() -> int:
     results.append(_safe(check_doctor_checks_are_all_reachable, "doctor-checks-reachable"))
     results.append(_safe(check_syntax_import, "syntax-import"))
     results.append(_safe(check_data_integrity, "data-integrity"))
-    results.append(_safe(check_shadow_live_consistency, "check_shadow_live_consistency"))
+    results.append(_safe(check_shadow_live_consistency, "shadow-live-consistency"))
 
     for cls in CHECK_CLASSES:
         if wanted and cls not in wanted:
@@ -3039,8 +3082,8 @@ def main() -> int:
     # this list's length plus one for each of them - derived here, next to the calls that
     # determine it, instead of each check guessing from the results visible at its own call.
     total_classes = len(results) + 2
-    results.append(_safe(lambda: check_the_gate_class_count_is_reported_consistently(total_classes), "check_the_gate_class_count_is_reported_consistently"))
-    results.append(_safe(lambda: check_fact_docs_match_the_live_gate(total_classes, results), "check_fact_docs_match_the_live_gate"))
+    results.append(_safe(lambda: check_the_gate_class_count_is_reported_consistently(total_classes), "gate-class-count-consistent"))
+    results.append(_safe(lambda: check_fact_docs_match_the_live_gate(total_classes, results), "fact-docs-current"))
 
     results = [r for r in results if r is not None]
     if not results:
