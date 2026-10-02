@@ -166,15 +166,54 @@ case "$cmd" in
     # writing somewhere the manager will never read.
     unit_dir="$("$ROOT_DIR/tools/systemd_unit_dir.sh")" || exit 2
     mkdir -p "$unit_dir" || { echo "FATAL: cannot create $unit_dir" >&2; exit 2; }
-    render() {
-      sed -e "s|@ROOT@|$ROOT_DIR|g" \
-          -e "s|@PYTHON@|$PYTHON_BIN|g" \
-          -e "s|@ENVBIN@|$ENVBIN|g" \
-          -e "s|@ENVFILE@|$ENV_FILE|g" \
-          -e "s|@OLLAMA_BIN@|${OLLAMA_BIN:-$(command -v ollama 2>/dev/null || echo /usr/local/bin/ollama)}|g" \
-          -e "s|@OLLAMA_MODELS@|${OLLAMA_MODELS:-/var/lib/ollama/.ollama/models}|g" \
-          "$1" > "$unit_dir/$2"
-    }
+# The ollama binary and its model directory have to be *found*, not assumed.
+      # The old fallback was the literal `/usr/local/bin/ollama`, and `command -v`
+      # finds nothing here, so the rendered unit was given a path that does not
+      # exist on this host. Nothing failed at install time - `systemd-analyze verify`
+      # does not stat ExecStart - and the unit only failed when it was next started,
+      # 40 minutes after a single binary path went missing on a service that had
+      # otherwise been up for a day and a half. Ollama is what decides trades, so
+      # for that window every decision silently came from the policy engine instead
+      # of the model, and only `doctor` noticed.
+      #
+      # So it reads the project's own configuration first, then PATH, and then
+      # refuses. A candidate list of plausible directories was tried and dropped:
+      # the real install here is under neither `$HOME` nor `/usr/local`, so any
+      # list that happened to include it would be a list written for one machine,
+      # which is the implicit state this project is supposed to stop depending on.
+      # A declared setting is portable; a guessed path is not.
+      env_setting() {
+        [ -r "$ENV_FILE" ] || return 1
+        sed -n "s/^[[:space:]]*$1=//p" "$ENV_FILE" | tail -n1 | sed 's/^["'\'']//; s/["'\'']$//'
+      }
+      OLLAMA_BIN_RESOLVED="${OLLAMA_BIN:-$(env_setting OLLAMA_BIN)}"
+      if [ -z "$OLLAMA_BIN_RESOLVED" ]; then
+        OLLAMA_BIN_RESOLVED="$(command -v ollama 2>/dev/null || true)"
+      fi
+      if [ -z "$OLLAMA_BIN_RESOLVED" ] || [ ! -x "$OLLAMA_BIN_RESOLVED" ]; then
+        echo "FATAL: cannot find an executable ollama, so ollama.service cannot be" >&2
+        echo "       written - a unit pointing at a missing binary does not fail" >&2
+        echo "       here, it fails whenever the service is next started." >&2
+        echo "       Add OLLAMA_BIN=/path/to/ollama to $ENV_FILE and re-run" >&2
+        echo "       'minictrl install-service', or export it for this run." >&2
+        exit 2
+      fi
+      OLLAMA_MODELS_RESOLVED="${OLLAMA_MODELS:-$(env_setting OLLAMA_MODELS)}"
+      if [ -z "$OLLAMA_MODELS_RESOLVED" ] || [ ! -d "$OLLAMA_MODELS_RESOLVED" ]; then
+        echo "FATAL: cannot find an ollama model directory." >&2
+        echo "       Add OLLAMA_MODELS=/path/to/models to $ENV_FILE and re-run" >&2
+        echo "       'minictrl install-service', or export it for this run." >&2
+        exit 2
+      fi
+      render() {
+        sed -e "s|@ROOT@|$ROOT_DIR|g" \
+            -e "s|@PYTHON@|$PYTHON_BIN|g" \
+            -e "s|@ENVBIN@|$ENVBIN|g" \
+            -e "s|@ENVFILE@|$ENV_FILE|g" \
+            -e "s|@OLLAMA_BIN@|$OLLAMA_BIN_RESOLVED|g" \
+            -e "s|@OLLAMA_MODELS@|$OLLAMA_MODELS_RESOLVED|g" \
+            "$1" > "$unit_dir/$2"
+      }
     render "$ROOT_DIR/tools/min-agent.service.in"  "$SERVICE_NAME"
     render "$ROOT_DIR/tools/ollama.service.in"     "ollama.service"
     render "$ROOT_DIR/tools/watchdog.service.in"  "quant-watchdog.service"

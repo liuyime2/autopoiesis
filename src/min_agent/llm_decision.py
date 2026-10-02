@@ -262,6 +262,13 @@ class HybridDecisionEngine:
                 )
         except Exception:
             strategy_id = None
+        lots: dict[str, dict[str, object]] = {}
+        if self.cost_basis is not None:
+            try:
+                lots = self.cost_basis()
+            except Exception:
+                lots = {}
+
         context: dict[str, Any] = {
             "symbol": snapshot.symbol,
             "timestamp": snapshot.timestamp.isoformat(),
@@ -303,15 +310,9 @@ class HybridDecisionEngine:
             # rejected by Guardian - it kept proposing BUY and Guardian kept saying
             # "total exposure exceeds hard limit". This is arithmetic on the broker
             # positions already in the context, not a hint to trade.
-            "exposure": self._exposure(snapshot),
+            "exposure": self._exposure(snapshot, lots),
         }
         held = next((pos for pos in snapshot.positions if pos.symbol == snapshot.symbol), None)
-        lots: dict[str, dict[str, object]] = {}
-        if self.cost_basis is not None:
-            try:
-                lots = self.cost_basis()
-            except Exception:
-                lots = {}
         if held is not None:
             context["sellable_quantity"] = int(held.quantity)
             lot = lots.get(snapshot.symbol)
@@ -329,7 +330,9 @@ class HybridDecisionEngine:
         context["lessons"] = [a.summary for a in self._lessons(strategy_id)]
         return context
 
-    def _exposure(self, snapshot: DataSnapshot) -> dict[str, Any]:
+    def _exposure(
+        self, snapshot: DataSnapshot, lots: Mapping[str, Mapping[str, object]] | None = None
+    ) -> dict[str, Any]:
         """The exposure arithmetic Guardian will actually apply, plus the account total.
 
         It has to match Guardian exactly. When the cap was measured over every
@@ -339,6 +342,19 @@ class HybridDecisionEngine:
         only exposure the agent can increase, so the context has to say the same
         thing. The account total is still reported, clearly separated, so the model
         can see the rest of the book without it being charged against its limit.
+
+        The per-symbol half was missing even after that. `max_position_value` was in
+        `risk_limits` and the position's market value was in `positions`, and the
+        model was expected to divide one by the other to learn that it was 2.6x over
+        a limit - which is exactly what it did in one recorded rationale, correctly,
+        while every other one reasoned about the strategy's price signal and never
+        mentioned the limit at all. Reading it out costs one comparison and removes
+        the arithmetic that produced 90% HOLDs with no risk reason attached.
+
+        So it is stated here, in Guardian's own terms and from Guardian's own
+        quantity: the agent's holding, falling back to the account's figure for the
+        symbol when that holding is unknown, which is the same fallback Guardian
+        uses so the two cannot disagree about whether a buy fits.
         """
         total = sum(pos.market_value for pos in snapshot.positions)
         allowlist = self.risk_limits.get("allowlist")
@@ -368,7 +384,51 @@ class HybridDecisionEngine:
             out["buy_blocked_by_account_limit"] = total + position_value > account_cap
         if held_here is not None:
             out["position_in_this_symbol"] = held_here.quantity
+        out.update(self._position_limit_state(snapshot, lots or {}))
         return out
+
+    def _position_limit_state(
+        self, snapshot: DataSnapshot, lots: Mapping[str, Mapping[str, object]]
+    ) -> dict[str, Any]:
+        """`max_position_value` restated as the arithmetic Guardian applies to it.
+
+        Guardian bounds the position a BUY would leave behind, measured on the
+        agent's own shares. If the agent's holding is not known, it falls back to
+        the account's figure for that symbol - an over-estimate, so the limit can
+        only bind harder. The same two steps, in the same order, are used here, so
+        a BUY the context calls blocked is the BUY Guardian refuses, and a BUY the
+        context calls permitted is one that passes.
+        """
+        cap = self.risk_limits.get("max_position_value")
+        if not (isinstance(cap, (int, float)) and cap > 0):
+            return {}
+        held = next(
+            (pos for pos in snapshot.positions if pos.symbol == snapshot.symbol), None
+        )
+        lot = lots.get(snapshot.symbol)
+        quantity: float | None = None
+        if isinstance(lot, Mapping) and is_number(lot.get("quantity")):
+            quantity = coerce.field_float_or(lot["quantity"], "open_lots.quantity", 0.0)
+        if quantity is None:
+            quantity = float(held.quantity) if held is not None else 0.0
+
+        held_value = quantity * snapshot.last_price
+        headroom = cap - held_value
+        one_share = snapshot.last_price
+        return {
+            "max_position_value": cap,
+            "your_position_value": round(held_value, 2),
+            "position_headroom": round(headroom, 2),
+            "over_position_limit": held_value > cap,
+            # Whether *any* buy fits. Guardian applies the same rule to whatever
+            # size was actually ordered, so this answers only the question that can
+            # be answered before a size is chosen - `shares_you_may_buy` below is
+            # the quantity-aware fact, and it is the one that equals Guardian's
+            # verdict exactly.
+            "buy_blocked_by_position_limit": held_value + one_share > cap,
+            # The largest order Guardian will approve: (held + q) * price <= cap.
+            "shares_you_may_buy": max(0, int(headroom // one_share)) if one_share > 0 else 0,
+        }
 
     def _lessons(self, strategy_id: str | None) -> list[KnowledgeArtifact]:
         if self.lessons is None or strategy_id is None:

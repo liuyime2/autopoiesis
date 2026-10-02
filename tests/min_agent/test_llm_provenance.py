@@ -975,3 +975,135 @@ def test_open_lots_can_never_report_more_than_a_sell_left_behind(tmp_path):
         reported = float(_agent_open_lots(journal)["SPY"]["quantity"])
         assert reported == held - (1 + extra_sell)
         assert reported <= held
+
+
+def _limits_engine(cap, total_cap=None):
+    from min_agent.llm_decision import HybridDecisionEngine
+
+    return HybridDecisionEngine(
+        llm=object(),
+        policy_engine=_StubPolicy(),
+        risk_limits={
+            "max_position_value": cap,
+            "max_total_exposure": total_cap,
+            "max_daily_loss": 500.0,
+            "max_trades_per_day": 10,
+            "min_confidence": 0.5,
+            "allowlist": ["SPY"],
+        },
+        cost_basis=dict,
+    )
+
+
+def test_the_context_states_the_position_limit_rather_than_making_the_model_divide():
+    """`max_position_value` and the position's value were both in the context, and
+    the model was expected to divide one by the other.
+
+    One recorded rationale did exactly that and correctly concluded it could not
+    add; every other one reasoned about the strategy's price signal and never
+    mentioned the limit. Ninety percent HOLDs, most with `no_signal` as the stated
+    reason, while the single fact that would have justified holding - already 2.6x
+    over the cap - was left as arithmetic.
+
+    So it is stated. The numbers here are the ones this project's own state produces:
+    17 shares at 769.72 against a $5,000 cap.
+    """
+    engine = _limits_engine(5_000)
+    snapshot = _basis_snapshot(last_price=769.72, spy_quantity=17)
+    state = engine._position_limit_state(snapshot, {"SPY": {"quantity": 17.0}})
+
+    assert state["max_position_value"] == 5_000
+    assert state["your_position_value"] == pytest.approx(17 * 769.72, abs=0.01)
+    assert state["position_headroom"] < 0
+    assert state["over_position_limit"] is True
+    assert state["buy_blocked_by_position_limit"] is True
+    assert state["shares_you_may_buy"] == 0
+
+
+def test_shares_you_may_buy_is_exactly_what_guardian_allows():
+    """The one property worth pinning, because two implementations of one rule is
+    what this project keeps having to undo.
+
+    `max_position_value` is enforced twice - once in Guardian, once in the context
+    - so the risk is not that one blocks and the other allows; it is that the two
+    answer slightly different questions and the model is guided by the wrong one.
+
+    Which is what a boolean does. `buy_blocked_by_position_limit` tests a *one-share*
+    buy, because the model has not chosen a size yet; Guardian tests whatever size
+    was actually ordered. At 6 shares held against a $5,000 cap at $700, a 1-share buy
+    fits (4900) and a 3-share buy does not (6300), so the boolean says "fine" for an
+    order Guardian refuses. Asserting agreement on the boolean therefore proves
+    almost nothing.
+
+    `shares_you_may_buy` is the quantity-aware fact, and it must equal the largest
+    order Guardian approves - across holdings from empty to six times the cap.
+    """
+    from min_agent.guardian import Guardian
+    from min_agent.models import TradeDecision
+
+    cap = 5_000
+    price = 700.0
+    guardian = Guardian(
+        allowlist={"SPY"}, max_position_value=cap, max_daily_loss=500,
+        max_total_exposure=None, min_confidence=0.5,
+    )
+    engine = _limits_engine(cap)
+
+    def guardian_allows(snapshot, held, quantity):
+        if quantity == 0:
+            return True
+        return guardian.review(
+            TradeDecision(symbol="SPY", action="BUY", quantity=quantity, confidence=0.9,
+                          rationale="probe", strategy_id="probe"),
+            snapshot, mode="paper", trades_today=0, now=snapshot.timestamp,
+            agent_position_quantity=float(held),
+        ).approved
+
+    for held in (0, 1, 5, 6, 7, 8, 17, 30):
+        snapshot = _basis_snapshot(last_price=price, spy_quantity=held)
+        state = engine._position_limit_state(snapshot, {"SPY": {"quantity": float(held)}})
+
+        largest = 0
+        for quantity in range(1, 30):
+            if not guardian_allows(snapshot, held, quantity):
+                break
+            largest = quantity
+
+        assert state["shares_you_may_buy"] == largest, (
+            f"held={held}: context says it may buy {state['shares_you_may_buy']}, "
+            f"Guardian allows at most {largest}"
+        )
+        # And the boolean means "no buy of any size fits", which is the only claim
+        # that is true before a size is chosen.
+        assert state["buy_blocked_by_position_limit"] == (largest == 0)
+
+
+def test_an_unknown_agent_holding_falls_back_to_the_account_the_same_way_guardian_does():
+    """Both sides fall back the same way, or they disagree at exactly the moment the
+    journal is unreadable - which is when a wrong answer costs the most.
+
+    Guardian uses the account's figure for the symbol so the cap binds harder. With
+    no `open_lots` entry the context must reach the same number, not the smaller
+    agent-only one.
+    """
+    from min_agent.guardian import Guardian
+    from min_agent.models import TradeDecision
+
+    cap = 5_000
+    snapshot = _basis_snapshot(last_price=700.0, spy_quantity=17)
+    state = _limits_engine(cap)._position_limit_state(snapshot, {})
+
+    assert state["your_position_value"] == pytest.approx(17 * 700, abs=0.01)
+    assert state["buy_blocked_by_position_limit"] is True
+
+    guardian = Guardian(
+        allowlist={"SPY"}, max_position_value=cap, max_daily_loss=500,
+        max_total_exposure=None, min_confidence=0.5,
+    )
+    refused = not guardian.review(
+        TradeDecision(symbol="SPY", action="BUY", quantity=1, confidence=0.9,
+                      rationale="p", strategy_id="p"),
+        snapshot, mode="paper", trades_today=0, now=snapshot.timestamp,
+        agent_position_quantity=None,
+    ).approved
+    assert refused == state["buy_blocked_by_position_limit"]
