@@ -80,11 +80,45 @@ class Guardian:
         if decision.confidence < self.min_confidence:
             return GuardianResult(approved=False, reason="decision confidence below minimum")
 
-        position_value = decision.quantity * snapshot.last_price
-        if decision.action == "BUY" and position_value > self.max_position_value:
-            return GuardianResult(approved=False, reason="position value exceeds hard limit")
+        order_value = decision.quantity * snapshot.last_price
+        if decision.action == "BUY":
+            # The limit is named `max_position_value` and was read as bounding the
+            # *position*. It did not: this test compared the order's own notional
+            # against it, so every order under the cap passed and the position could
+            # grow without limit. It reached 3.7x - 24 SPY shares worth $18,474
+            # against a $5,000 cap - by repeating $769 buys, and the variable was
+            # called `position_value`, so the name hid what the code measured.
+            #
+            # Bounding the order instead of the position is not a stricter rule, it
+            # is a different one, and it was the single cause of the agent being
+            # unable to explore: it filled its mandate on one symbol, then the model
+            # - correctly, reading the documented intent - refused to add to a
+            # position it believed was already over the limit.
+            #
+            # The quantity bounded is the agent's own holding, for the same reason
+            # the SELL rule below uses it: shares the account owner put there are not
+            # the agent's to risk. When that holding is unknown the account's own
+            # figure for the symbol is used instead - an over-estimate, so the limit
+            # can only be enforced more strictly, and available even when the journal
+            # is not. Refusing outright would turn an unreadable journal into a
+            # system that cannot trade at all, which is the brick, not the control.
+            held = agent_position_quantity
+            if held is None:
+                held = sum(
+                    p.quantity for p in snapshot.positions if p.symbol == decision.symbol
+                )
+            resulting_value = (held + decision.quantity) * snapshot.last_price
+            if resulting_value > self.max_position_value:
+                return GuardianResult(
+                    approved=False,
+                    reason=(
+                        f"this buy would leave {resulting_value:.2f} {decision.symbol} "
+                        f"held against a max_position_value of "
+                        f"{self.max_position_value:.2f}"
+                    ),
+                )
 
-        if decision.action == "BUY" and snapshot.account.buying_power < position_value:
+        if decision.action == "BUY" and snapshot.account.buying_power < order_value:
             return GuardianResult(approved=False, reason="insufficient buying power")
 
         if decision.action == "SELL" and not self._has_position(snapshot, decision.symbol, decision.quantity):
@@ -147,21 +181,21 @@ class Guardian:
         )
         account_value = sum(pos.market_value for pos in snapshot.positions)
         if self.max_total_exposure is not None and decision.action == "BUY":
-            if mandate_value + position_value > self.max_total_exposure:
+            if mandate_value + order_value > self.max_total_exposure:
                 return GuardianResult(
                     approved=False,
                     reason=(
-                        f"agent exposure {mandate_value:.2f} + {position_value:.2f} "
+                        f"agent exposure {mandate_value:.2f} + {order_value:.2f} "
                         f"exceeds the {self.max_total_exposure:.2f} limit "
                         f"(allowlist symbols only; account total is {account_value:.2f})"
                     ),
                 )
         if self.max_account_value is not None and decision.action == "BUY":
-            if account_value + position_value > self.max_account_value:
+            if account_value + order_value > self.max_account_value:
                 return GuardianResult(
                     approved=False,
                     reason=(
-                        f"account total {account_value:.2f} + {position_value:.2f} "
+                        f"account total {account_value:.2f} + {order_value:.2f} "
                         f"exceeds the {self.max_account_value:.2f} account limit"
                     ),
                 )

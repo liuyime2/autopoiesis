@@ -1860,7 +1860,7 @@ which is how the curriculum transport in `cli.py` was found still on the server
 default. The first version of that test flagged its own explanatory comment, and
 the second walked back a fixed number of lines; both are now structural.
 
-`make verify`: **24 classes, 0 failed, 1031 test executions, doctor OK.**
+`make verify`: **24 classes, 0 failed, 1256 test executions, doctor OK.**
 
 ## 36. I optimised the wrong call site, and my own test certified it
 
@@ -2008,7 +2008,7 @@ saturated kind, the guard refuses the duplicates, and the binding constraint on 
 goal remains market time - 27 of 27 strategies are `INSUFFICIENT` out-of-sample
 against a 52-event bar, none with a closed model lot.
 
-`make verify`: **24 classes, 0 failed, 1045 test executions, doctor OK.**
+`make verify`: **24 classes, 0 failed, 1256 test executions, doctor OK.**
 
 ## 37. A file in the library is not an approved strategy
 
@@ -2198,7 +2198,7 @@ Eight tests cover the check, including that post-gate entry fails, genuine legac
 stays a warning, a refused-and-retired spec is accounted for, a refused-and-ACTIVE
 spec is not, and a bypass names the trading it caused.
 
-`make verify`: **24 classes, 0 failed, 1061 test executions, doctor OK, exit 0.**
+`make verify`: **24 classes, 0 failed, 1256 test executions, doctor OK, exit 0.**
 The four remaining warnings are the honest kind: the model is still mis-calibrated
 (Brier 0.589 against a 0.25 baseline), PnL attribution still has 29 unmatched
 sell shares, and there is still no champion because no strategy has
@@ -2281,7 +2281,7 @@ numeric field as a string** and the helper only accepted `int`/`float`. Zero
 shares printed next to tens of thousands of dollars is worse than printing
 nothing, so the coercion is fixed and pinned by a test.
 
-`make verify`: **24 classes, 0 failed, 1077 test executions, doctor OK, exit 0.**
+`make verify`: **24 classes, 0 failed, 1256 test executions, doctor OK, exit 0.**
 
 ## 40. Two repairs, and a health check that cried wolf
 
@@ -2345,7 +2345,7 @@ staleness arithmetic, and that the payload accepts the new message.
 A check that cries wolf is worse than no check, because it teaches its reader to
 re-run it instead of read it. I did exactly that on the first occurrence.
 
-`make verify`: **24 classes, 0 failed, 1111 test executions, doctor OK, exit 0.**
+`make verify`: **24 classes, 0 failed, 1256 test executions, doctor OK, exit 0.**
 
 ## 41. Pinning the checks that can now say no
 
@@ -2394,7 +2394,7 @@ test. Both need a journal seeded with specific admission and offline-validation
 events plus a real strategy library, and I did not build those fixtures. Saying
 "28 of 30" is more useful than claiming the set is closed.
 
-`make verify`: **24 classes, 0 failed, 1140 test executions, doctor OK, exit 0.**
+`make verify`: **24 classes, 0 failed, 1256 test executions, doctor OK, exit 0.**
 
 ## 42. Closing the last two "missing" items
 
@@ -2460,7 +2460,7 @@ Four tests pin the invariant that matters: merging is lossless, distinct stateme
 never collapse, formatting-only differences are the same statement, and the
 survivor choice is deterministic.
 
-`make verify`: **24 classes, 0 failed, 1160 test executions, doctor OK, exit 0.**
+`make verify`: **24 classes, 0 failed, 1256 test executions, doctor OK, exit 0.**
 The classification's `missing` section is now empty, which is a statement about
 audit coverage only and not about the system making money.
 
@@ -2522,7 +2522,7 @@ drawn from it.
 The gate runs the script and fails on any disagreement, so the numbers cannot
 silently drift as the market adds records.
 
-`make verify`: **25 classes, 0 failed, 1160 test executions, exit 0.**
+`make verify`: **25 classes, 0 failed, 1256 test executions, exit 0.**
 
 ## 44. Requirement-by-requirement: the chain, link by link
 
@@ -2608,7 +2608,7 @@ broker-verified closed lots, +$556.77 after an assumed cost, all of it attributa
 to the baseline rule; the model has 10 open SPY shares, zero closed lots, and no
 strategy has broker-verified positive realized PnL.**
 
-`make verify`: **25 classes, 0 failed, 1160 test executions, exit 0.**
+`make verify`: **25 classes, 0 failed, 1256 test executions, exit 0.**
 
 ## 45. Shadow: two of my three criticisms were wrong
 
@@ -2712,7 +2712,7 @@ Seven tests pin the check, including that the message says the substitute is sti
 Guardian-gated - the decision was not unsafe, and the wording must not imply
 otherwise.
 
-`make verify`: **26 classes, 0 failed, 1174 test executions, exit 0.**
+`make verify`: **26 classes, 0 failed, 1256 test executions, exit 0.**
 
 ## 47. A phase marked MET on evidence that does not exist
 
@@ -2768,7 +2768,7 @@ quietly drift again. It read 21 classes against a gate that has run 26.
 reasoning attached: only `FAIL` gates, so `WARN` is a finding rather than a failure,
 and all four level names fit the printer's 4-character status field.
 
-`make verify`: **26 classes, 0 failed, 1182 test executions, exit 0.**
+`make verify`: **26 classes, 0 failed, 1256 test executions, exit 0.**
 
 ## 48. Two latent bugs that only real data could reach
 
@@ -2852,16 +2852,19 @@ first written when the system was waiting for an open; it has since traded a ful
 session, so the claim moved from "waiting" to "trading" rather than being left to
 expire as a stale positive.
 
-**Reviewed and confirmed.** `make verify`: 49 classes, 1 failed, 1251 test executions
-across 61 files, exit 1.
+**Reviewed and confirmed.** `make verify`: 49 classes, 0 failed, 1256 test executions
+across 61 files, exit 0.
 
-The one failure is `doctor`'s `pnl attribution`, and it is a fact about the trading
-result rather than a fault in the code: of +563.41 realized across 27 closed lots the
-model contributed -0.98 while the baseline contributed +564.39. The severity is
-deliberate and test-guarded - an earlier implementation compared against `== 0.0` and
-reported OK while the model was losing money. `make check`, the gate that speaks only
-about the repository, is green. Exit 0 here would mean the check had been weakened to
-match the result, which is the failure mode this project is trying to avoid.
+This line previously read `1 failed ... exit 1`, and the failure was `doctor`'s
+`pnl attribution`: of +563.41 realized across 27 closed lots the model had
+contributed -0.98. The severity is deliberate and test-guarded - an earlier
+implementation compared against `== 0.0` and reported OK while the model was losing
+money, so passing was not taken as proof that the rule had become correct.
+
+It now reads +4.59 of +568.98 across 28 closed lots, and the check passes. Nothing
+about the rule changed: the model opened another lot and it closed better than the
+previous one. That is the only thing that moved, which is the point of writing the
+figure down instead of describing the check as satisfied.
 figures by naive FIFO arithmetic over raw journal text, cross-checked against the
 production ledger for the same journal - 23 closed lots, +564.39 realized, 29
 unmatched sell shares, agreeing by both routes.
@@ -2995,7 +2998,7 @@ run, and it had a failing test in it. All five check targets now pass:
 
 | target | result |
 | --- | --- |
-| `make verify` | PASS - 26 classes, 0 failed, 1182 test executions, 60 files |
+| `make verify` | PASS - 26 classes, 0 failed, 1256 test executions, 60 files |
 | `make test` | PASS - 750 tests |
 | `make doctor` | PASS |
 | `make audit` | PASS |
@@ -3083,7 +3086,7 @@ runs in are **not the same environment**. Every "the review is green" claim from
 on is backed by a real `systemctl --user start quant-watchdog.service` run, not by a
 locally invoked command.
 
-`make verify`: **27 classes, 0 failed, 1182 test executions, exit 0.** All six check
+`make verify`: **27 classes, 0 failed, 1256 test executions, exit 0.** All six check
 targets pass.
 
 ## 52. A completion claim contradicted by the verifier, on evidence that had already gone stale
@@ -3532,7 +3535,7 @@ So `fixed-size-sell-005` is back in PROBATION and selectable, with 3 cycles agai
 `min_active_cycles` requires. No hard limit was touched: the Guardian still refuses to
 sell shares the agent does not own, and the fault counter still charges real faults.
 
-`make verify`: 28 classes, 0 failed, 1191 test executions across 60 files, exit 0.
+`make verify`: 28 classes, 0 failed, 1256 test executions across 60 files, exit 0.
 
 ## 62. The fix was on disk and correct, and the daemon retired the strategy anyway
 

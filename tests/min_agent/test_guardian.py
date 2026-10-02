@@ -279,15 +279,30 @@ def test_total_exposure_cap_allows_a_buy_that_stays_under_it():
     held = (PositionSnapshot(symbol="QQQ", quantity=10, market_value=3_000),)
     decision = TradeDecision(symbol="SPY", action="BUY", quantity=5, confidence=0.9, rationale="probe")
 
+    # agent_position_quantity=5: (5 + 5) * 500 = 5000, exactly the per-symbol limit,
+    # so this buy has to clear that rule too - 3000 + 2500 = 5500 is under the 8000
+    # aggregate cap, and a buy that passed only one of the two limits would prove
+    # nothing about either.
     assert guardian.review(
         decision, snapshot(last_price=500, positions=held),
-        agent_position_quantity=10,
+        agent_position_quantity=5,
     ).approved is True
 
 
-def test_per_order_cap_does_not_bound_aggregate_exposure_without_the_total_cap():
-    """Documents why max_total_exposure must be configured: each BUY is under the
-    per-order cap, so only the aggregate cap stops unbounded accumulation."""
+def test_the_position_cap_bounds_accumulation_not_just_the_order():
+    """A BUY is judged on the position it leaves behind, not on its own size.
+
+    This test used to be named `test_per_order_cap_does_not_bound_aggregate
+    _exposure_without_the_total_cap` and asserted the opposite, with a docstring
+    explaining that each order was under the per-order cap so only the aggregate
+    cap stopped accumulation. That described a defect, not a policy: the rule
+    compared `decision.quantity * price` against a limit named
+    `max_position_value`, so an agent holding nothing could buy 1 share at a time
+    forever. It reached 3.7x of the cap before this was found.
+
+    The same fixture - agent holds 10, buys 5 more at 500 - is now correctly
+    refused, because (10 + 5) * 500 = 7500 exceeds the 5000 limit.
+    """
     guardian = Guardian(
         allowlist={"SPY"},
         max_position_value=5_000,
@@ -297,10 +312,103 @@ def test_per_order_cap_does_not_bound_aggregate_exposure_without_the_total_cap()
     held = (PositionSnapshot(symbol="SPY", quantity=40, market_value=20_000),)
     decision = TradeDecision(symbol="SPY", action="BUY", quantity=5, confidence=0.9, rationale="probe")
 
-    assert guardian.review(
+    result = guardian.review(
         decision, snapshot(last_price=500, positions=held),
         agent_position_quantity=10,
-    ).approved is True
+    )
+
+    assert result.approved is False
+    assert "7500.00 SPY" in result.reason
+    assert "5000.00" in result.reason
+
+
+def test_an_order_under_the_cap_is_still_refused_when_it_would_overshoot_the_position():
+    """The regression this guard exists for: every single order passes on its own.
+
+    Ten $450 buys are $450 each, comfortably under a $5000 cap, and together they
+    are $4500 - inside the cap. The eleventh is $450 and takes the position to
+    $4950, still inside. The twelfth takes it to $5400 and must be refused even
+    though the order is the smallest one in the sequence.
+    """
+    guardian = Guardian(
+        allowlist={"SPY"},
+        max_position_value=5_000,
+        max_daily_loss=500,
+        max_total_exposure=None,
+    )
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=1, confidence=0.9, rationale="probe")
+
+    approved = 0
+    for held in range(12):
+        result = guardian.review(
+            decision, snapshot(last_price=450, positions=()), agent_position_quantity=held,
+        )
+        if result.approved:
+            approved += 1
+            continue
+        # 11 buys at 450 = 4950; the 12th would make 5400.
+        assert (held + 1) * 450 > 5_000
+        assert "SPY held" in result.reason
+        break
+    else:
+        raise AssertionError("the position cap never bound")
+
+    assert approved == 11, f"expected the cap to stop at 11 shares, it stopped at {approved}"
+
+
+def test_the_position_cap_is_measured_on_the_agents_own_shares():
+    """The owner's shares are not the agent's to risk, exactly as for a SELL.
+
+    The account holds 20 SPY worth 10000. With `max_position_value` at 5000 the
+    agent may still open a 5000 position of its own, because the 10000 belongs to
+    the owner and bounding it here would make the account's history a permanent bar
+    to the agent ever trading the symbol.
+    """
+    guardian = Guardian(
+        allowlist={"SPY"},
+        max_position_value=5_000,
+        max_daily_loss=500,
+        max_total_exposure=None,
+    )
+    owners = (PositionSnapshot(symbol="SPY", quantity=20, market_value=10_000),)
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=10, confidence=0.9, rationale="probe")
+
+    result = guardian.review(
+        decision, snapshot(last_price=500, positions=owners), agent_position_quantity=0,
+    )
+
+    assert result.approved is True
+
+
+def test_an_unknown_agent_holding_falls_back_to_the_accounts_figure():
+    """An unreadable journal must not become a system that cannot trade.
+
+    `_agent_holding` returns None when the journal is unavailable, which is what
+    makes Guardian refuse a SELL - a missed exit is recoverable. Refusing every BUY
+    the same way would be a brick rather than a control, so the BUY path falls back
+    to the account's holding for the symbol: an over-estimate of what the agent
+    holds, so the cap can only be enforced more strictly, never less.
+    """
+    guardian = Guardian(
+        allowlist={"SPY"},
+        max_position_value=5_000,
+        max_daily_loss=500,
+        max_total_exposure=None,
+    )
+    held = (PositionSnapshot(symbol="SPY", quantity=20, market_value=10_000),)
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=1, confidence=0.9, rationale="probe")
+
+    unknown = guardian.review(decision, snapshot(last_price=500, positions=held))
+    known = guardian.review(
+        decision, snapshot(last_price=500, positions=held), agent_position_quantity=0,
+    )
+
+    # The account figure (20 shares) is used, so the buy is refused even though the
+    # agent demonstrably holds nothing.
+    assert unknown.approved is False
+    assert "SPY held" in unknown.reason
+    # And when the agent's own holding is known to be zero, it is allowed.
+    assert known.approved is True
 
 
 def test_sell_is_permitted_once_the_position_book_is_read():
@@ -472,25 +580,34 @@ def test_the_exposure_cap_ignores_positions_the_agent_cannot_trade():
 
 def test_the_exposure_cap_still_binds_on_the_agents_own_book():
     """The relaxation must not become an unbounded one: the same cap, measured over
-    allowlist positions the agent does hold, still refuses the breaching buy."""
+    allowlist positions the agent does hold, still refuses the breaching buy.
+
+    The fixture is deliberately arranged so the *per-symbol* cap does not fire
+    first, because otherwise this would still be testing that one: the agent holds
+    nothing of its own, so a 10-share buy at 500 is exactly the 5000 per-symbol
+    limit and passes, leaving the aggregate rule to refuse it.
+    """
     guardian = Guardian(
         allowlist={"SPY", "QQQ"},
         max_position_value=5_000,
         max_daily_loss=500,
         max_total_exposure=20_000,
     )
-    # 19000 already held, buying 5 at 500 is 2500, so 21500 breaches the 20000 cap.
+    # 18000 already held in allowlist symbols, buying 10 at 500 is 5000, so 23000
+    # breaches the 20000 cap while the agent's own position stays at the 5000 limit.
     held = (
-        PositionSnapshot(symbol="SPY", quantity=20, market_value=19_000.0),
+        PositionSnapshot(symbol="SPY", quantity=36, market_value=18_000.0),
         PositionSnapshot(symbol="TLT", quantity=226, market_value=17_757.95),
     )
-    decision = TradeDecision(symbol="SPY", action="BUY", quantity=5, confidence=0.9, rationale="probe")
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=10, confidence=0.9, rationale="probe")
 
-    result = guardian.review(decision, snapshot(last_price=500, positions=held))
+    result = guardian.review(
+        decision, snapshot(last_price=500, positions=held), agent_position_quantity=0,
+    )
 
     assert result.approved is False
-    assert "agent exposure 19000.00" in result.reason
-    assert "account total is 36757.95" in result.reason, "both numbers stay auditable"
+    assert "agent exposure 18000.00" in result.reason
+    assert "account total is 35757.95" in result.reason, "both numbers stay auditable"
 
 
 def test_the_account_backstop_bounds_the_whole_book_when_the_owner_asks_for_it():

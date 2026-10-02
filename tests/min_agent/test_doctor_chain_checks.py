@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+from min_agent import doctor as doctor_module
 from min_agent.doctor import (
     DoctorReport,
     _check_champion_and_search,
@@ -215,3 +216,51 @@ def test_an_empty_library_is_reported_rather_than_claimed_complete(tmp_path):
     check = _chain_report(tmp_path, [], [])
     assert check.status.value == "warn"
     assert "no strategies to account for" in check.detail
+
+
+def test_a_model_that_subtracts_from_a_positive_total_fails_the_gate(tmp_path):
+    """The severity that must not be softened while the model happens to be up.
+
+    `doctor` reports `pnl attribution` PASS on this host because the model
+    contributed +4.59 of +568.98. That is the model's real trading result and the
+    rule was not touched to get there - but it also means the FAIL branch has
+    nothing exercising it, so a later "this check was too strict, loosen it" edit
+    would pass every test in the suite.
+
+    So the branch is driven directly through `_check_pnl_attribution`. An earlier
+    version of this rule compared `== 0.0` and reported OK while the model was
+    losing money, which is the exact failure this pins shut.
+    """
+    from min_agent import doctor as doctor_module
+    from min_agent.attribution import Attribution
+    from min_agent.doctor import _check_pnl_attribution
+
+    config = _Cfg(tmp_path / "strategies", tmp_path / "j.jsonl")
+    (tmp_path / "strategies").mkdir(exist_ok=True)
+
+    def severity(model_pnl: float, total: float) -> str:
+        # One recorded evidence event is what gets the check past its "no closed
+        # lots on record" early return.
+        journal = _journal(tmp_path, [
+            ("PNL_EVIDENCE_RECORDED", None, {"pnl": {"closed_lots": 4}}),
+        ])
+        report = DoctorReport()
+        result = Attribution(
+            total_realized_pnl=total,
+            closed_lots=4,
+            lots_by_source={"llm": 4, "baseline": 4},
+            by_source={"llm": model_pnl, "baseline": total - model_pnl},
+            after_cost_pnl=total,
+        )
+        original = doctor_module.attribution.attribute
+        doctor_module.attribution.attribute = lambda *a, **k: result
+        try:
+            _check_pnl_attribution(report, config, journal, [])
+        finally:
+            doctor_module.attribution.attribute = original
+        return _by_name(report, "pnl attribution").status.value
+
+    assert severity(-0.98, 563.41) == "fail", (
+        "a model that opened 4 lots and contributed -0.98 to a +563.41 total must FAIL"
+    )
+    assert severity(4.59, 568.98) != "fail"
