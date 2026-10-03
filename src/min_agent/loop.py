@@ -212,7 +212,28 @@ class TradingLoop:
                 decision, snapshot, mode=self.mode, trades_today=trades_today,
                 agent_position_quantity=self._agent_holding(decision.symbol),
             )
-            errors.append(f"in_flight_order: {in_flight}")
+            # Deliberately NOT appended to `errors`.
+            #
+            # `record.error` feeds `StrategyResult.errors`, which is the numerator of the
+            # lifecycle's failure rate: >= 0.75 retires a strategy as a "severe operational
+            # failure" and > 0.25 pauses it for "error rate above lifecycle threshold".
+            # Charging the guard for firing therefore retires the strategies that trade
+            # most, because a strategy that wants to trade while its order is pending is
+            # precisely a strategy that trades. Measured on this journal, every FIXED_SIZE
+            # strategy carrying errors had `in_flight_order` as the only error text -
+            # fixed-size-sell-005 (3), fixed-size-probe-0001 (3), fixed-size-sell-006 (4) -
+            # and all three are PAUSED or RETIRED, while fixed-size-buy-001 (21 informative
+            # decisions) and tiny-fixed-size-001, the two with no errors at all, are the only
+            # ones that survived. The cycle this guard produces submits nothing, takes no
+            # risk and ends in a fail-safe HOLD: it is the guard working, not a failure.
+            #
+            # Nothing is lost by dropping it. The skip stays on the cycle twice over: the
+            # decision's own rationale carries the specific reason, and the executor
+            # returns SKIPPED, which the evaluator counts as a skipped order.
+            #
+            # This is the same shape as `SYSTEM_REJECTION_REASONS` on the Guardian's
+            # rejection channel, where a refusal the system issued correctly stopped
+            # counting against the strategy. The error channel never got that split.
 
         execution = self.executor.execute(decision, guardian_result, cycle_id=cycle_id)
         record = CycleRecord(

@@ -401,9 +401,18 @@ def test_an_unfilled_submission_blocks_an_identical_resubmission():
     assert record.decision.action == "HOLD", (
         f"re-submitted an order already in flight; got {record.decision.action!r}"
     )
-    assert "in_flight_order" in (record.error or ""), (
-        f"the skip must be recorded on the cycle, not silently dropped; error={record.error!r}"
+    assert "skip:" in record.decision.rationale and "identical order" in record.decision.rationale, (
+        f"the skip must be recorded on the cycle, not silently dropped; "
+        f"rationale={record.decision.rationale!r}"
     )
+    # It must not be recorded as an *error*. `record.error` is the numerator of the
+    # lifecycle's failure rate, so charging the guard for firing retires the strategies
+    # that trade most: on this journal every FIXED_SIZE carrying errors had
+    # `in_flight_order` as its only error text, and all of them are now PAUSED or RETIRED.
+    assert record.error is None, (
+        f"a correctly-refused duplicate is not an operational failure; error={record.error!r}"
+    )
+    assert record.execution.status == "SKIPPED"
     assert [d.action for d in executor.submitted] == ["HOLD"], "nothing may reach the executor"
 
 

@@ -87,6 +87,20 @@ trouble.
 `probation produced no exploration evidence`, `behaviourally identical to existing
 strategy`, `broker-verified negative realised PnL`.
 
+**Retirement has to select for the right thing, not merely fire.** A strategy is retired
+when its failure rate reaches 0.75 and paused when its error rate passes 0.25, where the
+failure rate is `(errors + strategy-fault rejections) / cycles`. That makes the *numerator*
+a selection criterion, so anything counted there is a reason to die. The loop's guard
+against re-submitting an order it has not seen filled was journalled into `record.error`,
+which retired and paused the strategies that trade most - a strategy that wants to trade
+while its order is pending is precisely one that trades. On this journal the three
+FIXED_SIZE strategies holding 14, 12 and 3 informative decisions were all dead, and the
+two with no errors at all were the only survivors. Guardian rejections already split
+system-caused from strategy-fault for exactly this reason
+(`SYSTEM_REJECTION_REASONS`); the error channel now carries only genuine failures. The rule
+generalises: **a measurement that can retire a strategy must not also record the risk system
+working.**
+
 ## Where a measurement has to be able to go
 
 The system's own instruction is that a measurement nothing reads is a log line, not

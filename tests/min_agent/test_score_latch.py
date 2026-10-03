@@ -310,6 +310,103 @@ def test_baseline_strategies_are_exempt_from_the_degenerate_guard():
     assert manager.review([strategy], [result]) == []
 
 
+# --- a correctly-refused duplicate is not an operational failure ------------
+#
+# The sibling defect to `SYSTEM_REJECTION_REASONS` above, on the error channel.
+# `loop` rewrites a duplicate submission into a fail-safe HOLD and used to append
+# `in_flight_order: ...` to `record.error`, which is the numerator of the failure
+# rate. So the guard that stops a doubled position was counted as the strategy
+# failing, and it retired the strategies that trade most - a strategy that wants to
+# trade while its order is pending is precisely a strategy that trades.
+
+
+def _skipped_in_flight(strategy_id, error):
+    """A cycle the in-flight guard turned into a HOLD, with `error` as loop would set it."""
+    record = _record(strategy_id, "HOLD", "SKIPPED", reason="hold", quantity=0)
+    return record.model_copy(update={"error": error})
+
+
+def test_an_in_flight_skip_is_not_charged_as_a_strategy_error():
+    """The skip itself must not reach `record.error`; loop.py owns that decision."""
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[2] / "src" / "min_agent" / "loop.py"
+    body = source.read_text()
+    # Guard the source of the fix, not just its arithmetic: re-adding the append is a
+    # one-line change that every metric-level test below would still pass.
+    in_flight_block = body.split("in_flight is not None:", 1)[1].split("execution = self.executor.execute", 1)[0]
+    assert "errors.append" not in in_flight_block, (
+        "the in-flight guard must not append to `errors`; it charges a correct refusal "
+        "to the strategy as an operational failure"
+    )
+
+
+def test_a_correctly_refused_duplicate_cannot_reach_the_failure_rate():
+    """End to end: with the skip off the error channel, the lifecycle cannot fire on it."""
+    skipped = _skipped_in_flight("s", None)
+    metrics = DeterministicEvaluator().evaluate([skipped]).strategy_metrics["s"]
+
+    assert metrics.errors == 0
+
+    manager = StrategyLifecycleManager(severe_failure_rate=0.75, max_error_rate=0.25)
+    strategy = make_spec(strategy_id="s", kind="FIXED_SIZE", lifecycle="ACTIVE")
+    result = _result(
+        strategy_id="s",
+        cycles=metrics.cycles,
+        submitted_orders=metrics.submitted_orders,
+        rejected_orders=metrics.rejected_orders,
+        errors=metrics.errors,
+        score=metrics.score,
+    )
+    assert manager.review([strategy], [result]) == [], (
+        "a strategy whose only non-trades were correctly-refused duplicates must not be retired"
+    )
+
+
+def test_a_charged_in_flight_skip_would_have_retired_the_strategy():
+    """Why the fix matters: the same cycle, with the skip on the error channel, kills it.
+
+    This is the state loop.py used to produce, and it is what retired or paused
+    fixed-size-sell-005, fixed-size-probe-0001 and fixed-size-sell-006.
+    """
+    charged = _skipped_in_flight("s", "in_flight_order: an identical order was submitted")
+    metrics = DeterministicEvaluator().evaluate([charged]).strategy_metrics["s"]
+
+    assert metrics.errors == 1
+
+    manager = StrategyLifecycleManager(severe_failure_rate=0.75, max_error_rate=0.25)
+    strategy = make_spec(strategy_id="s", kind="FIXED_SIZE", lifecycle="ACTIVE")
+    result = _result(strategy_id="s", cycles=metrics.cycles, errors=metrics.errors, score=0.0)
+
+    [decision] = manager.review([strategy], [result])
+    assert decision.new_lifecycle == "RETIRED"
+    assert "severe operational failure" in decision.reason
+
+
+def test_a_real_execution_error_still_counts_against_the_strategy():
+    """The complement: dropping the misclassification must not blind the failure rate.
+
+    The two channels are counted separately because in production they do not overlap:
+    the executor returns `status="ERROR"` when the broker call fails, and `record.error`
+    carries a cycle the loop itself had to fail safe on. Either one alone must count.
+    """
+    broker_failure = _record("s", "BUY", "ERROR")
+    engine_failure = _record("s", "HOLD", "SKIPPED", reason="hold", quantity=0).model_copy(
+        update={"error": "decision_error: engine timeout"}
+    )
+
+    assert DeterministicEvaluator().evaluate([broker_failure]).strategy_metrics["s"].errors == 1
+    assert DeterministicEvaluator().evaluate([engine_failure]).strategy_metrics["s"].errors == 1
+
+    manager = StrategyLifecycleManager(severe_failure_rate=0.75, max_error_rate=0.25)
+    strategy = make_spec(strategy_id="s", kind="FIXED_SIZE", lifecycle="ACTIVE")
+    result = _result(strategy_id="s", cycles=1, errors=1, score=0.0)
+
+    [decision] = manager.review([strategy], [result])
+    assert decision.new_lifecycle == "RETIRED"
+    assert "severe operational failure" in decision.reason
+
+
 # --- selector ----------------------------------------------------------------
 
 
