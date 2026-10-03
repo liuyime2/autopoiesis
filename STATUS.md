@@ -447,3 +447,35 @@ leaves probation. And a first pass at this measurement counted *all* admissions 
 and wrongly concluded the budget was unsustainable; counting dormant candidates as budget
 consumers is the same error as the turn-10 harness, in a new place. Admission count is not
 claimant count.
+
+## 2026-10-03 — journal rotation is imminent, and retention is ~14 days
+
+`doctor` warns `journal headroom 84% of the 67MB cap`. Investigated before it could fire
+during trading rather than after.
+
+**Rotation does not destroy the PnL record — measured, not assumed.** Each
+`PNL_EVIDENCE_RECORDED` event carries the *cumulative* closed-lot list in its payload rather
+than reconstructing it on read, so the newest event always holds the whole record.
+Re-reading with the `.1` generation removed returns `closed_lots 35`, `net_pnl 643.4`,
+`linked_fills 62` — byte-identical to reading both generations. The gap I expected here does
+not exist.
+
+**But the design has a growth term, and retention is short.** Measured on the live file:
+
+- 18.7 MB/day; 4 generations (`.1`–`.3` + live) = 268 MB → **~14 days of retention**.
+- `PNL_EVIDENCE_RECORDED` is 174 events / 12.4 MB = **22% of the journal**, averaging
+  **71 KB per event** at 58 events/day ≈ 4.1 MB/day.
+- Each event embeds *all* closed lots, so per-event size grows as lots accumulate. The
+  growth term is superlinear in lots, and it will get worse, not better.
+
+**Why this is a finding and not a fix.** The PnL record survives rotation by design. What
+14 days does bound is anything *recomputed from the journal each cycle* — model calibration
+(314 decisions, 210 scored), the experiment chain (123 strategies), champion history. Past
+~14 days those analyses silently lose their older history rather than failing loudly, and
+there is no test pairing rotation with any of them: rotation and closed-lot evidence are
+never exercised together anywhere in the suite.
+
+**Not changed today.** Rewriting the evidence path from cumulative snapshot to delta is
+exactly the kind of change that must not be made unilaterally while paper trading is live,
+and it is not needed before Monday. Recorded so it is a decision with a number attached
+rather than a surprise discovered during a trading session.
