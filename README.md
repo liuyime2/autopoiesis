@@ -7,6 +7,11 @@ It runs against Alpaca **paper** only. Live trading is refused in code, not by
 convention: `cli.py` rejects any base URL that is not a paper endpoint before a client is
 constructed.
 
+For how the system is put together - the canonical execution path, the evolution loop,
+and which module owns which fact - start at [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+This file is the operator's guide: what to run, what to look at when it misbehaves, and
+what each hard limit is.
+
 ## What it actually does
 
 Every five minutes while the market is open:

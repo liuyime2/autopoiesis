@@ -1,5 +1,143 @@
 # Architecture & Runtime Map
 
+## What this system is
+
+A paper-trading agent that decides on its own, every five minutes while the market is
+open, and then revises its own strategy library from what followed those decisions.
+The unusual part is the second half: the system is permitted to delete its own
+strategies. One that cannot demonstrate worth does not stay in the library just
+because it is there.
+
+It is not an assistant that suggests trades. An order reaches the broker only through
+one path, and the risk gate on that path has no bypass and no way to be talked out of a
+refusal.
+
+Live trading is forbidden. `AGENTS.md` §16 holds that until paper behaviour has been
+audited and the hard risk controls verified; the standing evidence is recorded in
+`STATUS.md` and measured by `doctor`, not asserted here.
+
+## The canonical execution path
+
+```
+cli → daemon → loop → guardian → executor → journal
+```
+
+One path, not a family of them. `cli` reads configuration from one place and refuses
+anything that is not paper; `daemon` owns the loop and the maintenance pass; `loop`
+turns one broker snapshot into one decision; `guardian` decides whether that decision
+may leave; `executor` is the only code that talks to the broker; `journal` is the only
+code that writes history.
+
+Shadow mode swaps `executor` for one that journals an intent instead of calling the
+broker, and changes nothing above it. That is deliberate rather than convenient: a
+shadow mode with its own simplified decision path would be grading a different system
+from the one that will trade, and could pass while the real path failed. A shadow order
+carries `status="SHADOWED"` and `order_id=None`, so it cannot be reconciled to a
+broker fill and cannot reach the PnL ledger even by accident.
+
+### One cycle
+
+1. **Observe.** One broker snapshot: price, positions, account, clock. `source: alpaca`.
+   Nothing synthesised.
+2. **Understand.** The selector picks a strategy and hands the model a context
+   carrying the measured facts about the current position - the risk limits and what
+   they leave for this symbol, the exposure headroom, the cost basis, how many shares
+   can actually be sold. The arithmetic is Guardian's, so the context and the gate
+   cannot disagree about whether a buy fits.
+3. **Act.** The model returns an action, a confidence, and a reason. If it cannot be
+   reached the deterministic policy engine decides, and the decision is labelled
+   `fallback_policy_engine` - recorded, not disguised.
+4. **Gate.** Guardian refuses on: per-symbol position value, total exposure, daily
+   loss, trades per day, confidence below minimum, a stale snapshot, a symbol outside
+   the mandate, a sell the agent does not own, or any mode that is not paper.
+5. **Settle.** The order is submitted or journalled as an intent, and the cycle is
+   written to the journal.
+
+## The evolution loop
+
+This is the part that makes it a self-evolving system rather than a trading bot. Every
+stage writes journal events, so each step is auditable after the fact and countable
+now.
+
+```
+decision → counterfactual → calibration → reflection → curriculum
+          → admission → offline screen → probation → promotion/retirement
+          → knowledge → back into the decision context
+```
+
+| Stage | What it produces | Measured on this journal |
+|---|---|---|
+| Counterfactual | Every decision scored against what the market did next: `GOOD_HOLD`, `MISSED_ALPHA`, `FALSE_TRADE` | 350 evaluations |
+| Calibration | Whether the model's stated confidence predicts its decisions turning out right | Brier 0.433 against 0.25 for a constant 0.5 claim |
+| Reflection | A window summary plus per-strategy evidence | 859 |
+| Curriculum | The model proposing a strategy the library lacks | 344 proposed, 50 failed |
+| Admission | Whether that proposal is admissible at all | 177 reviewed |
+| Offline screen | Whether the candidate's real recorded decisions were any good | 9,646 |
+| Lifecycle | Promotion, pausing, retirement - each with its reason | 90 changes |
+| Knowledge | What the model is told about its own reliability | 47 proposed |
+
+**Promotion is evidence-gated and cannot be earned by inaction.** A candidate reaches
+`ACTIVE` on broker-verified realised PnL, or on decision quality that clears the
+evidence gate. It does not reach it by not crashing: an earlier version promoted on
+"acceptable operational metrics", which meant a strategy that existed, never submitted
+an order, and therefore had no PnL of any kind was being promoted for having avoided
+trouble.
+
+**The system may remove itself.** Retirement reasons recorded on this journal:
+`probation produced no exploration evidence`, `behaviourally identical to existing
+strategy`, `broker-verified negative realised PnL`.
+
+## Where a measurement has to be able to go
+
+The system's own instruction is that a measurement nothing reads is a log line, not
+self-evolution. Three defects during this work were the same shape - a fact was
+computed, reported, and never reached anything that could act on it:
+
+- the model's calibration was measured and reported by `doctor` for days while nothing
+  consumed it. It now reaches the model through the knowledge library, the channel
+  lessons already travelled on.
+- the model was expected to divide a position value by a limit to discover it was over
+  one. It is now told.
+- the per-symbol limit was enforced on the order rather than the position, so it never
+  bound anything, and the agent quietly filled its mandate with small orders. The
+  variable was named `position_value` while measuring the order.
+
+## Module responsibilities
+
+Verified by reading the modules rather than described from memory: 37 files under
+`src/min_agent/`, of which 4 are quarantined under `research/`. Counting
+`__init__.py` as a module is the only place the total is arguable, so it is stated as
+files.
+
+| Group | Modules |
+|---|---|
+| Entry and runtime | `cli` `daemon` `config` `health` `scheduler` `atomicio` |
+| Decision and execution | `loop` `llm_decision` `policy_engine` `guardian` `executor` `shadow` |
+| Broker data | `data_gateway` `broker_evidence` `fill_reconciler` `order_reconciler` `trade_counter` |
+| Record and accounting | `journal` `evaluator` `attribution` `reflection_memory` `counterfactual` |
+| Strategy lifecycle | `strategy_engine` `strategy_admission` `model_registry` `experiment_registry` `offline_validation` `lineage` |
+| Self-evolution | `curriculum` `knowledge_library` `knowledge_admission` `calibration` `regime` |
+| Models and coercion | `models` `coerce` |
+| Health reporting | `doctor` |
+
+`coerce` is the single implementation of reading a typed value out of an untyped
+payload. It exists because the same narrowing rules were repeated in a dozen modules,
+and it reports the field name and the offending value when a record is unreadable
+instead of raising a bare `invalid literal for int()`.
+
+## State, and which thing owns it
+
+One writer each. Getting this wrong was the source of a real defect, so it is stated:
+
+| Fact | Owner | Notes |
+|---|---|---|
+| What was decided and what happened | `journal` | append-only; rotations read as one history |
+| Current config | `config.py` | nothing else reads environment variables |
+| Risk limits | `guardian` | the only code that may refuse a trade |
+| Strategy library | `strategy_library` on disk | admission is the only door in |
+| What the model is told it learned | `knowledge_library` | admission-reviewed before use |
+| Health | `doctor` | measured, never asserted |
+
 ## Current architecture (after the refactor)
 
 What this repository is now. The pre-refactor tree it replaced is recorded at the end of
