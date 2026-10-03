@@ -49,11 +49,31 @@ from datetime import datetime
 
 from min_agent.models import CycleRecord
 
+#: The authoritative verdict set. This module produces these, so it owns them.
+#:
+#: They used to be declared by hand in three places - here, `calibration` and
+#: `offline_validation` - and the copies drifted. `calibration.INFORMATIVE` omitted
+#: GOOD_TRADE, so the verdict this module has emitted since it was added never reached
+#: the calibration layer: 49 of 607 scored decisions were dropped there, and because
+#: `correct` also required GOOD_HOLD, every winning trade scored *incorrect*. That is
+#: what produced a "most confident bucket is 5.6% accurate" reading - the model is most
+#: confident when it trades, and trading was structurally scored wrong. The Brier score
+#: and the MIS-CALIBRATED verdict were measuring that bug, not the model.
+#:
+#: The other two modules import from here rather than redeclaring, so a verdict added in
+#: one place cannot be missing from another.
 GOOD_HOLD = "GOOD_HOLD"
 MISSED_ALPHA = "MISSED_ALPHA"
 NEUTRAL = "NEUTRAL"
 FALSE_TRADE = "FALSE_TRADE"
 GOOD_TRADE = "GOOD_TRADE"
+
+#: Verdicts that say the decision was right or wrong. NEUTRAL is excluded on purpose: a
+#: move that did not clear the cost is silence, not a failure.
+INFORMATIVE = frozenset({GOOD_HOLD, MISSED_ALPHA, FALSE_TRADE, GOOD_TRADE})
+
+#: Verdicts that count as the decision having been right.
+CORRECT = frozenset({GOOD_HOLD, GOOD_TRADE})
 
 #: Charged on every counterfactual, in percent of notional, both ways. The paper
 #: broker reports zero commission, so this is the assumption standing in for the

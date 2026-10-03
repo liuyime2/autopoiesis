@@ -56,16 +56,16 @@ PASS_SCREENED = "PASS_SCREENED"
 REJECT_POOR_DECISIONS = "REJECT_POOR_DECISIONS"
 INCONCLUSIVE = "INCONCLUSIVE_INSUFFICIENT_EVIDENCE"
 
-GOOD_HOLD = "GOOD_HOLD"
-MISSED_ALPHA = "MISSED_ALPHA"
-FALSE_TRADE = "FALSE_TRADE"
-GOOD_TRADE = "GOOD_TRADE"
-NEUTRAL = "NEUTRAL"
-
-#: Verdicts that mean something about whether the decision was right. NEUTRAL is
-#: deliberately absent: a move that did not clear the cost is silence, not a
-#: failure.
-INFORMATIVE = frozenset({GOOD_HOLD, MISSED_ALPHA, FALSE_TRADE, GOOD_TRADE})
+# Re-exported, not redeclared: this was the third hand-written copy of the verdict set,
+# and it had drifted from `calibration`'s. See `counterfactual` for the account.
+from min_agent.counterfactual import (  # noqa: E402
+    FALSE_TRADE,
+    GOOD_HOLD,
+    GOOD_TRADE,
+    INFORMATIVE,
+    MISSED_ALPHA,
+    NEUTRAL,
+)
 
 
 @dataclass(frozen=True)

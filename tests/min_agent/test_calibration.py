@@ -100,8 +100,9 @@ def test_no_decisions_at_all_says_so_rather_than_scoring_zero():
 # scoring rules
 # --------------------------------------------------------------------------
 
-def test_only_a_hold_that_avoided_a_loss_counts_as_correct():
+def test_a_good_hold_and_a_winning_trade_both_count_as_correct():
     assert _rows([("a", 0.8, calibration.GOOD_HOLD)])[0].correct is True
+    assert _rows([("a", 0.8, calibration.GOOD_TRADE)])[0].correct is True
     assert _rows([("a", 0.8, calibration.MISSED_ALPHA)])[0].correct is False
     assert _rows([("a", 0.8, calibration.FALSE_TRADE)])[0].correct is False
 
@@ -333,3 +334,45 @@ def test_a_genuinely_separating_model_still_reports_a_signal():
 
     assert report.verdict.startswith("SIGNAL")
     assert report.brier < calibration.BRIER_UNINFORMATIVE
+
+
+def test_a_winning_trade_is_scored_not_discarded():
+    """Regression: `calibration` dropped GOOD_TRADE from INFORMATIVE entirely.
+
+    Measured on the live journal: 49 of 607 scored decisions were winning trades, and
+    this module excluded all of them. Because `correct` also required GOOD_HOLD, they
+    then counted as wrong. The visible symptom was a "most confident bucket is 5.6%
+    accurate" reading - the model is most confident when it trades, so refusing to
+    credit a trade scored the confident bucket as the inaccurate one, and the Brier
+    score and MIS-CALIBRATED verdict described this function rather than the model.
+    """
+    # Above MIN_SCORED_DECISIONS, below which the report deliberately prints no
+    # accuracy figure at all.
+    rows = _rows([(f"t{i}", 0.95, calibration.GOOD_TRADE) for i in range(40)])
+
+    report = calibration.calibrate(rows)
+
+    assert all(row.informative for row in rows), "winning trades must count as evidence"
+    assert all(row.correct for row in rows)
+    assert report.scored == 40
+    assert report.correct == 40
+    assert report.base_rate == 1.0
+    assert report.brier is not None and report.brier < calibration.BRIER_UNINFORMATIVE
+
+
+def test_the_three_verdict_sets_cannot_drift_apart_again():
+    """They were hand-declared in three modules and one copy had already drifted.
+
+    `counterfactual` produces the verdicts so it owns them; `calibration` and
+    `offline_validation` import them. A verdict added in one place and forgotten in
+    another is exactly how 49 winning trades were scored incorrect for the life of this
+    project, so the identity is asserted rather than trusted.
+    """
+    from min_agent import counterfactual, offline_validation
+
+    assert calibration.INFORMATIVE is counterfactual.INFORMATIVE
+    assert offline_validation.INFORMATIVE is counterfactual.INFORMATIVE
+    assert calibration.CORRECT is counterfactual.CORRECT
+    for name in ("GOOD_HOLD", "MISSED_ALPHA", "FALSE_TRADE", "GOOD_TRADE", "NEUTRAL"):
+        assert getattr(calibration, name) is getattr(counterfactual, name)
+        assert getattr(offline_validation, name) is getattr(counterfactual, name)

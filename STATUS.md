@@ -479,3 +479,46 @@ never exercised together anywhere in the suite.
 exactly the kind of change that must not be made unilaterally while paper trading is live,
 and it is not needed before Monday. Recorded so it is a decision with a number attached
 rather than a surprise discovered during a trading session.
+
+## 2026-10-03 — the audit's miscalibration claim survives; a silent verdict filter did not
+
+An audit reported the model as miscalibrated (Brier 0.433 against 0.25) and proposed a
+self-healing calibration loop. Investigating that produced a real defect and **a correction
+to the correction.**
+
+**The defect.** Three hand-declared copies of the verdict set existed in `counterfactual`,
+`calibration` and `offline_validation`, and `calibration`'s had drifted: its `INFORMATIVE`
+omitted `GOOD_TRADE` entirely, and `CalibrationRow.correct` required `GOOD_HOLD`. So a
+winning trade was first dropped from calibration and then, had it survived, counted as
+wrong. `counterfactual` now owns the set and the other two import it; `correct` accepts
+`GOOD_HOLD` and `GOOD_TRADE`. Three tests added, one asserting the sets are the same
+objects so they cannot drift apart again.
+
+**The correction.** The plan claimed this dropped "49 of 607 scored decisions" and that
+"Brier 0.433 describes this bug rather than the model". **Both were wrong.** 49 is the
+counterfactual report's own count, which includes rows with no matching journal cycle;
+joining verdicts to cycles that actually recorded a confidence, on the live journal:
+
+| | informative | correct | base rate | Brier |
+|---|---|---|---|---|
+| before | 497 | 287 | 0.5775 | **0.5399** |
+| after | 505 | 295 | 0.5842 | **0.5342** |
+
+**8 decisions, not 49**, and the Brier score moves by 0.0059. So:
+
+- the defect was worth removing — a silent filter on the evidence layer, and three copies
+  of a verdict set is how it drifted;
+- **but it does not explain MIS-CALIBRATED.** Brier stays far above the 0.25 of a constant
+  0.5 claim, so the model genuinely is miscalibrated, and the self-healing loop is a real
+  gap rather than an artifact to dismiss;
+- and the recorded confidence distribution explains why: it is **bimodal, 637 near 0 and
+  542 near 1 with nothing in between**, so the model states near-certainty and is wrong
+  about 46% of the time. A graded confidence that is really a coin flip cannot be
+  calibrated by better bookkeeping.
+
+Also established, and it lowers the severity of two other audit claims: the **offline
+screen does not use `confidence` at all** (it gates on `correct_outcome_ratio`, judged from
+real outcomes), so miscalibration has never corrupted a promotion decision. And confidence
+is consumed only for measurement, never for sizing or ranking.
+
+`make verify`: 49 classes, 0 failed, 1331 executions; 858 pytest pass.

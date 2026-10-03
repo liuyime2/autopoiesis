@@ -25,15 +25,29 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
 from min_agent import coerce
+from min_agent.counterfactual import (
+    CORRECT,
+    FALSE_TRADE,
+    GOOD_HOLD,
+    GOOD_TRADE,
+    INFORMATIVE,
+    MISSED_ALPHA,
+    NEUTRAL,
+)
 
-GOOD_HOLD = "GOOD_HOLD"
-MISSED_ALPHA = "MISSED_ALPHA"
-FALSE_TRADE = "FALSE_TRADE"
-NEUTRAL = "NEUTRAL"
-
-#: Verdicts that mean the decision was right or wrong. NEUTRAL means the move did not
-#: clear the cost, so it is silence and is excluded rather than counted as either.
-INFORMATIVE = frozenset({GOOD_HOLD, MISSED_ALPHA, FALSE_TRADE})
+# Re-exported rather than redeclared. These used to be a third hand-written copy of the
+# same verdict set, and this copy had drifted: it had no GOOD_TRADE at all, so winning
+# trades were dropped from calibration entirely and then scored incorrect. See
+# `counterfactual` for the full account.
+__all__ = [
+    "CORRECT",
+    "FALSE_TRADE",
+    "GOOD_HOLD",
+    "GOOD_TRADE",
+    "INFORMATIVE",
+    "MISSED_ALPHA",
+    "NEUTRAL",
+]
 
 #: Below this many informative decisions, no accuracy number is printed. Six
 #: decisions split across three buckets says nothing about anything.
@@ -69,15 +83,21 @@ class CalibrationRow:
 
     @property
     def correct(self) -> bool:
-        """Only a hold that avoided a loss is scored as correct.
+        """A decision counts as correct when it was a good hold or a winning trade.
 
         A MISSED_ALPHA is a hold that should have been a trade, and a FALSE_TRADE is a
         trade that lost. Both are decisions the system would have made better
         differently, so both are incorrect. Scoring a missed rally as a "correct
         caution" would flatter any model that never trades, which is the single easiest
         way to manufacture a good calibration curve.
+
+        GOOD_TRADE joins GOOD_HOLD because it is the same kind of statement told from the
+        other side: the decision was right. Excluding it does not protect that curve, it
+        inverts it - the model is most confident when it trades, so refusing to credit
+        winning trades made the most confident bucket read as the least accurate one and
+        produced a Brier score that said more about this function than about the model.
         """
-        return self.verdict == GOOD_HOLD
+        return self.verdict in CORRECT
 
 
 @dataclass
