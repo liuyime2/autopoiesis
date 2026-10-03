@@ -1263,3 +1263,34 @@ def test_a_candidate_leaves_probation_only_once_it_could_be_screened():
 
     assert selector.select([probation, incumbent], with_cycles(budget - 1)).strategy_id == "candidate"
     assert selector.select([probation, incumbent], with_cycles(budget)).strategy_id == "incumbent"
+
+
+def test_a_strategy_carries_the_reason_for_its_lifecycle_on_the_strategy_itself():
+    """The reason used to live only in the journal, so a reload could not read it.
+
+    `StrategySpec` carried `lifecycle: PAUSED` and nothing else, which made a strategy
+    rejected on evidence indistinguishable from one that had merely never been
+    testable. It is why the doctor spent 17 passes reconciling files it described as
+    carrying "a gated life" it could not explain, and why `experiment_registry` kept a
+    `lifecycle_reason` the authoritative file did not have - the reason survived in the
+    derived view and not in the single source of truth.
+
+    It also blocks any re-adjudication: a rule cannot ask whether a reason still holds
+    when the reason was not kept.
+    """
+    spec = make_spec(strategy_id="s", lifecycle="PAUSED")
+
+    assert "lifecycle_reason" in type(spec).model_fields
+    assert spec.lifecycle_reason == "", "a strategy written before the field existed must still load"
+
+
+def test_the_reason_is_written_when_the_lifecycle_is_written():
+    """A field nothing populates is documentation, not a fix."""
+    import inspect
+
+    from min_agent import daemon, strategy_admission
+
+    lifecycle_writes = inspect.getsource(daemon.AgentDaemon)
+    assert 'model_copy(update={"lifecycle": decision.new_lifecycle' not in lifecycle_writes
+    assert '"lifecycle_reason": decision.reason' in lifecycle_writes
+    assert '"lifecycle_reason": review.reason' in inspect.getsource(strategy_admission)

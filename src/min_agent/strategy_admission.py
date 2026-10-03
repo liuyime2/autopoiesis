@@ -70,7 +70,11 @@ class StrategyAdmission:
             )
 
         lifecycle = "BASELINE" if strategy.kind == "HOLD_BASELINE" else "PROBATION"
-        self.strategy_library.save(strategy.model_copy(update={"lifecycle": lifecycle}))
+        self.strategy_library.save(
+            strategy.model_copy(
+                update={"lifecycle": lifecycle, "lifecycle_reason": review.reason}
+            )
+        )
         return StrategyAdmissionResult(
             accepted=True,
             reason="approved",

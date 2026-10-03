@@ -477,7 +477,9 @@ class AgentDaemon:
                 "source": "offline_validation",
             },
         )
-        self.strategy_library.save(spec.model_copy(update={"lifecycle": "PAUSED"}))
+        self.strategy_library.save(
+            spec.model_copy(update={"lifecycle": "PAUSED", "lifecycle_reason": reason})
+        )
         self._append_event(
             "STRATEGY_LIFECYCLE_UPDATED",
             status="SUCCESS",
@@ -1233,7 +1235,12 @@ class AgentDaemon:
                 strategy_id=decision.strategy.strategy_id,
                 payload={**payload, "phase": "decided"},
             )
-            updated = decision.strategy.model_copy(update={"lifecycle": decision.new_lifecycle})
+            updated = decision.strategy.model_copy(
+                update={
+                    "lifecycle": decision.new_lifecycle,
+                    "lifecycle_reason": decision.reason,
+                }
+            )
             self.strategy_library.save(updated)
             self._append_event(
                 "STRATEGY_LIFECYCLE_UPDATED",

@@ -430,6 +430,20 @@ class StrategySpec(BaseModel):
     max_position_value: float = Field(gt=0)
     enabled: bool = True
     lifecycle: StrategyLifecycle = "ACTIVE"
+    #: Why this strategy carries the lifecycle it does.
+    #:
+    #: It used to live only in the journal, so the authoritative strategy file said
+    #: `PAUSED` and nothing else. On reload there was no way to tell a strategy that
+    #: had been rejected on evidence from one that had merely never been testable,
+    #: which is why the doctor spent 17 passes reconciling files that "carried a gated
+    #: life" it could not explain. `experiment_registry` already kept its own
+    #: `lifecycle_reason`, so the reason survived in the derived view and not in the
+    #: single source of truth - which is backwards.
+    #:
+    #: Without it no re-adjudication is possible: a rule cannot ask whether a reason
+    #: still holds when the reason was not kept. Defaults to empty so every strategy
+    #: written before this still loads.
+    lifecycle_reason: str = ""
     created_at: datetime
     rationale: str = Field(min_length=1)
 

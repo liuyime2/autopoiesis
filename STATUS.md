@@ -558,3 +558,47 @@ unresolved and unevidenced — see the calibration section above for why the con
 is not a prompting problem.
 
 `make verify`: 49 classes, 0 failed, 1337 executions across 61 files; 860 pytest pass.
+
+## 2026-10-03 — PAUSED is terminal by construction, and the reason was never kept
+
+The audit reported "PAUSED 无重新裁决路径" as a gap. Investigating it found the cause is
+earlier and more basic than a missing rule.
+
+**`StrategyEngine._review_one` returns immediately for PAUSED**
+(`strategy_engine.py:192`), before any lifecycle rule runs. So a PAUSED strategy is not
+merely unlikely to come back — it is never examined again by the reviewer at all.
+
+**And there was no way to ask whether its reason still held, because the reason was not
+kept.** `StrategySpec` had no `lifecycle_reason` field: the authoritative strategy file
+carried `lifecycle: PAUSED` and nothing else. All 33 reasons survive in the journal, and
+`experiment_registry` kept its own `lifecycle_reason` — so the reason lived in the derived
+view and not in the single source of truth, which is backwards. That is also what the
+doctor's repeated "reconciled by doctor: the strategy file carried a gated life" (17
+passes) was colliding with: a terminal state it could not explain.
+
+Landed in this commit: `StrategySpec.lifecycle_reason`, written at all three lifecycle
+write sites (two in the daemon, one at admission), so the reason survives a reload. It
+defaults to empty so every strategy written earlier still loads. Two tests: the field
+exists and defaults empty, and all three write sites actually populate it — a field nothing
+writes would be documentation rather than a fix.
+
+**This does NOT restore the 33 PAUSED strategies. P1-a is not done.** Restoring them needs
+two further changes, and neither is a one-liner:
+
+1. **`review()` has no price parameter**, so the rule cannot ask whether a paused strategy
+   is *currently actionable* — which is the test that matters, because 18 of the 33 are
+   paused for "probation produced no exploration evidence" and were dormant for their whole
+   probation. Their pause is an artifact of the old oldest-first queue, which has since
+   been fixed to skip strategies that cannot act at the current price; the cause is gone
+   but the 18 pauses it produced are stranded.
+2. **Re-entering PROBATION alone would churn**, because a strategy that already has
+   `cycles >= min_active_cycles` and `trade_attempts == 0` re-pauses immediately. It needs
+   a genuinely fresh probation window, which means resetting its evaluation record — a
+   real operation with a real risk of erasing evidence, and not one to rush into the
+   session before an open.
+
+Deliberately not landed on a partial basis: re-adjudication changes which strategies trade,
+so it wants its own commit with its own tests rather than riding along on the enabling
+change.
+
+`make verify`: 49 classes, 0 failed, 1339 executions across 61 files; 862 pytest pass.
