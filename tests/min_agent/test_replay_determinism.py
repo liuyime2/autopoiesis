@@ -115,6 +115,12 @@ def test_the_result_survives_a_json_round_trip():
     ]
 
 
+#: The one label pair whose disagreement is a rename rather than a defect. Winning filled
+#: orders were labelled NEUTRAL before `GOOD_TRADE` existed; NEUTRAL is also the label for a
+#: move that did not clear cost, so the old journal cannot be re-derived under the new rule.
+_RELABELLED = frozenset({("NEUTRAL", "GOOD_TRADE"), ("GOOD_TRADE", "NEUTRAL")})
+
+
 def test_replaying_the_live_journal_reproduces_the_recorded_verdicts():
     """The strongest statement available: the verdicts the daemon wrote to the
     journal can be recomputed from that same journal."""
@@ -138,11 +144,25 @@ def test_replaying_the_live_journal_reproduces_the_recorded_verdicts():
 
     mismatches = []
     resolved_since = 0
+    relabelled = 0
     for row in report.rows:
         prior = recorded.get(row.cycle_id)
         if prior is None:
             continue
         if prior[0] != row.verdict or prior[1] != row.net_return_pct:
+            if (prior[0], row.verdict) in _RELABELLED and prior[1] == row.net_return_pct:
+                # The same arithmetic under a changed vocabulary. A winning filled order
+                # used to be labelled NEUTRAL, which is the label for a move too small to
+                # clear cost; it now has its own verdict, GOOD_TRADE. The journal is
+                # append-only and correctly records what the code computed at the time, so
+                # these rows cannot be made to agree again and must not be rewritten.
+                #
+                # Deliberately derived rather than an allowlist: the pair of labels must be
+                # exactly this one, AND the recomputed net return must match to the digit.
+                # A genuine numeric divergence, or any other pair of labels, still fails -
+                # so this cannot hide a real determinism defect, only a rename.
+                relabelled += 1
+                continue
             if prior[0] == "PENDING":
                 # A PENDING row is not a claim about the outcome, so it cannot be
                 # a determinism violation when the outcome later arrives. This check
@@ -163,7 +183,8 @@ def test_replaying_the_live_journal_reproduces_the_recorded_verdicts():
     # a count that never moves would mean nothing is ever resolving.
     print(
         f"replay determinism: {len(mismatches)} decided verdict(s) changed; "
-        f"{resolved_since} placeholder(s) have since resolved"
+        f"{resolved_since} placeholder(s) have since resolved; "
+        f"{relabelled} relabelled NEUTRAL<->GOOD_TRADE at an identical net return"
     )
 
 

@@ -59,12 +59,13 @@ INCONCLUSIVE = "INCONCLUSIVE_INSUFFICIENT_EVIDENCE"
 GOOD_HOLD = "GOOD_HOLD"
 MISSED_ALPHA = "MISSED_ALPHA"
 FALSE_TRADE = "FALSE_TRADE"
+GOOD_TRADE = "GOOD_TRADE"
 NEUTRAL = "NEUTRAL"
 
 #: Verdicts that mean something about whether the decision was right. NEUTRAL is
 #: deliberately absent: a move that did not clear the cost is silence, not a
 #: failure.
-INFORMATIVE = frozenset({GOOD_HOLD, MISSED_ALPHA, FALSE_TRADE})
+INFORMATIVE = frozenset({GOOD_HOLD, MISSED_ALPHA, FALSE_TRADE, GOOD_TRADE})
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,7 @@ class OfflineValidationResult:
     good_holds: int = 0
     missed_alpha: int = 0
     false_trades: int = 0
+    good_trades: int = 0
     neutral: int = 0
     good_hold_ratio: float | None = None
     mean_net_pct: float | None = None
@@ -95,6 +97,22 @@ class OfflineValidationResult:
     @property
     def rejected(self) -> bool:
         return self.verdict == REJECT_POOR_DECISIONS
+
+    @property
+    def correct_outcomes(self) -> int:
+        """Scored decisions that went the right way, whichever action was taken.
+
+        `good_hold_ratio` is `good_holds / scored`, which for a strategy that only trades
+        is zero by construction - a filled order is never a hold. Reading the pass
+        condition off that ratio therefore made passing impossible for any trader, which
+        is the same selection inversion the `in_flight_order` defect had one level down:
+        the instrument rewarded not acting and could not register acting well.
+        """
+        return self.good_holds + self.good_trades
+
+    @property
+    def correct_outcome_ratio(self) -> float:
+        return round(self.correct_outcomes / self.scored, 6) if self.scored else 0.0
 
     def to_payload(self) -> dict:
         return {
@@ -106,6 +124,7 @@ class OfflineValidationResult:
             "good_holds": self.good_holds,
             "missed_alpha": self.missed_alpha,
             "false_trades": self.false_trades,
+            "good_trades": self.good_trades,
             "neutral": self.neutral,
             "good_hold_ratio": self.good_hold_ratio,
             "mean_net_pct": self.mean_net_pct,
@@ -181,6 +200,8 @@ def validate(
             result.missed_alpha += 1
         elif record.verdict == FALSE_TRADE:
             result.false_trades += 1
+        elif record.verdict == GOOD_TRADE:
+            result.good_trades += 1
 
     nets = [d.net_return_pct for d in scored if d.net_return_pct is not None]
     if nets:
@@ -210,18 +231,25 @@ def validate(
             "filled trades that lost money net of cost"
         )
         return result
-    if result.good_hold_ratio < min_good_hold_ratio:
+    # Over correct outcomes, not correct *holds*. The bar is unchanged - the same
+    # `min_good_hold_ratio` on the same denominator - but it is now reachable by a
+    # strategy that trades, which it was not. Nothing here is loosened: a strategy with a
+    # losing fill is still rejected above, and the ratio threshold is the same number.
+    if result.correct_outcome_ratio < min_good_hold_ratio:
         result.verdict = REJECT_POOR_DECISIONS
         result.reason = (
-            f"only {result.good_holds} of {result.scored} scored decisions were "
-            f"correct holds (ratio {result.good_hold_ratio:.3f} < "
-            f"{min_good_hold_ratio:.2f})"
+            f"only {result.correct_outcomes} of {result.scored} scored decisions went "
+            f"the right way ({result.good_holds} correct hold(s), "
+            f"{result.good_trades} profitable fill(s); ratio "
+            f"{result.correct_outcome_ratio:.3f} < {min_good_hold_ratio:.2f})"
         )
         return result
 
     result.verdict = PASS_SCREENED
+    holds = f"{result.good_holds} correct hold(s)"
+    trades = f", {result.good_trades} profitable fill(s)" if result.good_trades else ""
     result.reason = (
-        f"{result.good_holds} of {result.scored} scored decisions were correct "
-        f"holds and none were losing trades; a screen, not a promotion"
+        f"{result.correct_outcomes} of {result.scored} scored decisions went the right "
+        f"way ({holds}{trades}) and none were losing trades; a screen, not a promotion"
     )
     return result

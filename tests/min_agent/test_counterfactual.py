@@ -178,3 +178,64 @@ def test_the_assumed_cost_is_recorded_on_every_row():
 
     assert report.rows[0].assumed_cost_pct == 0.25
     assert report.rows[0].net_return_pct == pytest.approx(1.0 - 0.25)
+
+
+def test_a_winning_fill_is_a_good_trade():
+    """The missing primitive: a filled order that gained had no verdict of its own.
+
+    The branch was `FALSE_TRADE if signed < -dead_band else NEUTRAL`, so a winning fill
+    landed on NEUTRAL - the same label as a move too small to clear the cost - and NEUTRAL
+    is excluded from the offline screen's `scored`. A strategy's scored count was therefore
+    composed only of its mistakes, and the promotion gate rejected on any of them. On the
+    live journal: 34 model-authored trades, 26 of them winners, all 26 invisible to the
+    screen, and no trading strategy has ever passed it.
+    """
+    records = [
+        _record("buy", T0, 100.0, action="BUY"),
+        _record("later", T0 + timedelta(hours=5), 110.0),
+    ]
+
+    report = cf.evaluate(records, symbol="SPY", horizon_hours=4.0)
+
+    trade = next(r for r in report.rows if r.action == "BUY")
+    assert trade.verdict == cf.GOOD_TRADE
+    # 10% gross, less the 0.05% assumed round-trip cost, which every row is charged.
+    assert trade.net_return_pct == pytest.approx(9.95)
+
+
+def test_a_losing_fill_is_still_a_false_trade():
+    records = [
+        _record("buy", T0, 100.0, action="BUY"),
+        _record("later", T0 + timedelta(hours=5), 90.0),
+    ]
+
+    report = cf.evaluate(records, symbol="SPY", horizon_hours=4.0)
+
+    trade = next(r for r in report.rows if r.action == "BUY")
+    assert trade.verdict == cf.FALSE_TRADE
+
+
+def test_a_fill_inside_the_dead_band_is_still_neutral():
+    """Cost is still the bar: a move that did not clear it teaches nothing either way."""
+    records = [
+        _record("buy", T0, 100.0, action="BUY"),
+        _record("later", T0 + timedelta(hours=5), 100.01),
+    ]
+
+    report = cf.evaluate(records, symbol="SPY", horizon_hours=4.0)
+
+    trade = next(r for r in report.rows if r.action == "BUY")
+    assert trade.verdict == cf.NEUTRAL
+
+
+def test_a_short_that_gains_is_a_good_trade():
+    """The side taken is signed, so a winning SELL is scored the same as a winning BUY."""
+    records = [
+        _record("sell", T0, 100.0, action="SELL"),
+        _record("later", T0 + timedelta(hours=5), 90.0),
+    ]
+
+    report = cf.evaluate(records, symbol="SPY", horizon_hours=4.0)
+
+    trade = next(r for r in report.rows if r.action == "SELL")
+    assert trade.verdict == cf.GOOD_TRADE

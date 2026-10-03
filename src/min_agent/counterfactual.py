@@ -29,10 +29,17 @@ Verdicts:
 
 * ``MISSED_ALPHA``  the probe would have gained net of cost; holding cost us money
 * ``GOOD_HOLD``     the probe would have lost net of cost; holding saved us money
-* ``NEUTRAL``       the move did not clear the cost, so the hold taught us nothing
-* ``FALSE_TRADE``   an order that was actually filled lost money net of cost, so
-                    the same reasoning that produced the hold would have produced
-                    a losing trade
+* ``NEUTRAL``       the move did not clear the cost, so the decision taught us nothing
+* ``FALSE_TRADE``   an order that was actually filled lost money net of cost
+* ``GOOD_TRADE``    an order that was actually filled gained money net of cost
+
+``GOOD_TRADE`` did not exist. The branch for a decision that was actually taken was
+``FALSE_TRADE if signed < -dead_band_pct else NEUTRAL``, so a winning fill was labelled
+NEUTRAL - the same as a move too small to clear the cost - and NEUTRAL is excluded from
+the offline screen's ``scored``. A strategy's scored count was therefore made only of its
+mistakes, and the promotion gate rejected on any of them, so a trading strategy could not
+pass the screen at any profit. The screen was built to grade a hold-only agent and never
+acquired the verb for trading well.
 """
 
 from __future__ import annotations
@@ -46,6 +53,7 @@ GOOD_HOLD = "GOOD_HOLD"
 MISSED_ALPHA = "MISSED_ALPHA"
 NEUTRAL = "NEUTRAL"
 FALSE_TRADE = "FALSE_TRADE"
+GOOD_TRADE = "GOOD_TRADE"
 
 #: Charged on every counterfactual, in percent of notional, both ways. The paper
 #: broker reports zero commission, so this is the assumption standing in for the
@@ -245,7 +253,12 @@ def evaluate(
         else:
             # A real decision. Same arithmetic, signed for the side actually taken.
             signed = net if action == "BUY" else -net
-            verdict = FALSE_TRADE if signed < -dead_band_pct else NEUTRAL
+            if signed > dead_band_pct:
+                verdict = GOOD_TRADE
+            elif signed < -dead_band_pct:
+                verdict = FALSE_TRADE
+            else:
+                verdict = NEUTRAL
 
         report.rows.append(
             CounterfactualRow(

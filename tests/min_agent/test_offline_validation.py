@@ -178,3 +178,68 @@ def test_neutral_decisions_do_not_inflate_a_strategys_good_ratio():
     assert result.scored == 10
     assert result.good_hold_ratio == 0.5
     assert result.neutral == 40
+
+
+# --- the screen can only reward holding --------------------------------------
+#
+# For an action that was actually taken, `counterfactual` produced exactly two verdicts:
+# FALSE_TRADE when it lost net of cost, and NEUTRAL otherwise. A filled order that *won*
+# was NEUTRAL - the same label as a move too small to clear the cost - and NEUTRAL is
+# excluded from `scored`. So a strategy's scored count was made only of its mistakes, and
+# `if result.false_trades: REJECT` then rejected any strategy that had scored anything at
+# all. A trading strategy could not pass the screen at any profit.
+
+
+def test_a_winning_fill_is_scored_as_a_good_trade():
+    """The screen-level half. The primitive itself is pinned in
+    `test_counterfactual.py::test_a_winning_fill_is_a_good_trade`."""
+    decisions = [_d(ov.GOOD_TRADE, 1.0, action="BUY", cycle=f"w{i}") for i in range(12)]
+
+    result = ov.validate(decisions, strategy_id="profitable-trader", min_scored=10)
+
+    assert result.scored == 12
+    assert result.good_trades == 12
+    assert result.false_trades == 0
+    assert result.verdict == ov.PASS_SCREENED, result.reason
+
+
+def test_correct_outcomes_count_for_a_strategy_that_also_trades():
+    """A strategy that both holds well and trades well is not penalised for trading.
+
+    The stated design intent was "a strategy cannot buy a good ratio by trading
+    constantly and luckily", which is a real concern. Implemented as `good_holds /
+    scored`, it did not prevent that - it made passing impossible for any trader, because
+    a pure trader's `good_holds` is zero by construction.
+    """
+    decisions = [_d(ov.GOOD_HOLD, -1.0, cycle=f"g{i}") for i in range(6)]
+    decisions += [_d(ov.GOOD_TRADE, 1.0, action="SELL", cycle=f"t{i}") for i in range(6)]
+
+    result = ov.validate(decisions, strategy_id="mixed", min_scored=10)
+
+    assert result.scored == 12
+    assert result.correct_outcomes == 12
+    assert result.verdict == ov.PASS_SCREENED, result.reason
+    assert "trade" in result.reason.lower(), "the reason must name what earned the pass"
+
+
+def test_a_losing_trade_is_still_rejected():
+    """The fix must not weaken the gate. One losing fill rejects, as before."""
+    decisions = [_d(ov.GOOD_TRADE, 1.0, action="BUY", cycle=f"w{i}") for i in range(12)]
+    decisions += [_d(ov.FALSE_TRADE, -1.0, action="BUY", cycle="bad")]
+
+    result = ov.validate(decisions, strategy_id="mixed-results", min_scored=10)
+
+    assert result.false_trades == 1
+    assert result.verdict == ov.REJECT_POOR_DECISIONS
+    assert result.rejected
+
+
+def test_neutral_is_still_excluded_from_scored():
+    """A move that cleared neither cost nor profit stays silence, not evidence."""
+    decisions = [_d(ov.GOOD_TRADE, 1.0, action="BUY", cycle=f"w{i}") for i in range(12)]
+    decisions += [_d("NEUTRAL", 0.01, action="BUY", cycle=f"n{i}") for i in range(20)]
+
+    result = ov.validate(decisions, strategy_id="padded", min_scored=10)
+
+    assert result.scored == 12
+    assert result.neutral == 20
