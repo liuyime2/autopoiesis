@@ -134,6 +134,14 @@ metric-level test would still pass, so the arithmetic alone is not a sufficient 
    events repeat the same strategy's previous verdict unchanged, and 98 strategies are
    re-screened on a fixed cadence regardless of whether their decisions changed. The
    verdict is a pure function of recorded decisions, so most of this is recomputation of a
-   known answer - and it is most of why the journal is 51MB. Whether to skip unchanged
-   screens needs the answer to one question first: does anything downstream distinguish
-   "not screened recently" from "screened, unchanged"?
+   known answer. Measured after the fix below: a maintenance pass still writes **48** of
+   these. Whether to skip unchanged screens needs the answer to one question first: does
+   anything downstream distinguish "not screened recently" from "screened, unchanged"?
+   (Checked: it does not - `_offline_evidence_by_strategy`, `lineage` and
+   `experiment_registry` all overwrite with the latest verdict per strategy, and
+   `_apply_offline_rejection` returns early when the strategy is already PAUSED. So the
+   dedup is available; it is simply not the largest one.)
+
+   A correction to what this file said when first written: the redundant screens are
+   **5%** of the journal by bytes, not most of it. The claim was an estimate I did not
+   measure, and measuring it is what turned up item 3, which is 51%.

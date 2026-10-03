@@ -487,6 +487,149 @@ def test_daemon_passes_exploration_summary_to_curriculum(tmp_path):
     assert event.payload["recent_exploration_summary"]["no_exploration"] is True
 
 
+# --- the counterfactual ledger is a ledger, not a repeated dump --------------
+
+
+def _scored_cycle(cycle_id, *, price, horizon_price, hours_ago=48):
+    """A BUY decision, plus a later cycle that supplies its counterfactual horizon quote.
+
+    Both are `CycleRecord`s because that is what the daemon journals: the quote is
+    observed by a later cycle, not injected. Returns a 2-tuple so a caller can append
+    only the decision and leave the row PENDING.
+    """
+    from datetime import timedelta
+
+    decided = datetime.now(tz=timezone.utc).replace(microsecond=0) - timedelta(hours=hours_ago)
+    snapshot = DataSnapshot(
+        symbol="SPY",
+        timestamp=decided,
+        market_open=True,
+        last_price=price,
+        source="alpaca",
+        account=AccountSnapshot(
+            equity=100_000, cash=100_000, buying_power=100_000, portfolio_value=100_000, daily_loss=0
+        ),
+    )
+
+    def _record(cid, snap):
+        return CycleRecord(
+            cycle_id=cid,
+            snapshot=snap,
+            decision=TradeDecision(
+                symbol="SPY", action="BUY", quantity=1, confidence=0.7, rationale="t", strategy_id="s1"
+            ),
+            guardian=GuardianResult(approved=True, reason="approved"),
+            execution=ExecutionResult(
+                status="SUBMITTED", order_id="o", filled_quantity=0, message="submitted"
+            ),
+            strategy_id="s1",
+        )
+
+    quote = snapshot.model_copy(
+        update={"timestamp": decided + timedelta(hours=hours_ago), "last_price": horizon_price}
+    )
+    return _record(cycle_id, snapshot), _record(f"{cycle_id}-quote", quote)
+
+
+def _rows(journal):
+    out = {}
+    for event in journal.read_events("COUNTERFACTUAL_EVALUATED"):
+        for row in event.payload.get("rows", []):
+            out[row["cycle_id"]] = row["verdict"]
+    return out
+
+
+def test_a_repeat_pass_with_nothing_new_journals_nothing(tmp_path):
+    """The defect: every pass re-appended the whole ledger.
+
+    356 events carried 210,473 rows to describe 720 distinct decisions, 99% of them
+    re-records. That is 55% of the journal and it grew ~186KB every fifteen minutes,
+    and the screen re-read all of it every pass to answer a question about a fixed
+    720 decisions.
+    """
+    cfg = config(tmp_path, interval=0)
+    journal = JsonlJournal(cfg.journal_path)
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(journal=journal), sleep=lambda s: None, journal=journal)
+
+    decision, quote = _scored_cycle("c1", price=100.0, horizon_price=101.0)
+    journal.append(decision)
+    journal.append(quote)
+
+    daemon._record_counterfactuals(_events=journal.read_events("COUNTERFACTUAL_EVALUATED"))
+    first = journal.read_events("COUNTERFACTUAL_EVALUATED")
+    assert len(first) == 1
+    first_rows = {row["cycle_id"]: row["verdict"] for row in first[0].payload["rows"]}
+    assert "c1" in first_rows
+
+    # Nothing about the market or the decisions changed.
+    daemon._record_counterfactuals(_events=journal.read_events("COUNTERFACTUAL_EVALUATED"))
+    again = journal.read_events("COUNTERFACTUAL_EVALUATED")
+
+    assert len(again) == len(first), "a pass with no new or changed verdict must journal nothing"
+    assert _rows(journal) == first_rows, "the union of rows must be unchanged"
+
+
+def test_a_pending_row_is_rejournalled_once_it_resolves(tmp_path):
+    """The rule is "new or changed", not "not seen before".
+
+    A PENDING row is not a claim about the outcome - its horizon has not elapsed - so
+    suppressing it on sight would strand the decision as PENDING forever and the
+    screen would never learn what happened.
+    """
+    cfg = config(tmp_path, interval=0)
+    journal = JsonlJournal(cfg.journal_path)
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(journal=journal), sleep=lambda s: None, journal=journal)
+
+    decision, quote = _scored_cycle("c-pending", price=100.0, horizon_price=105.0)
+    journal.append(decision)  # the horizon quote has not been observed yet
+
+    daemon._record_counterfactuals(_events=journal.read_events("COUNTERFACTUAL_EVALUATED"))
+    assert len(journal.read_events("COUNTERFACTUAL_EVALUATED")) == 1
+    assert _rows(journal)["c-pending"] == "PENDING"
+
+    # The later cycle arrives and supplies the price the horizon was waiting for.
+    journal.append(quote)
+
+    daemon._record_counterfactuals(_events=journal.read_events("COUNTERFACTUAL_EVALUATED"))
+    resolved = journal.read_events("COUNTERFACTUAL_EVALUATED")
+
+    assert len(resolved) == 2, "a resolved verdict is a change and must be journalled"
+    assert _rows(journal)["c-pending"] != "PENDING"
+
+
+def test_the_screen_still_sees_every_decision_when_events_are_incremental(tmp_path):
+    """The load-bearing property: consumers union across events, so splitting the
+    ledger into per-pass increments cannot change what the screen reads."""
+    from min_agent import offline_validation
+
+    cfg = config(tmp_path, interval=0)
+    journal = JsonlJournal(cfg.journal_path)
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(journal=journal), sleep=lambda s: None, journal=journal)
+
+    for i in range(3):
+        decision, quote = _scored_cycle(f"c{i}", price=100.0 + i, horizon_price=101.0 + i)
+        journal.append(decision)
+        journal.append(quote)
+
+    daemon._record_counterfactuals(_events=journal.read_events("COUNTERFACTUAL_EVALUATED"))
+    events = journal.read_events("COUNTERFACTUAL_EVALUATED")
+    rows_in_first_event = len(events[0].payload["rows"])
+
+    # A second pass over the same journal adds nothing.
+    daemon._record_counterfactuals(_events=journal.read_events("COUNTERFACTUAL_EVALUATED"))
+    assert len(journal.read_events("COUNTERFACTUAL_EVALUATED")) == len(events)
+
+    decisions = offline_validation.collect_decisions(events, "s1")
+    journalled_cycles = {r.cycle_id for r in journal.read_all()}
+    assert {d.cycle_id for d in decisions} == journalled_cycles, (
+        "every decision the journal holds must reach the screen, including the ones "
+        "whose rows were first written in an earlier event"
+    )
+    assert rows_in_first_event == 6, "3 decisions plus the 3 cycles that quoted their horizon"
+    scored = [d for d in decisions if d.verdict not in {"PENDING", "GAP"}]
+    assert {d.cycle_id for d in scored} == {"c0", "c1", "c2"}
+
+
 def test_daemon_records_no_exploration_lesson(tmp_path):
     cfg = config(tmp_path, interval=0)
     journal = JsonlJournal(cfg.journal_path)

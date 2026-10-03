@@ -367,7 +367,7 @@ class AgentDaemon:
             )
         return latest
 
-    def _screen_all_strategies(self) -> None:
+    def _screen_all_strategies(self, *, _events=None) -> None:
         """Screen every strategy in the library, not just new candidates.
 
         The admission-time screen is structurally incapable of rejecting anything:
@@ -382,7 +382,11 @@ class AgentDaemon:
         """
         if self.journal is None or self.strategy_library is None:
             return
-        events = self.journal.read_events("COUNTERFACTUAL_EVALUATED")
+        events = (
+            self.journal.read_events("COUNTERFACTUAL_EVALUATED")
+            if _events is None
+            else _events
+        )
         for spec in self.strategy_library.list():
             if spec.lifecycle in {"RETIRED"}:
                 continue
@@ -445,13 +449,39 @@ class AgentDaemon:
             },
         )
 
-    def _record_counterfactuals(self) -> None:
+    def _recorded_counterfactual_verdicts(self, events) -> dict[str, str]:
+        """The verdict last journalled for each cycle, as `{cycle_id: verdict}`."""
+        recorded: dict[str, str] = {}
+        for event in events:
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            for row in coerce.field_dict_tuple(payload.get("rows"), "payload.rows"):
+                cycle_id = coerce.field_str(row.get("cycle_id"), "row.cycle_id")
+                if cycle_id:
+                    recorded[cycle_id] = coerce.field_str(row.get("verdict"), "row.verdict")
+        return recorded
+
+    def _record_counterfactuals(self, *, _events) -> None:
         """Score every decision against what the market actually did next.
 
         864 of 920 journaled cycles are HOLD, and until this existed nothing
         recorded what happened after them, so the system could count decisions and
         their realized PnL but never learn whether a hold was right. This is the
         first thing in the loop that can say a hold was wrong.
+
+        Only decisions that are new, or whose verdict changed, are journalled.
+
+        Every pass used to append the entire ledger: 356 events carrying 210,473
+        rows to describe 720 distinct decisions, of which 209,753 - 99% - were
+        re-records of a row already in the journal. That is 66MB, 55% of a 114MB
+        journal, growing by ~186KB every fifteen minutes, and `_screen_all_strategies`
+        already re-parsed all of it on every pass to answer a question about a fixed
+        720 decisions. The growth was self-feeding: more rows meant a slower read,
+        which meant the same rows were re-derived and re-written for longer.
+
+        A PENDING row is deliberately still re-journalled when it resolves, which is
+        why the rule is "new or changed" rather than "not seen before": a row whose
+        horizon has not elapsed yet is not a claim about the outcome, and the later
+        verdict that supersedes it is the useful record.
         """
         if self.journal is None:
             return
@@ -473,6 +503,18 @@ class AgentDaemon:
             return
         if not report.rows:
             return
+        recorded = self._recorded_counterfactual_verdicts(_events)
+        fresh = [
+            row
+            for row in report.rows
+            if recorded.get(row.cycle_id) != row.verdict
+        ]
+        if not fresh:
+            # Every decision already carries the verdict it has now, so there is
+            # nothing to record. The aggregates below are computed over the whole
+            # report and would be identical to the last event's, so writing them
+            # again would add a row that says only that the pass ran.
+            return
         counts = report.counts()
         self._append_event(
             "COUNTERFACTUAL_EVALUATED",
@@ -480,7 +522,7 @@ class AgentDaemon:
             message=(
                 f"hold_quality={report.hold_quality()} "
                 f"scored={len(report.scored)} pending={report.pending_count} "
-                f"gap={report.gap_count}"
+                f"gap={report.gap_count} new_or_changed={len(fresh)}/{len(report.rows)}"
             ),
             payload={
                 "symbol": symbol,
@@ -505,7 +547,7 @@ class AgentDaemon:
                         "net_return_pct": row.net_return_pct,
                         "verdict": row.verdict,
                     }
-                    for row in report.rows
+                    for row in fresh
                 ],
             },
         )
@@ -686,9 +728,14 @@ class AgentDaemon:
         if self.journal is not None:
             self._record_pnl_evidence(evidence)
             self._verify_profit_target(evidence)
-            self._record_counterfactuals()
+            # One read of the counterfactual ledger, shared. It used to be parsed
+            # twice per pass - once here and once in `_screen_all_strategies` - and
+            # each read grew with the journal, so the cost of every maintenance pass
+            # rose with the number of passes that had already run.
+            counterfactual_events = self.journal.read_events("COUNTERFACTUAL_EVALUATED")
+            self._record_counterfactuals(_events=counterfactual_events)
             self._record_calibration_lesson()
-            self._screen_all_strategies()
+            self._screen_all_strategies(_events=counterfactual_events)
         if self.reflection_memory is not None and self._due(self.last_reflection_at, self.config.reflection_interval_seconds):
             self._reflect(evidence=evidence)
         if self.curriculum_agent is not None and self.reflection_memory is not None and self._due(self.last_curriculum_at, self.config.curriculum_interval_seconds):
