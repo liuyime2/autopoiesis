@@ -602,3 +602,34 @@ so it wants its own commit with its own tests rather than riding along on the en
 change.
 
 `make verify`: 49 classes, 0 failed, 1339 executions across 61 files; 862 pytest pass.
+
+## 2026-10-03 — the journal now states the window it covers
+
+Rotation deletes the oldest generation, so the journal stops being the record of everything
+that happened and becomes a recent fragment. Nothing said so. The doctor reported
+"1179 cycles" as if it were a total, and those cycles are only what two generations still
+hold — measured 2026-10-03: `retained 2026-06-09T06:00:45 .. 2026-10-02T15:58:54 across
+2 generation(s); older cycles have been rotated away`.
+
+That matters because several analyses are **recomputed from the journal on every pass** —
+model calibration (314 decisions), the experiment chain (123 strategies), champion history.
+Past the retention horizon they keep returning a confident number computed from a fragment.
+Silently wrong is worse than loudly absent.
+
+`JsonlJournal.retained_window(known_since=...)` reports the retained span, the generation
+count, and whether older cycles are gone. Truncation is judged against the **strategy
+registry**, not by counting generations: the registry survives rotation, so its earliest
+admission proves when the system existed. A generation boundary cannot distinguish "never
+had more history" from "had more and lost it" — the same reasoning used for
+`lifecycle_reason` landing in the same window.
+
+**This makes truncation visible; it does not extend retention.** ~14 days at the measured
+18.7 MB/day is still the horizon, and whether 14 days is enough depends on what the analyses
+need — which is the next thing to measure, not the next thing to build.
+
+Note the doctor's new check needed no blind `except`: `StrategyLibrary.list()` never raises,
+returning `[]` for a missing directory and collecting parse failures internally. An earlier
+draft guarded it anyway, which added a 63rd `BLE001` and turned the ruff-count gate red —
+deleted rather than suppressed.
+
+`make verify`: 49 classes, 0 failed, 1340 executions across 61 files; 863 pytest pass.

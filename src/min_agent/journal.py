@@ -4,6 +4,7 @@ import contextlib
 import itertools
 import os
 from collections import deque
+from datetime import datetime
 from pathlib import Path
 
 from min_agent.atomicio import file_lock
@@ -101,6 +102,40 @@ class JsonlJournal:
                     continue
                 count += 1
         return count
+
+    def retained_window(self, *, known_since: datetime | None = None) -> dict[str, object]:
+        """The span of history still on disk, and whether it is the whole story.
+
+        Rotation deletes the oldest generation, so the journal stops being the record of
+        everything that happened and becomes a recent fragment. Nothing in `stats()` said
+        so: the doctor reported "1179 cycles" as if it were a total, and on this host
+        those cycles are only what four generations still hold - about 14 days at the
+        measured 18.7 MB/day.
+
+        That matters because several analyses are recomputed from the journal on every
+        pass - model calibration (314 decisions), the experiment chain (123 strategies),
+        champion history. Past the retention horizon they keep returning a confident
+        number computed from a fragment, which is the worst failure mode available:
+        silently wrong rather than loudly absent.
+
+        `truncated` is judged against a `known_since` instant rather than by counting
+        generations, because a generation boundary cannot distinguish "never had more
+        history" from "had more and lost it". If the caller knows the system was already
+        running at some earlier time and the oldest retained record is later than that,
+        the intervening cycles are gone.
+        """
+        records = self.read_all()
+        stamps = sorted(r.snapshot.timestamp for r in records if getattr(r.snapshot, "timestamp", None))
+        window: dict[str, object] = {
+            "cycles": len(records),
+            "oldest": stamps[0].isoformat() if stamps else None,
+            "newest": stamps[-1].isoformat() if stamps else None,
+            "generations": len(self.history_paths()),
+            "truncated": None,
+        }
+        if known_since is not None and stamps:
+            window["truncated"] = stamps[0] > known_since
+        return window
 
     def stats(self) -> dict[str, object]:
         if not self.path.exists():

@@ -1224,6 +1224,37 @@ def _check_journal(report: DoctorReport, config: AgentConfig) -> None:
         )
     else:
         report.add("journal", OK, detail)
+
+    # State the window the journal actually covers. Rotation deletes the oldest
+    # generation, so after it fires the file is a recent fragment rather than the record,
+    # and `len(records) cycles` reads like a total when it is not. Several analyses are
+    # recomputed from the journal every pass - calibration, the experiment chain, champion
+    # history - so past the horizon they return a confident number computed from a
+    # fragment, which is worse than returning nothing.
+    #
+    # Truncation is judged against the strategy registry rather than by counting
+    # generations: the registry survives rotation, so its earliest admission proves when
+    # the system existed. A generation boundary cannot distinguish "never had more history"
+    # from "had more and lost it".
+    # `StrategyLibrary.list` does not raise: it returns [] for a missing directory and
+    # collects per-file parse failures internally, so there is nothing to guard.
+    admitted = StrategyLibrary(config.strategy_dir).list()
+    known_since = min((s.created_at for s in admitted), default=None)
+    window = journal.retained_window(known_since=known_since)
+    if window["oldest"]:
+        window_detail = (
+            f"retained {window['oldest'][:19]} .. {str(window['newest'])[:19]} "
+            f"across {window['generations']} generation(s)"
+        )
+        if window["truncated"]:
+            report.add(
+                "journal window", WARN,
+                f"{window_detail}; older cycles have been rotated away",
+                "model calibration, the experiment chain and champion history are "
+                "recomputed from the retained window only - treat them as partial",
+            )
+        else:
+            report.add("journal window", OK, window_detail)
     utilization = coerce.field_float(stats.get("utilization"), "stats.utilization") or 0.0
     if utilization > 0.8:
         report.add(

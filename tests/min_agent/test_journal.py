@@ -262,3 +262,46 @@ def test_daily_trade_count_ignores_holds_and_other_days(tmp_path):
     journal.append(at(make_record("today"), datetime(2026, 6, 3, 14, 31, tzinfo=timezone.utc), "BUY", accepted))
 
     assert journal.count_submitted_on(target) == 1
+
+
+def test_retained_window_reports_the_span_and_says_when_older_cycles_are_gone(tmp_path):
+    """Rotation makes the journal a fragment, and nothing used to say so.
+
+    `stats()` reports bytes and lines for the live file alone, and the doctor reported
+    `len(records) cycles` as if it were a total. Several analyses are recomputed from the
+    journal on every pass - calibration, the experiment chain, champion history - so past
+    the retention horizon they returned a confident number computed from a fragment, which
+    is worse than returning nothing: silently wrong rather than loudly absent.
+    """
+    from datetime import timedelta
+
+    path = tmp_path / "journal.jsonl"
+    journal = JsonlJournal(path)
+    base = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    for index in range(3):
+        record = make_record(cycle_id=f"c{index}")
+        journal.append(
+            record.model_copy(
+                update={
+                    "snapshot": record.snapshot.model_copy(
+                        update={
+                            "timestamp": base + timedelta(hours=index),
+                            "last_price": 100.0 + index,
+                        }
+                    )
+                }
+            )
+        )
+
+    fresh = journal.retained_window()
+    assert fresh["cycles"] == 3
+    assert fresh["oldest"][:10] == "2026-10-01"
+    assert fresh["newest"][:10] == "2026-10-01"
+    assert fresh["truncated"] is None, "with no known_since there is nothing to judge against"
+
+    # Already running before the oldest retained cycle: the gap was rotated away, and the
+    # reader has to say so rather than imply the window is the whole story.
+    assert journal.retained_window(known_since=base - timedelta(days=1))["truncated"] is True
+
+    # Already running only since the oldest retained cycle: nothing was lost.
+    assert journal.retained_window(known_since=base)["truncated"] is False
