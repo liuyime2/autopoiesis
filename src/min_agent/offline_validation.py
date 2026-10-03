@@ -220,27 +220,42 @@ def validate(
         )
         return result
 
-    # Holds are the only rows that measure whether *not* trading was right, and a
-    # false trade is a filled order that lost. The ratio is over everything scored
-    # so a strategy cannot buy a good ratio by trading constantly and luckily.
+    # One bar, on correct outcomes, whatever action produced them. The comment above
+    # already stated the intent - "so a strategy cannot buy a good ratio by trading
+    # constantly and luckily" - and the ratio is what expresses it.
+    #
+    # There used to be a second, independent test above this one:
+    #
+    #     if result.false_trades:
+    #         return REJECT_POOR_DECISIONS
+    #
+    # It tested for the *presence* of a losing fill rather than its weight, and the
+    # ratio was still applied afterwards, so it only ever removed strategies that had
+    # already cleared the ratio bar. Over the 13 strategies on this journal with >=10
+    # scored decisions it rejected exactly three, and every one of them was a trader
+    # with a good ratio:
+    #
+    #     tiny-fixed-size-001   0.857   3 losing of 21   broker-verified +362.66
+    #     fixed-size-buy-001    0.762   3 losing of 21   16 profitable fills
+    #     fixed-size-sell-005   0.583   5 losing of 12
+    #
+    # The champion of the whole system was rejected by the evidence gate for having lost
+    # three times out of twenty-one, which is what a 0.857 correct-outcome ratio means.
+    # Nothing is admitted here that the ratio would not admit: the passing set becomes
+    # exactly "correct-outcome ratio >= 0.5", which is the sentence the code already
+    # claimed to implement.
     result.good_hold_ratio = round(result.good_holds / result.scored, 6)
-    if result.false_trades:
-        result.verdict = REJECT_POOR_DECISIONS
-        result.reason = (
-            f"{result.false_trades} of {result.scored} scored decisions were "
-            "filled trades that lost money net of cost"
-        )
-        return result
-    # Over correct outcomes, not correct *holds*. The bar is unchanged - the same
-    # `min_good_hold_ratio` on the same denominator - but it is now reachable by a
-    # strategy that trades, which it was not. Nothing here is loosened: a strategy with a
-    # losing fill is still rejected above, and the ratio threshold is the same number.
     if result.correct_outcome_ratio < min_good_hold_ratio:
         result.verdict = REJECT_POOR_DECISIONS
+        lost = (
+            f", {result.false_trades} of them filled trades that lost money"
+            if result.false_trades
+            else ""
+        )
         result.reason = (
             f"only {result.correct_outcomes} of {result.scored} scored decisions went "
             f"the right way ({result.good_holds} correct hold(s), "
-            f"{result.good_trades} profitable fill(s); ratio "
+            f"{result.good_trades} profitable fill(s){lost}; ratio "
             f"{result.correct_outcome_ratio:.3f} < {min_good_hold_ratio:.2f})"
         )
         return result

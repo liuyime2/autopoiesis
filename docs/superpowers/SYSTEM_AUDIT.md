@@ -2852,7 +2852,7 @@ first written when the system was waiting for an open; it has since traded a ful
 session, so the claim moved from "waiting" to "trading" rather than being left to
 expire as a stale positive.
 
-**Reviewed and confirmed.** `make verify`: 49 classes, 0 failed, 1321 test executions
+**Reviewed and confirmed.** `make verify`: 49 classes, 0 failed, 1329 test executions
 across 61 files, exit 0.
 
 This line previously read `1 failed ... exit 1`, and the failure was `doctor`'s

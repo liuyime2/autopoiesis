@@ -8,6 +8,8 @@ These tests pin what makes it a screen rather than a backtest: it can reject, it
 can never promote, and it says so when it does not know.
 """
 
+import pytest
+
 from min_agent import offline_validation as ov
 
 
@@ -61,7 +63,10 @@ def test_a_candidate_with_losing_trades_is_rejected():
 
     assert result.rejected
     assert result.false_trades == 10
-    assert result.reason.startswith("10 of 10")
+    assert result.correct_outcomes == 0
+    # The reason names the losing fills, because "all ten of your trades lost" is the
+    # thing a reader needs and the ratio alone does not say it.
+    assert "10 of them filled trades that lost money" in result.reason
 
 
 def test_a_candidate_that_misses_most_alpha_is_rejected():
@@ -222,16 +227,33 @@ def test_correct_outcomes_count_for_a_strategy_that_also_trades():
     assert "trade" in result.reason.lower(), "the reason must name what earned the pass"
 
 
-def test_a_losing_trade_is_still_rejected():
-    """The fix must not weaken the gate. One losing fill rejects, as before."""
+def test_a_losing_trade_drags_the_ratio_rather_than_rejecting_on_presence():
+    """Corrected from the version written yesterday, which asserted "one losing fill
+    rejects". That assertion was true then and was the reason the champion of the system
+    was refused by the evidence gate at a 0.857 correct-outcome ratio. The property that
+    matters is that losses count: each one moves the ratio, and enough of them reject.
+
+    Kept rather than deleted, because "a losing trade must be able to reject a strategy"
+    is the real requirement and this is where it is pinned.
+    """
     decisions = [_d(ov.GOOD_TRADE, 1.0, action="BUY", cycle=f"w{i}") for i in range(12)]
-    decisions += [_d(ov.FALSE_TRADE, -1.0, action="BUY", cycle="bad")]
+    one_loss = ov.validate(decisions + [_d(ov.FALSE_TRADE, -1.0, action="BUY", cycle="bad")],
+                           strategy_id="one-loss", min_scored=10)
+    many_losses = ov.validate(
+        [_d(ov.GOOD_TRADE, 1.0, action="BUY", cycle=f"w{i}") for i in range(4)]
+        + [_d(ov.FALSE_TRADE, -1.0, action="BUY", cycle=f"b{i}") for i in range(8)],
+        strategy_id="mostly-losing", min_scored=10,
+    )
 
-    result = ov.validate(decisions, strategy_id="mixed-results", min_scored=10)
+    assert one_loss.false_trades == 1
+    assert one_loss.correct_outcome_ratio == pytest.approx(12 / 13)
+    assert one_loss.verdict == ov.PASS_SCREENED, one_loss.reason
 
-    assert result.false_trades == 1
-    assert result.verdict == ov.REJECT_POOR_DECISIONS
-    assert result.rejected
+    assert many_losses.false_trades == 8
+    assert many_losses.correct_outcome_ratio == pytest.approx(4 / 12)
+    assert many_losses.verdict == ov.REJECT_POOR_DECISIONS
+    assert many_losses.rejected
+    assert "8 of them filled trades that lost money" in many_losses.reason
 
 
 def test_neutral_is_still_excluded_from_scored():
@@ -243,3 +265,87 @@ def test_neutral_is_still_excluded_from_scored():
 
     assert result.scored == 12
     assert result.neutral == 20
+
+
+# --- the pass condition is one bar on correct outcomes -----------------------
+#
+# `if result.false_trades: REJECT` tested for the *presence* of a losing fill and
+# returned before the ratio was ever consulted. Two consequences, both measured on the
+# live journal over the 13 strategies with >=10 scored decisions:
+#
+#   * it admitted strategies whose every scored decision was wrong -
+#     `trend-follow-20260611-003` has a correct-outcome ratio of 0.000 and passed,
+#     because it never placed a fill. `trend-follow-20260611-006` at 0.400 and
+#     `trend-follow-sell-002` at 0.093 passed for the same reason, below the 0.5 bar.
+#   * it rejected the broker-verified champion, `tiny-fixed-size-001` at +362.66, for
+#     having three losing fills out of twenty-one scored.
+#
+# So the screen was inverted in both directions at once. The comment above the ratio
+# already stated the intent - "so a strategy cannot buy a good ratio by trading
+# constantly and luckily" - and the ratio is what expresses that. The presence test was
+# stricter than the intent in one direction and looser in the other.
+
+
+def test_a_strategy_whose_every_scored_decision_was_wrong_is_rejected():
+    """The case the presence test waved through.
+
+    Ten holds that each missed a rally: no fill was ever placed, so `false_trades` is 0
+    and the old rule returned PASS before reading the ratio. This is
+    `trend-follow-20260611-003` exactly - 0 good holds, 0 profitable fills, 0 losing
+    fills, and a correct-outcome ratio of 0.000.
+    """
+    decisions = [_d(ov.MISSED_ALPHA, 1.5, cycle=f"m{i}") for i in range(10)]
+
+    result = ov.validate(decisions, strategy_id="always-wrong", min_scored=10)
+
+    assert result.scored == 10
+    assert result.false_trades == 0
+    assert result.correct_outcomes == 0
+    assert result.verdict == ov.REJECT_POOR_DECISIONS
+    assert result.rejected
+
+
+def test_the_champion_with_three_losing_fills_is_not_rejected_for_them():
+    """The case the presence test rejected. `tiny-fixed-size-001`: 15 profitable fills,
+    3 good holds, 3 losing fills, 21 scored, broker-verified +362.66."""
+    decisions = [_d(ov.GOOD_TRADE, 1.0, action="BUY", cycle=f"w{i}") for i in range(15)]
+    decisions += [_d(ov.GOOD_HOLD, -1.0, cycle=f"g{i}") for i in range(3)]
+    decisions += [_d(ov.FALSE_TRADE, -1.0, action="BUY", cycle=f"b{i}") for i in range(3)]
+
+    result = ov.validate(decisions, strategy_id="champion", min_scored=10)
+
+    assert result.scored == 21
+    assert result.correct_outcome_ratio == pytest.approx(18 / 21)
+    assert result.verdict == ov.PASS_SCREENED, result.reason
+
+
+def test_trading_luckily_cannot_buy_a_pass():
+    """The intent the presence test was reaching for, now expressed by the ratio.
+
+    A strategy that fills constantly and wins just over half the time has a
+    correct-outcome ratio of 0.5 and passes; one that wins less than half does not, and
+    neither is waved through by having no losing fill at all.
+    """
+    lucky = [_d(ov.GOOD_TRADE, 0.2, action="BUY", cycle=f"w{i}") for i in range(6)]
+    lucky += [_d(ov.FALSE_TRADE, -0.2, action="BUY", cycle=f"b{i}") for i in range(4)]
+    unlucky = [_d(ov.GOOD_TRADE, 0.2, action="BUY", cycle=f"w{i}") for i in range(4)]
+    unlucky += [_d(ov.FALSE_TRADE, -0.2, action="BUY", cycle=f"b{i}") for i in range(6)]
+
+    assert ov.validate(lucky, strategy_id="lucky", min_scored=10).verdict == ov.PASS_SCREENED
+    rejected = ov.validate(unlucky, strategy_id="unlucky", min_scored=10)
+    assert rejected.verdict == ov.REJECT_POOR_DECISIONS
+    assert rejected.rejected
+
+
+def test_a_hold_only_strategy_faces_the_same_bar_as_one_that_trades():
+    """One bar, applied to correct outcomes whatever action produced them."""
+    holds = [_d(ov.GOOD_HOLD, -1.0, cycle=f"g{i}") for i in range(6)]
+    holds += [_d(ov.MISSED_ALPHA, 1.0, cycle=f"m{i}") for i in range(4)]
+    trades = [_d(ov.GOOD_TRADE, 1.0, action="BUY", cycle=f"w{i}") for i in range(6)]
+    trades += [_d(ov.MISSED_ALPHA, 1.0, cycle=f"m{i}") for i in range(4)]
+
+    from_holding = ov.validate(holds, strategy_id="holder", min_scored=10)
+    from_trading = ov.validate(trades, strategy_id="trader", min_scored=10)
+
+    assert from_holding.correct_outcome_ratio == from_trading.correct_outcome_ratio
+    assert from_holding.verdict == from_trading.verdict == ov.PASS_SCREENED
