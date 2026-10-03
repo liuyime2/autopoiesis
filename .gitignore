@@ -27,6 +27,16 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.mypy_cache/
+.ruff_cache/
+
+# --- agent session state (regenerated per session; not project content) ---
+# Goal JSONs carry session ids, worktree fingerprints and the runtime's own
+# progress notes. Three of them were tracked, which put a `M` in `git status` on
+# every single turn and would have published internal session state to a public
+# repository. Nothing reads them: all three verify gates that walk the tree
+# already skip `.opencode`.
+.opencode/goals/
 
 # --- stale lock file from a dead Claude session ---
 .claude/scheduled_tasks.lock

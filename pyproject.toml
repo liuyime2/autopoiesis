@@ -8,7 +8,13 @@ version = "0.1.0"
 description = "A paper-trading agent that grades its own strategies against broker evidence and retires the ones that do not earn their place."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Proprietary" }
+# The table form, not the PEP 639 SPDX string `license = "Apache-2.0"`. That is the
+# modern spelling and it is what a reader expects, but it needs setuptools>=77; this
+# file declares `setuptools>=68` as its floor, and 68.1.2 rejects the string form with
+# `ValueError: required: ['text']`. Verified by reading the config with the floor
+# version rather than by assuming - raising the floor to chase the newer spelling would
+# make the documented fresh-clone install depend on a newer setuptools for no gain.
+license = { text = "Apache-2.0" }
 
 # The complete runtime dependency set. Three packages, all reachable by importing the
 # package: `alpaca_trade_api` in data_gateway/executor/cli/broker_evidence,

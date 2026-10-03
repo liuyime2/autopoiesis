@@ -278,3 +278,17 @@ recorded cycle, and it was red for several commits while every other step was gr
 gate checks that log against the script and the commit it names, so a green claim here is
 traceable to a run rather than to prose. `make verify` runs the same checks in place; the
 clone exists to prove they pass from nothing but a checkout.
+
+## License
+
+Apache License 2.0 - see [`LICENSE`](LICENSE).
+
+Two things a reader should know before running this against a real account, because the
+license does not cover them. It **trades in paper mode only**: `config.is_paper_endpoint`
+is the single definition of paper-only and both `cli` and the executor go through it, so
+there is one line to audit rather than a setting to trust. And it makes no claim of profit.
+The figures this repository quotes are broker-verified for a paper account and are evidence
+that the accounting and the loop are real, not a track record - and they are deliberately
+not written into these documents, because they move while the agent trades. Run
+`minictrl doctor` for the current ones.
+
