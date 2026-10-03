@@ -383,3 +383,52 @@ agent's own book: $15,000 held approves, $19,000 held rejects with
 `agent exposure 19000.00 + 3827.45 exceeds the 20000.00 limit`. The optional
 `max_account_value` backstop also rejects correctly when enabled. The per-position
 $5,000 limit is what refuses larger single orders, not the account total.
+
+## 2026-10-03 — the profit is one exit event, and the budget now buys measurement
+
+**Measured, not assumed.** The broker-verified record is 35 closed lots, 62 linked
+fills, net PnL **+643.40** (+630.13 after an assumed 0.05% round trip; observed broker
+fees 0.00): `tiny-fixed-size-001` +366.03, `fixed-size-buy-001` +146.94,
+`trend-follow-buy-001` +81.36. Grouped by exit price, **a single exit at 766.57 closed
+23 of the 35 lots and produced 87.7% of the net PnL**, involving all three strategies at
+once. Ten distinct exit prices exist across the record; the other nine contribute +29.94
+combined. So the headline is **one market move, not thirty-five decisions**, and the
+ranking between the three reflects how many shares each happened to hold.
+
+The champion's +366.03 is 8 of its 10 lots exiting at 766.57, bought across 727–742 while
+SPY was in its June range; its other two lots exited at 769.31 for +3.37 combined.
+**No strategy on record has a demonstrated repeatable edge.** The doctor already carries
+part of this and says so: `regime=CANNOT ATTRIBUTE`, `signal=CANNOT ATTRIBUTE`,
+`by regime: {'UNKNOWN': 594.33}`, and `UNMATCHED SELLS 29` makes the headline an upper
+bound rather than an exact result.
+
+**Decision (owner's).** Spend about one trading day of the incumbent's throughput so
+every candidate that can actually trade reaches the evidence gate.
+
+**Change.** `StrategySelector.min_probation_cycles` 3 → 13.
+
+- Why 13: the offline screen refuses to judge below ten informative decisions
+  (`DEFAULT_MIN_SCORED_DECISIONS`), and a `FIXED_SIZE` produces them at an observed
+  0.75–0.91 per selected cycle — 11 to 13 selected cycles. The budget of 3 bought about
+  two informative decisions, so every candidate was judged before it could be measured and
+  the screen returned `INCONCLUSIVE` for all of them. **Zero trading strategies have ever
+  passed it.**
+- The cost is deliberate and accepted, not discovered: probation has absolute priority in
+  `select`, so 13 candidates × 13 cycles is cycles taken from the incumbent.
+- Verified with the shipped code at spot 769.58: **6 candidates claim 13 cycles each =
+  78 cycles ≈ 1.2 trading days** at the observed 66 market-open cycles per day, and the
+  **9 dormant candidates claim nothing** because their trigger band contains spot and
+  the selector skips them. That filter is what makes the budget mean anything.
+- **Not a one-time cost.** A newly admitted candidate re-enters probation and claims 13
+  again; at the current admission rate this is a standing claim of roughly 20–40% of
+  throughput. The 6-claimant count moved from 5 to 6 between measurements because a
+  seventh candidate was admitted, which is the refill in action.
+
+**Still not fixed, and the next honest step.** The four terminal PAUSED strategies whose
+stated reasons have expired (2 price-gated above spot, 2 refresh-gated) still cannot return
+to the candidate pool — nothing re-adjudicates PAUSED. That arrives with the next trading
+day, and it is deliberately not pre-built. Together with the profit being one exit event,
+the honest summary is: **nothing is proven about any strategy's edge, and this change buys
+the measurements that could prove something.**
+
+`make verify`: 49 classes, 0 failed, 1331 test executions across 61 files, exit 0.

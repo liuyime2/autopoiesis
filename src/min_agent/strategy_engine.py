@@ -343,10 +343,35 @@ class StrategyLifecycleManager:
 
 
 class StrategySelector:
+    """Pick one strategy for a cycle, probation first.
+
+    `min_probation_cycles` is the number of selected cycles a candidate is guaranteed
+    before the queue moves on, and it is set to what a candidate *needs* rather than
+    to a round number. The offline screen refuses to judge a strategy below ten
+    informative decisions, and a FIXED_SIZE produces them at an observed 0.75-0.91 per
+    selected cycle - so 11 to 13 selected cycles. The budget was 3, which produced
+    about two informative decisions against a gate of ten: every candidate was judged
+    before it could be measured, and the screen returned INCONCLUSIVE for all of them.
+
+    The cost is deliberate and was accepted rather than discovered. Probation has
+    absolute priority in `select`, so a deeper budget takes cycles from whatever else
+    is eligible. At 13, five tradeable candidates x 13 is 65 cycles - about one
+    trading day at the observed 66 market-open cycles per day - during which the one
+    ACTIVE strategy trades nothing. It is not a one-time cost: a newly admitted
+    candidate re-enters probation and claims 13 cycles again, so at the current
+    admission rate this is a standing claim of roughly 20-40% of throughput.
+
+    What it buys is the only thing that has ever been missing. Zero trading
+    strategies have passed the offline screen in this project's history, because none
+    could reach its evidence gate; and the profit on record is 87.7% a single exit at
+    one price, which is not evidence that any strategy has a repeatable edge. A day of
+    the incumbent's throughput to find out whether anything else does is the trade.
+    """
+
     def __init__(
         self,
         *,
-        min_probation_cycles: int = 3,
+        min_probation_cycles: int = 13,
         exploration_floor_cycles: int = 5,
     ):
         self.min_probation_cycles = min_probation_cycles
@@ -374,15 +399,12 @@ class StrategySelector:
         # The queue is oldest-first, so it is the one place in this method that is blind
         # to whether a strategy can act: argmax over scores naturally avoids a strategy
         # that has never traded, while the queue serves whatever has been waiting
-        # longest. Measured on the live library, 8 of the 13 probation candidates could
+        # longest. Measured on the live library, 9 of the 15 probation candidates could
         # not have fired anywhere in the recent price range (759.37-772.39) because
         # their trigger band contains it, so those cycles could produce nothing at any
-        # queue depth.
-        #
-        # That is also why raising `min_probation_cycles` was measured and rejected: at a
-        # budget of 13 the candidates reaching the ten-scored gate fell from 3 to 2 and
-        # the informative decisions produced by probation candidates fell from 62.8 to
-        # 35.8, because the extra cycles went to strategies that cannot use them.
+        # queue depth. Filtering them is therefore what makes the budget mean anything:
+        # at 13 cycles per candidate, a budget spent on dormant candidates would buy
+        # nothing, and this filter keeps all 13 on candidates that can use them.
         #
         # `_declared_actions` is the same predicate the admission gate uses to refuse a
         # TREND_FOLLOW anchored so close to spot that its band swallows the price, so the

@@ -1209,3 +1209,57 @@ def test_a_probation_strategy_with_no_price_is_still_served():
     )
 
     assert selector.select([probation], None, None).strategy_id == "probation"
+
+
+def test_the_default_probation_budget_covers_the_screen_gate():
+    """The budget is set to what the screen needs, not to a round number.
+
+    `offline_validation.DEFAULT_MIN_SCORED_DECISIONS` is ten informative decisions, and
+    the offline screen is the only promotion route that does not require broker-verified
+    PnL. A FIXED_SIZE produces informative decisions at an observed 0.75-0.91 per selected
+    cycle, so eleven to thirteen selected cycles. The budget was 3, which bought about
+    two informative decisions: every candidate was judged before it could be measured, and
+    the screen returned INCONCLUSIVE for all of them. No trading strategy has ever passed
+    it in this project's history.
+    """
+    from min_agent import offline_validation as ov
+
+    assert StrategySelector().min_probation_cycles >= ov.DEFAULT_MIN_SCORED_DECISIONS
+
+
+def test_a_candidate_leaves_probation_only_once_it_could_be_screened():
+    """Three cycles is not "served"; it is "not yet measurable".
+
+    Pins the behaviour the budget exists for, without coupling the test to the exact
+    constant: a candidate short of the default budget stays in the queue, and one that has
+    reached it is released.
+    """
+    selector = StrategySelector()
+    budget = selector.min_probation_cycles
+    probation = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION")
+    incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE")
+
+    def with_cycles(n):
+        return [
+            StrategyResult(
+                strategy_id="candidate", cycles=n, submitted_orders=0, rejected_orders=0,
+                errors=0, score=0.5, evaluated_at=datetime.now(tz=timezone.utc),
+            ),
+            # The incumbent outscores the candidate, so once the candidate leaves
+            # probation the argmax hands the cycle over rather than returning it. Without
+            # this the test would pass for the wrong reason - the candidate has the higher
+            # score and would win either way.
+            #
+            # `trade_attempts` matters too: the selector's exploration floor fires when
+            # nothing in the library has traded, and its probe prefers the smallest order
+            # rather than the best score. With the floor live this test would be measuring
+            # the probe, not probation.
+            StrategyResult(
+                strategy_id="incumbent", cycles=50, submitted_orders=10, trade_attempts=10,
+                rejected_orders=0, errors=0, score=0.9,
+                evaluated_at=datetime.now(tz=timezone.utc),
+            ),
+        ]
+
+    assert selector.select([probation, incumbent], with_cycles(budget - 1)).strategy_id == "candidate"
+    assert selector.select([probation, incumbent], with_cycles(budget)).strategy_id == "incumbent"
