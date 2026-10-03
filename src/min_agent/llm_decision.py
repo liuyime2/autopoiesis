@@ -30,6 +30,43 @@ def parse_decision_json(text: str, *, model_name: str | None = None) -> TradeDec
 
 Transport = Callable[[str, Mapping[str, Any], int], Mapping[str, Any]]
 
+#: The decision engine's entire instruction, as data.
+#:
+#: This was a string literal inside `decide()`. That is the whole of the system's
+#: self-representation: there was nowhere else it lived, so it could not be audited
+#: without reading a method, diffed as a change to intent, or corrected without a code
+#: change and a daemon restart.
+#:
+#: It also had a measurable hole. It spelled out the `action` enum, the `quantity` rule
+#: and every `hold_reason` value - and never said that `confidence` must lie in [0, 1].
+#: The JSON schema passed alongside it *does* carry `minimum: 0, maximum: 1`, so the
+#: bound was available to constrained decoding, and 92 cycles still reached validation
+#: with an out-of-range value: a numeric range does not survive into the decoding
+#: grammar, so these words are the only place it can be enforced. Cost: 100 cycles lost
+#: to a malformed `confidence` and 135 more to fail-closed HOLDs on invalid output -
+#: about 20% of this project's entire decision history, every one of them a cycle the
+#: market was open for.
+#:
+#: Every constraint the validator enforces is stated here in words. `tests/
+#: min_agent/test_llm_decision.py` asserts that correspondence, so a field added to the
+#: schema without a line here fails the build rather than costing 20% of the history.
+DECISION_INSTRUCTION = (
+    "You are a paper-trading decision engine. Return exactly one JSON object with keys: "
+    "symbol, action, quantity, confidence, rationale, hold_reason. "
+    "action must be exactly one of BUY, SELL, HOLD. "
+    "quantity must be the integer 0 when action is HOLD, and a positive integer otherwise. "
+    "confidence must be a decimal number between 0 and 1 inclusive, written as a decimal "
+    "like 0.65 and never as a percentage such as 65 and never above 1. "
+    "Base every number on the context you are given; do not invent prices. "
+    "If the context does not support a trade, return HOLD, set quantity to 0, and set "
+    "hold_reason. "
+    "hold_reason must be exactly one of: no_signal, risk_limit_near, market_uncertain, "
+    "await_confirmation, other. Use risk_limit_near only when a risk figure in the "
+    "context is what stopped you. The risk limits in the context are enforced "
+    "independently downstream; state your reason, do not act as a second risk check. "
+    "Do not include any order outside the supplied symbol and risk context."
+)
+
 #: The one transport contract: (prompt, context, num_ctx) -> the parsed body.
 #: There was a second, identical-looking definition of this name further up the
 #: file, differing only in dict-vs-Mapping. Python bound the later one and the
@@ -97,20 +134,7 @@ class OllamaDecisionEngine:
         return env
 
     def decide(self, context: dict[str, Any]) -> TradeDecision:
-        prompt = (
-            "You are a paper-trading decision engine. Return exactly one JSON object with keys: "
-            "symbol, action, quantity, confidence, rationale, hold_reason. "
-            "action must be BUY, SELL, or HOLD. "
-            "quantity must be 0 when action is HOLD, and a positive integer otherwise. "
-            "Base every number on the context you are given; do not invent prices. "
-            "If the context does not support a trade, return HOLD and set hold_reason. "
-            "hold_reason must be exactly one of: no_signal, risk_limit_near, market_uncertain, "
-            "await_confirmation, other. Use risk_limit_near only when a risk figure in the "
-            "context is what stopped you. The risk limits in the context are enforced "
-            "independently downstream; state your reason, do not act as a second risk check. "
-            "Do not include any order outside the supplied symbol and risk context.\n"
-            f"Context: {json.dumps(context, sort_keys=True)}"
-        )
+        prompt = f"{DECISION_INSTRUCTION}\nContext: {json.dumps(context, sort_keys=True)}"
         payload = {
             "model": self.model,
             "prompt": prompt,

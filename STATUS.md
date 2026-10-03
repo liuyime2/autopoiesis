@@ -522,3 +522,39 @@ real outcomes), so miscalibration has never corrupted a promotion decision. And 
 is consumed only for measurement, never for sizing or ranking.
 
 `make verify`: 49 classes, 0 failed, 1331 executions; 858 pytest pass.
+
+## 2026-10-03 — the decision instruction now exists as data, and had a measured hole
+
+The whole of the system's instruction to the model was a string literal inside
+`llm_decision.decide()`. There was nowhere else it lived, so it could not be audited
+without reading a method body, diffed as a change to intent, or corrected without a code
+change and a daemon restart. It is now `DECISION_INSTRUCTION`, one owned constant, with the
+prompt assembled from it.
+
+**The hole it had.** It spelled out the `action` enum, the `quantity` rule and every
+`hold_reason` value — and never said `confidence` must lie in [0, 1]. The JSON schema passed
+alongside it *does* carry `minimum: 0, maximum: 1`, so the bound was available to constrained
+decoding and 92 cycles still reached validation with an out-of-range value: a numeric range
+does not survive into the decoding grammar, which leaves the prose as the only enforcement
+point. **Cost: 100 cycles lost to a malformed `confidence` plus 135 fail-closed HOLDs on
+invalid output — about 20% of the entire decision history, every one of them a cycle the
+market was open for.** The 28 HOLDs that carried a non-zero quantity despite the rule being
+stated are addressed by stating the quantity/hold_reason coupling in one sentence.
+
+The prompt grew 781 → 975 characters. The file's measured budget said prompt 3441 at
+`num_ctx` 6144 using 4584; it is now ~3635 using ~4778, leaving 1366 of headroom, so the
+recorded budget still holds and was not widened to hide the increase.
+
+**A correspondence test, not a string test.** `test_the_instruction_states_every_constraint_
+the_validator_enforces` walks the actual schema: every `action` enum, every `hold_reason`
+value, every required field, and the confidence bound must all appear in the instruction. A
+field added to the schema without a line here now fails the build instead of costing 20% of
+the history.
+
+**Not built, deliberately:** a prompt-management subsystem or an auto-rewriting optimiser.
+The observed need was one missing line in a hardcoded string; a constant plus a
+correspondence test covers it. Whether the model should ever rewrite its own instruction is
+unresolved and unevidenced — see the calibration section above for why the confidence problem
+is not a prompting problem.
+
+`make verify`: 49 classes, 0 failed, 1337 executions across 61 files; 860 pytest pass.

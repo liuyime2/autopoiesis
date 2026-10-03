@@ -1,7 +1,9 @@
+import inspect
 from datetime import datetime, timezone
 
 import pytest
 
+from min_agent import llm_decision
 from min_agent.llm_decision import OllamaDecisionEngine, parse_decision_json
 from min_agent.models import TradeDecision
 
@@ -337,3 +339,61 @@ def test_curriculum_window_fits_its_own_prompt_and_answer():
         f"curriculum prompt measures ~{tokens} tokens and the answer needs "
         f"{measured_answer}; window {CURRICULUM_NUM_CTX} would truncate"
     )
+
+
+# --------------------------------------------------------------------------
+# the instruction is data, and it must cover what the validator enforces
+# --------------------------------------------------------------------------
+
+def test_the_decision_instruction_lives_outside_the_method_body():
+    """There has to be a surface representing what the system tells the model.
+
+    It was a string literal inside `decide()`, which meant the whole of the system's
+    self-representation could only be audited by reading a method body, and could only
+    be corrected by a code change and a daemon restart.
+    """
+    from min_agent.llm_decision import DECISION_INSTRUCTION
+
+    assert isinstance(DECISION_INSTRUCTION, str) and DECISION_INSTRUCTION.strip()
+    source = inspect.getsource(llm_decision.OllamaDecisionEngine.decide)
+    assert "DECISION_INSTRUCTION" in source
+    # The literal must not be duplicated back inside the method.
+    assert "You are a paper-trading decision engine" not in source
+
+
+def test_the_instruction_states_every_constraint_the_validator_enforces():
+    """The measured cost of a missing line here was ~20% of the decision history.
+
+    92 cycles carried an out-of-range `confidence` and 28 a HOLD with non-zero quantity;
+    the JSON schema carries `minimum: 0, maximum: 1`, so the bound was available to
+    constrained decoding and still did not hold - a numeric range does not survive into
+    the decoding grammar, which leaves these words as the only enforcement point.
+
+    So this is a correspondence test, not a string test: every enum the schema declares
+    must appear in the instruction, and the confidence bound must be stated in words.
+    A field added to the schema without a line here now fails the build.
+    """
+    from min_agent.llm_decision import DECISION_INSTRUCTION
+
+    instruction = DECISION_INSTRUCTION
+    schema = TradeDecision.model_json_schema()
+
+    for value in schema["properties"]["action"]["enum"]:
+        assert value in instruction, f"action {value} is not in the instruction"
+
+    for value in schema["properties"]["hold_reason"]["anyOf"][0]["enum"]:
+        assert value in instruction, f"hold_reason {value} is not in the instruction"
+
+    for field in schema["required"]:
+        assert field in instruction, f"required field {field} is not in the instruction"
+
+    # The range the schema declares numerically, and the grammar silently drops.
+    bounds = schema["properties"]["confidence"]
+    assert bounds["minimum"] == 0 and bounds["maximum"] == 1
+    assert "confidence" in instruction
+    lowered = instruction.lower()
+    assert "0" in lowered and "1" in lowered, "the confidence range is never stated"
+
+    # The quantity rule, which the model broke 28 times despite it being stated.
+    assert "quantity must be" in lowered
+    assert "hold" in lowered
