@@ -369,7 +369,30 @@ class StrategySelector:
         result_by_id = {result.strategy_id: result for result in results or []}
         tradable = [strategy for strategy in eligible if strategy.kind != "HOLD_BASELINE" and strategy.lifecycle != "BASELINE"]
         probation = [strategy for strategy in tradable if self._needs_probation(strategy, result_by_id.get(strategy.strategy_id))]
-        if probation:
+        # A candidate that cannot trade at this price would spend the cycle on a HOLD.
+        #
+        # The queue is oldest-first, so it is the one place in this method that is blind
+        # to whether a strategy can act: argmax over scores naturally avoids a strategy
+        # that has never traded, while the queue serves whatever has been waiting
+        # longest. Measured on the live library, 8 of the 13 probation candidates could
+        # not have fired anywhere in the recent price range (759.37-772.39) because
+        # their trigger band contains it, so those cycles could produce nothing at any
+        # queue depth.
+        #
+        # That is also why raising `min_probation_cycles` was measured and rejected: at a
+        # budget of 13 the candidates reaching the ten-scored gate fell from 3 to 2 and
+        # the informative decisions produced by probation candidates fell from 62.8 to
+        # 35.8, because the extra cycles went to strategies that cannot use them.
+        #
+        # `_declared_actions` is the same predicate the admission gate uses to refuse a
+        # TREND_FOLLOW anchored so close to spot that its band swallows the price, so the
+        # two agree by construction rather than by two implementations agreeing. It is
+        # price-dependent and reversible: when the market leaves the band the strategy
+        # becomes selectable again. Nothing is retired here.
+        actionable = [
+            strategy for strategy in probation if self._declared_actions(strategy, last_price)
+        ]
+        if actionable:
             # Fair rotation, but a strategy that supplies a capability the library
             # otherwise lacks is not an interchangeable peer. Curriculum builds a
             # SELL strategy precisely because the library could not sell, and then
@@ -380,12 +403,25 @@ class StrategySelector:
             # is served first, and only then does the queue return to oldest-first.
             unexercised = self._uncovered_capabilities(tradable, last_price)
             if unexercised:
-                for strategy in sorted(probation, key=lambda s: (s.created_at, s.strategy_id)):
+                for strategy in sorted(actionable, key=lambda s: (s.created_at, s.strategy_id)):
                     if self._supplies_capability(strategy, unexercised, last_price):
                         return strategy
-            return sorted(probation, key=lambda strategy: (strategy.created_at, strategy.strategy_id))[0]
+            return sorted(actionable, key=lambda strategy: (strategy.created_at, strategy.strategy_id))[0]
 
         candidates = tradable or eligible
+        # Same reasoning as the probation queue, applied to the path it falls through
+        # to. Without this, skipping an untradeable probation queue buys nothing: the
+        # argmax below has no score to separate the candidates yet, `max` returns the
+        # first of equals, and the untradeable strategy is served anyway.
+        #
+        # Falls back to the unfiltered list when nothing can act, because an empty
+        # candidate set would raise rather than trade. Skipping must never become
+        # stopping.
+        actionable_candidates = [
+            strategy for strategy in candidates if self._declared_actions(strategy, last_price)
+        ]
+        if actionable_candidates:
+            candidates = actionable_candidates
         scores = {result.strategy_id: result.score for result in results or []}
         # A candidate counts as explored only if it has a history that shows it
         # tried. Having no result at all is unevaluated, not explored - otherwise

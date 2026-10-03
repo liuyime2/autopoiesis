@@ -1098,3 +1098,114 @@ def test_broker_verified_pnl_still_promotes_without_offline_evidence():
 
     assert decision.new_lifecycle == "ACTIVE"
     assert "broker-verified realized PnL" in decision.reason
+
+
+# --- the probation queue is not served blind to whether a strategy can act ----
+#
+# The queue is oldest-first, so it is the one place in `select` that ignores whether a
+# strategy could trade on this snapshot; argmax over scores naturally avoids one that
+# has never traded. Replaying the recorded price path over the live library: the old
+# queue spent 39 cycles, 30 of them (76%) on strategies that emitted nothing, and
+# released none. Serving only what can act spends 15, wastes 0, and releases 313 of
+# 325 cycles to the strategies that do trade.
+#
+# Raising `min_probation_cycles` was the obvious alternative and was measured: at 13
+# the candidates reaching the ten-scored gate fell from 3 to 2, and the informative
+# decisions produced by probation candidates fell from 62.8 to 35.8.
+
+
+def test_probation_queue_skips_a_candidate_that_cannot_trade_this_snapshot():
+    selector = StrategySelector(min_probation_cycles=3)
+    # band [98.00, 102.00] around a reference of 100.0 - 767 is far above it, so this
+    # one can act. The other is anchored on spot and can only HOLD.
+    can_act = make_spec(
+        strategy_id="can-act",
+        kind="TREND_FOLLOW",
+        lifecycle="PROBATION",
+        reference_price=100,
+        threshold_pct=0.02,
+    )
+    older_but_cannot = make_spec(
+        strategy_id="older-cannot",
+        kind="TREND_FOLLOW",
+        lifecycle="PROBATION",
+        reference_price=767,
+        threshold_pct=0.02,
+        created_at=datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc),
+    )
+
+    chosen = selector.select([older_but_cannot, can_act], None, 767.0)
+
+    assert chosen.strategy_id == "can-act"
+
+
+def test_an_untradeable_probation_queue_falls_through_instead_of_freezing():
+    """The dangerous direction: skipping must not become stopping.
+
+    If every probation candidate would HOLD, the queue is skipped and the cycle goes to
+    the non-probation path. Returning None here would be an agent that has stopped
+    trading because its candidates are dormant - a freeze wearing a fix's clothes.
+    """
+    selector = StrategySelector(min_probation_cycles=3)
+    dormant = make_spec(
+        strategy_id="dormant",
+        kind="TREND_FOLLOW",
+        lifecycle="PROBATION",
+        reference_price=767,
+        threshold_pct=0.02,
+    )
+    active = make_spec(
+        strategy_id="active", kind="FIXED_SIZE", lifecycle="ACTIVE", action="BUY", quantity=1
+    )
+
+    chosen = selector.select([dormant, active], None, 767.0)
+
+    assert chosen is not None, "a dormant probation queue must not stop the agent trading"
+    assert chosen.strategy_id == "active"
+
+
+def test_the_queue_decision_follows_the_price_rather_than_purging():
+    """Reversibility, which is why this is a selector change and not a retirement.
+
+    A strategy anchored on spot is dormant, not wrong. When the market moves out of its
+    band it becomes selectable again, and nothing about its lifecycle was touched.
+    """
+    selector = StrategySelector(min_probation_cycles=3)
+    anchored = make_spec(
+        strategy_id="anchored",
+        kind="TREND_FOLLOW",
+        lifecycle="PROBATION",
+        reference_price=767,
+        threshold_pct=0.02,
+    )
+    other = make_spec(
+        strategy_id="other",
+        kind="TREND_FOLLOW",
+        lifecycle="PROBATION",
+        reference_price=100,
+        threshold_pct=0.02,
+        created_at=datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc),
+    )
+
+    # 767 is inside [752.34, 781.66], so `anchored` holds and `other` buys above 102.
+    assert selector.select([anchored, other], None, 767.0).strategy_id == "other"
+    # 700 is below the band, so `anchored` now emits SELL and the queue reverts to
+    # oldest-first, which is `other` again only because it is older.
+    assert selector.select([anchored, other], None, 700.0).strategy_id == "other"
+    # Take `other` out of the picture and `anchored` is served once it can act.
+    assert selector.select([anchored], None, 700.0).strategy_id == "anchored"
+    assert anchored.lifecycle == "PROBATION", "selection must not change a lifecycle"
+
+
+def test_a_probation_strategy_with_no_price_is_still_served():
+    """Without a price there is nothing to judge executability by, so the queue runs.
+
+    Skipping on a missing price would strand every candidate the moment the daemon
+    started, which is the opposite of the intent.
+    """
+    selector = StrategySelector(min_probation_cycles=3)
+    probation = make_spec(
+        strategy_id="probation", kind="FIXED_SIZE", lifecycle="PROBATION", action="BUY", quantity=1
+    )
+
+    assert selector.select([probation], None, None).strategy_id == "probation"
