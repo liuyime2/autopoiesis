@@ -2087,11 +2087,50 @@ def check_units_are_where_systemd_looks() -> Result:
                     "dangling after reboot"
                 )
 
+    # A unit can live in exactly the right place, be enabled from exactly the right
+    # link, and still be unable to start, because nothing has checked that the binary
+    # in ExecStart exists. `systemd-analyze verify` does not stat it.
+    #
+    # That is not hypothetical: `minictrl install-service` fell back to the literal
+    # /usr/local/bin/ollama when `command -v ollama` found nothing, and this host has
+    # no such file. The install reported success and the unit loaded from $HOME. The
+    # service only failed when it was next started - 40 minutes later, with
+    # `status=203/EXEC` - on a unit that had otherwise been up a day and a half. Ollama
+    # decides the trades, so for that window every decision silently came from the
+    # policy engine instead of the model, and `doctor` was the only thing that
+    # noticed.
+    #
+    # So the path each unit will actually execute is resolved and checked for
+    # existence, because a durable unit that cannot start is a reboot away from
+    # discovering it.
+    for unit in ("min-agent.service", "ollama.service", "quant-watchdog.service"):
+        try:
+            proc = subprocess.run(
+                ["systemctl", "--user", "show", unit, "-p", "ExecStart", "--value"],
+                capture_output=True, text=True, timeout=15,
+            )
+        except Exception as exc:  # pragma: no cover
+            problems.append(f"{unit}: could not query ExecStart ({exc})")
+            continue
+        if proc.returncode != 0 or not proc.stdout.strip():
+            continue
+        for token in proc.stdout.split():
+            if not token.startswith("path="):
+                continue
+            exe = token[len("path="):]
+            if exe and not Path(exe).exists():
+                problems.append(
+                    f"{unit} ExecStart {exe} does not exist - the unit would fail with "
+                    f"203/EXEC the next time it is started, whatever its file looks like"
+                )
+                break
+
     return Result(
         "units-where-systemd-looks",
         FAIL if problems else PASS,
         "; ".join(problems[:4]) if problems else
-        "every --user unit loads from a durable path and is enabled without a tmpfs link",
+        "every --user unit loads from a durable path, is enabled without a tmpfs link, "
+        "and its ExecStart exists",
     )
 
 
@@ -3046,7 +3085,8 @@ def self_test() -> int:
         return 1
     print("\nSELF-TEST PASSED: the gate detects failing tests, missing names,")
     print("empty classes, unclassified test files, stale plan documents,")
-    print("$HOME paths in production code, and units systemd cannot find.")
+    print("$HOME paths in production code, units systemd cannot find, and units")
+    print("whose ExecStart is a path that does not exist.")
     return 0
 
 
