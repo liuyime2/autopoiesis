@@ -432,3 +432,18 @@ the honest summary is: **nothing is proven about any strategy's edge, and this c
 the measurements that could prove something.**
 
 `make verify`: 49 classes, 0 failed, 1331 test executions across 61 files, exit 0.
+
+**Is the budget sustainable, or does the queue outgrow it?** This is the question that
+would invalidate the change, so it was measured rather than assumed. Only *claimant*
+admissions consume budget — a candidate whose trigger band contains spot claims nothing.
+Of the 15 probation candidates admitted since 2026-09-25, **6 claim and 9 are dormant**;
+claimant admissions run **1.50/day**, against a sustainable **5.1/day** (66 cycles/day ÷ 13).
+**Sustainable**, at roughly 30% of throughput.
+
+Two honest caveats. Dormancy is **price-dependent** — if spot leaves those bands those 9
+become claimants, and the queue is currently 6 × 13 = 78 cycles, so all 15 claiming would
+be 195 cycles ≈ 3 days, still bounded because a candidate claims 13 cycles once and then
+leaves probation. And a first pass at this measurement counted *all* admissions (7.33/day)
+and wrongly concluded the budget was unsustainable; counting dormant candidates as budget
+consumers is the same error as the turn-10 harness, in a new place. Admission count is not
+claimant count.
