@@ -7,7 +7,7 @@ $ git clone <repo> fc && cd fc
 $ python -m pip install -e ".[dev]"
 
 ## commit under test
-08c1420 Make `make type` a real gate, and pay the 95 mypy findings
+0331c6d Fail the gate when a unit's ExecStart is a path that does not exist
 
 ## environment
 interpreter: /home/liuyime2/miniconda3/bin/python3
@@ -16,7 +16,7 @@ credentials: none present (verified by probing, after unset)
 
 ## install
 $ python3 -m pip install -e ".[dev]"
-Obtaining file:///tmp/opencode/fc-run
+Obtaining file:///tmp/opencode/fc2
   Installing build dependencies: started
   Installing build dependencies: finished with status 'done'
   Checking if build backend supports build_editable: started
@@ -68,8 +68,8 @@ Requirement already satisfied: six>=1.5 in /home/liuyime2/miniconda3/lib/python3
 Building wheels for collected packages: min-agent
   Building editable for min-agent (pyproject.toml): started
   Building editable for min-agent (pyproject.toml): finished with status 'done'
-  Created wheel for min-agent: filename=min_agent-0.1.0-0.editable-py3-none-any.whl size=7278 sha256=1716cd223c51eb25b4db5ad17b57c5e532940a844b1d2757167bf5588ae53bfb
-  Stored in directory: /tmp/pip-ephem-wheel-cache-bd5w1opb/wheels/18/ab/2e/ddfa0b9d10431a4895a1315fc27dd053bf1ee631387301ceec
+  Created wheel for min-agent: filename=min_agent-0.1.0-0.editable-py3-none-any.whl size=7273 sha256=14902f1a1073ce64d27184675042dc584f10010d1699dd97a95124be2c5abd11
+  Stored in directory: /tmp/pip-ephem-wheel-cache-lhu6yx6x/wheels/f4/d0/d6/1a19626497b8cc041bde25b08fe339362bd9805c2bf17b44ba
 Successfully built min-agent
 Installing collected packages: min-agent
   Attempting uninstall: min-agent
@@ -88,16 +88,16 @@ $ python3 -m pytest -q
 ........................................................................ [  8%]
 .......................................s................................ [ 17%]
 ........................................................................ [ 26%]
-........................................................................ [ 35%]
-........................................................................ [ 44%]
-........................................................................ [ 53%]
-........................................................................ [ 62%]
-....................................................s................... [ 71%]
-.............s.......................................................... [ 79%]
-................................s....................................... [ 88%]
-........................................................................ [ 97%]
-...................                                                      [100%]
-807 passed, 4 skipped in 11.76s
+........................................................................ [ 34%]
+........................................................................ [ 43%]
+........................................................................ [ 52%]
+........................................................................ [ 61%]
+................................................................s....... [ 69%]
+.........................s.............................................. [ 78%]
+............................................s........................... [ 87%]
+........................................................................ [ 96%]
+...............................                                          [100%]
+819 passed, 4 skipped in 13.06s
 RESULT: PASS
 
 ## example
@@ -153,10 +153,10 @@ RESULT: PASS
 ## provenance
 $ python3 tools/provenance.py
 # provenance for one run of min-agent
-generated: 2026-10-02T15:07:07Z
+generated: 2026-10-03T12:44:12Z
 
 ## code
-commit: 08c1420b207af1a2684a78122c13adf2f0b59758
+commit: 0331c6d3230943cbb6dd4a921caa7cc900996785
 dirty:  yes
 
 ## environment
@@ -215,7 +215,8 @@ verify self-test: the gate must be able to fail
 
 SELF-TEST PASSED: the gate detects failing tests, missing names,
 empty classes, unclassified test files, stale plan documents,
-$HOME paths in production code, and units systemd cannot find.
+$HOME paths in production code, units systemd cannot find, and units
+whose ExecStart is a path that does not exist.
 RESULT: PASS
 
 ## gate
@@ -230,19 +231,19 @@ verify: every check class, one gate
 [PASS] docs-not-stale                   7 plan document(s), none asserting an unacted state
 [PASS] production-research-separation   4 research module(s), 37 production module(s), no production import of research
 [PASS] home-independence                42 production file(s) with no $HOME path construction; XDG_STATE_HOME=outside; XDG_DATA_HOME=outside
-[PASS] units-where-systemd-looks        every --user unit loads from a durable path and is enabled without a tmpfs link
+[PASS] units-where-systemd-looks        every --user unit loads from a durable path, is enabled without a tmpfs link, and its ExecStart exists
 [SKIP] daemon-source-matches-worktree   no heartbeat; daemon not running
 [PASS] docs-no-deleted-commands         no document instructs a reader to run one of the 6 removed scripts
 [PASS] example-runs                     examples/minimal_cycle.py runs with no broker or credentials
 [PASS] tools-readme-accurate            tools/README.md names all 12 tools and invents none of them
 [PASS] no-loose-design-notes            every root markdown file is a documented entry point (AGENTS.md, README.md, STATUS.md) or declares itself historical
-[PASS] fresh-clone-evidence-real        log records 7 steps from commit 3629bbf, regenerable by run-fresh-clone.sh
+[PASS] fresh-clone-evidence-real        log records 7 steps from commit 08c1420, regenerable by run-fresh-clone.sh
 [PASS] shell-scripts-well-formed        3 shell script(s) parse cleanly under bash -n
 [PASS] bespoke-list-matches-run         17 bespoke names, all appended by main() and all reported by --list
 [PASS] status-states-only-fixed-facts   STATUS.md states only fixed configuration (mode=paper, model=qwen3.8:27b, 5 symbols, 3 hard limits); live counters are queried rather than written dow
-[PASS] config-comment-figures-true      ruff.toml's measured figures hold: verify.py 3,244 lines, 62 BLE001 findings, 24 deferred imports
+[PASS] config-comment-figures-true      ruff.toml's measured figures hold: verify.py 3,284 lines, 62 BLE001 findings, 24 deferred imports
 [PASS] list-count-matches-run           --list says 49; the run produces 49 for the same set (syntax-import contributes the extra row)
-[PASS] fact-figures-match               prose agrees with the commands: audit 61/61, 811 tests collected; and no document claims a doctor warnings count (live value is 14, which is why none 
+[PASS] fact-figures-match               prose agrees with the commands: audit 61/61, 823 tests collected; and no document claims a doctor warnings count (live value is 14, which is why none 
 [PASS] unit-templates-portable          4 unit template(s) carry no host path and every placeholder is substituted
 [PASS] pipeline-targets-exist           pipeline runs ['validate-data', 'test', 'evaluate', 'reproduce'] and every stage has a rule
 [PASS] type-checking-is-a-gate          `type:` runs mypy and blocks; `check:` runs lint, type and test
@@ -259,22 +260,22 @@ verify: every check class, one gate
 [PASS] syntax-import                    imported 36 modules
 [PASS] data-integrity                   runtime integrity: OK (0 cycles, 0 events, 0 strategies) |   no journal yet |   no strategy registry yet |   6 previously-missing strategies recorded 
 [PASS] shadow-live-consistency          live mode hard-blocked; probation gate enforced; shadow implemented, reachable by MIN_AGENT_SHADOW=1, off by default, strict boolean
-[PASS] syntax-import                    .................................................                        [100%] | 49 passed in 3.46s
-[PASS] unit-integration                 .............................................................s.......... [ 25%] | ....................................................................
+[PASS] syntax-import                    .................................................                        [100%] | 49 passed in 3.68s
+[PASS] unit-integration                 .............................................................s.......... [ 24%] | ....................................................................
 [PASS] point-in-time-no-leakage         ...........................................s............................ [ 92%] | ......                                                              
-[PASS] pnl-accounting                   ........................................................................ [ 60%] | ................................................                    
+[PASS] pnl-accounting                   ........................................................................ [ 59%] | .................................................                   
 [PASS] lifecycle-invariants             ........................................................................ [ 28%] | ....................................................................
-[PASS] guardian-bypass-prevention       ........................................................................ [ 69%] | ...............................                                     
-[PASS] replay-determinism               ........................................................................ [ 69%] | ..............................s.                                    
-[PASS] crash-recovery                   ........................................................................ [ 53%] | ..............................................................      
-[PASS] broker-reconciliation            .............................................................            [100%] | 61 passed in 1.61s
+[PASS] guardian-bypass-prevention       ........................................................................ [ 67%] | ..................................                                  
+[PASS] replay-determinism               ........................................................................ [ 65%] | ....................................s.                              
+[PASS] crash-recovery                   ........................................................................ [ 50%] | ....................................................................
+[PASS] broker-reconciliation            .............................................................            [100%] | 61 passed in 1.64s
 [PASS] decision-outcome-counterfactual  ................................................................         [100%] | 64 passed in 0.49s
 [PASS] defect-regression-audit          D15  archived projects are out of the tree  PASS | D15  a plan document exists  PASS | 61/61 checks pass across 15 defects
 [PASS] doctor                           no broker credentials and no runtime state in this checkout; ran offline (ok=False exit=1 failures=[alpaca credentials,strategy library] warnings=[dae
 [PASS] gate-class-count-consistent      every document that states the count says '49 check classes'
-[SKIP] fact-docs-current                no broker credentials: this host runs 1247 executions against the 1251 the documents state for a configured host; skipped rather than failed, and the 
+[SKIP] fact-docs-current                no broker credentials: this host runs 1270 executions against the 1274 the documents state for a configured host; skipped rather than failed, and the 
 
-classes: 49   passed: 49   failed: 0   test executions: 1247 across 61 test files
+classes: 49   passed: 49   failed: 0   test executions: 1270 across 61 test files
 
 OK - all check classes pass
 RESULT: PASS
