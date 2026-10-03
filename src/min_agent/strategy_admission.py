@@ -78,23 +78,43 @@ class StrategyAdmission:
         )
 
     def _reference_price_rejection_reason(self, strategy: StrategySpec) -> str | None:
-        """Reject a TREND_FOLLOW anchored to a price the market never had.
+        """Reject a TREND_FOLLOW that cannot trade, in either direction.
 
-        The curriculum prompt used to contain a literal example
-        `{"reference_price": 100.0}`. The model copied it, and nine strategies
-        were admitted with reference_price in {100, 120, 150, 170, 180, 200}
-        against a SPY that traded between 723.21 and 756.55 in the same journal.
-        Price was therefore always far above the reference, so every one of them
-        was permanently degenerate and could only ever emit the same action.
+        A TREND_FOLLOW emits BUY above `ref*(1+threshold)` and SELL below
+        `ref*(1-threshold)`, and HOLD everywhere between. Two ways of anchoring
+        therefore make it permanently degenerate, and both were admitted here:
 
-        The anchor must be a real market price. Without a price on hand the check
-        is skipped rather than guessed - it is a quality gate, not a safety one.
+        1. **Far from the market.** The curriculum prompt used to contain a literal
+           example `{"reference_price": 100.0}`. The model copied it, and nine
+           strategies were admitted with reference_price in {100, 120, 150, 170,
+           180, 200} against a SPY that traded between 723.21 and 756.55 in the
+           same journal. Price was always far above the reference, so every one of
+           them could only ever emit the same action. Refused by the deviation
+           check below.
+
+        2. **At the market.** The same prompt told the model to set
+           `reference_price` to the real last price, "copied exactly". That puts
+           the trigger band around the present, so the strategy is permanently
+           HOLD - it emits no action at all, which is the same degeneracy facing
+           the other way. 26 strategies were admitted this way, anchored between
+           762 and 770 and differing only in the second decimal place. Measured
+           against the last five recorded trading days (SPY 759.37-772.39), 25 of
+           the 38 TREND_FOLLOW on disk could not emit a single order in that
+           window and none could fire in both directions.
+
+        Case 2 is what the second check is for. It cannot be caught by the first:
+        `threshold_pct` is capped at 0.20, so a reference that swallows the current
+        price is never more than 20% away and never trips a 50% deviation.
+
+        The anchor must be a real market price. Without a price on hand the checks
+        are skipped rather than guessed - this is a quality gate, not a safety one.
         """
         if strategy.kind != "TREND_FOLLOW":
             return None
         reference = strategy.parameters.get("reference_price")
         if not isinstance(reference, (int, float)) or isinstance(reference, bool) or reference <= 0:
             return None
+        threshold = strategy.parameters.get("threshold_pct")
         for symbol in strategy.symbols:
             price = self.market_prices.get(symbol.upper())
             if price is None or price <= 0:
@@ -105,6 +125,21 @@ class StrategyAdmission:
                     f"reference_price {reference} is {deviation:.0%} from the real "
                     f"{symbol} price {price}; anchor it to the market, not to an example"
                 )
+            if (
+                isinstance(threshold, (int, float))
+                and not isinstance(threshold, bool)
+                and threshold > 0
+            ):
+                low = reference * (1 - threshold)
+                high = reference * (1 + threshold)
+                if low <= price <= high:
+                    return (
+                        f"reference_price {reference} puts the trigger band "
+                        f"[{low:.2f}, {high:.2f}] around the real {symbol} price "
+                        f"{price}, so the strategy can only ever HOLD. Anchor it "
+                        f"outside that band - below {low:.2f} or above {high:.2f} - "
+                        f"so it can express a view."
+                    )
         return None
 
     def _progression_rejection_reason(self, strategy: StrategySpec) -> str | None:

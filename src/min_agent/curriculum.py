@@ -594,7 +594,11 @@ _FIELD_GUIDE = {
     "TREND_FOLLOW": (
         " Units: threshold_pct is a FRACTION, not a percentage - 0.02 means 2 "
         "percent, and it must be greater than 0 and at most 0.2. reference_price is "
-        "the real last_price from the context, copied exactly."
+        "a real price near the market but NOT the last price itself: it must sit "
+        "outside its own trigger band, so either reference_price*(1-threshold_pct) "
+        "is above last_price, or reference_price*(1+threshold_pct) is below it. A "
+        "reference copied exactly from last_price puts the band around the current "
+        "price, the strategy can then only ever HOLD, and admission refuses it."
     ),
     "FIXED_SIZE": (
         " Units: confidence is a number between 0 and 1, not a percentage; quantity "
@@ -891,7 +895,10 @@ def _capability_demand(attempts: list[str], context: Mapping[str, object]) -> di
             "Propose a spec that expresses it: FIXED_SIZE with parameters.action "
             "set to that action, or TREND_FOLLOW. Keep quantity small enough that "
             "max_position_value covers it at last_price, set confidence at or above "
-            "the guardian minimum, use last_price for any reference_price, and "
-            "give strategy_id a value not present in strategy_ids_already_in_use."
+            "the guardian minimum, and give strategy_id a value not present in "
+            "strategy_ids_already_in_use. If you choose TREND_FOLLOW, its "
+            "reference_price must sit outside its own trigger band rather than "
+            "equal last_price, or the strategy can only ever HOLD and admission "
+            "will refuse it."
         ),
     }

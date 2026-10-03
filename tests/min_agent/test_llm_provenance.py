@@ -416,7 +416,12 @@ def test_reference_price_from_the_prompt_example_is_rejected(tmp_path):
 
 def test_realistic_reference_price_is_accepted(tmp_path):
     admission = _admission(tmp_path, {"SPY": REAL_SPY_PRICE})
-    good = _spec("good", kind="TREND_FOLLOW", reference_price=740.0, threshold_pct=0.02)
+    # 720.00 against a 744.27 market: a real price, not the prompt's example, and
+    # outside its own trigger band [705.60, 734.40] so the strategy can fire. It used
+    # to be 740.00, which is inside the band the 2% threshold builds around it - the
+    # market sits at 744.27, so that spec could only ever HOLD, which is the case
+    # `test_reference_price_whose_band_contains_the_market_is_rejected` now covers.
+    good = _spec("good", kind="TREND_FOLLOW", reference_price=720.0, threshold_pct=0.02)
 
     library = StrategyLibrary(tmp_path / "strategies")
     library.save(_spec("base", kind="HOLD_BASELINE", lifecycle="BASELINE"))
@@ -430,7 +435,97 @@ def test_realistic_reference_price_is_accepted(tmp_path):
     assert admission.admit(good).accepted is True
 
 
-def test_reference_check_is_skipped_when_no_price_is_known(tmp_path):
+def test_reference_price_whose_band_contains_the_market_is_rejected(tmp_path):
+    """A reference at the current price makes a TREND_FOLLOW permanently HOLD.
+
+    It fires above `ref*(1+threshold)` and below `ref*(1-threshold)`, so anchoring
+    the reference *at* the market puts the band around the present. 26 strategies on
+    the live library were admitted that way, and replaying the recorded curriculum
+    proposals found 27 accepted while their band already contained spot.
+
+    This is the mirror image of `test_reference_price_from_the_prompt_example_is_rejected`
+    and the pre-existing deviation rule cannot catch it: threshold_pct is capped at
+    0.20, so a reference that swallows the price is never more than 20% away.
+    """
+    admission = _admission(tmp_path, {"SPY": REAL_SPY_PRICE})
+    at_spot = _spec("at-spot", kind="TREND_FOLLOW", reference_price=REAL_SPY_PRICE, threshold_pct=0.02)
+
+    result = admission.admit(at_spot)
+
+    assert result.accepted is False
+    assert "can only ever HOLD" in result.reason
+    assert "744.27" in result.reason
+
+
+def test_band_edge_is_inside_the_refusal(tmp_path):
+    """Price exactly on the band edge still cannot trade, so the edge counts as inside."""
+    # 744.27 / 1.02 == 729.68, so ref 729.68 puts 744.27 exactly on the upper edge.
+    admission = _admission(tmp_path, {"SPY": REAL_SPY_PRICE})
+    on_edge = _spec("on-edge", kind="TREND_FOLLOW", reference_price=729.68, threshold_pct=0.02)
+
+    result = admission.admit(on_edge)
+
+    assert result.accepted is False
+    assert "can only ever HOLD" in result.reason
+
+
+def test_a_resting_trigger_outside_the_band_is_still_admitted(tmp_path):
+    """The rule must not refuse a strategy that is dormant, not degenerate.
+
+    `trend-follow-buy-001` had band [727.66, 742.36] against spot 765.49 and produced
+    6 informative decisions. A trigger the market has not reached yet is a resting
+    order, which is exactly what these strategies are for.
+    """
+    library = StrategyLibrary(tmp_path / "strategies")
+    library.save(_spec("base", kind="HOLD_BASELINE", lifecycle="BASELINE"))
+    library.save(_spec("fixed", kind="FIXED_SIZE"))
+    admission = StrategyAdmission(
+        guardian=Guardian(allowlist={"SPY"}, max_position_value=5000, max_daily_loss=500),
+        strategy_library=library,
+        market_prices={"SPY": REAL_SPY_PRICE},
+    )
+    # ref 700.00 -> band [686.00, 714.00]; 744.27 is above it, so this is a resting
+    # sell trigger at 714.00.
+    resting = _spec("resting", kind="TREND_FOLLOW", reference_price=700.0, threshold_pct=0.02)
+
+    result = admission.admit(resting)
+
+    assert result.accepted is True, result.reason
+
+
+def test_band_rule_follows_the_price_rather_than_purging_once(tmp_path):
+    """The same spec is admissible once the market leaves its band, and not before.
+
+    A frozen anchor is dormant, not wrong, so the rule has to be a function of the
+    observed price. A one-time purge of the library would delete resting triggers
+    along with the degenerate ones.
+    """
+    from min_agent.guardian import Guardian
+    from min_agent.strategy_admission import StrategyAdmission
+
+    library = StrategyLibrary(tmp_path / "strategies")
+    library.save(_spec("base", kind="HOLD_BASELINE", lifecycle="BASELINE"))
+    library.save(_spec("fixed", kind="FIXED_SIZE"))
+    admission = StrategyAdmission(
+        guardian=Guardian(allowlist={"SPY"}, max_position_value=5000, max_daily_loss=500),
+        strategy_library=library,
+        market_prices={"SPY": REAL_SPY_PRICE},
+    )
+
+    # ref 720.00 -> band [705.60, 734.40], which excludes 744.27.
+    clear = _spec("clear", kind="TREND_FOLLOW", reference_price=720.0, threshold_pct=0.02)
+    assert admission.admit(clear).accepted is True
+
+    # The market now sits inside that same band.
+    admission.set_market_prices({"SPY": 720.0})
+    same_shape = _spec("same-shape", kind="TREND_FOLLOW", reference_price=720.0, threshold_pct=0.02)
+    result = admission.admit(same_shape)
+
+    assert result.accepted is False
+    assert "can only ever HOLD" in result.reason
+
+
+def test_band_rule_is_skipped_when_no_price_is_known(tmp_path):
     """A quality gate, not a safety one: no price must not block admission."""
     admission = _admission(tmp_path, {})
     result = admission.admit(_spec("x", kind="TREND_FOLLOW", reference_price=100.0))

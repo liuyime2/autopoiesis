@@ -155,6 +155,14 @@ moved through `PROBATION -> ACTIVE / PAUSED / RETIRED`. A new one is not added b
 file into `strategies/` - `doctor` reports any file without a recorded admission verdict as
 a blocking failure, on purpose.
 
+A `TREND_FOLLOW` is refused if its `reference_price` cannot trade in either direction: too
+far from the market to be a real price, or so close that its own trigger band already
+contains the current price, which would leave it permanently `HOLD`. A trigger the market
+has not reached yet is fine - that is a resting order, and the rule follows the price
+rather than purging once. See
+[`docs/superpowers/plans/2026-10-03-refuse-untradeable-strategy.md`](docs/superpowers/plans/2026-10-03-refuse-untradeable-strategy.md)
+for the measurement behind it.
+
 ## Verifying a change did not break something
 
 ```bash
