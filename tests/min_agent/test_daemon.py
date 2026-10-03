@@ -47,6 +47,13 @@ def config(tmp_path, *, symbols=("SPY",), interval=1):
         heartbeat_path=tmp_path / "heartbeat.json",
         pidfile_path=tmp_path / "daemon.pid",
         strategy_dir=tmp_path / "strategies",
+        # Isolated deliberately. `knowledge_dir` defaults to the production
+        # runtime path, so any daemon test that proposes or admits an artifact was
+        # writing into the live knowledge library - which is how a test can pass,
+        # fail, or mutate real state depending on what the agent had already
+        # learned. The knowledge tests below assert on emptiness, so a shared
+        # directory makes them assert on the agent's history instead.
+        knowledge_dir=tmp_path / "knowledge",
         reflection_window=10,
         curriculum_enabled=False,
     )
@@ -749,3 +756,93 @@ def test_maintenance_failure_does_not_stop_trading(tmp_path, monkeypatch):
     heartbeat = HealthMonitor(cfg.heartbeat_path).read()
     assert heartbeat is not None
     assert heartbeat.error_count >= 2, "the failure must be counted, not swallowed silently"
+
+
+def test_no_measurement_produces_no_claim_about_the_model(tmp_path):
+    """A lesson must never assert something the system has not measured.
+
+    This produces the calibration lesson, so the property that matters most is the
+    negative one: with no scored decisions there is no calibration, and a system that
+    invents a lesson about the model anyway is worse than one that says nothing. It
+    would put a fabricated claim into every subsequent decision prompt.
+
+    The positive case is not synthetic here - it needs enough real counterfactual
+    verdicts for two buckets to clear `MIN_SCORED_DECISIONS`, which is what
+    `doctor` reports on and what this reads.
+    """
+    from min_agent.knowledge_library import KnowledgeLibrary
+
+    cfg = config(tmp_path, interval=0)
+    journal = JsonlJournal(cfg.journal_path)
+    knowledge_library = KnowledgeLibrary(cfg.knowledge_dir)
+
+    daemon = AgentDaemon(
+        config=cfg,
+        loop=FakeLoop(journal=journal, strategy_id="hold-strategy"),
+        sleep=lambda seconds: None,
+        journal=journal,
+        strategy_library=StrategyLibrary(cfg.strategy_dir),
+        knowledge_admission=KnowledgeAdmission(knowledge_library=knowledge_library),
+    )
+    # One real cycle, so the journal is not empty. The point of this test is that
+    # one unscored cycle still supports no claim.
+    daemon.run(max_cycles=1)
+    daemon._record_calibration_lesson()
+
+    assert knowledge_library.list(status="ACCEPTED") == [], (
+        "one unscored cycle cannot support a claim about the model's reliability"
+    )
+    assert journal.read_events("KNOWLEDGE_ARTIFACT_PROPOSED") == []
+    assert journal.read_events("KNOWLEDGE_ARTIFACT_ADMISSION_REVIEWED") == []
+
+
+def test_a_calibration_claim_is_published_only_with_records_to_attribute_it_to(
+    tmp_path, monkeypatch
+):
+    """A lesson is a claim, and a claim needs something behind it.
+
+    Two independent conditions both have to hold. The report must say
+    MIS-CALIBRATED *and* at least two buckets must each clear
+    `MIN_SCORED_DECISIONS`, because a single unlucky run produces a bad Brier score
+    just as readily as a real pattern and publishing that to every decision prompt
+    would be the system learning from noise. And there must be scored cycles to
+    cite, which `KnowledgeArtifact` enforces by refusing an artifact with no source.
+
+    Only the blocking half is asserted here. The publishing half needs enough real
+    counterfactual verdicts to fill two buckets - thirty scored decisions each - which
+    is what this project's own journal has and what a synthetic fixture would only
+    imitate. `doctor`'s MIS-CALIBRATED warning and the lesson that mirrors it are the
+    same computation, so a change that broke one would break both.
+    """
+    from min_agent import calibration
+    from min_agent.knowledge_library import KnowledgeLibrary
+
+    cfg = config(tmp_path, interval=0)
+    journal = JsonlJournal(cfg.journal_path)
+    knowledge_library = KnowledgeLibrary(cfg.knowledge_dir)
+    daemon = AgentDaemon(
+        config=cfg,
+        loop=FakeLoop(journal=journal, strategy_id="hold-strategy"),
+        sleep=lambda seconds: None,
+        journal=journal,
+        strategy_library=StrategyLibrary(cfg.strategy_dir),
+        knowledge_admission=KnowledgeAdmission(knowledge_library=knowledge_library),
+    )
+    daemon.run(max_cycles=1)
+
+    report = calibration.CalibrationReport(
+        source="llm", total_decisions=200, scored=200, brier=0.9, base_rate=0.5,
+        verdict="MIS-CALIBRATED: brier 0.9",
+        buckets=(
+            calibration.Bucket(low=0.6, high=0.8, n=200, correct=10),
+            calibration.Bucket(low=0.0, high=0.2, n=40, correct=37),
+        ),
+    )
+    monkeypatch.setattr(calibration, "calibrate", lambda rows, **kw: report)
+
+    daemon._record_calibration_lesson()
+    assert knowledge_library.list(status="ACCEPTED") == [], (
+        "two well-populated buckets are still not enough while there are no scored "
+        "cycles to cite - a claim with nothing behind it must not be published"
+    )
+    assert journal.read_events("KNOWLEDGE_ARTIFACT_PROPOSED") == []

@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from min_agent import coerce, counterfactual, offline_validation
+from min_agent import calibration, coerce, counterfactual, offline_validation
 from min_agent.atomicio import file_lock, write_text_atomic
 from min_agent.broker_evidence import latest_evidence_batch
 from min_agent.config import AgentConfig
@@ -687,6 +687,7 @@ class AgentDaemon:
             self._record_pnl_evidence(evidence)
             self._verify_profit_target(evidence)
             self._record_counterfactuals()
+            self._record_calibration_lesson()
             self._screen_all_strategies()
         if self.reflection_memory is not None and self._due(self.last_reflection_at, self.config.reflection_interval_seconds):
             self._reflect(evidence=evidence)
@@ -921,6 +922,104 @@ class AgentDaemon:
             "no_exploration": no_exploration,
             "paper_only": self.config.mode == "paper",
         }
+
+    def _record_calibration_lesson(self) -> None:
+        """Send the model its own measured reliability, through the knowledge channel.
+
+        The system has been measuring whether the model's stated confidence predicts
+        its decisions turning out right, and reporting the answer - and nothing acted
+        on it. On this account the answer is that confidence is *inverted*: the
+        0.6-0.8 bucket was right 5.6% of the time while the 0.0-0.2 bucket was right
+        90.6%. So `min_confidence`, which uses exactly that number as a proxy for
+        decision quality, admitted 178 decisions that were 38.2% right and blocked 32
+        that would have been 90.6% right.
+
+        `doctor` has said `MIS-CALIBRATED` about this for days. A measurement no
+        component reads is not self-evolution, it is a log line. The knowledge library
+        already carries journal measurements to the model through `context["lessons"]`,
+        so this uses that path rather than adding a second one, and the artifact says
+        what was measured rather than what to conclude - the risk limits stay where
+        they are and the model is the one being told.
+
+        Cheap enough for every maintenance pass: 0.34s over 1179 cycles, dominated by
+        reading the journal rather than by the evaluation.
+        """
+        if self.knowledge_admission is None or self.journal is None:
+            return
+        records = self.journal.read_all()
+        if not records:
+            return
+        verdicts = {
+            row.cycle_id: row.verdict
+            for row in counterfactual.evaluate(
+                records, horizon_hours=self.config.counterfactual_horizon_hours
+            ).rows
+        }
+        rows = calibration.build_rows(records, verdicts, source="llm")
+        report = calibration.calibrate(rows, min_confidence=self.config.min_confidence)
+        if report.brier is None or not str(report.verdict).startswith("MIS-CALIBRATED"):
+            return
+
+        buckets = [
+            bucket for bucket in report.buckets if bucket.n >= calibration.MIN_SCORED_DECISIONS
+        ]
+        if len(buckets) < 2:
+            return
+        # The cycles this claim is computed from, so the artifact can be traced back
+        # to the records rather than asserting a fact about the model in general. If
+        # there are none, there is nothing to attribute the claim to and it is not
+        # published: `KnowledgeArtifact` refuses an artifact with no source, and
+        # that refusal is the correct outcome, not something to work around.
+        scored_refs = [row.cycle_id for row in rows if row.informative][-200:]
+        if not scored_refs:
+            return
+        best = max(buckets, key=lambda b: b.accuracy or 0.0)
+        worst = min(buckets, key=lambda b: b.accuracy or 1.0)
+        answer = (
+            f"On this account your stated confidence does not predict whether you are "
+            f"right, and the relationship runs backwards. Across {report.scored} scored "
+            f"decisions (base rate {report.base_rate:.0%}), a {worst.low:.1f}-"
+            f"{worst.high:.1f} confidence bucket was right {worst.accuracy:.0%} of the "
+            f"time while a {best.low:.1f}-{best.high:.1f} bucket was right "
+            f"{best.accuracy:.0%}. Brier {report.brier:.3f} against the 0.25 that "
+            f"always answering 0.5 would score. Judge your own past decisions by what "
+            f"followed them, not by how sure you felt."
+        )
+        digest = hashlib.sha1(f"calibration|{answer}".encode()).hexdigest()[:12]
+        artifact = KnowledgeArtifact(
+            artifact_id=f"lesson-calibration-{digest}",
+            artifact_type="LESSON",
+            answer=answer,
+            summary=(
+                f"Confidence is inversely related to correctness on this account: "
+                f"Brier {report.brier:.3f} over {report.scored} scored decisions."
+            ),
+            tags=("calibration", "model", "counterfactual"),
+            source_kind="journal",
+            source_refs=tuple(scored_refs),
+            created_at=self.now(),
+            rationale=(
+                "computed by min_agent.calibration over the same counterfactual verdicts "
+                "doctor reports, delivered through the existing knowledge channel"
+            ),
+        )
+        self._append_event(
+            "KNOWLEDGE_ARTIFACT_PROPOSED",
+            status="SUCCESS",
+            message=artifact.summary,
+            payload=artifact.model_dump(mode="json"),
+        )
+        result = self.knowledge_admission.admit(artifact)
+        self._append_event(
+            "KNOWLEDGE_ARTIFACT_ADMISSION_REVIEWED",
+            status="ACCEPTED" if result.accepted else "REJECTED",
+            message=result.reason,
+            payload={
+                "accepted": result.accepted,
+                "reason": result.reason,
+                "artifact_id": result.artifact_id,
+            },
+        )
 
     def _record_no_exploration_lesson(self, summary: dict[str, object]) -> None:
         if self.knowledge_admission is None or not summary.get("no_exploration"):
