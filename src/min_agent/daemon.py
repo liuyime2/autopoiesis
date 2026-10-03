@@ -296,12 +296,27 @@ class AgentDaemon:
                 payload={"error_type": type(exc).__name__},
             )
 
-    def _screen_candidate(self, strategy_id: str, *, _events=None) -> None:
+    def _screen_candidate(self, strategy_id: str, *, _events=None, _latest_payloads=None) -> None:
         """Screen a candidate on the decisions it has actually produced.
 
         Read from the journalled counterfactual verdicts, so this cannot disagree
         with what was recorded and cannot manufacture evidence. It can only
         report; promotion stays with prospective live cycles.
+
+        A verdict identical to the one already on record for this strategy is not
+        journalled again. Measured on this journal: 9661 of 9832 events repeated the
+        previous verdict unchanged, and a maintenance pass wrote 48 of them every
+        fifteen minutes. The verdict is a pure function of the strategy's recorded
+        decisions, so a pass that changed no decision cannot have changed it.
+
+        Nothing downstream can tell the two apart, which was checked rather than
+        assumed: `_offline_evidence_by_strategy`, `lineage` and `experiment_registry`
+        each keep the latest verdict per strategy and overwrite, `summarize` counts
+        one verdict per strategy rather than per event, and `_apply_offline_rejection`
+        returns early when the strategy is already PAUSED or RETIRED. The full
+        payload is compared, not just the verdict, because the promotion gate reads
+        `scored` and a strategy crossing the threshold with an unchanged verdict is a
+        real transition.
         """
         if self.journal is None:
             return
@@ -321,17 +336,35 @@ class AgentDaemon:
                 payload={"strategy_id": strategy_id, "verdict": "FAILED"},
             )
             return
+        payload = result.to_payload()
+        if _latest_payloads is not None and _latest_payloads.get(strategy_id) == payload:
+            return
         self._append_event(
             "OFFLINE_VALIDATION_COMPLETED",
             status="SUCCESS",
             message=result.reason,
             strategy_id=strategy_id,
-            payload=result.to_payload(),
+            payload=payload,
         )
         if result.rejected:
             self._apply_offline_rejection(result)
 
-    def _offline_evidence_by_strategy(self) -> dict[str, object]:
+    def _latest_screen_payloads(self, events) -> dict[str, dict]:
+        """The full payload last journalled per strategy, for change detection.
+
+        Returns the payload rather than just the verdict so the comparison covers
+        every field a consumer reads, not the one field that happens to be called
+        the verdict.
+        """
+        latest: dict[str, dict] = {}
+        for event in events:
+            if not event.strategy_id:
+                continue
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            latest[event.strategy_id] = payload
+        return latest
+
+    def _offline_evidence_by_strategy(self, *, _validation=None) -> dict[str, object]:
         """The latest offline validation result per strategy, read from the journal.
 
         Read rather than recomputed so the lifecycle and the screen cannot disagree:
@@ -342,7 +375,11 @@ class AgentDaemon:
             return {}
         latest: dict[str, object] = {}
         try:
-            events = self.journal.read_events("OFFLINE_VALIDATION_COMPLETED")
+            events = (
+                _validation
+                if _validation is not None
+                else self.journal.read_events("OFFLINE_VALIDATION_COMPLETED")
+            )
         except Exception:
             return {}
         for event in events:
@@ -367,7 +404,7 @@ class AgentDaemon:
             )
         return latest
 
-    def _screen_all_strategies(self, *, _events=None) -> None:
+    def _screen_all_strategies(self, *, _events=None, _validation=None) -> None:
         """Screen every strategy in the library, not just new candidates.
 
         The admission-time screen is structurally incapable of rejecting anything:
@@ -387,10 +424,17 @@ class AgentDaemon:
             if _events is None
             else _events
         )
+        latest_payloads = (
+            self._latest_screen_payloads(_validation)
+            if _validation is not None
+            else None
+        )
         for spec in self.strategy_library.list():
             if spec.lifecycle in {"RETIRED"}:
                 continue
-            self._screen_candidate(spec.strategy_id, _events=events)
+            self._screen_candidate(
+                spec.strategy_id, _events=events, _latest_payloads=latest_payloads
+            )
 
     def _apply_offline_rejection(self, result) -> None:
         """Pause a strategy whose own recorded decisions were bad.
@@ -725,6 +769,10 @@ class AgentDaemon:
         evidence = self._latest_evidence_batch()
         if self._due(self.last_evidence_at, self.config.evidence_interval_seconds):
             evidence = self._ingest_broker_evidence()
+        # Bound before the branch below: `_manage_strategy_lifecycle` runs after it and
+        # takes the same read, and a name bound only inside the `if` would be undefined
+        # on the path where there is no journal - which is the path the tests exercise.
+        validation_events = None
         if self.journal is not None:
             self._record_pnl_evidence(evidence)
             self._verify_profit_target(evidence)
@@ -733,14 +781,20 @@ class AgentDaemon:
             # each read grew with the journal, so the cost of every maintenance pass
             # rose with the number of passes that had already run.
             counterfactual_events = self.journal.read_events("COUNTERFACTUAL_EVALUATED")
+            # Also read once. `_offline_evidence_by_strategy` parsed every validation
+            # event on every pass already, so this adds no scan - it removes one - and
+            # the same read is what tells the screen whether a verdict actually moved.
+            validation_events = self.journal.read_events("OFFLINE_VALIDATION_COMPLETED")
             self._record_counterfactuals(_events=counterfactual_events)
             self._record_calibration_lesson()
-            self._screen_all_strategies(_events=counterfactual_events)
+            self._screen_all_strategies(
+                _events=counterfactual_events, _validation=validation_events
+            )
         if self.reflection_memory is not None and self._due(self.last_reflection_at, self.config.reflection_interval_seconds):
             self._reflect(evidence=evidence)
         if self.curriculum_agent is not None and self.reflection_memory is not None and self._due(self.last_curriculum_at, self.config.curriculum_interval_seconds):
             self._curriculum_proposal()
-        self._manage_strategy_lifecycle()
+        self._manage_strategy_lifecycle(_validation=validation_events)
         self.last_maintenance_at = self.now()
 
     def _last_known_prices(self) -> dict[str, float]:
@@ -1142,7 +1196,7 @@ class AgentDaemon:
             "No trade is not failure; no exploration is failure. Probation must not require submitted orders, and degenerate non-baseline strategies should be paused so distinct safe alternatives can be explored.",
         )
 
-    def _manage_strategy_lifecycle(self) -> None:
+    def _manage_strategy_lifecycle(self, *, _validation=None) -> None:
         if self.lifecycle_manager is None or self.strategy_library is None or self.reflection_memory is None:
             return
         reflection = self.reflection_memory.load()
@@ -1153,7 +1207,7 @@ class AgentDaemon:
         # offline validation verdict for each strategy. Without this the gate would
         # see "no evidence" for everyone and block every promotion permanently -
         # a gate that cannot be satisfied is not a gate, it is a freeze.
-        evidence = self._offline_evidence_by_strategy()
+        evidence = self._offline_evidence_by_strategy(_validation=_validation)
         for decision in self.lifecycle_manager.review(
             self.strategy_library.list(), results, evidence
         ):

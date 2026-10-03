@@ -547,9 +547,7 @@ def test_a_repeat_pass_with_nothing_new_journals_nothing(tmp_path):
     and the screen re-read all of it every pass to answer a question about a fixed
     720 decisions.
     """
-    cfg = config(tmp_path, interval=0)
-    journal = JsonlJournal(cfg.journal_path)
-    daemon = AgentDaemon(config=cfg, loop=FakeLoop(journal=journal), sleep=lambda s: None, journal=journal)
+    daemon, journal = _screening_daemon(tmp_path)
 
     decision, quote = _scored_cycle("c1", price=100.0, horizon_price=101.0)
     journal.append(decision)
@@ -597,14 +595,127 @@ def test_a_pending_row_is_rejournalled_once_it_resolves(tmp_path):
     assert _rows(journal)["c-pending"] != "PENDING"
 
 
+def _screening_daemon(tmp_path):
+    """A daemon whose library holds one strategy, so the screen has something to judge."""
+    cfg = config(tmp_path, interval=0)
+    journal = JsonlJournal(cfg.journal_path)
+    library = StrategyLibrary(cfg.strategy_dir)
+    library.save(
+        StrategySpec(
+            strategy_id="s1",
+            name="s1",
+            kind="FIXED_SIZE",
+            symbols=("SPY",),
+            parameters={"action": "BUY", "quantity": 1, "confidence": 0.7},
+            max_position_value=1000,
+            enabled=True,
+            lifecycle="PROBATION",
+            created_at=datetime.now(tz=timezone.utc),
+            rationale="test",
+        )
+    )
+    daemon = AgentDaemon(
+        config=cfg,
+        loop=FakeLoop(journal=journal),
+        sleep=lambda s: None,
+        journal=journal,
+        strategy_library=library,
+    )
+    return daemon, journal
+
+
+def _screen_payloads(journal):
+    return {
+        e.strategy_id: e.payload
+        for e in journal.read_events("OFFLINE_VALIDATION_COMPLETED")
+    }
+
+
+def _record_and_screen(daemon, journal):
+    """One maintenance-shaped step: record the ledger, then screen against it."""
+    cf = journal.read_events("COUNTERFACTUAL_EVALUATED")
+    daemon._record_counterfactuals(_events=cf)
+    daemon._screen_all_strategies(
+        _events=journal.read_events("COUNTERFACTUAL_EVALUATED"),
+        _validation=journal.read_events("OFFLINE_VALIDATION_COMPLETED"),
+    )
+
+
+def _losing_cycles(journal, ids):
+    """BUY decisions that lose money, so they score FALSE_TRADE rather than NEUTRAL.
+
+    NEUTRAL means the move did not clear cost, and `validate` excludes it from
+    `scored` - so a fixture of neutrals would leave the field the promotion gate reads
+    unmoved and the test would pass without exercising anything.
+
+    Prices vary per cycle because `_price_series` collapses consecutive identical
+    quotes: three cycles all pricing SPY at 101.0 are one observation, not three.
+    """
+    for i, cid in enumerate(ids):
+        decision, quote = _scored_cycle(cid, price=101.0 + i, horizon_price=100.0 + i)
+        journal.append(decision)
+        journal.append(quote)
+
+
+def test_an_unchanged_verdict_is_not_screened_again(tmp_path):
+    """The defect, in the shape the screen had: 48 duplicate events per pass.
+
+    9661 of 9832 OFFLINE_VALIDATION_COMPLETED events on record repeated the previous
+    verdict unchanged for the same strategy. The verdict is a pure function of the
+    strategy's recorded decisions, so a pass that changed no decision cannot have
+    changed the verdict.
+    """
+    daemon, journal = _screening_daemon(tmp_path)
+    _losing_cycles(journal, ["c1", "c2", "c3"])
+
+    _record_and_screen(daemon, journal)
+    first = journal.read_events("OFFLINE_VALIDATION_COMPLETED")
+    assert len(first) == 1
+    assert first[0].payload["scored"] == 3, "the fixture must produce scored decisions"
+    recorded = _screen_payloads(journal)
+
+    # Same journal, same decisions: the screen must produce the same payload and
+    # therefore must not add another record of it.
+    _record_and_screen(daemon, journal)
+
+    assert len(journal.read_events("OFFLINE_VALIDATION_COMPLETED")) == len(first)
+    assert _screen_payloads(journal) == recorded
+
+
+def test_a_changed_verdict_is_screened_again(tmp_path):
+    """The complement, and the one that would be dangerous to lose.
+
+    A strategy crossing the ten-scored threshold can keep the same verdict name - the
+    payload's `scored` count moves while `verdict` stays INCONCLUSIVE - and the
+    promotion gate reads `scored`. Suppressing on the verdict alone would strand a
+    strategy just below the bar forever.
+    """
+    daemon, journal = _screening_daemon(tmp_path)
+    _losing_cycles(journal, ["c1", "c2", "c3"])
+
+    _record_and_screen(daemon, journal)
+    before = dict(journal.read_events("OFFLINE_VALIDATION_COMPLETED")[-1].payload)
+    assert before["scored"] == 3
+    assert before["verdict"] == "INCONCLUSIVE_INSUFFICIENT_EVIDENCE"
+
+    _losing_cycles(journal, ["c4", "c5", "c6", "c7"])
+    _record_and_screen(daemon, journal)
+    after = journal.read_events("OFFLINE_VALIDATION_COMPLETED")
+
+    assert len(after) == 2, "new decisions must produce a new screen record"
+    assert after[-1].payload["scored"] == 7, "and the count the promotion gate reads must move"
+    assert after[-1].payload["verdict"] == before["verdict"], (
+        "the verdict name is unchanged here, which is the case a verdict-only "
+        "comparison would have wrongly suppressed"
+    )
+
+
 def test_the_screen_still_sees_every_decision_when_events_are_incremental(tmp_path):
     """The load-bearing property: consumers union across events, so splitting the
     ledger into per-pass increments cannot change what the screen reads."""
     from min_agent import offline_validation
 
-    cfg = config(tmp_path, interval=0)
-    journal = JsonlJournal(cfg.journal_path)
-    daemon = AgentDaemon(config=cfg, loop=FakeLoop(journal=journal), sleep=lambda s: None, journal=journal)
+    daemon, journal = _screening_daemon(tmp_path)
 
     for i in range(3):
         decision, quote = _scored_cycle(f"c{i}", price=100.0 + i, horizon_price=101.0 + i)
