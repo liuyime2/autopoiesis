@@ -706,12 +706,27 @@ def _check_model_calibration(
         )
         return
 
+    # The verdict is reported whole, not truncated to its label.
+    #
+    # `verdict.split(":")[0]` printed "MIS-CALIBRATED" and discarded the rest, which is
+    # where the actionable half lives: `calibration.calibrate` had already computed that
+    # the most confident bucket was right 5.6% of the time against a 46.2% base rate - a
+    # margin of -40.6% - and stated it in the sentence that was thrown away.
+    #
+    # That is the same defect this file already records twice, in a new place. A label
+    # saying "miscalibrated" invites the reading "the model is overconfident, raise
+    # `min_confidence`". The measured direction says the opposite: the confident
+    # decisions are the *worst* ones, so tightening the gate rejects the decisions that
+    # were right and admits the ones that lose. A reader given only the label cannot tell
+    # those two situations apart, and the wrong response here degrades a risk gate.
     detail = (
         f"{result.total_decisions} llm decision(s), {result.scored} scored, "
-        f"{result.pending} still awaiting an outcome; {result.verdict.split(':')[0]}"
+        f"{result.pending} still awaiting an outcome; {result.verdict}"
     )
-    if result.brier is not None:
-        detail += f", Brier {result.brier:.3f}, base rate {result.base_rate:.1%}"
+    # No separate `, Brier ..., base rate ...` append: every non-INSUFFICIENT branch of
+    # `calibrate` already states both inside the verdict, so appending them again would
+    # print each figure twice. An INSUFFICIENT verdict names neither, and that absence is
+    # the information - there is nothing yet to be miscalibrated against.
     level = OK if result.verdict.startswith("SIGNAL") else WARN
     report.add("model calibration", level, detail)
 

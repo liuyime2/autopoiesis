@@ -179,6 +179,11 @@ class _Cfg2:
     # catches everything can hide a broken caller behind a plausible message.
     counterfactual_horizon_hours = 24
     assumed_round_trip_cost_pct = 0.05
+    # `_check_model_calibration` passes `min_confidence` into `calibrate`, so without
+    # this the check raised AttributeError and reported "evaluation failed" - which the
+    # miscalibration test below accepted as a warning. It was passing through the
+    # swallow-and-warn path, not through the branch it claims to test.
+    min_confidence = 0.5
 
     def __init__(self, journal_path):
         self.journal_path = journal_path
@@ -235,3 +240,79 @@ def test_a_miscalibrated_model_is_not_reported_as_healthy(tmp_path):
         assert "Brier" in check.detail or "0" in check.detail, check.detail
     else:
         assert check.status.value == "warn"
+
+
+def test_the_calibration_check_reports_the_verdict_and_not_only_its_label(tmp_path, monkeypatch):
+    """The whole verdict, because the actionable half is after the colon.
+
+    `doctor` used to print `verdict.split(":")[0]`, which reduced a finding to the single
+    word MIS-CALIBRATED and threw away the sentence stating that the most confident bucket
+    was right 5.6% of the time against a 46.2% base rate - a margin of -40.6%.
+
+    That matters because the label alone invites "the model is overconfident, raise
+    `min_confidence`", while the measured direction says the confident decisions are the
+    worst ones. This stubs `calibrate` because the property under test is what `doctor`
+    does with the verdict it is handed, not how `calibrate` derives it.
+    """
+    from min_agent import calibration
+    from min_agent.doctor import _check_model_calibration
+
+    verdict = (
+        "MIS-CALIBRATED: Brier 0.433 against the 0.25 a constant 0.5 claim scores, so "
+        "the stated confidence is worse than useless. Accuracy is 46.2% and the most "
+        "confident bucket is 5.6% (margin -40.6% if positive)"
+    )
+    report_stub = calibration.CalibrationReport(
+        source="llm",
+        total_decisions=314,
+        scored=210,
+        pending=71,
+        brier=0.433,
+        base_rate=0.462,
+        top_bucket_accuracy=0.056,
+        passed_gate_n=178,
+        verdict=verdict,
+    )
+    monkeypatch.setattr(calibration, "calibrate", lambda rows, min_confidence: report_stub)
+
+    journal = _journal_with(tmp_path, [_cycle("HOLD", hold_reason="no_signal")])
+    report = DoctorReport()
+    _check_model_calibration(report, _Cfg2(journal.path), journal, journal.read_all())
+    detail = _lines(report)["model calibration"].detail
+
+    assert detail != "MIS-CALIBRATED", "the label alone is the defect"
+    assert "5.6%" in detail, f"the confident-bucket accuracy must reach the reader: {detail}"
+    assert "-40.6%" in detail, f"the direction must reach the reader: {detail}"
+    assert "46.2%" in detail, f"the base rate it is compared against must be there: {detail}"
+    # The figures appear once each, not twice.
+    assert detail.count("Brier") == 1, detail
+    assert detail.count("46.2%") == 1, f"base rate printed twice: {detail}"
+
+
+def test_an_insufficient_calibration_still_says_so(tmp_path, monkeypatch):
+    """Dropping the append must not lose the case where there is no Brier yet."""
+    from min_agent import calibration
+    from min_agent.doctor import _check_model_calibration
+
+    report_stub = calibration.CalibrationReport(
+        source="llm",
+        total_decisions=40,
+        scored=3,
+        pending=37,
+        brier=None,
+        base_rate=None,
+        verdict=(
+            "INSUFFICIENT: 3 of 40 decisions have an outcome yet, against the 30 needed "
+            "to say anything about calibration"
+        ),
+    )
+    monkeypatch.setattr(calibration, "calibrate", lambda rows, min_confidence: report_stub)
+
+    journal = _journal_with(tmp_path, [_cycle("HOLD", hold_reason="no_signal")])
+    report = DoctorReport()
+    _check_model_calibration(report, _Cfg2(journal.path), journal, journal.read_all())
+    detail = _lines(report)["model calibration"].detail
+
+    assert "INSUFFICIENT" in detail
+    assert "3 of 40" in detail, detail
+    assert "Brier" not in detail, f"a figure that does not exist must not be printed: {detail}"
