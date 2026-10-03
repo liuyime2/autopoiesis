@@ -633,3 +633,33 @@ draft guarded it anyway, which added a 63rd `BLE001` and turned the ruff-count g
 deleted rather than suppressed.
 
 `make verify`: 49 classes, 0 failed, 1340 executions across 61 files; 863 pytest pass.
+
+**Is ~14 days actually too short?** Measured rather than assumed, per day-of-journal each
+analysis actually spans:
+
+| analysis | days spanned | vs ~14-day horizon |
+|---|---|---|
+| `COUNTERFACTUAL_EVALUATED` | 5 (2026-09-29 .. 10-03) | fine |
+| `OFFLINE_VALIDATION_COMPLETED` | 5 | fine |
+| `CURRICULUM_PROPOSED` | 15 | marginal |
+| `PNL_EVIDENCE_RECORDED` | 20 | exceeds |
+| `STRATEGY_EVALUATION_RECORDED` | 20 | exceeds |
+
+The two that exceed it do not actually depend on the old records: the PnL payload is
+cumulative, so the newest event carries the whole closed-lot record (verified earlier —
+dropping the `.1` generation returns an identical `closed_lots 35 / net_pnl 643.4`), and
+strategy evaluation runs a 50-cycle window, about one trading day.
+
+**So the honest conclusion is that retention is currently adequate, and extending it would be
+building for a problem that has not arrived.** The value of the previous commit is the
+visibility: if an analysis ever does start needing more than the window holds, the doctor
+will now say so instead of the number quietly changing. That is the whole requirement — a
+check that fires when the constraint binds, not a larger buffer built in anticipation.
+
+Also worth stating plainly: the retained window is **not** 14 days of trading. It spans
+2026-06-09 to 2026-10-03 in timestamps, with a 98-day hole in the middle (2026-06-22 to
+2026-09-28) when the system was not running at all. Two generations are on disk, 67MB and
+57MB. Any analysis that assumes continuous history is already wrong on this host for a
+reason that has nothing to do with rotation.
+
+`make verify`: 49 classes, 0 failed, 1340 executions across 61 files; 863 pytest pass.
