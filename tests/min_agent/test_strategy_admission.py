@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from min_agent.guardian import Guardian
-from min_agent.models import StrategySpec
+from min_agent.models import StrategyResult, StrategySpec
 from min_agent.strategy_admission import StrategyAdmission
 from min_agent.strategy_engine import StrategyLibrary
 
@@ -150,3 +150,105 @@ def test_strategy_admission_rejects_duplicate_trend_follow_params(tmp_path):
     assert duplicate.accepted is False
     assert "duplicate TREND_FOLLOW" in duplicate.reason
     assert distinct.accepted is True
+
+
+def _queued_candidate(library, strategy_id, *, lifecycle="PROBATION", quantity=1,
+                      created_at="2026-06-10T12:00:00+00:00"):
+    """Write a strategy straight into the library, as a previous admission would have.
+
+    `quantity` varies so a newcomer under test is not refused as a behavioural twin
+    first, which would mask the rule being tested.
+    """
+    library.save(
+        make_spec(strategy_id=strategy_id, quantity=quantity).model_copy(
+            update={
+                "lifecycle": lifecycle,
+                "created_at": datetime.fromisoformat(created_at),
+            }
+        )
+    )
+
+
+def _served(strategy_id, cumulative):
+    return StrategyResult(
+        strategy_id=strategy_id,
+        cycles=3,
+        cumulative_cycles=cumulative,
+        submitted_orders=1,
+        rejected_orders=0,
+        errors=0,
+        score=0.5,
+        evaluated_at=datetime.now(tz=timezone.utc),
+        trade_attempts=1,
+    )
+
+
+def test_a_candidate_is_refused_when_the_probation_queue_is_already_full(tmp_path):
+    """The gate's other refusals are all candidate-intrinsic; this one is about capacity.
+
+    716 market-open cycles could serve about 51 candidates and 68 were admitted, so the
+    queue grew by 17 - and 7 were admitted across a weekend, when there is no market
+    and therefore no capacity at all. Because `select` serves probation first and only
+    considers the incumbent otherwise, a candidate that cannot be served is a claim on
+    the cycles the one ACTIVE strategy needs.
+    """
+    library, admission = admission_fixture(tmp_path)
+    admit_baseline(library, admission)
+    admission.max_probation_queue = 3
+    for i in range(3):
+        _queued_candidate(library, f"queued-{i}")
+    results = [_served(f"queued-{i}", 0) for i in range(3)]
+
+    result = admission.admit(make_spec(strategy_id="newcomer", quantity=7), results)
+
+    assert result.accepted is False
+    assert "probation" in result.reason
+    assert "3 candidate(s)" in result.reason
+    assert library.list() == sorted(library.list(), key=lambda s: s.strategy_id)
+    assert not library.exists("newcomer")
+
+
+def test_a_candidate_is_admitted_one_below_the_cap(tmp_path):
+    """So the rule cannot pass by refusing everything."""
+    library, admission = admission_fixture(tmp_path)
+    admit_baseline(library, admission)
+    admission.max_probation_queue = 3
+    for i in range(2):
+        _queued_candidate(library, f"queued-{i}")
+    results = [_served(f"queued-{i}", 0) for i in range(2)]
+
+    result = admission.admit(make_spec(strategy_id="newcomer", quantity=7), results)
+
+    assert result.accepted is True
+
+
+def test_a_candidate_that_has_served_its_budget_does_not_hold_the_queue(tmp_path):
+    """The backlog is the population still owed service, not the count of PROBATION files.
+
+    A candidate that has served `PROBATION_CYCLES` leaves the queue while its lifecycle
+    still reads PROBATION, so counting files would pin the backlog at every candidate
+    ever admitted and the gate could never reopen.
+    """
+    from min_agent.strategy_engine import PROBATION_CYCLES
+
+    library, admission = admission_fixture(tmp_path)
+    admit_baseline(library, admission)
+    admission.max_probation_queue = 1
+    _queued_candidate(library, "served-its-budget")
+    _queued_candidate(library, "paused-not-queued", lifecycle="PAUSED")
+    _queued_candidate(library, "retired-not-queued", lifecycle="RETIRED")
+
+    served = [_served("served-its-budget", PROBATION_CYCLES)]
+
+    assert admission.probation_backlog(served) == 0
+    result = admission.admit(make_spec(strategy_id="newcomer", quantity=7), served)
+    assert result.accepted is True
+
+
+def test_a_fresh_library_refuses_nothing_for_capacity(tmp_path):
+    _library, admission = admission_fixture(tmp_path)
+
+    result = admission.admit(make_spec(strategy_id="first", max_position_value=1, kind="HOLD_BASELINE"))
+
+    assert result.accepted is True
+    assert "probation" not in result.reason

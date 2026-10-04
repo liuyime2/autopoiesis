@@ -34,6 +34,7 @@ from min_agent.models import (
     JournalEventStatus,
     JournalEventType,
     KnowledgeArtifact,
+    StrategyResult,
 )
 from min_agent.reflection_memory import ReflectionMemory
 from min_agent.strategy_admission import StrategyAdmission
@@ -689,7 +690,9 @@ class AgentDaemon:
                 # Give admission the real prices so a TREND_FOLLOW anchored to
                 # a fabricated level is rejected instead of entering the library.
                 self.strategy_admission.set_market_prices(self._last_known_prices())
-                result = self.strategy_admission.admit(task.strategy_spec)
+                result = self.strategy_admission.admit(
+                    task.strategy_spec, self._strategy_results()
+                )
                 self._append_event(
                     "STRATEGY_ADMISSION_REVIEWED",
                     status="ACCEPTED" if result.accepted else "REJECTED",
@@ -1198,6 +1201,19 @@ class AgentDaemon:
             "generic",
             "No trade is not failure; no exploration is failure. Probation must not require submitted orders, and degenerate non-baseline strategies should be paused so distinct safe alternatives can be explored.",
         )
+
+    def _strategy_results(self) -> list[StrategyResult]:
+        """The current reflection's per-strategy results, or none before the first one.
+
+        Read rather than recomputed: the lifecycle review and the selector are handed
+        the same list, so admission is being asked the same question they are.
+        """
+        if self.reflection_memory is None:
+            return []
+        reflection = self.reflection_memory.load()
+        if reflection is None:
+            return []
+        return self.reflection_memory.strategy_results(reflection)
 
     def _manage_strategy_lifecycle(self, *, _validation=None) -> None:
         if self.lifecycle_manager is None or self.strategy_library is None or self.reflection_memory is None:

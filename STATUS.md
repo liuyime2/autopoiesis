@@ -1460,3 +1460,68 @@ caught it in the same run; it is recorded because the failure mode — an `oldSt
 matches while dropping a field — is invisible in review and only a test finds it.
 
 `make verify`: 52 classes, 0 failed, 1408 executions across 62 files; 896 pytest pass.
+
+## 2026-10-04 — the admission gate asked whether a candidate was good, never whether it could be used
+
+With probation reachable again, the next question was why the queue never drains. The
+arithmetic answers it.
+
+```
+market-open cycles:            716
+  of which probation received: 92%
+candidates serviceable:         716 x 0.92 / 13 cycles each  =  51
+candidates admitted:                                            68
+net queue growth:                                               +17
+```
+
+Per market day: capacity is about 4.6 candidates, and admission ran 8–15 on the days it ran.
+
+| day | dow | cycles | mkt-open | admitted | serviceable | net |
+|---|---|---|---|---|---|---|
+| 2026-09-28 | Mon | 69 | 69 | 12 | 4.9 | −7.1 |
+| 2026-09-30 | Wed | 61 | 59 | 15 | 4.2 | −10.8 |
+| 2026-10-01 | Thu | 66 | 65 | 8 | 4.6 | −3.4 |
+| 2026-10-02 | Fri | 65 | 65 | 10 | 4.6 | −5.4 |
+| 2026-10-03 | Sat | 0 | 0 | 4 | 0.0 | −4.0 |
+| 2026-10-04 | Sun | 0 | 0 | 3 | 0.0 | −3.0 |
+
+**7 candidates were admitted across a weekend**, when there is no market and therefore no
+capacity to evaluate anything.
+
+The 92% is measured rather than assumed, and measuring it corrected an error made earlier in
+this same session: reading each strategy's lifecycle *now* said 126 of 146 cycles went to
+PAUSED strategies, which would have meant the selector was trading strategies it had already
+judged. Reconstructing the lifecycle of the selected strategy **at each cycle** puts it at
+134 of 146 in PROBATION. `eligible` does exclude PAUSED and RETIRED; the earlier number was
+current state read as historical state.
+
+### The change
+
+Every existing refusal in `StrategyAdmission` is candidate-intrinsic — duplicate id, price
+anchored far from the market, curriculum progression, behavioural twin. None asks whether the
+loop can use the candidate. One more refusal now does, in the same shape as the others:
+
+```
+live probation backlog: 17        cap: 13 (PROBATION_CYCLES, reused not duplicated)
+17 candidate(s) are in probation and still short of the 13-cycle budget, which is the cap;
+admitting another cannot be evaluated and would further delay the strategies already
+waiting. Let the queue drain first.
+```
+
+The cap is in candidates rather than cycles-per-day so it does not encode this machine's
+5-minute interval into what is otherwise a capacity rule. The backlog counts strategies still
+*short of the budget*, not `PROBATION` files: a candidate that has served its 13 cycles
+leaves the queue while its lifecycle still reads PROBATION, so counting files would pin the
+backlog at every candidate ever admitted and the gate could never reopen. Four tests pin that
+distinction, the boundary, and that a fresh library refuses nothing.
+
+### What this does and does not do
+
+It stops the queue growing. It does **not** clear the 17 already waiting, so the ACTIVE
+strategy still waits roughly 17 / 4.6 ≈ 3.7 market days, and nothing here should be read as
+making the loop profitable. The sequence is: the deficit stops compounding, the backlog
+drains, and only then does the incumbent get cycles. Whether that happens is a live
+measurement, recorded as a falsifier in
+`docs/superpowers/plans/2026-10-04-admission-outruns-serving.md` rather than asserted here.
+
+`make verify`: 52 classes, 0 failed, 1412 executions across 62 files; 900 pytest pass.

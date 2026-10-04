@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from min_agent.guardian import Guardian
-from min_agent.models import StrategySpec
-from min_agent.strategy_engine import StrategyLibrary, behavioural_signature
+from min_agent.models import StrategyResult, StrategySpec
+from min_agent.strategy_engine import (
+    PROBATION_CYCLES,
+    StrategyLibrary,
+    StrategySelector,
+    behavioural_signature,
+)
 
 
 @dataclass(frozen=True)
@@ -28,20 +33,79 @@ class StrategyAdmission:
         strategy_library: StrategyLibrary,
         market_prices: Mapping[str, float] | None = None,
         max_reference_price_deviation: float = 0.5,
+        probation_selector: StrategySelector | None = None,
+        max_probation_queue: int = PROBATION_CYCLES,
     ):
         self.guardian = guardian
         self.strategy_library = strategy_library
         self.market_prices = dict(market_prices or {})
         self.max_reference_price_deviation = max_reference_price_deviation
+        self.probation_selector = probation_selector or StrategySelector()
+        self.max_probation_queue = max_probation_queue
 
     def set_market_prices(self, prices: Mapping[str, float]) -> None:
         self.market_prices = dict(prices)
 
-    def admit(self, strategy: StrategySpec) -> StrategyAdmissionResult:
+    def probation_backlog(self, results: Sequence[StrategyResult] | None = None) -> int:
+        """How many strategies are in probation and still short of their budget.
+
+        This is the population the queue actually has to serve, and it is not the
+        count of `PROBATION` files: a candidate that has served its
+        `PROBATION_CYCLES` leaves the queue even while its lifecycle still says
+        PROBATION, so counting files would hold the backlog at every candidate ever
+        admitted and the gate could never reopen.
+        """
+        by_id = {result.strategy_id: result for result in results or []}
+        return sum(
+            1
+            for strategy in self.strategy_library.list()
+            if self.probation_selector._needs_probation(strategy, by_id.get(strategy.strategy_id))
+        )
+
+    def _capacity_rejection_reason(self, backlog: int) -> str | None:
+        """Refuse a candidate the loop has no cycles to evaluate.
+
+        Every other refusal here is candidate-intrinsic: is this id a duplicate, is
+        this price anchored sensibly, does this progression make sense, is it a
+        behavioural twin. None of them asks whether the loop can *use* the result,
+        and the measured answer was that it cannot. Over the whole record 716
+        market-open cycles could serve about 51 candidates and 68 were admitted, so
+        the queue grew by 17 - including 7 admitted across a weekend, when there is
+        no market and therefore no capacity at all.
+
+        The cost is not merely a longer queue. `StrategySelector.select` serves the
+        probation queue first and only considers the incumbent otherwise, so a
+        candidate that cannot be served is a claim on the cycles the one ACTIVE
+        strategy needs. That strategy has been selected 0 times in the 146 cycles
+        since its promotion.
+
+        The cap is in candidates rather than in cycles-per-day so it does not encode
+        this machine's interval into what is otherwise a capacity rule.
+        """
+        if backlog < self.max_probation_queue:
+            return None
+        return (
+            f"{backlog} candidate(s) are in probation and still short of the "
+            f"{self.probation_selector.min_probation_cycles}-cycle budget, which is "
+            f"the cap; admitting another cannot be evaluated and would further "
+            f"delay the strategies already waiting. Let the queue drain first."
+        )
+
+    def admit(
+        self, strategy: StrategySpec, results: Sequence[StrategyResult] | None = None
+    ) -> StrategyAdmissionResult:
         if self.strategy_library.exists(strategy.strategy_id):
             return StrategyAdmissionResult(
                 accepted=False,
                 reason="strategy_id already exists; duplicate admission rejected",
+                strategy_id=strategy.strategy_id,
+            )
+
+        capacity_reason = self._capacity_rejection_reason(self.probation_backlog(results))
+        if capacity_reason is not None:
+            return StrategyAdmissionResult(
+                accepted=False,
+                reason=capacity_reason,
                 strategy_id=strategy.strategy_id,
             )
 
