@@ -1,0 +1,87 @@
+"""Probe: does the whole self-evolution loop actually close on real bars?
+
+Run standalone (`python tools/self_evolution_probe.py`) it prints a JSON list of what
+failed, so a failure is legible. `make verify` calls it through
+`check-self-evolution-closes`.
+
+`TradingLoop` is only the trading half. The evolution half - reflect, score every decision
+against what the market actually did next, screen the strategy on those scores, let the
+lifecycle rules rule on the verdict - runs in `AgentDaemon._maintenance`. Proving the rules
+work by calling `review()` by hand does not prove the loop closes; this drives the daemon, so
+every stage has to fire on its own for anything to come out.
+
+What it asserts: 847 real cycles with no daemon errors, every evolution stage present in the
+journal, at least one lifecycle ruling, the strategy no longer PROBATION, the reason carrying
+its evidence in numbers, and replay safety intact - no broker-verified PnL from simulated
+fills.
+
+What it is not: evidence that any strategy has an edge. Replay fills are REPLAYED, never
+SUBMITTED, and a replayed retirement is not a real one.
+"""
+
+from __future__ import annotations
+
+import json
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import replay_self_evolution as harness
+
+REQUIRED_EVENTS = (
+    "COUNTERFACTUAL_EVALUATED",
+    "OFFLINE_VALIDATION_COMPLETED",
+    "REFLECTION_GENERATED",
+    "STRATEGY_LIFECYCLE_UPDATED",
+)
+BROKER_VERIFIED = {"broker_strategy_closed_lot_pnl_verified", "broker_account_pnl_verified"}
+
+
+def probe() -> list[str]:
+    problems: list[str] = []
+    bars = pathlib.Path(harness.BARS)
+    if not bars.exists():
+        return [f"missing {harness.BARS}; run tools/fetch_replay_bars.py first"]
+
+    result = harness.run(str(bars))
+
+    if result["cycles"] < 100:
+        problems.append(f"only {result['cycles']} cycles ran; the replay did not get going")
+    if result["errors"]:
+        problems.append(f"{result['errors']} daemon error(s) during the replay")
+
+    events = result["events"]
+    for name in REQUIRED_EVENTS:
+        if not events.get(name):
+            problems.append(f"the {name} stage never fired")
+
+    if not result["rulings"]:
+        problems.append(
+            "no lifecycle ruling was produced, so selection pressure never acted on the "
+            "scored evidence"
+        )
+    if result["final_lifecycle"] == "PROBATION":
+        problems.append(
+            "the strategy was still PROBATION at the end; a screen verdict of "
+            "REJECT_POOR_DECISIONS produced no applied transition"
+        )
+
+    # A ruling has to say what happened in numbers, not merely that the strategy was bad.
+    for ruling in result["rulings"]:
+        reason = str(ruling.get("reason") or "")
+        if "scored decision" not in reason or "correct_outcome_ratio" not in reason:
+            problems.append(f"a ruling carries no evidence: {reason!r}")
+            break
+
+    # Replay safety must survive the evolution stages, not just the trading ones.
+    reason_text = " ".join(str(r.get("reason") or "") for r in result["rulings"])
+    for token in BROKER_VERIFIED:
+        if token in reason_text:
+            problems.append(f"a replay ruling claimed {token}")
+
+    return problems
+
+
+if __name__ == "__main__":
+    print(json.dumps(probe()))

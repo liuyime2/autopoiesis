@@ -2400,6 +2400,50 @@ def check_data_integrity() -> Result:
     return Result("data-integrity", PASS if rc == 0 else FAIL, _tail(out))
 
 
+def check_self_evolution_closes() -> Result:
+    """The evolution loop must close end to end on real bars, not just in the rules.
+
+    `TradingLoop` is only the trading half. Reflect, score every decision against what the
+    market actually did next, screen the strategy on those scores, and rule on the verdict
+    all happen in `AgentDaemon._maintenance`. Calling `StrategyLifecycleManager.review()` by
+    hand proves the rules work; it does not prove the stages are wired to each other. This
+    drives the daemon over 847 cached real bars and requires every stage to fire on its own.
+
+    What it caught that nothing else had: the Guardian refused all 847 cycles as `data
+    snapshot is stale` until `TradingLoop` grew an injectable clock, and
+    `ReplayDataGateway.current` raised IndexError when advanced past the last bar. Both were
+    invisible while only the loop was replayed.
+
+    It proves selection pressure acts on scored evidence. It proves nothing about whether any
+    strategy has an edge - replay fills are REPLAYED, never SUBMITTED, and a replayed
+    retirement is not a real one. The first real PASS_SCREENED has to come from live paper
+    cycles across trading days.
+    """
+    rc, out = _run([sys.executable, "tools/self_evolution_probe.py"])
+    if rc != 0:
+        return Result(
+            "self-evolution-closes", FAIL,
+            f"self-evolution probe did not run: {_tail(out)}",
+        )
+    try:
+        found = json.loads(out.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return Result(
+            "self-evolution-closes", FAIL,
+            f"unreadable probe output: {_tail(out)}",
+        )
+    if found:
+        return Result(
+            "self-evolution-closes", FAIL,
+            f"the self-evolution loop does not close: {'; '.join(found)}",
+        )
+    return Result(
+        "self-evolution-closes", PASS,
+        "847 real-bar cycles drove reflect -> counterfactual -> screen -> lifecycle with no "
+        "daemon errors, and produced an attributed retirement",
+    )
+
+
 def check_selection_pressure_reaches_the_rules() -> Result:
     """The lifecycle rules must react to the system's own scored evidence.
 
@@ -2804,6 +2848,7 @@ def check_all_tests_classified() -> Result:
 # the class-count gate and the run itself cannot disagree: three readers of one list rather
 # than three independent recollections of it.
 BESPOKE_CHECK_NAMES = (
+    "self-evolution-closes",
     "selection-pressure-reaches-the-rules",
     "replay-cannot-reach-the-account",
     "docs-no-deleted-commands",
@@ -3305,6 +3350,7 @@ def main() -> int:
     results.append(_safe(check_shadow_live_consistency, "shadow-live-consistency"))
     results.append(_safe(check_replay_cannot_reach_the_account, "replay-cannot-reach-the-account"))
     results.append(_safe(check_selection_pressure_reaches_the_rules, "selection-pressure-reaches-the-rules"))
+    results.append(_safe(check_self_evolution_closes, "self-evolution-closes"))
 
     for cls in CHECK_CLASSES:
         if wanted and cls not in wanted:

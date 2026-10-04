@@ -224,7 +224,12 @@ class ReplayDataGateway:
 
     @property
     def current(self) -> ReplayBar:
-        return self.bars[self.cursor]
+        # Clamped, because a caller can legitimately advance past the end - the daemon's
+        # sleep hook advances between cycles and it does maintenance before it checks
+        # whether it is done. `snapshot` already clamped; this did not, so the same
+        # over-advance that produced a valid last-bar snapshot raised IndexError the moment
+        # anything asked for the current time.
+        return self.bars[min(self.cursor, len(self.bars) - 1)]
 
     def snapshot(self, symbol: str) -> DataSnapshot:
         symbol = symbol.upper()
