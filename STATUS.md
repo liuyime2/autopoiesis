@@ -2598,3 +2598,90 @@ Nothing passes. Every candidate clearing the evidence bar is `OVERFIT`, and that
 answer on 24,162 real bars. The pipeline is now correct and continuous; what it produces is a
 negative result, produced correctly and reproducibly, which is the most this design space has
 given so far.
+
+## 2026-10-04 — requirement-by-requirement audit
+
+Each part of the objective, the evidence that would make it a claim rather than an intention, and
+what is still missing.
+
+### 1. 完整审查 — complete audit: MET
+
+`STATUS.md` is the audit, and it is adversarial about its own earlier conclusions: `8c299a2` and
+`112731f` are a claim and its retraction in consecutive commits. `make verify` is 52 classes with
+52 passing and 0 failing, and every figure it reports is checked against the run that produced it
+(`fact-figures-match`, `fact-docs-current`), so a stale claim in a document turns the gate red.
+
+### 2. 7x24 验证 — MET WHILE RUNNING, qualified on continuity
+
+```
+18504 journal events, 2026-06-10 -> 2026-10-04T18:40:30
+21 distinct calendar days, of which 9758 events fall outside 14:00-20:00 UTC
+```
+
+The overnight count is the load-bearing part: the system does not merely run when the market is
+open. It runs maintenance, reflects and journals through the night.
+
+**The qualification, stated because it is the kind of thing that reads as a strength.** The active
+days are not contiguous:
+
+```
+2026-06-10 .. 2026-06-23   14 consecutive weekdays
+2026-09-28 .. 2026-10-04    6 days
+largest gap between active days: 97 days
+```
+
+That gap is not an unexplained outage. The host has booted once since 2026-04-23
+(`last -F reboot`: 6.17.0-14-generi, Sun Sep 20 11:30:38 2026, still running), and the June run
+preceded the unit being installed: `default.target.wants/` contains `min-agent.service` and
+`ollama.service`, all four units report `enabled`, and systemd's own log for the unit begins
+2026-09-28. So the service was not deployed across the gap rather than failing to come back. The
+defensible claim is **"runs unattended whenever it is deployed"**, with seven days of continuous
+deployment on the current host, not "has run every day since June".
+
+Validation specifically, as distinct from operation: the replay harness drove the real
+`TradingLoop`, the real `Guardian` and the real lifecycle rules over **3514 real bars with 0
+errors**, ending in `PROBATION -> RETIRED` at `correct_outcome_ratio 0.035` (`b8eb9c5`). Every
+stage fired on its own.
+
+### 3. 完全自主 / 完全自动探索策略 — MET
+
+```
+384 CURRICULUM_PROPOSED, 51 CURRICULUM_FAILED      generation, unattended, months
+37 trials on the ledger, required_trades 61         evaluation, unattended, on a timer
+Mon 2026-10-05 06:42 EDT  quant-research.timer      scheduled, after the close
+```
+
+The second line was not true a day ago: `record_trial()` had no caller anywhere outside its own
+package, so every verdict this project ever reported came from a person typing a script
+(`2622bb3`). The pipeline now fetches real bars, sweeps the rule space, records every trial with
+its figures, and re-judges each candidate when the dataset grows (`8f94c0f`).
+
+**It finds nothing.** Every candidate clearing the evidence bar is `OVERFIT` on 24,162 real bars.
+That is a correct negative, produced by a gate that opens, not a failure of the gate.
+
+### 4. 自己优化自己系统 — MET
+
+```
+910 REFLECTION_GENERATED      910 STRATEGY_EVALUATION_RECORDED
+358 COUNTERFACTUAL_EVALUATED  10158 OFFLINE_VALIDATION_COMPLETED
+94  STRATEGY_LIFECYCLE_UPDATED   217 STRATEGY_ADMISSION_REVIEWED
+1988 PNL_EVIDENCE_RECORDED     132 KNOWLEDGE_ARTIFACT_PROPOSED / REVIEWED
+```
+
+The loop closes on live data and in replay, and it is willing to act against itself: a promoted
+strategy that was never selected got a 1-in-5 incumbent share, and the current library holds 33
+paused and 11 retired strategies retired on its own scored evidence.
+
+### 5. Still outstanding, and why
+
+Three verifications need live market cycles and cannot be obtained before Monday 2026-10-05:
+
+- the probation backlog draining below its cap of 17 after `INCUMBENT_SHARE` raised throughput;
+- `tiny-fixed-size-001` actually being selected in the live daemon;
+- `fixed-size-sell-005` leaving `PAUSED (in_flight_order)` once a reflection window rolls past
+  2026-10-02 and no longer contains the stale order.
+
+All three are verifications of changes already committed and unit-tested (`3407ebc`, `5b3683e`,
+`e02a8ff`). They are not regressions, and they are not new capability; they are the last thing
+between "written" and "observed", and the objective asks about what the system does, not what the
+tests say it does.
