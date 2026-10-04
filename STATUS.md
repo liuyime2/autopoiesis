@@ -1215,8 +1215,16 @@ blocked set beats its own days would each make this entry wrong.
 ## 2026-10-03 — the loop paused every candidate at cycle 5 of the 13 it was guaranteed
 
 With the confidence gate settled, the next question came from the record rather than a
-queue: **can this loop actually learn which strategy works?** Measured over the 1179 cycles
-on record, it cannot, and the reason is arithmetic.
+queue: **can this loop actually learn which strategy works?**
+
+> **Every figure in this entry is wrong, and the correction is at the end of this file.** The
+> block below was measured by scanning `journal.jsonl` alone; the journal is rotated, so it
+> covers about half the record. Corrected: 92 lifecycle transitions across 45 strategies (not
+> 34 across 17), 208 admission events across 142 (not 84 proposals and 24 admitted), 127
+> strategies evaluated (not 107), and **eight** transitions to `ACTIVE` including one applied
+> on 2026-09-30 — not zero promotions ever, and not zero ACTIVE strategies. The conclusion
+> that candidates are starved survives on a stronger measurement (17 of 18 hit below the
+> evidence gate of 10). Read this block as a record of what was believed, not what is true.
 
 ```
 78 strategies proposed, 24 admitted, 107 with evaluation records
@@ -1277,9 +1285,11 @@ a promoted strategy that stops acting is still paused at 5.
 ### The cost, which is not the cost the code assumed
 
 The selector's docstring priced a deep probation budget against "the one ACTIVE strategy"
-trading nothing. **There is no ACTIVE strategy** — all 17 are PAUSED — so that cost is
-currently paid by nothing, and the total spend is roughly 60 extra cycles across the whole
-1179-cycle history, about 5%.
+trading nothing. **There is an ACTIVE strategy** — `tiny-fixed-size-001`, promoted 2026-09-30 —
+and the correction below shows it was selected **0 times in the 146 cycles since**, because
+probation has absolute priority and 18 candidates never let the queue empty. So probation
+already consumes every cycle, and the extra spend is cycles that were not going to the
+incumbent anyway: roughly 60 across the whole history, about 5%.
 
 ### What is not yet proven
 
@@ -1290,3 +1300,85 @@ next thing the same measurement exposes: **9 of the 12 strategies that reached 1
 decisions were never judged at all** — no lifecycle verdict was ever recorded for them.
 
 `make verify`: 52 classes, 0 failed, 1404 executions across 62 files; 892 pytest pass.
+
+## 2026-10-03 — correction: the previous entry read half the journal
+
+The lifecycle entry above is wrong, and so are parts of the `min_confidence` entry's
+framing of the same record. Both were measured by scanning `runtime/min_agent/journal.jsonl`
+directly. **That file is rotated** — `journal.jsonl.1` holds another 10,587 events, and
+`ARCHITECTURE.md` has said since the beginning that "rotations read as one history". The
+authoritative reader is `JsonlJournal.read_all()`, which spans both.
+
+What the full record actually says:
+
+```
+across both journal files
+  lifecycle transitions: 92 across 45 strategies     (the entry above said 34 across 17)
+  admission events:     208 across 142 strategies     (said 84 proposals, 24 admitted)
+    ACCEPTED 68, REJECTED 140
+  strategies evaluated: 127                          (said 107)
+
+transitions
+   46 PROBATION -> PAUSED      9 RETIRED -> RETIRED    9 PAUSED -> PAUSED
+    9 RETIRED  -> PROBATION    8 PROBATION -> ACTIVE   8 PROBATION -> RETIRED
+    1 ACTIVE   -> RETIRED      1 ACTIVE  -> PAUSED     1 ACTIVE  -> PROBATION
+```
+
+**"Zero promotions ever" was false.** Eight transitions to `ACTIVE` are on record. One is in
+the current two-phase format — `tiny-fixed-size-001`, 2026-09-30T14:30, *"probation completed
+on 6 cycles with broker-verified realized PnL +362.66"* — and seven predate the phase field.
+The most recent promotion of any kind is 2026-09-30; the last lifecycle transition of any kind
+is 2026-10-03.
+
+**`tiny-fixed-size-001` was not hand-seeded and unadmitted.** It has 6 admission events (five
+REJECTED on 2026-09-28, one ACCEPTED on 2026-09-30) and 5 lifecycle events: promoted
+2026-06-12, retired 2026-06-16, re-adjudicated to PROBATION 2026-09-30 02:30, promoted again
+2026-09-30 14:30 with both `decided` and `applied` phases. Its `lifecycle_reason` is `None`
+because admission and the lifecycle manager write that field only on the paths that set it,
+and its promotion reason lives in the journal. The audit's remediation table and the disk
+agree; my scan was simply looking at one file.
+
+### What survives, and what does not
+
+The no-exploration pause is real and is the dominant transition: 36 transitions across 18
+strategies. Its victims' evidence counts:
+
+```
+max decisions those 18 strategies ever accumulated:
+  5 5 5 5 5 5 6 6 6 6 7 7 7 7 7 8 9 43
+```
+
+**17 of the 18 never reached 10 decisions** — the gate the offline screen refuses to judge
+below — so the starving finding stands, and with it the change made in `e9317a6`. The 18th is
+the exception the previous entry denied existed: 43 decisions and 43 scored, all of them
+HOLDs, zero trade attempts. The screen passed it and the degenerate rule paused it, which is
+consistent rather than contradictory — `trade_attempts == 0` is what "no exploration evidence"
+means, and 43 scored HOLDs are not exploration. So the honest count is **17 of 18 starved,
+1 correctly judged**, not "18 starved, none with evidence".
+
+### The cost claim was wrong in a way that strengthens the change
+
+The previous entry argued a deeper probation budget "is currently paid by nothing" because
+there was no ACTIVE strategy. There is one — `tiny-fixed-size-001` — and the measurement says
+something better:
+
+```
+146 cycles since it was promoted on 2026-09-30
+  times selected: 0
+  strategies actually selected: fixed-size-sell-005, fixed-size-probe-0001,
+    trend-follow-buy-001, trend-follow-20260613-001, trend-follow-buy-010 ...
+```
+
+**Probation has absolute priority in the selector, and with 18 PROBATION candidates the ACTIVE
+strategy has not been selected once in 146 cycles.** So probation already consumes every
+cycle, and lengthening a candidate's budget from 5 to 13 costs nothing that was not already
+being spent. The loop's real shape is one dormant ACTIVE strategy and 46 candidates paused on
+the way to a promotion that has happened exactly once.
+
+### The lesson, recorded where it will be read
+
+`ARCHITECTURE.md` states rotations read as one history, and `ARCHITECTURE.md:300` is a
+correction on this same point ("the journal has no rotation" was wrong). It is stated twice and
+still got repeated here, because scanning one file is the path of least resistance when the
+question is "what is on record". **Measure the journal through `JsonlJournal.read_all()`**,
+or say which file was read next to the number.

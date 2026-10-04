@@ -13,6 +13,11 @@ Scope: `src/min_agent/strategy_engine.py` and its tests. No config, no new modul
 The objective's core mission is a self-evolving agent that improves its own strategies. The
 loop cannot currently do that, and the reason is measurable without any new infrastructure:
 
+> **Corrected 2026-10-03 — read this block last.** The figures below were taken by scanning
+> `journal.jsonl` alone. The journal is rotated, so they cover roughly half the record. The
+> corrected figures are at the end of this document and in STATUS.md; the conclusion survives
+> but three of these numbers do not.
+
 ```
 78 strategies proposed, 24 admitted, 107 with evaluation records
 6485 offline validations across 107 strategies, 60.6 evaluations each
@@ -24,8 +29,12 @@ strategies that ever placed a trade:              11 of 78
 final lifecycle state of all 17 tracked strategies: PAUSED 17, ACTIVE 0
 ```
 
-**Zero strategies have ever been promoted.** Not one, in 1179 cycles. Every candidate the
-loop admits ends PAUSED, and 24 of the 34 pauses share one reason: *"probation produced no
+**Promotion is close to absent, not absent.** *(corrected: the original claim here was "zero
+promotions ever", which was an artifact of reading one journal file — see the note above.)*
+Eight transitions to `ACTIVE` are on record across both files, one of them in the current
+two-phase format: `tiny-fixed-size-001`, 2026-09-30, on broker-verified realized PnL. The most
+recent promotion of any kind is 2026-09-30 and none has happened since. Of 92 transitions, 46
+are `PROBATION -> PAUSED`, and 36 of those share one reason: *"probation produced no
 exploration evidence."*
 
 ## 1. Root cause: two numbers for one concept
@@ -55,8 +64,10 @@ and `_is_degenerate_no_exploration` is `cycles >= min_active_cycles and trade_at
 
 So a candidate that has not attempted a trade is declared degenerate at cycle 5 and never
 reaches its 13-cycle budget, let alone the 10-decision evidence gate. The measured
-consequence: **12 of the 17 paused strategies produced zero trades**, at 5 to 9 cycles each,
-while the daemon ran on for 65 to 1179 more cycles in the same window.
+consequence, on the full record: **17 of the 18 strategies this pause ever hit accumulated
+fewer than 10 decisions ever** — 5,5,5,5,5,5,6,6,6,6,7,7,7,7,7,8,9 — so they could not have
+been screened even if the pause had not fired. The daemon ran on for dozens more cycles in
+each of those windows.
 
 The probation budget and the probation-stage verdict are the same stage. They were set in
 different classes, at different times, and never reconciled.
@@ -92,17 +103,19 @@ going to pretend it does not apply:
 > *"At 13, five tradeable candidates x 13 is 65 cycles - about one trading day at the observed
 > 66 market-open cycles per day - during which the one ACTIVE strategy trades nothing."*
 
-Two measurements change that arithmetic:
+Two measurements change that arithmetic — and both are stronger than the argument they replace:
 
-- **There is no ACTIVE strategy.** All 17 tracked strategies are PAUSED. The incumbent the
-  cost was measured against does not exist, so the cost of a deeper probation is currently
-  paid by nothing.
-- **The total spend is small.** The 12 strategies that hit this pause ran 5-9 cycles each;
-  taking them to 13 adds roughly 60 cycles across the entire 1179-cycle history, about 5%.
+- **Probation already consumes every cycle.** The incumbent exists — `tiny-fixed-size-001`,
+  promoted 2026-09-30 — and in the 146 cycles since its promotion it was **selected 0 times**,
+  because with 18 PROBATION candidates the queue never empties. So the ACTIVE strategy is
+  already getting nothing, and lengthening a candidate's budget from 5 to 13 spends cycles
+  that were not going to the incumbent in the first place.
+- **The total spend is small.** The 17 strategies that hit this pause starved ran 5-9 cycles
+  each; taking them to 13 adds roughly 60 cycles across the entire history, about 5%.
 
-So the change buys the only capability that has ever been missing — a candidate that can
-reach its evidence gate — for about 5% of throughput and no incumbent, against a measured
-return of **zero promotions ever**.
+So the change buys the capability that decides the whole loop — a candidate that can reach its
+evidence gate — for cycles probation was already spending, against a record in which
+promotion has happened **once** in the current format and not at all since 2026-09-30.
 
 ## 5. What would prove this wrong
 
@@ -144,19 +157,47 @@ The measurement that made the case is sharper than the plan predicted. It is not
 candidates were paused at 5 of 13 cycles:
 
 ```
-strategies paused for "probation produced no exploration evidence": 12
-  their max decisions ever: 5 5 5 5 6 6 7 7 7 7 8 9    <- every one below the gate of 10
+strategies paused for "probation produced no exploration evidence": 18
+  their max decisions ever: 5 5 5 5 5 5 6 6 6 6 7 7 7 7 7 8 9 43
+                                             ^ 17 of 18 never reached the gate of 10
 strategies that reached >=10 scored decisions: 12
-  of those, paused for no-exploration: 0                 <- none
+  of those, paused for no-exploration: 1
 ```
 
-Every strategy the rule ever paused had fewer decisions than the evidence gate requires, and
-no strategy with enough evidence was ever paused by it. The rule could not have done anything
-else: it fired on exactly the population it was structurally incapable of judging, and never
-on the population it was written for.
+Seventeen of the eighteen had fewer decisions than the evidence gate requires, so the rule
+fired almost entirely on the population it was structurally incapable of judging. The
+eighteenth is the case the previous version of this document denied existed: 43 decisions and
+43 scored, every one a HOLD, zero trade attempts. The offline screen passed it and the
+degenerate rule paused it — which is consistent, because `trade_attempts == 0` is what "no
+exploration evidence" means, and 43 scored HOLDs are not exploration. So the rule has one
+honest firing here and seventeen starved ones.
 
 **Not closed by this change.** It removes the reason promotion was unreachable; it does not
 show a promotion. And the same sweep surfaced the next question rather than answering it: of
 the 12 strategies that did reach 10+ scored decisions, **9 were never judged at all** — the
 screen ran, the evidence was sufficient, and no lifecycle verdict was ever recorded. That is
 a separate defect with a separate baseline, and it is where the next measurement goes.
+
+## 9. Correction: this plan read half the journal
+
+Measured by scanning `runtime/min_agent/journal.jsonl`, which is **rotated** —
+`journal.jsonl.1` holds another 10,587 events. `JsonlJournal.read_all()` spans both and is
+the reader to use. Corrected figures:
+
+```
+lifecycle transitions: 92 across 45 strategies      (this plan said 34 across 17)
+admission events:     208 across 142 strategies      (said 84 proposals, 24 admitted)
+strategies evaluated: 127                           (said 107)
+last promotion of any kind: 2026-09-30               (said none, ever)
+```
+
+Three claims in this document were false and are corrected in place: that no strategy had
+ever been promoted, that the pause's victims all lacked evidence, and that there was no
+ACTIVE strategy. The change itself stands, and stands on a cleaner measurement than the one
+it was planned from — **17 of the 18 strategies the pause ever hit had fewer than 10
+decisions**, against a gate of 10, and probation already consumes every cycle while the one
+ACTIVE strategy has gone unselected for all 146 cycles since its promotion.
+
+The lesson is recorded in STATUS.md and belongs to this document too: a number measured from
+the journal must say which file it came from, because "one file" is the path of least
+resistance and it silently halves the evidence.
