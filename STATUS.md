@@ -1874,3 +1874,53 @@ against the $20,000 the Guardian allows as concurrent exposure — so the aggreg
 limit only because the strategies did not all hold at once, and the Guardian's own bound is on
 concurrent exposure, measured separately at about $19,793. Not a breach, and not reported as
 one.
+
+## 2026-10-04 — the shortfall is not yet a basis for changing the promotion gate
+
+The gate change this was heading towards is not justified, and the reason is worth more than
+the change would have been.
+
+**Two defensible denominators, and they disagree per strategy.** The report compares each
+strategy's return on peak exposure against the market over the whole record window. The
+like-for-like alternative is to compare it against the market over *its own* active window —
+the same capital, held over the period it was actually invested:
+
+```
+                                    whole-record window      its own active window
+strategy                    at risk  mkt    excess          window   mkt    excess
+tiny-fixed-size-001          9603  +4.10%   -$28.16         113d  +5.59%   -$170.36
+fixed-size-buy-001           7641  +4.10%  -$166.71         106d  +2.84%    -$69.73
+trend-follow-buy-001         3833  +4.10%   -$76.00         104d  +2.34%     -$8.16
+TOTAL                       21077          -$270.86                        -$248.25
+```
+
+Neither is wrong. The whole-record denominator charges a strategy for periods it was flat;
+the own-window denominator measures entry and exit timing only within the stretches it chose
+to trade, and would flatter a strategy that trades exclusively in rising markets. The total is
+robust — **−$248 to −$271 either way, about −$250 on $21,077 at risk** — but the per-strategy
+attribution is not: `tiny-fixed-size-001` reads as near parity on one basis and as the worst
+performer on the other, because it happened to trade through the strongest part of the market.
+
+**So the code keeps the whole-record window** and this entry records the other, rather than
+the report carrying two numbers where a decision needs one. Which basis is right is a policy
+question about what the loop is optimising, not a measurement fix, and it should be settled
+before it is baked into a gate.
+
+**And the sample cannot carry the decision anyway.** Fifteen, sixteen and four round trips,
+all inside one four-month regime in which the market rose. The per-lot distributions are tight
+(`tiny-fixed-size-001`: min +0.12%, median +3.35%, max +5.36% over 15 lots) but tight
+dispersion in a single rising regime does not distinguish skill from the regime — in a market
+that rose, every buy-then-sell sequence is profitable by construction, which is the same
+reason the benchmark rather than the per-lot distribution is the honest instrument.
+
+**What would justify changing the promotion gate:** a strategy whose excess sits beyond the
+dispersion, over enough round trips and enough distinct market regimes that the sign is not a
+property of the sample. Nothing on this record is close to that, and the three strategies the
+gate has produced were chosen by a criterion — decision quality, +1.8% day-adjusted — that has
+never been shown to predict this number.
+
+**What this does not say:** that the strategies are fine. They are behind the market by roughly
+$250 on $21,077, and that is the honest summary of four months. It says the sample cannot
+distinguish that from noise, so the correct response is to wait for evidence rather than to
+change a risk boundary on the strength of it — the same answer the `min_confidence` gate got
+when its single firing turned out to be correct.
