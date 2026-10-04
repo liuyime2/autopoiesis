@@ -312,7 +312,7 @@ class AgentDaemon:
         Nothing downstream can tell the two apart, which was checked rather than
         assumed: `_offline_evidence_by_strategy`, `lineage` and `experiment_registry`
         each keep the latest verdict per strategy and overwrite, `summarize` counts
-        one verdict per strategy rather than per event, and `_apply_offline_rejection`
+        one verdict per strategy rather than per event, and the lifecycle reviewer
         returns early when the strategy is already PAUSED or RETIRED. The full
         payload is compared, not just the verdict, because the promotion gate reads
         `scored` and a strategy crossing the threshold with an unchanged verdict is a
@@ -346,8 +346,11 @@ class AgentDaemon:
             strategy_id=strategy_id,
             payload=payload,
         )
-        if result.rejected:
-            self._apply_offline_rejection(result)
+        # The rejection itself is applied by `_manage_strategy_lifecycle`, from the rule
+        # set. It used to be applied here instead, by `_apply_offline_rejection`, which meant
+        # the same screen verdict produced PAUSED on the daemon path and RETIRED from
+        # `StrategyLifecycleManager.review()` - one piece of evidence, two rulings, which is
+        # the same one-authoritative-rule violation the veto was moved out of.
 
     def _latest_screen_payloads(self, events) -> dict[str, dict]:
         """The full payload last journalled per strategy, for change detection.
@@ -435,65 +438,6 @@ class AgentDaemon:
             self._screen_candidate(
                 spec.strategy_id, _events=events, _latest_payloads=latest_payloads
             )
-
-    def _apply_offline_rejection(self, result) -> None:
-        """Pause a strategy whose own recorded decisions were bad.
-
-        Same journal-first discipline as `_manage_strategy_lifecycle`: intent is
-        journalled, then the file is written, then the outcome is journalled. The
-        worst case is therefore an event for a transition that did not happen,
-        which is visible and harmless - not a silent state change with no record,
-        which is how eight duplicate retirements once landed here unnoticed.
-
-        The verdict is re-checked here rather than trusted from the caller. The
-        guard lived only in the caller, so calling this method directly paused a
-        first-cycle candidate that had been told INCONCLUSIVE - silence was being
-        read as failure. A method that corrupts state when misused should be safe
-        when misused.
-        """
-        if result is None or not result.rejected:
-            return
-        if self.strategy_library is None or result.strategy_id is None:
-            return
-        # `load`, not `get`: the library has no `get`. The first cut called
-        # `get`, which raised AttributeError inside the caller's broad `except`,
-        # so the rejection path would have journalled FAILED forever and never
-        # paused anything - wired in appearance, dead in practice.
-        spec = self.strategy_library.try_load(result.strategy_id)
-        if spec is None or spec.lifecycle in {"RETIRED", "PAUSED"}:
-            return
-        old = spec.lifecycle
-        reason = f"offline validation rejected this strategy: {result.reason}"
-        event_id = self._append_event(
-            "STRATEGY_LIFECYCLE_UPDATED",
-            status="SUCCESS",
-            message=reason,
-            strategy_id=spec.strategy_id,
-            payload={
-                "old_lifecycle": old,
-                "new_lifecycle": "PAUSED",
-                "reason": reason,
-                "phase": "decided",
-                "source": "offline_validation",
-            },
-        )
-        self.strategy_library.save(
-            spec.model_copy(update={"lifecycle": "PAUSED", "lifecycle_reason": reason})
-        )
-        self._append_event(
-            "STRATEGY_LIFECYCLE_UPDATED",
-            status="SUCCESS",
-            message=reason,
-            strategy_id=spec.strategy_id,
-            payload={
-                "old_lifecycle": old,
-                "new_lifecycle": "PAUSED",
-                "reason": reason,
-                "phase": "applied",
-                "decided_event_id": event_id,
-                "source": "offline_validation",
-            },
-        )
 
     def _recorded_counterfactual_verdicts(self, events) -> dict[str, str]:
         """The verdict last journalled for each cycle, as `{cycle_id: verdict}`."""

@@ -191,6 +191,24 @@ class StrategyLifecycleManager:
     ) -> StrategyLifecycleDecision | None:
         if strategy.lifecycle in {"BASELINE", "PAUSED", "RETIRED"}:
             return None
+        # A screen verdict that says REJECT retires the strategy here, in the rule set,
+        # rather than in `AgentDaemon._apply_offline_rejection`.
+        #
+        # It used to live there, and that was an asymmetry with no principled basis: any
+        # other caller of `review()` got the promotion gate but not the rejection veto, so a
+        # replay harness or a fresh process could read `REJECT_POOR_DECISIONS` on the record
+        # and see the strategy still sitting in PROBATION with nothing anywhere saying why.
+        # Measured over 847 real bars: 580 scored decisions, 304 of them losing trades,
+        # `correct_outcome_ratio` 0.476, verdict REJECT_POOR_DECISIONS - and the lifecycle
+        # returned no ruling at all. One authoritative rule, not a rule plus a side effect.
+        #
+        # RETIRED rather than the PAUSED the daemon used, because RETIRED is terminal in
+        # these rules while PAUSED is not, and a strategy whose own recorded decisions were
+        # 48% correct has earned a final answer rather than another probation. That is the
+        # one behavioural difference this change makes, and it is deliberate.
+        rejection = self._evidence_rejection_reason(evidence)
+        if rejection is not None:
+            return StrategyLifecycleDecision(strategy, "RETIRED", rejection)
         if result is None:
             return None
 
@@ -229,24 +247,6 @@ class StrategyLifecycleManager:
         if rejection_rate > self.max_rejection_rate:
             return StrategyLifecycleDecision(strategy, "PAUSED", "Guardian rejection rate above lifecycle threshold")
 
-        # A screen verdict that says REJECT retires the strategy here, in the rule set,
-        # rather than in `AgentDaemon._apply_offline_rejection`.
-        #
-        # It used to live there, and that was an asymmetry with no principled basis: any
-        # other caller of `review()` got the promotion gate but not the rejection veto, so a
-        # replay harness or a fresh process could read `REJECT_POOR_DECISIONS` on the record
-        # and see the strategy still sitting in PROBATION with nothing anywhere saying why.
-        # Measured over 847 real bars: 580 scored decisions, 304 of them losing trades,
-        # `correct_outcome_ratio` 0.476, verdict REJECT_POOR_DECISIONS - and the lifecycle
-        # returned no ruling at all. One authoritative rule, not a rule plus a side effect.
-        #
-        # RETIRED rather than the PAUSED the daemon used, because RETIRED is terminal in
-        # these rules while PAUSED is not, and a strategy whose own recorded decisions were
-        # 48% correct has earned a final answer rather than another probation. That is the
-        # one behavioural difference this change makes, and it is deliberate.
-        rejection = self._evidence_rejection_reason(evidence)
-        if rejection is not None:
-            return StrategyLifecycleDecision(strategy, "RETIRED", rejection)
         if strategy.lifecycle == "PROBATION" and result.cycles >= self.min_active_cycles:
             if self._is_degenerate_no_exploration(strategy, result):
                 return StrategyLifecycleDecision(strategy, "PAUSED", "probation produced no exploration evidence")

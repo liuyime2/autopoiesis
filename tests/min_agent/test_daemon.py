@@ -865,61 +865,66 @@ def _cf_event(strategy_id, verdicts):
     )
 
 
-def test_offline_rejection_actually_pauses_the_strategy(tmp_path):
-    """The screen has to reach the registry or it is another unused function. The
-    first cut of this called `strategy_library.get`, which does not exist: the
-    AttributeError was swallowed by the caller's broad except, so the path
-    journalled FAILED and never paused anything."""
-    cfg = config(tmp_path)
-    journal = JsonlJournal(cfg.journal_path)
-    journal.append(_cf_event("loser", ["FALSE_TRADE"] * 12))
-    library = StrategyLibrary(cfg.strategy_dir)
-    library.save(_spec("loser"))
+def test_a_rejected_strategy_is_retired_by_the_rule_set(tmp_path):
+    """The veto now lives in `StrategyLifecycleManager`, not in the daemon.
 
-    daemon = AgentDaemon(
-        config=cfg, journal=journal, strategy_library=library, loop=FakeLoop()
-    )
+    It used to be `AgentDaemon._apply_offline_rejection`, which meant the same screen
+    verdict produced PAUSED here and RETIRED from `review()` - one piece of evidence, two
+    rulings. These tests used to call that method directly, so they are rewritten onto the
+    rule set that is now the single implementation. PAUSED became RETIRED deliberately:
+    RETIRED is terminal in the rules and a strategy whose own recorded decisions were this
+    bad has earned a final answer rather than another probation.
+    """
+    from datetime import datetime, timezone
+
     from min_agent import offline_validation
+    from min_agent.strategy_engine import StrategyLifecycleManager, StrategyResult
 
-    decisions = offline_validation.collect_decisions(
-        journal.read_events("COUNTERFACTUAL_EVALUATED"), "loser"
+    result = offline_validation.validate(
+        [type("D", (), {"cycle_id": f"c{i}", "action": "BUY", "verdict": "FALSE_TRADE",
+                        "net_return_pct": -1.0})() for i in range(12)],
+        strategy_id="loser",
     )
-    result = offline_validation.validate(decisions, strategy_id="loser")
     assert result.rejected
 
-    daemon._apply_offline_rejection(result)
-
-    assert library.try_load("loser").lifecycle == "PAUSED"
-    events = journal.read_events("STRATEGY_LIFECYCLE_UPDATED")
-    phases = [e.payload.get("phase") for e in events if e.strategy_id == "loser"]
-    assert phases == ["decided", "applied"], (
-        "the transition must be journalled before and after the write, so a "
-        "crash leaves a visible event rather than a silent state change"
+    decisions = StrategyLifecycleManager().review(
+        [_spec("loser")],
+        [StrategyResult(strategy_id="loser", cycles=40, submitted_orders=12,
+                        rejected_orders=0, errors=0, score=0.0, trade_attempts=12,
+                        evaluated_at=datetime.now(tz=timezone.utc))],
+        {"loser": result},
     )
+
+    assert [d.new_lifecycle for d in decisions] == ["RETIRED"]
+    assert "FALSE" not in decisions[0].reason
+    assert "scored" in decisions[0].reason, "the ruling must carry its evidence"
 
 
 def test_offline_screening_never_promotes_a_strategy(tmp_path):
     """A strategy that screened well must still be waiting for live evidence."""
-    cfg = config(tmp_path)
-    journal = JsonlJournal(cfg.journal_path)
-    journal.append(_cf_event("sound", ["GOOD_HOLD"] * 12))
-    library = StrategyLibrary(cfg.strategy_dir)
-    library.save(_spec("sound", lifecycle="PROBATION"))
-
-    daemon = AgentDaemon(
-        config=cfg, journal=journal, strategy_library=library, loop=FakeLoop()
-    )
     from min_agent import offline_validation
+    from min_agent.strategy_engine import StrategyLifecycleManager
+    from datetime import datetime, timezone
 
-    decisions = offline_validation.collect_decisions(
-        journal.read_events("COUNTERFACTUAL_EVALUATED"), "sound"
-    )
-    result = offline_validation.validate(decisions, strategy_id="sound")
+    decisions_in = [
+        type("D", (), {"cycle_id": f"c{i}", "action": "HOLD", "verdict": "GOOD_HOLD",
+                       "net_return_pct": -1.0})()
+        for i in range(12)
+    ]
+    result = offline_validation.validate(decisions_in, strategy_id="sound")
     assert result.verdict == offline_validation.PASS_SCREENED
 
-    daemon._apply_offline_rejection(result)
+    decisions = StrategyLifecycleManager().review(
+        [_spec("sound", lifecycle="PROBATION")],
+        [type("R", (), {"strategy_id": "sound", "cycles": 0, "submitted_orders": 0,
+                        "rejected_orders": 0, "errors": 0, "score": 0.5,
+                        "trade_attempts": 0, "pnl_evidence": "", "realized_pnl": None,
+                        "strategy_fault_rejections": None, "subbed_orders": 0,
+                        "evaluated_at": datetime.now(tz=timezone.utc)})()],
+        {"sound": result},
+    )
 
-    assert library.try_load("sound").lifecycle == "PROBATION", (
+    assert not [d for d in decisions if d.new_lifecycle == "ACTIVE"], (
         "screening through must not promote; only prospective live cycles can"
     )
 
@@ -927,46 +932,49 @@ def test_offline_screening_never_promotes_a_strategy(tmp_path):
 def test_a_first_cycle_candidate_is_never_touched(tmp_path):
     """A brand-new candidate has no history, so the screen returns INCONCLUSIVE and
     must leave it in PROBATION rather than reading silence as failure."""
-    cfg = config(tmp_path)
-    journal = JsonlJournal(cfg.journal_path)
-    library = StrategyLibrary(cfg.strategy_dir)
-    library.save(_spec("fresh", lifecycle="PROBATION"))
+    from datetime import datetime, timezone
 
-    daemon = AgentDaemon(
-        config=cfg, journal=journal, strategy_library=library, loop=FakeLoop()
-    )
     from min_agent import offline_validation
+    from min_agent.strategy_engine import StrategyLifecycleManager, StrategyResult
 
     result = offline_validation.validate([], strategy_id="fresh")
     assert result.verdict == offline_validation.INCONCLUSIVE
 
-    daemon._apply_offline_rejection(result)
+    decisions = StrategyLifecycleManager().review(
+        [_spec("fresh", lifecycle="PROBATION")],
+        [type("R", (), {"strategy_id": "fresh", "cycles": 1, "submitted_orders": 0,
+                        "rejected_orders": 0, "errors": 0, "score": 0.5,
+                        "trade_attempts": 0, "pnl_evidence": "", "realized_pnl": None,
+                        "strategy_fault_rejections": None,
+                        "evaluated_at": datetime.now(tz=timezone.utc)})()],
+        {"fresh": result},
+    )
 
-    assert library.try_load("fresh").lifecycle == "PROBATION"
-    assert journal.read_events("STRATEGY_LIFECYCLE_UPDATED") == []
+    assert not [d for d in decisions if d.new_lifecycle in {"PAUSED", "RETIRED"}]
 
 
 def test_an_already_retired_strategy_is_not_resurrected_or_rewritten(tmp_path):
-    cfg = config(tmp_path)
-    journal = JsonlJournal(cfg.journal_path)
-    journal.append(_cf_event("dead", ["FALSE_TRADE"] * 12))
-    library = StrategyLibrary(cfg.strategy_dir)
-    library.save(_spec("dead", lifecycle="RETIRED"))
+    from datetime import datetime, timezone
 
-    daemon = AgentDaemon(
-        config=cfg, journal=journal, strategy_library=library, loop=FakeLoop()
-    )
     from min_agent import offline_validation
+    from min_agent.strategy_engine import StrategyLifecycleManager, StrategyResult
 
-    decisions = offline_validation.collect_decisions(
-        journal.read_events("COUNTERFACTUAL_EVALUATED"), "dead"
+    result = offline_validation.validate(
+        [type("D", (), {"cycle_id": f"c{i}", "action": "BUY", "verdict": "FALSE_TRADE",
+                        "net_return_pct": -1.0})() for i in range(12)],
+        strategy_id="dead",
     )
-    daemon._apply_offline_rejection(
-        offline_validation.validate(decisions, strategy_id="dead")
+    assert result.rejected
+
+    decisions = StrategyLifecycleManager().review(
+        [_spec("dead", lifecycle="RETIRED")],
+        [StrategyResult(strategy_id="dead", cycles=40, submitted_orders=12,
+                        rejected_orders=0, errors=0, score=0.0, trade_attempts=12,
+                        evaluated_at=datetime.now(tz=timezone.utc))],
+        {"dead": result},
     )
 
-    assert library.try_load("dead").lifecycle == "RETIRED"
-    assert journal.read_events("STRATEGY_LIFECYCLE_UPDATED") == []
+    assert decisions == []
 
 
 class MaintenanceExplodingLoop(FakeLoop):

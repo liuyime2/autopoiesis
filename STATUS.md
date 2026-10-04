@@ -877,3 +877,42 @@ generator is premature while there have been **zero promotions**. The number to 
 first `PASS_SCREENED`.
 
 `make verify`: 51 classes, 0 failed, 1380 executions across 62 files; 880 pytest pass.
+
+### The second half: I created the drift I was removing, then deleted the duplicate
+
+Moving the veto in was not enough. With `_apply_offline_rejection` still present, the same
+screen verdict produced **two different rulings**:
+
+```
+lifecycle=PROBATION  -> ['RETIRED']      # the rule set
+lifecycle=PAUSED     -> None            # already terminal
+```
+
+and on the daemon the order is `_screen_all_strategies` (which paused it) before
+`_manage_strategy_lifecycle` (which then skips it), so **the daemon yielded PAUSED while the
+rule set yielded RETIRED**. One piece of evidence, two answers — exactly the
+one-authoritative-rule violation the veto was moved out of, reappearing one layer down.
+
+`_apply_offline_rejection` is deleted. Rejection now reaches the file through the same
+journal-first discipline as every other lifecycle decision: intent journalled, file written,
+outcome journalled. The four daemon tests that called the deleted method directly were
+**rewritten onto the rule set**, not deleted, because what they assert is still true and
+still worth asserting: a rejected strategy is retired, a screened-through one is not promoted,
+a first-cycle candidate reading INCONCLUSIVE is left alone, and a retired one is not
+resurrected.
+
+**The veto was also moved above the cycle-count gate**, because it does not depend on it. The
+screen judges a strategy's own scored decisions and needs no cycle summary, so requiring one
+first made the veto unreachable when no result existed — and `AgentDaemon` returns early from
+the lifecycle pass without a reflection memory, which is precisely the degraded case where its
+duplicate used to be the only thing acting. One rule, reachable from every caller.
+
+Both directions of the selection pressure are now verified end to end on real bars:
+
+```
+REJECT_POR_DECISIONS 580 scored, ratio 0.476 -> RETIRED, reason carries the numbers
+PASS_SCREENED        50 scored, ratio 1.000 -> ACTIVE,  "decision quality that cleared the evidence gate"
+INCONCLUSIVE                                   -> no ruling; silence is not failure
+```
+
+`make verify`: 51 classes, 0 failed, 1380 executions across 62 files; 880 pytest pass.
