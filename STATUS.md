@@ -28,24 +28,35 @@ what does not change:
 ## Open finding: shares sold that no BUY accounts for
 
 `minictrl doctor` reports `UNMATCHED SELLS {'trend-follow-sell-002': 29.0}`: 29 shares were
-sold with no linked BUY inside that strategy's lot tracker. The journal covers 2026-06-09
-onward and the sells are later than that, so this is not a gap at the start of the record -
-the tracker genuinely cannot pair them. Run `minictrl doctor` for the current figure; it moves
+sold with no lot to price them against. Run `minictrl doctor` for the current figure; it moves
 as the agent trades.
 
-What it does to the numbers: the headline realized PnL includes part that cannot be
-attributed to a strategy, so it is an upper bound rather than an exact result. `minictrl
-profit` evaluates the target against the same figures.
+**What it does to the numbers — measured, 2026-10-03.** `_apply_activity` books no PnL for a
+sell it cannot match: it records the quantity and the fee and stops
+(`evaluator.py:878-882`). So those exits are **absent from** the headline realized figure, not
+present in it without a name. The total is therefore **incomplete**, and the omitted term has
+an unknown sign — 29 shares sold at 766.57 with proceeds that are real and a cost basis that
+is not on the record. An earlier version of this section, and of the doctor's own message,
+called it "an upper bound". That was wrong in the direction that flatters the run: it is the
+most the record can *prove*, not the most the account could have earned.
 
-Not yet diagnosed. The likeliest explanation is that `trend-follow-sell-002` was re-admitted
-mid-flight - it is the strategy restored after the `loop._agent_holding` defect - and its BUY
-history predates its current admission, so the tracker starts with no open lots to sell
-against. That is a hypothesis, not a finding.
+**The cause, measured rather than hypothesised.** The standing hypothesis was a re-admission
+that lost the BUY history. It is wrong: the ledger matches a SELL FIFO across the whole
+account and records `closing_strategy_id`, precisely so a lot opened by one strategy can be
+closed by another, and 23 of that sell's 52 shares did close agent lots. Reading all 62
+retained fills in time order, the account's on-record position goes to **−29** the instant that
+sell lands and only recovers through later BUYs — the agent sold 29 shares it had never bought
+on its own record. The exit strategies exist to close an account position they do not own
+(`fixed-size-sell-005`: *"the open SPY position (10 shares, $7,641.80) has no exit path"*),
+and part of that position was not theirs. Same fact as the `unmanaged exposure` warning — 5
+positions outside the allowlist, 37% of equity — seen from the PnL side.
 
-Recorded rather than fixed because this is a domain question, not a repository defect, and
-getting it wrong would change reported PnL. It is a WARN rather than a FAIL for the same
-reason `make evaluate` exits zero when the profit target is unmet: a property of the data is
-not a property of the code.
+Recorded rather than fixed because it is a property of the **account**, not of the trading
+path: pricing those shares would mean fetching broker history the agent does not currently
+read, which is a scope decision rather than a defect fix. It stays a WARN rather than a FAIL
+for the same reason `make evaluate` exits zero when the profit target is unmet: a property of
+the data is not a property of the code. Plan and measurements:
+`docs/superpowers/plans/2026-10-03-the-pnl-total-omits-unmatched-exits.md`.
 
 
 > **Dated section starts here.** Everything below records the position at the time it was
@@ -916,3 +927,98 @@ INCONCLUSIVE                                   -> no ruling; silence is not fail
 ```
 
 `make verify`: 51 classes, 0 failed, 1380 executions across 62 files; 880 pytest pass.
+
+## 2026-10-03 — driving the daemon, because the rules were only ever proven by hand
+
+The two previous entries proved the lifecycle rules react to scored evidence. Both proofs
+were partial in the same way: `TradingLoop` was replayed on its own, and
+`StrategyLifecycleManager.review()` was called by hand. A component proves a component.
+Reflect, score every decision against what the market did next, screen the strategy on those
+scores and rule on the verdict all happen in `AgentDaemon._maintenance`, and **nothing ran
+that path**.
+
+`tools/replay_self_evolution.py` drives the daemon itself over the same 847 real bars, and
+`tools/self_evolution_probe.py` asserts the stages fired rather than being told they did:
+
+```
+847 cycles   0 daemon errors
+COUNTERFACTUAL_EVALUATED / OFFLINE_VALIDATION_COMPLETED / REFLECTION_GENERATED /
+STRATEGY_LIFECYCLE_UPDATED all present
+580 scored, ratio 0.476 -> RETIRED, reason carries the numbers; no broker-verified claim
+```
+
+It found a defect nothing else could see. The daemon's sleep hook advances the gateway
+between cycles and runs maintenance *before* checking whether the replay is finished, so
+`ReplayDataGateway.current` was reached with the cursor one past the last bar and raised
+IndexError — `snapshot` clamped, `current` did not, which is why the same over-advance
+produced a valid last-bar snapshot and then blew up. Clamped, with a test that advances ten
+times past a three-bar series.
+
+**The decision engine in that replay is a three-bar momentum rule, not the LLM, and that is
+the point.** A replayed system that always HOLDs would score every decision as a good hold
+and never reach the branch that retires a strategy. The Guardian is the real one, unchanged —
+a replay with its own softer risk layer would be testing a system nobody ships. Fills stay
+`REPLAYED`, so this proves selection pressure reacts to scored evidence and says nothing
+about whether any strategy has an edge.
+
+`make verify` runs it as `self-evolution-closes`, the 52nd class.
+
+### The gate could not pass on a clean HEAD
+
+Running the whole gate rather than the parts of it that were being worked on:
+
+| | on HEAD | now |
+|---|---|---|
+| `ruff check src/ tools/ tests/ examples/` | **15 findings** | 0 |
+| `mypy src/min_agent` | **2 findings** | 0 |
+| `make verify` classes | red | 52 / 52 |
+
+`make lint` is the first step of `make check`, `make fast` and the inner loop this project
+runs on every edit, and it failed. All 15 findings were in the files the two replay commits
+had just added: 8 `# noqa: E402` that `ruff.toml` already ignores globally, two unsorted
+import blocks, three missing final newlines, an unused `dataclasses.field`, and an unused
+`cycle_id` in `ReplayExecutor.execute` — kept under that name because `loop.py` calls every
+executor with `cycle_id=` as a keyword, and renaming it would have broken the canonical
+execution path for the replay executor alone.
+
+`make type`'s comment reads *"It is now 0 findings and blocking"*. It was blocking and
+reported 2: `REPLAYED = "REPLAYED"` inferred as `str` where `ExecutionResult.status` is a
+`Literal`, and `retained_window()` returning `dict[str, object]`, which pushed the missing
+type onto its one reader. Both fixed at the source — the constant annotated as the literal the
+model requires, the window as a `TypedDict` of its five fixed keys, which also deleted a
+`str()` cast in the doctor. The comment is now true of the target.
+
+### The PnL total is incomplete, and the report said it was an upper bound
+
+The long-standing `UNMATCHED SELLS` finding was finally diagnosed rather than carried, and
+the sentence both `STATUS.md` and the doctor attached to it was false in the direction that
+flatters the run. `_apply_activity` books **no** PnL for a sell it cannot match — quantity
+and fee only — so those exits are absent from the headline figure, not present in it without
+a name. The omitted term has an unknown sign: 29 shares at 766.57 whose cost basis is not on
+the record. The number is incomplete; it is not an upper bound, and `+594.33` is the most
+the record can *prove*, not the most the account could have earned.
+
+The standing hypothesis — a re-admission that lost the BUY history — is **wrong**. Lot
+matching is account-level FIFO and records `closing_strategy_id`, so 23 of that sell's 52
+shares did close lots opened by other strategies. Reading all 62 retained fills in time
+order, the on-record position goes to **−29** the instant the sell lands: the agent sold 29
+shares it had never bought on its own record. It is the same fact as `unmanaged exposure`
+(5 positions outside the allowlist, 37% of equity) seen from the PnL side — a property of the
+account, not of the trading path.
+
+Deleted the false claim; added no field. `unmatched_sell_quantity` is already the number, and
+`tests/min_agent/test_evaluator.py` already pins the semantics on this exact 52-share sell
+(`closed_lot_count == 23`, `{"closer": 29.0}`, `opener == (766.57 − 742.03) × 23`). The
+figure did not move — only the claim about it.
+
+`make verify`: 52 classes, 0 failed, 1383 executions across 62 files; 881 pytest pass.
+
+### The next question, which is a scope decision and not a build
+
+**Should the agent manage account positions it did not open?** 37% of equity sits outside the
+allowlist and 29 shares of one sell had no basis on record. Whether the right answer is to
+price those shares from broker history or to refuse to touch positions the strategy library
+does not own decides what gets built — and building either before that decision is the kind
+of anticipatory infrastructure this project has been deleting.
+
+`make verify`: 52 classes, 0 failed, 1383 executions across 62 files; 881 pytest pass.

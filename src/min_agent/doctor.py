@@ -805,7 +805,8 @@ def _check_pnl_attribution(
         detail += (
             f" | UNMATCHED SELLS {unmatched_shares:g}: shares were sold "
             f"that no linked BUY could account for ({unmatched_by_strategy}), "
-            "so that PnL is unproven"
+            "and their PnL is absent from the total above rather than merely "
+            "unproven"
         )
 
     # Severity follows a distinction that has to be stated, because it decides
@@ -831,10 +832,14 @@ def _check_pnl_attribution(
     # Two different findings, and only one of them decides severity.
     #
     # * Shares sold that no BUY accounts for are a limit on what the *record* can support.
-    #   The headline PnL is then an upper bound rather than an exact result. That is a
-    #   property of the data, so it is reported prominently and recorded as an open finding in
-    #   STATUS.md, but it does not make the health report FAIL - otherwise a four-month-old
-    #   accounting gap keeps `make verify` red permanently and teaches everyone to ignore it.
+    #   `_apply_activity` books no PnL for them - only the quantity and the fee - so the
+    #   headline total is *incomplete*, not an upper bound: the omitted term is those shares'
+    #   gain or loss, and the record does not say which. An earlier version of this message
+    #   called the figure "an upper bound", which is wrong in the direction that flatters the
+    #   run and is the reason the sentence now states the mechanism instead. That is a
+    #   property of the data, so it is reported prominently and recorded in STATUS.md, but it
+    #   does not make the health report FAIL - otherwise a four-month-old accounting gap
+    #   keeps `make verify` red permanently and teaches everyone to ignore it.
     #
     # * A model that opened lots and subtracted from a positive total IS a FAIL, and stays
     #   one. `tests/min_agent/test_attribution.py` guards that with a deliberate message: the
@@ -849,10 +854,12 @@ def _check_pnl_attribution(
     if unmatched_shares:
         report.add(
             "pnl attribution", WARN,
-            detail + "; shares were sold that no BUY accounts for, so part of this PnL "
-            "cannot be attributed to a strategy and the headline figure is an upper bound "
-            "rather than an exact result. This is an open finding, not a fault in the "
-            "trading path - see STATUS.md",
+            detail + f"; {unmatched_shares:g} share(s) were sold that no BUY accounts "
+            "for, so the PnL of those exits is not in the total above at all - their "
+            "proceeds are real and their cost basis is not on the record, so the omitted "
+            "term can be positive or negative and the figure is incomplete rather than "
+            "exact. This is a property of the account, not a fault in the trading path - "
+            "see STATUS.md",
         )
     if result.closed_lots and model_lots > 0 and result.model_pnl <= 0.0:
         report.add(
