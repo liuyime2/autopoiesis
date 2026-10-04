@@ -1924,3 +1924,49 @@ $250 on $21,077, and that is the honest summary of four months. It says the samp
 distinguish that from noise, so the correct response is to wait for evidence rather than to
 change a risk boundary on the strength of it — the same answer the `min_confidence` gate got
 when its single firing turned out to be correct.
+
+## 2026-10-04 — two fixes confirmed on the live record, and one falsifier blocked on market hours
+
+The changes earlier today are not only unit-tested. Two of them are visible in the journal, and
+the third cannot be observed yet for a reason worth stating.
+
+**The capacity refusal is firing.** Since it landed there have been three admission reviews,
+and all three were refused for the reason it was built to give:
+
+```
+2026-10-04T11:54:22  17 candidate(s) are in probation and still short of the 13-cycle
+2026-10-04T12:19:24  budget, which is the cap; admitting another cannot be evaluated
+2026-10-04T13:03:18  and would further delay the strategies already waiting.
+```
+
+So the loop is proposing, being refused, and journalling why — which is the whole point of
+putting the refusal in the existing admission path with its reason string, rather than in a
+scheduler or a queue manager.
+
+**The loop still reaches a verdict on real bars.** `tools/replay_self_evolution.py` over 847
+real SPY bars: 847 cycles, 0 errors, 282 counterfactual evaluations, 78 offline validations,
+and one applied ruling — the strategy accumulated 34 scored decisions and was retired on its
+own evidence with the numbers in the reason (`34 scored decision(s), 2 correct,
+correct_outcome_ratio 0.059`). That exercises the cumulative-service path end to end: service
+accumulates, decisions get scored against real future bars, the screen judges them, and the
+rules rule. It is still not evidence that any strategy has an edge, which the harness says
+itself.
+
+**The queue-drain falsifier cannot be observed yet.** Measured this morning:
+
+```
+cycle records: 1179   newest 2026-10-02T15:58:54   market-open: 716
+probation backlog: 17   [17 when the cumulative fix landed]
+```
+
+The backlog is unchanged because **no cycle has run since Friday afternoon** — it is Sunday,
+and the last cycle predates every fix made today. So the queue has not had an opportunity to
+drain, and reporting it as "not draining" would be reading a closed market as a stalled loop.
+The first honest read is after the 2026-10-05 session, and the command for it is the same one
+used here: count PROBATION strategies short of `PROBATION_CYCLES`, and compare against 17.
+
+That number is worth watching for a specific reason rather than in general: the backlog has a
+**floor of 7**, because seven of the seventeen have TREND_FOLLOW bands containing every price
+observed in the recent range and can never be selected until the market leaves those bands.
+Seven is below the cap of 13, so the gate reopens on its own as the actionable candidates are
+served — the floor is a floor on the *backlog*, not a reason the gate stays shut.
