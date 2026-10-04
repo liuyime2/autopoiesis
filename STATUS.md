@@ -1020,7 +1020,6 @@ allowlist and 29 shares of one sell had no basis on record. Whether the right an
 price those shares from broker history or to refuse to touch positions the strategy library
 does not own decides what gets built — and building either before that decision is the kind
 of anticipatory infrastructure this project has been deleting.
-
 `make verify`: 52 classes, 0 failed, 1383 executions across 62 files; 881 pytest pass.
 
 ## 2026-10-03 — the calibration report was measuring the weather
@@ -1087,3 +1086,52 @@ confident *trades*. Changing a risk-adjacent gate needs its own experiment with 
 falsifier; fixing a measurement is not a reason to do it in the same change.
 
 `make verify`: 52 classes, 0 failed, 1395 executions across 62 files; 886 pytest pass.
+
+## 2026-10-03 — the broker's activity history is a fragment, and said nothing
+
+The open question above was *"should the agent manage account positions it did not open"*.
+Paging the broker's own activity history to exhaustion answers the measurement half of it:**6000 fills back to 2025-10-22**, of which 279 fall in the last nine months, against a
+52-share sell with no lot. So the basis for those shares is *recoverable in principle* — the
+account was simply being read through a window that did not reach back to them.
+
+The other half needs no measurement. The Guardian already refuses any SELL exceeding what the
+agent itself bought — its comment cites this exact 52-share sell — and **9 of the 9 sells
+since that rule landed are covered by its own lots**. The situation cannot recur; the 29
+shares are a historical fact, not a live exposure. So nothing is built for it: neither the
+broker-history pricer nor a new position-ownership layer.
+
+### What the paging turned up instead
+
+Paging revealed a second thing, in the path every PnL figure is computed from.
+`BrokerEvidenceProvider` makes **one** request and the page limit is the whole fetch. The
+broker caps a page at 100 (`tried to set the page size to 1000, but the maximum is 100`) and
+says nothing about the rest:
+
+```
+window                          ingest  broker holds  missing_reasons
+  the daemon's 1-day window            0             0  ()
+  `evidence ingest`, 30 days          43            43  ()
+  two months                           43            43  ()
+  four months                          66            66  ()
+  nine months                         100           279  ()   <-- SHORT, and silent
+```
+
+The ledger was told it held the whole of a nine-month window while holding 100 of 279 fills.
+That is a confident number computed from a fragment — the same failure the journal's own
+rotation had, and the same response: **say so, and do not build the buffer in anticipation.**
+Every window this code requests is far under the limit, so the fix is a disclosed limitation
+rather than paging. A full page now lands in `missing_reasons`, which `_pnl_evidence` copies
+into `PnLEvidence` and the doctor prints, and the batch reports `PARTIAL` rather than
+`SUCCESS`.
+
+Measured before the limit was acted on, which is what makes "do not page" a measurement
+rather than an assumption: the daemon's 24-hour window returns 0–20, `minictrl evidence
+ingest`'s 30 days returns 43, four months returns 66. Paging would buy nothing any current
+caller needs.
+Three tests pin the behaviour: a full page is reported as a fragment; a window under the
+limit is not questioned at all, because a warning that fires on every ordinary pass is one
+nobody reads; and the flag resets per ingest, so a wide window cannot follow every later
+narrow one — the same latching bug class as the unparameterised `get_portfolio_history`
+fallback already pinned in that file.
+`make verify`: 52 classes, 0 failed, 1401 executions across 62 files; 889 pytest pass. The
+daemon was restarted onto the new code.

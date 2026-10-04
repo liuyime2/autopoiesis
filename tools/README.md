@@ -31,6 +31,12 @@ prices can only show that code runs, and this is the one step that needs network
 credentials. Everything below it runs offline against that cache. On a fresh clone run it
 once.
 
+The same API is what `broker_evidence` reads for PnL, and it caps a page at 100. Measured on
+this account: the daemon's 24-hour window returns 0-20 fills, `minictrl evidence ingest`'s
+30 days returns 43, four months 66 — and a nine-month window holds 279, of which one request
+returns 100. A full page is therefore reported in `missing_reasons` so a caller asking for
+more than the limit gets a stated partial rather than a fragment presented as the window.
+
 **`replay_self_evolution.py`** drives the whole `AgentDaemon` over those bars — not
 `TradingLoop` alone — so reflect, counterfactual scoring against what the market did next,
 offline screening and the lifecycle ruling each have to fire on their own. Driving the loop

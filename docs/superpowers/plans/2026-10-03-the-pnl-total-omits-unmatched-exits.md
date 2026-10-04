@@ -1,7 +1,8 @@
 # The PnL total omits the exits it cannot price, and the report calls that an upper bound
 
 Date: 2026-10-03
-Status: **DONE - measured, the false claim deleted, nothing added**
+Status: **DONE - the false claim deleted; the scope question answered by measurement a
+day later, and nothing built for it**
 Baseline commit for rollback: `ffc635e`
 Scope: `src/min_agent/doctor.py` (two strings and one comment), `STATUS.md`. No behaviour
 change, no new field, no new check class: `unmatched_sell_quantity` already carries the
@@ -98,9 +99,7 @@ direction that flatters the run.
 
 ## 3. The minimal change
 
-**Delete the false claim. Add nothing.**
-
-1. `doctor.py:853` - replace *"the headline figure is an upper bound rather than an exact
+**Delete the false claim. Add nothing.**1. `doctor.py:853` - replace *"the headline figure is an upper bound rather than an exact
    result"* with the mechanism: those shares' PnL is **not in the total**, its sign is
    unknown, read the figure as incomplete.
 2. `doctor.py:834` - the comment above it states the same claim as the rationale for WARN
@@ -116,9 +115,10 @@ semantics. Adding `unpriced_exit_proceeds` would restate it.
 ## 4. What this deliberately does not do
 
 - **Not fetch older broker activities to price those 29 shares.** It would work - the broker
-  has the fills - and it is a *capability* addition that changes the reported number. It is
-  only worth building if the agent is meant to manage positions it did not open, which is a
-  decision about scope, not a defect fix. Recorded as the next question instead.
+  has the fills, and section 8a records that measurement - and it is a *capability* addition
+  that changes the reported number. It is only worth building if the agent is meant to manage
+  positions it did not open, which is a decision about scope, not a defect fix. Recorded as
+  the next question instead.
 - **Not change what the PnL ledger books.** Zero-PnL-for-unmatched is correct: inventing a
   cost basis would be worse than omitting the exit.
 - **Not change severity.** It stays WARN. The severity argument stands on its own - a
@@ -146,6 +146,27 @@ covered by its own lots, then `unmatched_sell_quantity` should read 0 forever, t
 finding is moot, and the wording matters no more than the field. That is the condition, and
 it is a scope decision rather than a code change.
 
+**The condition is already half met, and measured.** The Guardian refuses any SELL exceeding
+what the agent itself bought, its comment citing this exact 52-share sell, and 9 of the 9
+sells since that rule landed are covered by its own lots. The remaining 29 shares are a
+historical fact with no path to recurrence, so the scope decision has been made by
+circumstance rather than by argument: the agent manages only what it opened.
+
+## 8a. What paging the broker's own history showed, recorded later the same day
+
+Paging `get_activities` with `page_token` to exhaustion returns **6000 fills back to
+2025-10-22**, of which 279 fall in the last nine months. So the cost basis for those 29
+shares is recoverable in principle - the account was simply being read through a window that
+did not reach back far enough. That confirms the first half of the question below and leaves
+the second half answered by the Guardian rule: nothing needs building for it.
+
+The paging did surface a real defect in the same path. `broker_evidence` makes one request
+and the broker's 100-row page cap is the whole fetch, so a nine-month window yielded 100 of
+279 fills with `missing_reasons` empty - a confident number computed from a fragment.
+Disclosed rather than paged, because every window the code actually requests is under the
+limit (24 hours returns 0-20, 30 days 43, four months 66). Pinned by three tests and
+recorded in `STATUS.md`.
+
 ## 7. Verification
 
 - The doctor run before and after: the WARN survives, the sentence changes, and the figure it
@@ -163,6 +184,11 @@ the right answer is to price the unowned shares from broker history or to refuse
 positions the strategy library does not own. Both are buildable; which one is correct depends
 on a scope decision, and building either before the decision is exactly the kind of
 anticipatory infrastructure this project has been deleting.
+
+**Answered, and nothing built** - see section 8a. The basis is recoverable, the Guardian
+already refuses to sell what the agent does not own, and 9 of 9 sells since that rule landed
+are covered by the agent's own lots. So the decision made itself: the agent manages only what
+it opened, and the 29 shares stay a disclosed historical fact.
 
 ## 9. Result, measured against the live report
 
