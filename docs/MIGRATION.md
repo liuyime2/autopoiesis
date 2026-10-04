@@ -77,7 +77,7 @@ adding it surfaced an assertion about a `DRIFT` marker that only ever applied to
 | Kept | Why it was tempting to remove it |
 | --- | --- |
 | `src/min_agent/research/` | 848 lines imported by tests only, and `check_production_research_separation` fails the build if production imports it. That is a correct separation of diagnosis from execution. Wiring it into production to "reduce duplication" would destroy the property |
-| `tools/verify.py`'s 51 check classes | Not bloat. Real invariants: production may not import `research/`, every deployed unit's `EnvironmentFile` must resolve, the running daemon's fingerprint must match the worktree, replayed FIFO accounting must reproduce the reported PnL |
+| `tools/verify.py`'s 52 check classes | Not bloat. Real invariants: production may not import `research/`, every deployed unit's `EnvironmentFile` must resolve, the running daemon's fingerprint must match the worktree, replayed FIFO accounting must reproduce the reported PnL |
 | `runtime/min_agent/journal.jsonl` as source of truth | Everything else is derived from it and regenerable |
 
 ## If you are following along from the old version
@@ -159,7 +159,7 @@ runs the documented commands.
 | --- | --- |
 | Clones | `git clone` to an empty directory; `runtime/` absent, as gitignore intends |
 | Installs | New `conda create -n freshclone-test python=3.10`, then `pip install -e ".[dev]"` |
-| Runs | `min-agent --help` works; 880 tests pass; lint clean |
+| Runs | `min-agent --help` works; 881 tests pass; lint clean |
 | Works without credentials | All of the above with zero Alpaca variables set |
 
 **Three defects found only here**, none of which reproduces on the live machine: `ruff` and

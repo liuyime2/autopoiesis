@@ -13,7 +13,7 @@ this refactor removed.
 
 ## The gate — `verify.py`
 
-**`python tools/verify.py`** is the project gate: 51 check classes, non-zero exit on any
+**`python tools/verify.py`** is the project gate: 52 check classes, non-zero exit on any
 failure. `make verify` runs it. Three modes:
 
 - `--self-test` breaks the gate on purpose and asserts it reports failure, because a
@@ -21,6 +21,30 @@ failure. `make verify` runs it. Three modes:
 - `--list` names every class and the test files behind it.
 - `--only <class> [...]` runs a subset, for re-running one failing class while working
   on it (`make verify CLASS=pnl-accounting` is the same thing through the Makefile).
+
+## The replay environment — real bars, simulated account
+
+**`fetch_replay_bars.py`** takes `[SYMBOL] [START] [END] [INTERVAL]` and writes what the
+broker's historical endpoint actually returns into `runtime/min_agent/replay/`, with the
+provenance recorded in the file. It never falls back to a generator: a replay over invented
+prices can only show that code runs, and this is the one step that needs network and
+credentials. Everything below it runs offline against that cache. On a fresh clone run it
+once.
+
+**`replay_self_evolution.py`** drives the whole `AgentDaemon` over those bars — not
+`TradingLoop` alone — so reflect, counterfactual scoring against what the market did next,
+offline screening and the lifecycle ruling each have to fire on their own. Driving the loop
+and calling `StrategyLifecycleManager.review()` by hand proves the rules work; it does not
+prove the stages are wired to each other. It found two defects that way: the Guardian
+refused all 847 cycles as `data snapshot is stale`, and `ReplayDataGateway.current` raised
+IndexError once the cursor passed the last bar. Fills stay `REPLAYED`, so it shows selection
+pressure reacting to scored evidence and says nothing about whether any strategy has an edge.
+
+**`self_evolution_probe.py`** is the assertion over that harness, and the one the gate runs:
+847 cycles with no daemon errors, every evolution stage present in the journal, at least one
+ruling carrying its ratio in the reason, the strategy no longer on `PROBATION`, and no
+replayed ruling claiming broker-verified PnL. Run standalone it prints a JSON list of what
+failed. `make verify` calls it through `check_self_evolution_closes`.
 
 ## The independent audit
 

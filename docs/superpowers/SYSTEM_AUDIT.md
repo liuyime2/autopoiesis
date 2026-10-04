@@ -2852,8 +2852,8 @@ first written when the system was waiting for an open; it has since traded a ful
 session, so the claim moved from "waiting" to "trading" rather than being left to
 expire as a stale positive.
 
-**Reviewed and confirmed.** `make verify`: 51 classes, 0 failed, 1380 test executions
-across 61 files, exit 0.
+**Reviewed and confirmed.** `make verify`: 52 classes, 0 failed, 1383 test executions
+across 62 files, exit 0.
 
 This line previously read `1 failed ... exit 1`, and the failure was `doctor`'s
 `pnl attribution`: of +563.41 realized across 27 closed lots the model had
