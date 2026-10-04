@@ -49,6 +49,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from min_agent.atomicio import write_json_atomic
 from min_agent.models import (
@@ -64,7 +65,9 @@ from min_agent.models import (
 REPLAY_SOURCE = "alpaca_replay"
 
 #: The one value that must never be mistaken for a fill. See the module docstring.
-REPLAYED = "REPLAYED"
+#: Annotated as the literal `ExecutionResult.status` requires, so a rename or a typo here
+#: is a type error rather than a value that reaches the journal and cannot be read back.
+REPLAYED: Literal["REPLAYED"] = "REPLAYED"
 
 
 @dataclass(frozen=True)

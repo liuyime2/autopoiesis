@@ -1243,7 +1243,7 @@ def _check_journal(report: DoctorReport, config: AgentConfig) -> None:
     window = journal.retained_window(known_since=known_since)
     if window["oldest"]:
         window_detail = (
-            f"retained {window['oldest'][:19]} .. {str(window['newest'])[:19]} "
+            f"retained {window['oldest'][:19]} .. {(window['newest'] or '')[:19]} "
             f"across {window['generations']} generation(s)"
         )
         if window["truncated"]:
