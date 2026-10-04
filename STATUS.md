@@ -1595,3 +1595,44 @@ this as price-dependent and reversible, and the backlog of 17 is honest — thos
 do eventually need service.
 
 `make verify`: 52 classes, 0 failed, 1416 executions across 62 files; 904 pytest pass.
+
+## 2026-10-04 — the 18 strategies the superseded rule paused, measured and left alone
+
+Replacing the windowed probation rule raises an obvious question: what about the 18 strategies
+it paused? Measured before acting, because the answer determines whether a repair pays.
+
+```
+the 18 paused with reason "probation produced no exploration evidence"
+  screen verdicts:  17 INCONCLUSIVE_INSUFFICIENT_EVIDENCE, 1 REJECT_POOR_DECISIONS
+  with a PASS_SCREENED verdict:  0
+  that ever attempted a trade:   1  (and that one is the REJECT, on 43 scored decisions)
+  lifetime cycles when the rule fired: 43, 9, 8, 7, 7, 7, 7, 7, 7, 6, 6, 6, 6, 5, 5, 5, 5, 5
+```
+
+**Re-adjudicating them would produce zero promotions.** Seventeen would get no ruling at all —
+5 to 9 cumulative cycles against a budget of 13, so neither degenerate nor promotable — and one
+would be retired on a verdict it already carries. And every one of them would re-enter a
+probation queue that is **already over its cap**, 17 against 13, so the repair would deepen the
+deficit it was meant to remedy.
+
+`PAUSED` is terminal in `_review_one`, so nothing revisits them automatically. That is
+acceptable for a measured reason rather than a hopeful one: the strategies the superseded rule
+excluded are the ones with nothing to offer — seventeen never traded and cannot be screened,
+and the eighteenth traded once in 43 cycles and its own screen rejects it.
+
+The audit trail needs no repair. Each pause is a journalled `STRATEGY_LIFECYCLE_UPDATED` with
+a timestamp and a reason, and the rule that produced it is in git history, so a reader can see
+both the decision and the rule it came from.
+
+**What would change this answer:** one of the eighteen earning `PASS_SCREENED`, or the capacity
+cap being raised. Neither holds today. Recorded so a later session does not read the stale
+pause reasons as a defect to fix.
+
+The same reasoning retires the narrower question of `trend-follow-buy-010` specifically. It is
+the one candidate that had earned a ruling — 15 cumulative cycles, 10 scored decisions,
+`PASS_SCREENED`, one lifetime BUY — and the current rules give it **no ruling**: not degenerate
+any more, but not promotable either, because its evidence is ten correct *holds* and one BUY.
+That is what the `submitted_orders <= 0` guard exists for. Its pause cites a rule that no longer
+exists, and it stays paused anyway, because nothing in the current rules would release it.
+
+`make verify`: 52 classes, 0 failed, 1416 executions across 62 files; 904 pytest pass.

@@ -228,3 +228,38 @@ stopped acting" genuinely is a recent-behaviour question.
 The second row is the one that keeps this from becoming a licence to keep anything: a
 candidate that genuinely never traded must still be paused, and it will be, because lifetime
 attempts is 0 for it.
+
+## 10. The 18 strategies the superseded rule paused — measured, and deliberately not repaired
+
+The obvious next move after replacing a rule is to re-adjudicate what it decided. Measured
+first, it does not pay.
+
+```
+the 18 strategies paused with reason "probation produced no exploration evidence"
+  screen verdicts:  17 INCONCLUSIVE_INSUFFICIENT_EVIDENCE, 1 REJECT_POOR_DECISIONS
+  with a PASS_SCREENED verdict:  0
+  that ever attempted a trade:   1   (and that one is the REJECT, on 43 scored decisions)
+
+  lifetime cycles when the old rule fired: 43, 9, 8, 7, 7, 7, 7, 7, 7, 6, 6, 6, 6, 5, 5, 5, 5, 5
+  lifetime BUY/SELL: 1 for one of them, 0 for the other seventeen
+```
+
+Re-adjudicating under the current rules yields **zero promotions**: seventeen would get no
+ruling at all (5-9 cumulative cycles against a budget of 13, so neither degenerate nor
+promotable) and one would be retired on a verdict it already has. Meanwhile every one of them
+would re-enter a probation queue that is **already over its capacity cap** — 17 candidates
+against a cap of 13 — so the repair would deepen the exact deficit it was meant to remedy.
+
+`PAUSED` is terminal in `_review_one`, so the loop will never revisit them on its own. That is
+acceptable here for a measured reason rather than a hopeful one: the strategies the superseded
+rule excluded are precisely the ones with nothing to offer. Seventeen never traded and cannot
+be screened; the eighteenth traded once in 43 cycles and its own screen rejects it.
+
+The audit trail is complete without a repair. Each pause is a journalled
+`STRATEGY_LIFECYCLE_UPDATED` with a timestamp and a reason, and the rule that produced it is
+in git history. A reader can see both the decision and the rule it came from, which is what
+"auditable" has to mean.
+
+**What would change this answer:** one of the eighteen earning a `PASS_SCREENED` verdict, or
+the capacity cap being raised. Either would make re-adjudication worth its cost. Neither holds
+today.
