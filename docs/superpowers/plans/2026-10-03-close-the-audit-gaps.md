@@ -114,7 +114,51 @@ auto-rewriting, no prompt DSL.
 - Verify: new test; `make verify`; after Monday's open, measure the malformed-output rate
   against the 12.5% baseline.
 
-## 4. P1 — Nothing re-adjudicates a PAUSED strategy
+## 4. ~~P1 — Nothing re-adjudicates a PAUSED strategy~~ — measured, and NOT built
+
+**This section originally proposed re-adjudication. Measurement said do not build it.**
+
+Two measurements, both against the 847 real cached bars rather than against an impression:
+
+```
+33 PAUSED strategies, over the real price range 758.79-772.65:
+  7  ever actionable
+  26 never actionable at any price in the range
+```
+
+The 26 are not a lifecycle problem at all. Their `reference_price` values are **100, 120,
+150, 170, 180, 200** while SPY trades at **769.88** — placeholder anchors copied out of an
+old prompt example, so their bands (98-102, 148.5-151.5, ...) are unreachable by
+construction. `StrategyAdmission._reference_price_rejection_reason` **already refuses both
+failure directions**, and its docstring records this exact defect ("nine strategies were
+admitted with reference_price in {100, 120, 150, 170, 180, 200}"). These are pre-gate
+residue; the gate is correct and no new ones can arrive.
+
+So restoring PAUSED strategies means restoring 6 actionable ones. And that is where the
+proposal inverts:
+
+```
+actionable at 769.88: 13  (7 PROBATION / 6 PAUSED)
+probation queue is SERIAL - sorted(actionable, created_at)[0], one candidate per cycle
+the promotion gate is PER CANDIDATE - 10 informative decisions ~= 13 dedicated cycles
+
+drain today's queue:              7 x 13 =  91 cycles ~= 1.4 trading days
+drain it with the 6 restored:   13 x 13 = 169 cycles ~= 2.6 trading days
+```
+
+**Restoring them makes the first promotion slower, not faster.** Adding candidates does not
+accelerate any candidate past a gate that is counted per candidate and served from a serial
+queue — it lengthens everyone's wait.
+
+The lifecycle-rule work described below therefore stays undone, on purpose. It would have
+been three coordinated changes to a safety-adjacent subsystem (plumbing price into `review`,
+an actionability gate, and resetting evaluation records) bought at the cost of delaying the
+one thing the project is actually waiting for. `StrategySpec.lifecycle_reason` landed
+separately because it is a data-loss fix that stands on its own.
+
+### What was originally proposed here, and why it is wrong
+
+
 
 **Problem.** 56 strategies are PAUSED and there is no route back. Four have pause reasons
 that have since expired. Meanwhile the single largest HOLD cause in the whole history is

@@ -719,3 +719,47 @@ and the check's docstring records the same distinction `check_shadow_live_consis
 insists on: this proves the mechanism, not that any replay has been run.
 
 `make verify`: 50 classes, 0 failed, 1376 executions across 62 files; 876 pytest pass.
+
+## 2026-10-03 — P1-a re-adjudication measured, and deliberately NOT built
+
+The remaining P1-a work (re-adjudicating the 33 paused strategies) was measured against the
+847 real cached bars before being built, and the measurement says it would make things worse.
+
+**Only 7 of the 33 PAUSED strategies are ever actionable** across the real price range
+758.79–772.65. The other 26 never act at any price in it.
+
+And the 26 are not a lifecycle problem. Their `reference_price` values are **100, 120, 150,
+170, 180, 200** while SPY trades at **769.88** — placeholder anchors copied from an old prompt
+example, so their bands (98–102, 148.5–151.5, …) are unreachable by construction.
+`StrategyAdmission._reference_price_rejection_reason` **already refuses both failure
+directions**, and its docstring records this precise defect ("nine strategies were admitted
+with reference_price in {100, 120, 150, 170, 180, 200}"). These are pre-gate residue; the gate
+works and no new ones can arrive.
+
+So restoration means restoring 6 actionable strategies — and that inverts the proposal:
+
+```
+actionable at 769.88: 13  (7 PROBATION / 6 PAUSED)
+probation queue is SERIAL      sorted(actionable, created_at)[0], one per cycle
+the promotion gate is PER CANDIDATE   10 informative decisions ~= 13 dedicated cycles
+
+drain today's queue:              7 x 13 =  91 cycles ~= 1.4 trading days
+drain it with the 6 restored:   13 x 13 = 169 cycles ~= 2.6 trading days
+```
+
+**Restoring them makes the first promotion slower, not faster.** A gate counted per candidate
+and served from a serial queue is not accelerated by adding candidates; it is lengthened.
+"More candidates means more chances" was the assumption, and it is wrong here.
+
+So the three coordinated changes this would have required — plumbing price into `review()`, an
+actionability gate, and resetting evaluation records — stay undone, on purpose. That is a
+better outcome than shipping them: they would have touched a safety-adjacent subsystem and
+delayed the one measurement the project is waiting for. `StrategySpec.lifecycle_reason`
+remains, because a data-loss fix stands on its own merits.
+
+**What actually gates a promotion, stated plainly:** each candidate needs ~13 cycles of
+exclusive attention, served one candidate at a time. Draining all 13 actionable candidates
+costs ~169 cycles ≈ 2.6 trading days. That is the number to plan against — not the number of
+strategies in the library.
+
+`make verify`: 50 classes, 0 failed, 1376 executions across 62 files; 876 pytest pass.
