@@ -2019,3 +2019,53 @@ session.
 
 So this joins the queue drain as something the next session can settle, and both are blocked
 on the same thing rather than on a decision.
+
+## 2026-10-04 — the stage whose job is finding an edge has never been able to answer
+
+The research layer is 827 lines with 440 lines of tests, deliberately isolated from production
+— "Production must never import this" — and that isolation is enforced rather than merely
+documented: `production-research-separation` passes, 4 research modules against 38 production
+ones with no production import.
+
+It has been run 26 times. It has returned a verdict 0 times.
+
+```
+26 trials, all on the same 467 bars with 3 folds
+  out_of_sample_trades:  0 to 3          required_trades: 52 on every single one
+  leakage violations:   0                stress survivors: 148 of 234
+  verdict:               INSUFFICIENT x26
+```
+
+**The multiple-testing control is unsatisfiable.** `required_trades` is
+`ceil(BASE_REQUIRED_TRADES × sqrt(trials))` = `ceil(10 × sqrt(27))` = 52. The reasoning behind
+it is sound and documented: dividing a zero return threshold by the trial count is decoration, so
+the trial count raises the *evidence* requirement instead, on a square-root schedule. But the
+bar is compared against a quantity these strategy designs cannot supply — a buy-and-hold
+`FIXED_SIZE` opens a position on 467 bars and does not close it, so it produces 3 out-of-sample
+trades, not 52. The control is not too strict; it is unreachable.
+
+**And it is self-reinforcing.** More specs tried raises the bar. A higher bar that cannot be met
+produces INSUFFICIENT, which tells the search nothing, which searches more specs. The stage
+whose documented job is `backtest → walk-forward OOS → robustness → multiple-testing control →
+shadow → probation → promotion` cannot get past the multiple-testing control, so **nothing can
+ever reach shadow or probation from research.**
+
+One detail worth recording: the `research-trial-ledger` gate *passes* while reporting `0 passed,
+26 failed`. It checks that every record is traceable and accounted for, which is bookkeeping, and
+it prints the outcome honestly without treating "nothing has ever passed" as a defect. So the
+number has been visible in the gate output this whole time and nothing read it as one.
+
+**What this does not argue for.** It does not argue for lowering `required_trades`. That is a
+multiple-testing control, and removing it to make a gate pass is the same trade this project has
+already refused twice today — on `min_confidence` and on the promotion gate. The honest
+statement is that the control is right and the *instrument* it measures in is wrong for these
+strategy designs at this data volume.
+
+The three real options are all experiments rather than fixes: express the control in a unit a
+long-only strategy can move (folds and bars rather than trades), require strategy designs that
+open and close positions so trades are available, or gather enough bars that a
+trade-count-based control is reachable. Which one is right cannot be decided from a record in
+which the stage has never once produced an answer.
+
+**What would prove this wrong:** a single trial with a verdict other than INSUFFICIENT. There
+is none, and the mechanism above says there could not be one.
