@@ -65,11 +65,26 @@ class StrategyLifecycleDecision:
     reason: str
 
 
+#: Selected cycles a candidate is guaranteed before the probation queue moves on.
+#: One number, because it is one concept: `StrategySelector` guarantees a candidate
+#: this many cycles, and `StrategyLifecycleManager` may not judge it degenerate before
+#: then. They were separate literals in separate classes - 13 and 5 - so every candidate
+#: that had not attempted a trade was paused at cycle 5 and never reached either the
+#: budget it was guaranteed or the ten informative decisions needed to be screened. On
+#: the live record that ended 0 promotions out of 24 admissions.
+#:
+#: 13 is what the evidence gate needs, not a round number: the offline screen refuses to
+#: judge below ten informative decisions, and a FIXED_SIZE produces them at an observed
+#: 0.75-0.91 per selected cycle.
+PROBATION_CYCLES = 13
+
+
 class StrategyLifecycleManager:
     def __init__(
         self,
         *,
         min_active_cycles: int = 5,
+        probation_cycles: int = PROBATION_CYCLES,
         max_error_rate: float = 0.25,
         max_rejection_rate: float = 0.5,
         severe_failure_rate: float = 0.75,
@@ -79,6 +94,7 @@ class StrategyLifecycleManager:
         min_promotion_scored_decisions: int = 10,
     ):
         self.min_active_cycles = min_active_cycles
+        self.probation_cycles = probation_cycles
         self.max_error_rate = max_error_rate
         self.max_rejection_rate = max_rejection_rate
         self.severe_failure_rate = severe_failure_rate
@@ -382,12 +398,22 @@ class StrategyLifecycleManager:
         `lifecycle == "PROBATION"` requirement that is permanently false once
         the strategy is promoted. The strategy holding the top score in the
         recorded run was a promoted TREND_FOLLOW, so both guards missed it.
+
+        A candidate on probation is required to clear the *probation* budget, not
+        `min_active_cycles`. Those were the same rule at two numbers - 13 guaranteed,
+        5 judged - so a candidate with no signal on a quiet stretch was called degenerate
+        at cycle 5, having had less than half the cycles it was promised and none of the
+        chance to produce the ten informative decisions the screen needs. Twelve of the
+        seventeen strategies ever paused here had attempted no trade at all.
         """
         if strategy.kind == "HOLD_BASELINE" or strategy.lifecycle == "BASELINE":
             return False
         if result is None:
             return False
-        return result.cycles >= self.min_active_cycles and result.trade_attempts == 0
+        required = (
+            self.probation_cycles if strategy.lifecycle == "PROBATION" else self.min_active_cycles
+        )
+        return result.cycles >= required and result.trade_attempts == 0
 
 
 class StrategySelector:
@@ -419,7 +445,7 @@ class StrategySelector:
     def __init__(
         self,
         *,
-        min_probation_cycles: int = 13,
+        min_probation_cycles: int = PROBATION_CYCLES,
         exploration_floor_cycles: int = 5,
     ):
         self.min_probation_cycles = min_probation_cycles

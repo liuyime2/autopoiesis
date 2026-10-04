@@ -253,7 +253,7 @@ def test_lifecycle_manager_pauses_hold_only_trend_after_evidence_cycles():
     twice: once because it returned False for any kind != "FIXED_SIZE", and
     once because it required lifecycle == "PROBATION".
     """
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     strategy = make_spec(strategy_id="trend", kind="TREND_FOLLOW", lifecycle="PROBATION")
     result = StrategyResult(
         strategy_id="trend",
@@ -275,7 +275,7 @@ def test_lifecycle_manager_pauses_hold_only_trend_after_evidence_cycles():
 
 
 def test_lifecycle_manager_pauses_degenerate_fixed_size_no_exploration():
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     strategy = make_spec(strategy_id="hold-fixed", kind="FIXED_SIZE", lifecycle="PROBATION", action="HOLD", quantity=0)
     result = StrategyResult(
         strategy_id="hold-fixed",
@@ -288,6 +288,93 @@ def test_lifecycle_manager_pauses_degenerate_fixed_size_no_exploration():
         skipped_orders=3,
         action_counts={"HOLD": 3},
         intended_notional=0,
+    )
+
+    [decision] = manager.review([strategy], [result])
+
+    assert decision.new_lifecycle == "PAUSED"
+    assert "no exploration" in decision.reason
+
+
+def test_probation_candidate_is_not_degenerate_before_its_budget():
+    """A candidate must be given the cycles it was guaranteed before being judged.
+
+    `StrategySelector` keeps a candidate on probation for `PROBATION_CYCLES` selected
+    cycles, and the offline screen refuses to judge below ten informative decisions - so
+    the probation-stage verdict has to use the same budget. It used `min_active_cycles`,
+    so a candidate that had attempted no trade was paused at cycle 5 of 13 and never
+    reached either. Twelve of the seventeen strategies ever paused this way had attempted
+    no trade, and nothing was ever promoted.
+    """
+    manager = StrategyLifecycleManager(probation_cycles=13)
+    strategy = make_spec(strategy_id="quiet", kind="FIXED_SIZE", lifecycle="PROBATION", action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="quiet",
+        cycles=12,
+        submitted_orders=0,
+        rejected_orders=0,
+        errors=0,
+        score=0.0,
+        evaluated_at=datetime.now(tz=timezone.utc),
+        skipped_orders=12,
+        action_counts={"HOLD": 12},
+        intended_notional=0,
+        trade_attempts=0,
+    )
+
+    assert manager.review([strategy], [result]) == []
+
+
+def test_probation_candidate_is_degenerate_once_its_budget_is_spent():
+    """The same candidate, one cycle later, is paused - the budget bounds probation too.
+
+    Without this the fix would be an open-ended probation, which is the failure mode the
+    cycle budget exists to prevent.
+    """
+    manager = StrategyLifecycleManager(probation_cycles=13)
+    strategy = make_spec(strategy_id="quiet", kind="FIXED_SIZE", lifecycle="PROBATION", action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="quiet",
+        cycles=13,
+        submitted_orders=0,
+        rejected_orders=0,
+        errors=0,
+        score=0.0,
+        evaluated_at=datetime.now(tz=timezone.utc),
+        skipped_orders=13,
+        action_counts={"HOLD": 13},
+        intended_notional=0,
+        trade_attempts=0,
+    )
+
+    [decision] = manager.review([strategy], [result])
+
+    assert decision.new_lifecycle == "PAUSED"
+    assert "no exploration" in decision.reason
+
+
+def test_promoted_strategy_that_stops_acting_is_still_paused_at_min_active_cycles():
+    """A promoted strategy has no probation budget left to spend, so it is judged sooner.
+
+    This is the defect the guard was written for - a promoted strategy that holds forever
+    must not be exempt - and it is why the probation budget cannot simply be raised
+    everywhere. Recorded as D4; `tools/audit_defects.py` checks the source no longer
+    exempts non-probation strategies, and this pins the behaviour it was protecting.
+    """
+    manager = StrategyLifecycleManager(min_active_cycles=5)
+    strategy = make_spec(strategy_id="stalled", kind="FIXED_SIZE", lifecycle="ACTIVE", action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="stalled",
+        cycles=5,
+        submitted_orders=0,
+        rejected_orders=0,
+        errors=0,
+        score=1.0,
+        evaluated_at=datetime.now(tz=timezone.utc),
+        skipped_orders=5,
+        action_counts={"HOLD": 5},
+        intended_notional=0,
+        trade_attempts=0,
     )
 
     [decision] = manager.review([strategy], [result])

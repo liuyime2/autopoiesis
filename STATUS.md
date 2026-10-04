@@ -1212,3 +1212,81 @@ firing that blocks a `GOOD_TRADE`, an LLM trade below 0.5, or a threshold above 
 blocked set beats its own days would each make this entry wrong.
 
 `make verify`: 52 classes, 0 failed, 1401 executions across 62 files; 889 pytest pass.
+## 2026-10-03 — the loop paused every candidate at cycle 5 of the 13 it was guaranteed
+
+With the confidence gate settled, the next question came from the record rather than a
+queue: **can this loop actually learn which strategy works?** Measured over the 1179 cycles
+on record, it cannot, and the reason is arithmetic.
+
+```
+78 strategies proposed, 24 admitted, 107 with evaluation records
+6485 offline validations across 107 strategies, 60.6 evaluations each
+  INCONCLUSIVE_INSUFFICIENT_EVIDENCE  5280  (81%)
+strategies that ever placed a trade:              11 of 78
+strategies that ever reached 10+ scored decisions: 12 of 107
+final lifecycle state of all 17 tracked strategies: PAUSED 17, ACTIVE 0
+```
+
+**Zero promotions, ever.** Every admitted candidate ends PAUSED, and 24 of the 34 pauses
+share one reason: *"probation produced no exploration evidence."*
+
+### Two numbers for one concept
+
+A candidate is guaranteed **13** selected cycles before the probation queue moves on, and
+the screen needs **10** informative decisions — 13 is what reaches 10, at the observed
+0.75-0.91 informative decisions per selected cycle. But the probation-stage *verdict* fired
+at **5**:
+
+```python
+StrategySelector:         min_probation_cycles = 13    # guaranteed before the queue moves on
+StrategyLifecycleManager: min_active_cycles    = 5     # judged degenerate here
+```
+
+So a candidate with no trade attempt was called degenerate at cycle 5 of 13, having had less
+than half its budget and no chance at the evidence gate. And the measurement says that is
+exactly what happened:
+
+```
+strategies paused for "probation produced no exploration evidence": 12
+  their max decisions ever: 5 5 5 5 6 6 7 7 7 7 8 9     <- every one below the gate of 10
+strategies that reached >=10 scored decisions: 12
+  of those, paused for no-exploration: 0                  <- none
+```
+
+**The rule fired only on candidates that were structurally incapable of being screened.** Not
+one strategy with enough evidence was ever paused by it. It was not enforcing the gate; it was
+pre-empting it.
+
+### The change
+
+One number, not a new mechanism. `PROBATION_CYCLES = 13` is now a module constant used as the
+default by both classes, so the guarantee and the verdict cannot drift apart again, and
+`_is_degenerate_no_exploration` requires the *probation* budget while a strategy is on
+probation and `min_active_cycles` otherwise — so a promoted strategy that stops acting is
+still caught at 5 cycles, which is the defect the guard was originally written for (D4).
+
+`tools/audit_defects.py` had to change too, and the reason is worth recording: D4's check
+forbade the literal `"PROBATION"` anywhere in the guard, as a proxy for "the guard must not
+exempt non-probation strategies". A fix that legitimately needed to know a candidate's
+lifecycle tripped it. The check now forbids the actual escape — `lifecycle != "PROBATION"` —
+and the behaviour it was protecting is pinned by a test instead of by text.
+
+Three tests: a 0-trade candidate at 12 cycles is not paused, the same candidate at 13 is, and
+a promoted strategy that stops acting is still paused at 5.
+
+### The cost, which is not the cost the code assumed
+
+The selector's docstring priced a deep probation budget against "the one ACTIVE strategy"
+trading nothing. **There is no ACTIVE strategy** — all 17 are PAUSED — so that cost is
+currently paid by nothing, and the total spend is roughly 60 extra cycles across the whole
+1179-cycle history, about 5%.
+
+### What is not yet proven
+
+Nothing here shows a strategy being promoted. It removes the thing that made promotion
+unreachable; whether a candidate now clears the screen is a claim about the live record after
+the daemon has run, and it is recorded as a falsifier in the plan rather than asserted. The
+next thing the same measurement exposes: **9 of the 12 strategies that reached 10+ scored
+decisions were never judged at all** — no lifecycle verdict was ever recorded for them.
+
+`make verify`: 52 classes, 0 failed, 1404 executions across 62 files; 892 pytest pass.
