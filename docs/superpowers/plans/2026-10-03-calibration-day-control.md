@@ -103,7 +103,13 @@ model that is right when unsure; it is a Tuesday.
   reported, and not for the reason given.
 - **Genuinely adverse, and worth keeping:** on trades the 0.6-0.8 bucket is **19 points
   below** the days it appears on. High-confidence trades underperform. That is the finding
-  the report should be making, and it is the one that would justify changing `min_confidence`.
+  the report should be making.
+
+  Measured later the same day, that margin is a fact about the model rather than an argument
+  for moving the gate: the LLM's lowest stated trade confidence is exactly `min_confidence`,
+  so nothing sits below any threshold to block, and every setting above 0.5 blocks sets that
+  underperform their own days. See
+  `docs/superpowers/plans/2026-10-03-min-confidence-what-it-is-worth.md`.
 
 ## 4. The minimal change
 
@@ -120,9 +126,8 @@ model that is right when unsure; it is a Tuesday.
 4. `_record_calibration_lesson` quotes the day-adjusted numbers and, when the buckets do not
    separate within days, publishes no inversion claim at all.
 
-Not done, deliberately: `min_confidence` is not touched. The evidence that it should change
-is the −19 point trade margin, and changing a risk-adjacent gate needs its own experiment
-with its own falsifier, not a side effect of fixing a measurement.
+Not done, deliberately: `min_confidence` is not touched. Changing a risk-adjacent gate needs
+its own experiment with its own falsifier, not a side effect of fixing a measurement.
 
 ## 5. What would prove this wrong
 
@@ -156,9 +161,15 @@ unnecessary and the adjusted one is the only one worth keeping.
 **Should `min_confidence` exist at all?** The gate is passed by every trade the model has
 proposed (209 of 241 scored decisions cleared it, one refusal in 1179 cycles) and it is
 bypassed entirely for HOLDs, which return approved before the check. So it is a threshold
-that has never bound — while the one stratum that is genuinely worse than its days is the
+that has barely bound — while the one stratum that is genuinely worse than its days is the
 most confident trades. That is a separate experiment with a stated falsifier, and it is the
 next question rather than part of this change.
+
+**Answered later the same day: keep it at 0.5.** Its one firing was correct — a baseline SELL
+the counterfactual scores as a `FALSE_TRADE` — and every setting above 0.5 blocks sets that
+underperform their own days. The "one refusal in 1179 cycles" above turns out to be exactly
+right; measuring only the LLM's own decisions finds the gate innocent, which is how a guard
+gets misjudged. See `docs/superpowers/plans/2026-10-03-min-confidence-what-it-is-worth.md`.
 
 ## 9. Result, measured against the live record
 

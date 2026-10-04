@@ -1081,9 +1081,12 @@ daemon was restarted onto the new code.
 
 **Should `min_confidence` exist at all?** 209 of 241 scored decisions clear the gate, one
 refusal in 1179 cycles, and HOLDs return approved before the check — so it is a threshold
-that has never bound, while the stratum that is genuinely worse than its days is the most
+that has barely bound, while the stratum that is genuinely worse than its days is the most
 confident *trades*. Changing a risk-adjacent gate needs its own experiment with its own
 falsifier; fixing a measurement is not a reason to do it in the same change.
+
+**Answered later the same day: keep it at 0.5.** Its one firing was correct, and raising it
+blocks sets that underperform their own days. See the dated entry below.
 
 `make verify`: 52 classes, 0 failed, 1395 executions across 62 files; 886 pytest pass.
 
@@ -1133,5 +1136,79 @@ limit is not questioned at all, because a warning that fires on every ordinary p
 nobody reads; and the flag resets per ingest, so a wide window cannot follow every later
 narrow one — the same latching bug class as the unparameterised `get_portfolio_history`
 fallback already pinned in that file.
-`make verify`: 52 classes, 0 failed, 1401 executions across 62 files; 889 pytest pass. The
-daemon was restarted onto the new code.
+`make verify`: 52 classes, 0 failed, 1401 executions across 62 files; 889 pytest pass.
+
+## 2026-10-03 — the confidence gate fired once, it was right, and raising it is measured-harmful
+
+The question above was answered by measurement, and the measurement had to be done twice,
+because the first pass produced a clean and wrong answer.
+
+`Guardian.review` approves a HOLD before the confidence check, so the gate's population is
+every non-HOLD decision — from all three decision sources, not just the current one:
+
+```
+cycle records: 1179
+  decision_source: baseline 852 | llm 314 | fallback_policy_engine 13
+
+trades (the only decisions the gate can see): 114
+  llm 56 | baseline 51 | fallback_policy_engine 7
+
+refused by the confidence gate, any source: 1
+  2026-06-09T12:40:03  SELL 54  confidence 0.30  source baseline
+  -> counterfactual verdict: FALSE_TRADE
+```
+
+**The gate's one and only firing was correct.** It blocked a baseline SELL scored as a
+`FALSE_TRADE` — 0% correct on a day whose base rate for scored decisions was 22.2%, so it
+removed a decision 22 points worse than its own day. The previous entry's "one refusal in
+1179 cycles" was exactly right.
+
+What made the first pass wrong was scoping it to the LLM. Among the LLM's 56 trades the gate
+has refused **none**, and the reason is a fact about the model rather than about the gate:
+
+```
+LLM trades: 56
+  below 0.5: 0    at or above: 56
+  confidences seen: [0.5, 0.55, 0.6, 0.65, 0.7, 0.75]
+  scored: 45 -> 31 correct (68.9%) against a 68.9% day expectation, margin -0.0%
+```
+
+The model's lowest stated trade confidence is exactly the threshold, so no LLM decision can
+reach it. A measurement scoped to the decision source that happens to be current will always
+find that source innocent of the guard; the 852 baseline and 13 fallback decisions sitting in
+the same journal under the same threshold are what gave the gate its one real use.
+
+### What every setting would do
+
+All 114 trades, 76 scored, each blocked set compared against the base rate of the days it
+appears on:
+
+| threshold | blocks | blocked right | blocked wrong | day-adjusted gain |
+|---|---|---|---|---|
+| 0.00 | 0 | 0 | 0 | +0.0% |
+| 0.30 | 0 | 0 | 0 | +0.0% |
+| **0.50 (current)** | **1** | **0** | **1** | **−22.2%** |
+| 0.55 | 1 | 0 | 1 | −22.2% |
+| 0.60 | 7 | 3 | 4 | −4.3% |
+| 0.65 | 37 | 24 | 13 | −2.3% |
+| 0.70 | 55 | 39 | 16 | −3.8% |
+| 0.75 | 73 | 48 | 25 | −0.5% |
+| 0.80 | 73 | 48 | 25 | −0.5% |
+
+**0.50 is the only setting that blocks anything, and what it blocks was wrong.** Every
+setting above it blocks sets that underperform their own days — trading a 22-point
+underperforming decision for sets that are 4 to 0.5 points underperforming, and far more of
+them. The gate is kept, and the reason is this table rather than the general prudence of
+having a guard.
+
+The Guardian is unchanged. What the evidence demands is that nobody turn the knob on the
+strength of it looking inert, so the measurement went where an operator would look first:
+`configs/paper.env.example` now states the gate's one firing and what raising it costs, and
+`calibration`'s docstring no longer implies a filter with no record behind it.
+
+No test was added, because there is no code path here to pin — the claim is about runtime
+state and a fixture would assert nothing the journal does not. The falsifiers are live: a
+firing that blocks a `GOOD_TRADE`, an LLM trade below 0.5, or a threshold above 0.5 whose
+blocked set beats its own days would each make this entry wrong.
+
+`make verify`: 52 classes, 0 failed, 1401 executions across 62 files; 889 pytest pass.

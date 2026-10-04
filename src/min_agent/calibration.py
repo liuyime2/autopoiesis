@@ -7,6 +7,18 @@ be sent - and never as a claim to be tested. So a model that is confidently wron
 indistinguishable from one that is right, which is the one distinction that matters
 for whether the decision engine is worth running at all.
 
+That gate has a real but thin record, and the shape of it is worth stating here rather than
+leaving to a reader who assumes either a working filter or dead code. Over the 1179 cycles on
+record it has fired **once**, and that firing was correct: it blocked a baseline SELL at
+confidence 0.30 that the counterfactual ledger scores as a `FALSE_TRADE`, 22 points below the
+base rate of the day it appeared on. It has never refused one of the LLM's own decisions,
+because the lowest confidence the model states on a trade is exactly `min_confidence` — so its
+inertness is a fact about this model's behaviour distribution, not about the gate. Every
+setting above 0.5 blocks sets that underperform their own days. So this module's job is to
+keep reporting what the model's confidences are worth on the trades it can see, which on the
+live record is nothing, and not to imply the gate is carrying weight it is not. See
+`docs/superpowers/plans/2026-10-03-min-confidence-what-it-is-worth.md`.
+
 The pairing is already available and needs no new data: every decision carries a
 confidence, and the counterfactual ledger already scores every decision against the
 first real broker quote at or after the horizon. This joins the two.
