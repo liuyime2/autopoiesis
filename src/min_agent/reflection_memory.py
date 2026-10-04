@@ -27,6 +27,7 @@ class ReflectionMemory:
         fills: Mapping[str, float] | None = None,
         seeded_fills: Sequence[BrokerFillActivity] | None = None,
         cumulative_cycles: Mapping[str, int] | None = None,
+        cumulative_trade_attempts: Mapping[str, int] | None = None,
     ) -> ReflectionRecord:
         evaluation = DeterministicEvaluator().evaluate(
             records,
@@ -34,6 +35,7 @@ class ReflectionMemory:
             fills=fills,
             seeded_fills=seeded_fills,
             cumulative_cycles=cumulative_cycles,
+            cumulative_trade_attempts=cumulative_trade_attempts,
         )
         strategy_metrics = {
             sid: ev.model_dump(mode="json") for sid, ev in evaluation.strategy_metrics.items()
@@ -78,6 +80,10 @@ class ReflectionMemory:
                         cycles=coerce.field_int(metrics.get("cycles"), f"{strategy_id}.cycles"),
                         cumulative_cycles=coerce.field_int(
                             metrics.get("cumulative_cycles", 0), f"{strategy_id}.cumulative_cycles"
+                        ),
+                        cumulative_trade_attempts=coerce.field_int(
+                            metrics.get("cumulative_trade_attempts", 0),
+                            f"{strategy_id}.cumulative_trade_attempts",
                         ),
                         submitted_orders=coerce.field_int(
                             metrics.get("submitted_orders"), f"{strategy_id}.submitted_orders"

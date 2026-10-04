@@ -1525,3 +1525,73 @@ measurement, recorded as a falsifier in
 `docs/superpowers/plans/2026-10-04-admission-outruns-serving.md` rather than asserted here.
 
 `make verify`: 52 classes, 0 failed, 1412 executions across 62 files; 900 pytest pass.
+
+## 2026-10-04 — two more windowed numbers answering cumulative questions, one of them live
+
+Completing the probation-service fix turned up two more sites reading the reflection window
+where they needed the journal. The second one is the valuable finding, because the daemon
+exercised it within minutes of the restart and got it wrong in the open.
+
+### The third site: the probation verdict gate
+
+```python
+if strategy.lifecycle == "PROBATION" and result.cycles >= self.min_active_cycles:
+```
+
+This gates the whole probation verdict block — degenerate pause and both promotion paths sit
+behind it. Left on the windowed count, a candidate that has served its budget but holds few
+window cycles receives **no verdict at all**: not a refusal, an absence. It now reads
+`cumulative_cycles`, like the other two service questions.
+
+### The fourth site: the daemon paused a candidate that had earned promotion
+
+```
+2026-10-04T11:24:13  trend-follow-buy-010  decided -> PAUSED
+                     "no exploration evidence over the evaluation window"
+```
+
+That candidate is the only one that had earned a ruling: **15 cumulative cycles, 10 scored
+decisions, `PASS_SCREENED`**. Over its lifetime it was selected 15 times and made **one
+BUY**. The pause fired because `trade_attempts` is windowed, and its single BUY fell outside
+the last 50 records.
+
+"Did this candidate ever try to trade?" is a lifetime question, and a five-hour window
+answered it. Reproduced against live data:
+
+```
+trend-follow-buy-010: lifetime cycles=15  lifetime BUY/SELL=1
+  its recorded result: window cycles=4  window attempts=0  cumulative=15
+
+  windowed attempts (what the daemon used): degenerate = True
+  lifetime attempts (the fix):              degenerate = False
+```
+
+`cumulative_trade_attempts` now sits beside `cumulative_cycles`, from the same journal read,
+because both answer the same question — how much has this candidate been given, and what did
+it do with it. The windowed `trade_attempts` stays on the *promoted*-strategy path, where
+"has stopped acting" genuinely is a recent-behaviour question.
+
+A candidate that never traded is still paused: lifetime attempts is 0 for it, and a test
+pins that so this is not a licence to keep anything.
+
+### The full distinction, now stated once
+
+| reads `cumulative_cycles` / `cumulative_trade_attempts` | reads the windowed count |
+|---|---|
+| `_needs_probation` | `failure_rate`, `rejection_rate` |
+| `_is_degenerate_no_exploration` (PROBATION) | `_is_degenerate_no_exploration` (promoted) |
+| probation verdict gate | `score`, `exploration_floor_cycles` |
+
+**Ruled out along the way**, by running the real code rather than inferring: the offline
+screen and the counterfactual ledger agree. `fixed-size-buy-001` looked like it had 21
+informative decisions and a screen count of 2; running `offline_validation.validate` on the
+real journal gives **21 scored, `PASS_SCREENED`**. The discrepancy was in my extraction. Five
+strategies pass the screen, and the promotion gate is satisfiable — it requires `scored >= 10`
+plus `PASS_SCREENED` and returns `None` (allow) otherwise.
+
+Also measured and found *not* to be a defect: 7 of 17 queued candidates are dormant at every
+observed price because their TREND_FOLLOW band contains the market. The selector documents
+this as price-dependent and reversible, and the backlog of 17 is honest — those candidates
+do eventually need service.
+
+`make verify`: 52 classes, 0 failed, 1416 executions across 62 files; 904 pytest pass.

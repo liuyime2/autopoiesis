@@ -152,3 +152,79 @@ before the incumbent can trade.
 **What would show this worked:** the count of candidates owing probation falling below 17,
 and then the ACTIVE strategy being selected. Neither is observable in a test, and neither is
 asserted here.
+
+## 8. A third site, found while measuring the fix
+
+The change above deliberately touched two rules. A third one turned out to be the same
+question wearing different clothes:
+
+```python
+if strategy.lifecycle == "PROBATION" and result.cycles >= self.min_active_cycles:
+```
+
+This is the gate for the whole probation verdict block — degenerate pause, broker-verified
+promotion, and decision-quality promotion all sit behind it. It asks "does this candidate
+have enough history to judge?", which is a *service* question, so it belongs on
+`cumulative_cycles` like the other two. Left on the window it means a candidate that has
+served its whole 13-cycle budget but has 4 cycles in the current window receives **no verdict
+at all** — not a refusal, an absence — and waits for a 50-cycle coincidence. Measured on the
+live library, `trend-follow-buy-010` is exactly that case: 15 cumulative cycles, 10 scored
+decisions, `PASS_SCREENED`, and 4 window cycles.
+
+So all three probation-stage service questions now read `cumulative_cycles`, and the
+windowed number is left only where the meaning is genuinely recent: failure rate, rejection
+rate, score, and the exploration floor. That is the whole distinction, stated once:
+
+| reads `cumulative_cycles` | reads windowed `cycles` |
+|---|---|
+| `_needs_probation` | `failure_rate`, `rejection_rate` |
+| `_is_degenerate_no_exploration` (PROBATION) | `score` via `StrategySelector` |
+| probation verdict gate (this one) | `exploration_floor_cycles` |
+
+One test added: a candidate with its budget served and 0 window cycles is judged, and a
+candidate still short of its budget is not.
+
+## 9. Fourth site, and this one the daemon actually exercised
+
+The daemon acted on the change above within minutes of the restart, and it acted wrongly.
+That is worth more than any test.
+
+```
+2026-10-04T11:24:13  trend-follow-buy-010  decided -> PAUSED
+                     "no exploration evidence over the evaluation window"
+```
+
+`trend-follow-buy-010` is the one candidate that had earned a ruling: 15 cumulative cycles,
+10 scored decisions, `PASS_SCREENED`. Over its lifetime it was selected 15 times and made
+**one BUY**. And the pause fired because the *windowed* `trade_attempts` was 0 — its single
+BUY fell outside the last 50 records.
+
+So the question "did this candidate ever try to trade?" — a lifetime question — was answered
+with a five-hour window, and the answer flipped from yes to no purely because of where the
+window boundary happened to fall. The strategy that had demonstrated it could act was
+paused for not acting. This is the same instrument error as §1, now on the path that decides
+promotion, and it is the reason the only candidate with a passing screen never became ACTIVE.
+
+Note what is *not* wrong here: a BUY strategy that holds 14 times in 15 is a weak strategy,
+and pausing it is defensible. What is wrong is that the evidence for the claim was five hours
+of a fifteen-cycle history.
+
+### The change
+
+`cumulative_trade_attempts` alongside `cumulative_cycles`, from the same journal read, and the
+degenerate check uses it. Both quantities answer the same question — how much has this
+candidate been given, and what did it do with it — so they are counted together and carried
+together. The windowed `trade_attempts` stays for the *promoted*-strategy path, where "has
+stopped acting" genuinely is a recent-behaviour question.
+
+### What would prove this wrong
+
+| Prediction | Falsifier |
+|---|---|
+| A candidate that traded in its lifetime is not paused for never trading | Another pause citing "no exploration evidence" for a strategy with lifetime BUY/SELL decisions |
+| The pause still fires on a candidate that never traded | A 13-cycle candidate with 0 lifetime attempts that is not paused |
+| The distinction matters at the boundary | Both cases pausing, or neither |
+
+The second row is the one that keeps this from becoming a licence to keep anything: a
+candidate that genuinely never traded must still be paused, and it will be, because lifetime
+attempts is 0 for it.

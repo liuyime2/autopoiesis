@@ -95,6 +95,7 @@ class DeterministicEvaluator:
         fills: Mapping[str, float] | None = None,
         seeded_fills: Sequence[BrokerFillActivity] | None = None,
         cumulative_cycles: Mapping[str, int] | None = None,
+        cumulative_trade_attempts: Mapping[str, int] | None = None,
     ) -> EvaluationReport:
         buckets: dict[str, _StrategyBucket] = {}
         guardian_rejections: dict[str, int] = {}
@@ -217,7 +218,8 @@ class DeterministicEvaluator:
             pnl=pnl,
             strategy_metrics={
                 strategy_id: bucket.to_evaluation(
-                    (cumulative_cycles or {}).get(strategy_id, 0)
+                    (cumulative_cycles or {}).get(strategy_id, 0),
+                    (cumulative_trade_attempts or {}).get(strategy_id, 0),
                 )
                 for strategy_id, bucket in buckets.items()
             },
@@ -281,11 +283,14 @@ class _StrategyBucket:
             if not is_system_rejection(record.guardian.reason):
                 self.strategy_fault_rejections += 1
 
-    def to_evaluation(self, cumulative_cycles: int = 0) -> StrategyEvaluation:
+    def to_evaluation(
+        self, cumulative_cycles: int = 0, cumulative_trade_attempts: int = 0
+    ) -> StrategyEvaluation:
         return StrategyEvaluation(
             strategy_id=self.strategy_id,
             cycles=self.cycles,
             cumulative_cycles=cumulative_cycles,
+            cumulative_trade_attempts=cumulative_trade_attempts,
             submitted_orders=self.submitted_orders,
             rejected_orders=self.rejected_orders,
             skipped_orders=self.skipped_orders,

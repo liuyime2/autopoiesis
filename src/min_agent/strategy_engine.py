@@ -263,7 +263,14 @@ class StrategyLifecycleManager:
         if rejection_rate > self.max_rejection_rate:
             return StrategyLifecycleDecision(strategy, "PAUSED", "Guardian rejection rate above lifecycle threshold")
 
-        if strategy.lifecycle == "PROBATION" and result.cycles >= self.min_active_cycles:
+        # Service, not freshness: every rule inside this block asks how much the
+        # candidate has been given, which is `cumulative_cycles`. Left on the windowed
+        # count, a candidate that has served its whole probation budget but has few
+        # cycles in the current 50-record window received no verdict at all - not a
+        # refusal, an absence - and waited for a coincidence. `min_active_cycles` is
+        # still the bar for a *promoted* strategy in
+        # `_is_degenerate_no_exploration`, which has no probation budget left to serve.
+        if strategy.lifecycle == "PROBATION" and result.cumulative_cycles >= self.probation_cycles:
             if self._is_degenerate_no_exploration(strategy, result):
                 return StrategyLifecycleDecision(strategy, "PAUSED", "probation produced no exploration evidence")
             # PnL has to be able to *promote* as well as retire, or it is only a
@@ -410,13 +417,22 @@ class StrategyLifecycleManager:
         for the same reason `_needs_probation` counts it that way: `cycles` is the
         reflection window and tops out at 7 for any single strategy, so both thresholds
         were unreachable against it.
+
+        A candidate's *attempts* are counted the same way. `trade_attempts` is also
+        windowed, and on 2026-10-04 that misfired on the promotion path:
+        `trend-follow-buy-010`, which had served 15 cycles, made one BUY in its lifetime
+        and passed the screen on 10 scored decisions, was paused for "no exploration
+        evidence" because its single BUY fell outside the last 50 records.
         """
         if strategy.kind == "HOLD_BASELINE" or strategy.lifecycle == "BASELINE":
             return False
         if result is None:
             return False
         if strategy.lifecycle == "PROBATION":
-            return result.cumulative_cycles >= self.probation_cycles and result.trade_attempts == 0
+            return (
+                result.cumulative_cycles >= self.probation_cycles
+                and result.cumulative_trade_attempts == 0
+            )
         return result.cycles >= self.min_active_cycles and result.trade_attempts == 0
 
 

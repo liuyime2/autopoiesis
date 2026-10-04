@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from min_agent.models import AccountSnapshot, DataSnapshot, StrategyResult, StrategySpec
 from min_agent.strategy_engine import (
+    PROBATION_CYCLES,
     StrategyExecutor,
     StrategyLibrary,
     StrategyLifecycleManager,
@@ -226,9 +227,9 @@ def test_strategy_selector_prefers_tradable_over_baseline_after_probation():
 
 
 def test_lifecycle_manager_promotes_probation_after_successful_exposure():
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     strategy = make_spec(strategy_id="trial", kind="FIXED_SIZE", lifecycle="PROBATION", action="BUY", quantity=1)
-    result = StrategyResult(strategy_id="trial", cycles=3, submitted_orders=3, rejected_orders=0, errors=0, score=1.0, evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=3)
+    result = StrategyResult(strategy_id="trial", cycles=3, cumulative_cycles=3, cumulative_trade_attempts=3, submitted_orders=3, rejected_orders=0, errors=0, score=1.0, evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=3)
 
     # Phase 6: this strategy has acted and has clean operational metrics, but it has
     # no verifiable outcome yet. It is not promoted - the contract requires evidence,
@@ -484,6 +485,89 @@ def test_a_strategy_result_built_without_the_new_count_behaves_exactly_as_before
 
     assert result.cumulative_cycles == 0
     assert manager._is_degenerate_no_exploration(strategy, result) is False
+
+
+def test_a_served_candidate_is_judged_on_a_thin_window():
+    """The probation verdict gate is a service question, not a freshness one.
+
+    Left on the windowed count, a candidate that has served its whole probation budget
+    but holds only a few cycles in the current 50-record window got *no verdict at all* -
+    not a refusal, an absence - and waited for a coincidence. Measured on the live
+    library, `trend-follow-buy-010` was exactly that case: 15 cumulative cycles, 10
+    scored decisions, PASS_SCREENED, and 4 window cycles against a bar of 5.
+
+    The window still has to be non-empty: `cycles <= 0` returns early a few lines above,
+    because the rate rules divide by it and a strategy with no activity in the window has
+    nothing fresh to judge on. Two window cycles is the case that was broken; zero is not.
+    """
+    manager = StrategyLifecycleManager(probation_cycles=13)
+    strategy = make_spec(strategy_id="served", kind="FIXED_SIZE", lifecycle="PROBATION",
+                         action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="served", cycles=2, cumulative_cycles=13, cumulative_trade_attempts=5,
+        submitted_orders=5, rejected_orders=0, errors=0, score=0.9,
+        evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=5,
+    )
+
+    [decision] = manager.review([strategy], [result], {"served": _evidence(scored=12)})
+
+    assert decision.new_lifecycle == "ACTIVE"
+
+
+def test_a_candidate_short_of_its_budget_is_not_judged_on_a_thin_window_either():
+    """The converse, so the first cannot pass by ignoring the count."""
+    manager = StrategyLifecycleManager(probation_cycles=13)
+    strategy = make_spec(strategy_id="unserved", kind="FIXED_SIZE", lifecycle="PROBATION",
+                         action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="unserved", cycles=2, cumulative_cycles=12, cumulative_trade_attempts=5,
+        submitted_orders=5, rejected_orders=0, errors=0, score=0.9,
+        evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=5,
+    )
+
+    assert manager.review([strategy], [result], {"unserved": _evidence(scored=12)}) == []
+
+
+def test_a_candidate_that_traded_in_its_lifetime_is_not_called_degenerate():
+    """The daemon paused this exact case on 2026-10-04, minutes after the fix that
+    let the candidate reach a ruling at all.
+
+    `trend-follow-buy-010` had served 15 cycles, made one BUY across its whole life,
+    and passed the offline screen on 10 scored decisions. It was paused for "no
+    exploration evidence" because `trade_attempts` is windowed and its single BUY fell
+    outside the last 50 records. "Did this candidate ever try to trade?" is a lifetime
+    question and the window answered it for five hours.
+    """
+    manager = StrategyLifecycleManager(probation_cycles=13)
+    strategy = make_spec(strategy_id="traded-once", kind="FIXED_SIZE", lifecycle="PROBATION",
+                         action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="traded-once", cycles=4, cumulative_cycles=15,
+        cumulative_trade_attempts=1,          # lifetime: one BUY, outside the window
+        trade_attempts=0,                     # windowed: nothing recent
+        submitted_orders=1, rejected_orders=0, errors=0, score=0.225,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+
+    assert manager._is_degenerate_no_exploration(strategy, result) is False
+
+
+def test_a_candidate_that_never_traded_is_still_paused_on_its_lifetime_count():
+    """So the fix is not a licence to keep anything: zero lifetime attempts still pauses."""
+    manager = StrategyLifecycleManager(probation_cycles=13)
+    strategy = make_spec(strategy_id="never-traded", kind="FIXED_SIZE", lifecycle="PROBATION",
+                         action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="never-traded", cycles=4, cumulative_cycles=15,
+        cumulative_trade_attempts=0, trade_attempts=0,
+        submitted_orders=0, rejected_orders=0, errors=0, score=0.0,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+
+    [decision] = manager.review([strategy], [result])
+
+    assert decision.new_lifecycle == "PAUSED"
+    assert "no exploration" in decision.reason
 
 
 def test_lifecycle_manager_pauses_high_rejection_rate():
@@ -853,7 +937,9 @@ def test_verified_positive_pnl_drives_the_promotion_and_is_recorded_as_the_reaso
     result = StrategyResult(
         strategy_id="winner",
         evaluated_at=datetime.now(tz=timezone.utc),
-        cycles=5,                       # probation bar met
+        cycles=5,
+        cumulative_cycles=PROBATION_CYCLES,   # probation bar met at the default budget
+        cumulative_trade_attempts=5,
         submitted_orders=5,
         rejected_orders=0,
         skipped_orders=0,
@@ -930,6 +1016,8 @@ def test_no_closed_lot_needs_decision_evidence_not_operational_metrics():
         strategy_id="no-lots",
         evaluated_at=datetime.now(tz=timezone.utc),
         cycles=5,
+        cumulative_cycles=PROBATION_CYCLES,
+        cumulative_trade_attempts=5,
         submitted_orders=5,
         rejected_orders=0,
         skipped_orders=0,
@@ -1172,7 +1260,8 @@ def _probation_spec(strategy_id="p1", action="BUY"):
 def _clean_result(strategy_id="p1", **over):
     from min_agent.models import StrategyResult
     base = dict(
-        strategy_id=strategy_id, cycles=5, submitted_orders=5, rejected_orders=0,
+        strategy_id=strategy_id, cycles=5, cumulative_cycles=5, cumulative_trade_attempts=5,
+        submitted_orders=5, rejected_orders=0,
         skipped_orders=0, errors=0, score=1.0, trade_attempts=5,
         strategy_fault_rejections=0,
         evaluated_at=datetime.now(tz=timezone.utc),
@@ -1194,7 +1283,7 @@ def test_a_strategy_that_never_traded_is_not_promoted_however_clean_it_looked():
     """Five cycles, zero errors, zero rejections - and it never did anything. A
     strategy with no orders has produced no evidence of value, and the absence of
     trouble is not evidence."""
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     result = _clean_result(submitted_orders=0, trade_attempts=0)
 
     decisions = manager.review([_probation_spec()], [result], {"p1": _evidence()})
@@ -1208,7 +1297,7 @@ def test_a_strategy_that_never_traded_is_not_promoted_however_clean_it_looked():
 def test_absent_evidence_blocks_promotion_rather_than_defaulting_to_it():
     """The direction that matters. No verdict yet reads as 'not yet', never as
     'assumed fine' - which is precisely what the version this replaced did."""
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     for kwargs in ({}, {"p1": _evidence(verdict="")}):
         decisions = manager.review([_probation_spec()], [_clean_result()], kwargs or None)
         assert all(d.new_lifecycle != "ACTIVE" for d in decisions), (kwargs, decisions)
@@ -1217,7 +1306,7 @@ def test_absent_evidence_blocks_promotion_rather_than_defaulting_to_it():
 def test_an_inconclusive_verdict_does_not_promote():
     """INCONCLUSIVE means the screen could not tell. Promoting on it would read
     ignorance as a pass, which is the error this whole gate exists to prevent."""
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     verdict = "INCONCLUSIVE_INSUFFICIENT_EVIDENCE"
     decisions = manager.review(
         [_probation_spec()], [_clean_result()], {"p1": _evidence(verdict=verdict)}
@@ -1226,7 +1315,7 @@ def test_an_inconclusive_verdict_does_not_promote():
 
 
 def test_a_rejected_verdict_does_not_promote():
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     decisions = manager.review(
         [_probation_spec()], [_clean_result()],
         {"p1": _evidence(verdict="REJECT_POOR_DECISIONS")},
@@ -1237,7 +1326,7 @@ def test_a_rejected_verdict_does_not_promote():
 def test_too_few_scored_decisions_does_not_promote():
     """A handful of decisions is not enough to judge, even when none of them was
     wrong."""
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     decisions = manager.review(
         [_probation_spec()], [_clean_result()], {"p1": _evidence(scored=3)}
     )
@@ -1247,7 +1336,7 @@ def test_too_few_scored_decisions_does_not_promote():
 def test_a_clean_strategy_with_evidence_is_promoted():
     """The gate must be satisfiable. A gate that nothing can pass is a freeze, and
     would silently stop the lifecycle from ever advancing."""
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     [decision] = manager.review(
         [_probation_spec()], [_clean_result()], {"p1": _evidence()}
     )
@@ -1259,7 +1348,7 @@ def test_a_clean_strategy_with_evidence_is_promoted():
 def test_the_gate_states_what_is_missing():
     """A gate that can only say no leaves the journal unable to explain why a
     strategy is stuck."""
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     reason = manager._promotion_evidence_gate(None)
     assert reason and "no offline validation evidence" in reason
 
@@ -1277,13 +1366,13 @@ def test_broker_verified_pnl_still_promotes_without_offline_evidence():
     from min_agent.models import StrategyResult
 
     result = StrategyResult(
-        strategy_id="p1", cycles=5, submitted_orders=5, rejected_orders=0,
+        strategy_id="p1", cycles=5, cumulative_cycles=5, cumulative_trade_attempts=5, submitted_orders=5, rejected_orders=0,
         skipped_orders=0, errors=0, score=1.0, trade_attempts=5,
         strategy_fault_rejections=0, realized_pnl=120.0,
         pnl_evidence=PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
         evaluated_at=datetime.now(tz=timezone.utc),
     )
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     [decision] = manager.review([_probation_spec()], [result])
 
     assert decision.new_lifecycle == "ACTIVE"

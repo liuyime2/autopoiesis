@@ -588,6 +588,7 @@ class StrategyEvaluation(BaseModel):
     #: `cycles`, which counts only the reflection window. See `StrategyResult` for why
     #: the probation rules cannot use the windowed number.
     cumulative_cycles: int = Field(default=0, ge=0)
+    cumulative_trade_attempts: int = Field(default=0, ge=0)
     submitted_orders: int = Field(ge=0)
     rejected_orders: int = Field(ge=0)
     skipped_orders: int = Field(ge=0)
@@ -678,6 +679,13 @@ class StrategyResult(BaseModel):
     #:
     #: Defaults to 0 so a result built without it behaves exactly as before.
     cumulative_cycles: int = Field(default=0, ge=0)
+    #: Lifetime BUY/SELL decisions this strategy produced. Paired with
+    #: `cumulative_cycles` because both answer the same question - how much has this
+    #: candidate been given, and what did it do with it - so they are counted together
+    #: and carried together. The windowed `trade_attempts` cannot answer it:
+    #: `trend-follow-buy-010` was paused for "no exploration evidence" on 2026-10-04
+    #: with a windowed count of 0 and a lifetime count of 1.
+    cumulative_trade_attempts: int = Field(default=0, ge=0)
     submitted_orders: int = Field(ge=0)
     rejected_orders: int = Field(ge=0)
     errors: int = Field(ge=0)
