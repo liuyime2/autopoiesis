@@ -2069,3 +2069,40 @@ which the stage has never once produced an answer.
 
 **What would prove this wrong:** a single trial with a verdict other than INSUFFICIENT. There
 is none, and the mechanism above says there could not be one.
+
+### The arithmetic of an unreachable bar
+
+Measured from the trial ledger's own rates rather than assumed:
+
+```
+kind             trials  bars  oos trades  trades/bar  bars needed for 52
+FIXED_SIZE          13    467          36      0.00593            8,769
+TREND_FOLLOW        12    467          22      0.00393           13,246
+HOLD_BASELINE        1    467           0      0.00000                 -
+```
+
+**52 out-of-sample trades needs about 8,800 bars** at the most trade-productive rate on
+record — roughly **10x** the 847-bar replay cache. That is the size of the gap, and it is not
+the interesting part.
+
+The interesting part is that the requirement grows with the search while the data does not:
+
+```
+trials   required_trades   bars needed at 0.00593 trades/bar
+      27                52                             8,769
+     100               100                            16,864
+     400               200                            33,728
+```
+
+The bar rises as `sqrt(trials)` and the dataset is fixed, so **the gap widens without bound
+as the search broadens.** Gathering more bars does not close it while the search keeps
+expanding — at 400 trials the same dataset would need 40x what it has. That is the
+self-reinforcing loop stated as arithmetic rather than as a worry, and it is what makes
+"just collect more history" the wrong answer on its own.
+
+So of the three options, one is now measurable rather than hypothetical: a bounded dataset is
+necessary and nowhere near sufficient. Either the search is bounded so the bar stops rising,
+or the control is expressed in a unit a long-only strategy can actually move — folds and bars,
+which scale with the dataset, rather than trades, which scale with the strategy's design. Which
+of those two is right is the experiment; what is no longer in doubt is that a fixed dataset and
+an unbounded search cannot both stand.
