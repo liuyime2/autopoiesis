@@ -374,6 +374,25 @@ class PnLEvidence(BaseModel):
     account_return_pct: float | None = None
     strategy_realized_pnl: dict[str, float] = Field(default_factory=dict)
     strategy_fees: dict[str, float] = Field(default_factory=dict)
+    #: Entry cost of each strategy's closed lots: the capital its realized PnL was
+    #: earned on. Cumulative turnover across sequential round trips, **not**
+    #: concurrent exposure - the Guardian bounds the latter separately.
+    strategy_deployed_capital: dict[str, float] = Field(default_factory=dict)
+    #: Realized PnL over that capital, per cent. A strategy with no closed lots is
+    #: absent rather than zero: "did not trade" is not "returned nothing".
+    strategy_return_pct: dict[str, float] = Field(default_factory=dict)
+    #: The same instrument's return over the same window, from the prices this
+    #: evaluation already holds. Computed here rather than fetched so the benchmark
+    #: and the lots cannot rest on two price sources that disagree.
+    market_return_pct: float | None = None
+    #: Per strategy, `strategy_return_pct` minus `market_return_pct`. This is the
+    #: project's success metric and nothing else reported it: the promotion gate
+    #: screens on decision quality, which the counterfactual ledger measures, and
+    #: that ledger cannot see this number by construction - a trade's return there
+    #: is holding from the same instant less cost, so every decision shows an excess
+    #: of exactly the assumed cost over holding. See
+    #: `docs/superpowers/plans/2026-10-04-report-the-holding-benchmark.md`.
+    strategy_excess_vs_market_pct: dict[str, float] = Field(default_factory=dict)
     unattributed_pnl: float | None = None
     window_start: datetime | None = None
     window_end: datetime | None = None

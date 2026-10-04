@@ -528,6 +528,33 @@ def _pnl_evidence(
         account_pnl = last_point.profit_loss
         account_return_pct = last_point.profit_loss_pct
 
+    # The holding benchmark, from the prices this evaluation already holds rather than
+    # a second source that could disagree with the lots.
+    deployed_capital: dict[str, float] = {}
+    for lot in closed_lots:
+        deployed_capital[lot.strategy_id] = deployed_capital.get(lot.strategy_id, 0.0) + (
+            lot.buy_price * lot.quantity
+        )
+    deployed_capital = {k: round(v, 6) for k, v in deployed_capital.items()}
+    strategy_return = {
+        strategy_id: round(strategy_realized[strategy_id] / capital * 100.0, 6)
+        for strategy_id, capital in deployed_capital.items()
+        if capital > 0 and strategy_id in strategy_realized
+    }
+    market_return_pct = _market_return_pct(records)
+    if market_return_pct is None and deployed_capital:
+        missing_reasons.append(
+            "no price series covers the closed-lot window, so no holding benchmark can be stated"
+        )
+    excess_vs_market = (
+        {}
+        if market_return_pct is None
+        else {
+            strategy_id: round(value - market_return_pct, 6)
+            for strategy_id, value in strategy_return.items()
+        }
+    )
+
     # Named `evidence_status`, not `status`: this function also builds fill
     # attributions, whose `status` is a LINKED/UNLINKED flag. Two unrelated
     # meanings under one name in one 150-line function is how the wrong one gets
@@ -548,6 +575,10 @@ def _pnl_evidence(
         account_return_pct=account_return_pct,
         strategy_realized_pnl=strategy_realized,
         strategy_fees=strategy_fees,
+        strategy_deployed_capital=deployed_capital,
+        strategy_return_pct=strategy_return,
+        market_return_pct=market_return_pct,
+        strategy_excess_vs_market_pct=excess_vs_market,
         unattributed_pnl=0.0 if unlinked_fill_count else None,
         window_start=evidence.window_start,
         window_end=evidence.window_end,
@@ -781,6 +812,29 @@ def _open_lots(
                 )
             )
     return tuple(out)
+
+
+def _market_return_pct(records: list[CycleRecord]) -> float | None:
+    """What the traded instrument returned over the window these records cover.
+
+    The first and last real quotes the loop observed, and nothing else. This exists so
+    the benchmark and the lots rest on one price source: a comparison assembled from two
+    can silently disagree, and a benchmark that disagrees with the PnL it is judging is
+    worse than no benchmark. Returns None when no price series covers the window, which
+    is reported rather than papered over.
+    """
+    prices = [
+        (record.snapshot.timestamp, record.snapshot.last_price)
+        for record in records
+        if getattr(record, "snapshot", None) is not None and record.snapshot.last_price > 0
+    ]
+    if len(prices) < 2:
+        return None
+    prices.sort(key=lambda item: item[0])
+    first, last = prices[0][1], prices[-1][1]
+    if first <= 0:
+        return None
+    return round((last / first - 1.0) * 100.0, 6)
 
 
 def _assumed_cost_for_lots(

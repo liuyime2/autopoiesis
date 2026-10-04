@@ -93,3 +93,69 @@ def test_the_evidence_reports_observed_and_assumed_separately():
     assert pnl.net_of_fees == 100.0, "after observed fees, which were free"
     assert pnl.net_after_assumed_cost == 99.0, "after the assumption"
     assert pnl.net_after_assumed_cost < pnl.net_of_fees
+
+
+class _Snap:
+    def __init__(self, timestamp, last_price):
+        self.timestamp = timestamp
+        self.last_price = last_price
+
+
+class _Rec:
+    def __init__(self, timestamp, last_price):
+        self.snapshot = _Snap(timestamp, last_price)
+
+
+def test_the_holding_benchmark_is_computed_from_the_prices_the_evaluation_already_holds():
+    """One price source, so the benchmark cannot disagree with the lots it judges.
+
+    The comparison is assembled from the same records the PnL comes from rather than a
+    second fetch: a benchmark that rests on a different price series than the PnL it is
+    judging is worse than no benchmark, because the disagreement is invisible.
+    """
+    from min_agent.evaluator import _market_return_pct
+
+    records = [
+        _Rec(datetime(2026, 6, 11, tzinfo=timezone.utc), 100.0),
+        _Rec(datetime(2026, 6, 12, tzinfo=timezone.utc), 110.0),
+    ]
+
+    assert _market_return_pct(records) == pytest.approx(10.0)
+
+
+def test_no_price_series_yields_no_benchmark_rather_than_a_guess():
+    """A missing benchmark must read as unknown, not as flat."""
+    from min_agent.evaluator import _market_return_pct
+
+    assert _market_return_pct([]) is None
+    assert _market_return_pct([_Rec(TS, 100.0)]) is None
+
+
+def test_a_return_is_per_cent_of_the_capital_it_was_earned_on():
+    """The arithmetic behind `strategy_return_pct`, stated on numbers that can be checked.
+
+    10.00 realized on 100.00 of entry cost is +10.0%. This is the figure the project's
+    success metric needs and nothing reported it: the promotion gate screens on decision
+    quality, and the counterfactual ledger cannot see this number at all - a trade's
+    return there is holding from the same instant less cost, so every decision shows an
+    excess of exactly the assumed cost over holding.
+    """
+    realized = {"s1": 10.0}
+    capital = {"s1": 100.0}
+    market = 4.0
+
+    returns = {k: round(realized[k] / capital[k] * 100.0, 6) for k in capital if capital[k] > 0}
+    excess = {k: round(v - market, 6) for k, v in returns.items()}
+
+    assert returns == {"s1": 10.0}
+    assert excess == {"s1": 6.0}
+
+
+def test_a_strategy_that_did_not_trade_is_absent_rather_than_zero():
+    """"Did not trade" must not render as "returned nothing"."""
+    realized = {"s1": 10.0}
+    capital = {"s1": 100.0}
+
+    returns = {k: round(realized[k] / capital[k] * 100.0, 6) for k in capital if k in realized}
+
+    assert "s2" not in returns

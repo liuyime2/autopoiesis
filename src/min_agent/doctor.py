@@ -1391,6 +1391,29 @@ def _check_proof(report: DoctorReport, config: AgentConfig) -> None:
             f"empty (pnl_evidence={evaluation.pnl_evidence})",
             "needs broker closed-lot evidence; a fill alone is not PnL",
         )
+    # The project's success metric, per strategy, against the same instrument over the
+    # same window. Reported rather than folded into the PnL line above because it is a
+    # different question: that line says what was made, this says what holding would
+    # have returned instead. WARN below zero, because a strategy that made money and
+    # still lost to the market has not earned the capital it was given.
+    pnl_evidence = evaluation.pnl
+    excess = pnl_evidence.strategy_excess_vs_market_pct if pnl_evidence else {}
+    market_return = pnl_evidence.market_return_pct if pnl_evidence else None
+    if excess and market_return is not None and pnl_evidence is not None:
+        behind = sorted(k for k, v in excess.items() if v < 0)
+        detail = ", ".join(
+            f"{k}={pnl_evidence.strategy_return_pct[k]:+.2f}% vs market {market_return:+.2f}%"
+            f" ({excess[k]:+.2f})"
+            for k in sorted(excess, key=lambda x: -excess[x])[:6]
+        )
+        report.add(
+            "pnl vs holding", WARN if behind else OK,
+            f"{len(behind)} of {len(excess)} strategy/ies behind the market: {detail}"
+            if behind else f"every strategy beat the market: {detail}",
+            "return is on the capital each strategy deployed; the promotion gate screens on "
+            "decision quality, which is a different question from this one"
+            if behind else "",
+        )
     risk_halts = evaluation.hold_reasons.get("risk_limit_near", 0)
     total_holds = evaluation.action_counts.get("HOLD", 0)
     if risk_halts:

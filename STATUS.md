@@ -1813,3 +1813,47 @@ holding on the same capital over the same window. Neither exists on this record.
 window scored every 5 minutes is not 241 independent observations, and any significance claim
 built on treating them as independent would be wrong. The day adjustment in `calibration.py`
 partly handles this; a per-strategy benchmark should not assume independence it does not have.
+
+## 2026-10-04 — the project can now see the only number it was aiming at
+
+The previous two entries established that no decision source shows an edge and that the
+instrument judging strategies cannot see the project's success metric. This makes that metric
+visible, per strategy, on the object the system already reports.
+
+```python
+# PnLEvidence, computed from the broker's own closed-lot record
+strategy_deployed_capital:      entry cost of each strategy's closed lots
+strategy_return_pct:            realized over that capital
+market_return_pct:              the same instrument, same window, same price source
+strategy_excess_vs_market_pct:  the difference, per strategy
+```
+
+The market return comes from the prices the evaluation already holds, not a second fetch, so
+the benchmark and the lots cannot rest on two sources that disagree. Where no price series
+covers the window the fields stay `None` and `missing_reasons` says so, rather than a
+benchmark being invented.
+
+`doctor` now reports it, and it is a WARN because every strategy that has ever produced
+broker-verified PnL is behind the market:
+
+```
+[WARN] pnl vs holding   3 of 3 strategy/ies behind the market:
+        tiny-fixed-size-001  =+3.29% vs market +4.10%  (-0.82)
+        trend-follow-buy-001 =+2.73% vs market +4.10%  (-1.38)
+        fixed-size-buy-001   =+1.21% vs market +4.10%  (-2.89)
+```
+
+Those figures were computed by hand from the broker record before this code existed, and the
+emitted values reproduce them exactly — which is the check that matters, because a benchmark
+assembled independently of the code it judges is the only kind worth having.
+
+**What this deliberately does not do.** It does not change the promotion gate. Requiring a
+strategy to beat holding before promotion is a risk-adjacent policy change, and it is only
+meaningful once the loop has promoted something and that something's number has been seen.
+Today the gate's criterion has produced three strategies, and all three lost to the market —
+that is now a fact in the report rather than an inference, and the decision about the gate
+belongs to its own experiment.
+
+A note on what `capital` is: the sum of each closed lot's entry cost, so cumulative turnover
+across sequential round trips — $26,243 against the $20,000 the Guardian allows as
+*concurrent* exposure. It is not a limit breach and is not reported as one.
