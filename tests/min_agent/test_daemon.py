@@ -902,9 +902,10 @@ def test_a_rejected_strategy_is_retired_by_the_rule_set(tmp_path):
 
 def test_offline_screening_never_promotes_a_strategy(tmp_path):
     """A strategy that screened well must still be waiting for live evidence."""
+    from datetime import datetime, timezone
+
     from min_agent import offline_validation
     from min_agent.strategy_engine import StrategyLifecycleManager
-    from datetime import datetime, timezone
 
     decisions_in = [
         type("D", (), {"cycle_id": f"c{i}", "action": "HOLD", "verdict": "GOOD_HOLD",

@@ -58,7 +58,7 @@ INCONCLUSIVE = "INCONCLUSIVE_INSUFFICIENT_EVIDENCE"
 
 # Re-exported, not redeclared: this was the third hand-written copy of the verdict set,
 # and it had drifted from `calibration`'s. See `counterfactual` for the account.
-from min_agent.counterfactual import (  # noqa: E402
+from min_agent.counterfactual import (
     FALSE_TRADE,
     GOOD_HOLD,
     GOOD_TRADE,
