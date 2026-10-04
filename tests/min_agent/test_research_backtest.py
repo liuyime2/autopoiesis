@@ -329,3 +329,87 @@ def _win():
         strategy_id="t", kind=bt.KIND_FIXED_SIZE, bars=100, trades=10,
         wins=6, losses=4, net_pnl=100.0, return_pct=1.0,
     )
+
+
+# --------------------------------------------------------------------------
+# the evidence gate must be satisfiable
+# --------------------------------------------------------------------------
+
+def test_out_of_sample_trades_equal_the_fold_count():
+    """Pins the identity the fold-count fix is built on.
+
+    `run_backtest` opens only when flat and force-closes at the segment's last bar, so
+    an always-BUY rule makes exactly one counted trade per test segment. That makes
+    `oos_trades == n_folds` an identity, and it is why a hardcoded fold count of 3
+    against a 52-trade requirement made the multiple-testing gate unsatisfiable for
+    every one of the 26 recorded trials.
+
+    If a future change lets a strategy re-enter within a segment, this fails - which is
+    the point: it should fail here rather than be discovered as a permanently frozen gate.
+    """
+    prices = [100.0 + (i % 7) * 0.3 + i * 0.05 for i in range(400)]
+    for folds in (3, 10, 27):
+        result = wf.run_walk_forward(
+            _bars(prices), strategy_id="t", kind=bt.KIND_FIXED_SIZE,
+            parameters={"action": "BUY", "quantity": 1}, n_folds=folds, min_train_bars=20,
+        )
+        assert result.oos_trades == folds, (
+            f"{folds} folds produced {result.oos_trades} out-of-sample trades"
+        )
+
+
+def test_the_default_fold_count_is_derived_from_the_evidence_the_gate_demands():
+    """A gate nothing can pass is a veto, not a control.
+
+    The default used to be 3 while `required_trades` at 27 trials is 52, so every run
+    returned INSUFFICIENT and the stage could never report anything. The bar itself is
+    unchanged; this only provisions the evidence it counts.
+    """
+    prices = [100.0 + (i % 7) * 0.3 + i * 0.05 for i in range(600)]
+    for trials in (1, 10, 27, 40):
+        result = wf.run_walk_forward(
+            _bars(prices), strategy_id="t", kind=bt.KIND_FIXED_SIZE,
+            parameters={"action": "BUY", "quantity": 1}, trials=trials, min_train_bars=20,
+        )
+        assert result.oos_trades >= result.required_trades(), (
+            f"{trials} trials: {result.oos_trades} trades against "
+            f"{result.required_trades()} required"
+        )
+        assert not result.verdict().startswith("INSUFFICIENT: ")
+
+
+def test_the_bar_itself_is_unchanged_and_still_rises_with_the_search():
+    """Asserted against the formula, not against the new code's own output.
+
+    A change that made the gate passable by lowering `required_trades` would satisfy
+    every test above. This one is the guard against that, and it is why the fix derives
+    the fold count instead.
+    """
+    import math
+
+    for trials in (1, 10, 27, 40):
+        result = wf.WalkForwardResult(
+            strategy_id="t", kind=bt.KIND_FIXED_SIZE, trials=trials, bars=600
+        )
+        assert result.required_trades() == math.ceil(
+            wf.BASE_REQUIRED_TRADES * math.sqrt(trials)
+        )
+
+
+def test_an_explicit_fold_count_below_the_requirement_is_honoured_and_explained():
+    """A caller asking for a cheap run gets one - but the reason is on the record.
+
+    Overriding it silently would be worse: this repository has already been bitten twice
+    by a count quietly meaning something other than it says.
+    """
+    prices = [100.0 + (i % 7) * 0.3 + i * 0.05 for i in range(600)]
+    result = wf.run_walk_forward(
+        _bars(prices), strategy_id="t", kind=bt.KIND_FIXED_SIZE,
+        parameters={"action": "BUY", "quantity": 1}, n_folds=3, min_train_bars=20, trials=27,
+    )
+
+    assert len(result.folds) == 3, "the caller's fold count is respected"
+    assert result.verdict().startswith("INSUFFICIENT: ")
+    assert any("cannot be satisfied at this fold count" in n for n in result.notes), (
+        "a structural INSUFFICIENT must say it is structural, not a verdict about the strategy"
+    )

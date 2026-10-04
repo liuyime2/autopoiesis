@@ -2081,31 +2081,38 @@ TREND_FOLLOW        12    467          22      0.00393           13,246
 HOLD_BASELINE        1    467           0      0.00000                 -
 ```
 
-**52 out-of-sample trades needs about 8,800 bars** at the most trade-productive rate on
-record — roughly **10x** the 847-bar replay cache. That is the size of the gap, and it is not
-the interesting part.
-
-The interesting part is that the requirement grows with the search while the data does not:
+**Correction, measured the next day: the 8,800-bar figure above is wrong, and so is the
+remedy it implied.** `out_of_sample_trades` does not grow with the dataset at all. Fed the real
+847-bar cache at four different lengths:
 
 ```
-trials   required_trades   bars needed at 0.00593 trades/bar
-      27                52                             8,769
-     100               100                            16,864
-     400               200                            33,728
+bars fed   folds   oos trades   required
+      100      3             3         52
+      200      3             3         52
+      400      3             3         52
+      847      3             3         52
 ```
 
-The bar rises as `sqrt(trials)` and the dataset is fixed, so **the gap widens without bound
-as the search broadens.** Gathering more bars does not close it while the search keeps
-expanding — at 400 trials the same dataset would need 40x what it has. That is the
-self-reinforcing loop stated as arithmetic rather than as a worry, and it is what makes
-"just collect more history" the wrong answer on its own.
+`run_backtest` opens a position only when flat and force-closes it at the segment's last bar,
+so an always-BUY rule makes **exactly one counted trade per test segment**. That makes
+`out_of_sample_trades == n_folds` an identity, not an approximation. **Gathering more history
+would not have fixed anything** — the claim that the bar "rises as sqrt(trials) while the
+dataset is fixed" described a gap that does not exist in that form.
 
-So of the three options, one is now measurable rather than hypothetical: a bounded dataset is
-necessary and nowhere near sufficient. Either the search is bounded so the bar stops rising,
-or the control is expressed in a unit a long-only strategy can actually move — folds and bars,
-which scale with the dataset, rather than trades, which scale with the strategy's design. Which
-of those two is right is the experiment; what is no longer in doubt is that a fixed dataset and
-an unbounded search cannot both stand.
+The real invariant is sharper: **the gate is satisfiable only when `n_folds >=
+required_trades`, and `n_folds` was hardcoded at 3.** The module demanded 52 independent
+out-of-sample bets and produced 3, so all 26 trials returned INSUFFICIENT for that reason
+alone. Measured at 1, 10, 27, 52 and 60 folds on the same cache:
+
+```
+bars  n_folds   required  test_size  oos trades  verdict
+ 847        3         52        275           3  INSUFFICIENT
+ 847       27         52         30          27  INSUFFICIENT
+ 847       52         52         15          52  OVERFIT
+```
+
+At `n_folds == required_trades` the stage stops vetoing and returns a real verdict. It was not
+failing to find edge — it was structurally prevented from reporting the answer it had.
 
 ## 2026-10-04 — audit: can this system run 7x24, fully autonomous, discovering and improving itself?
 
@@ -2181,3 +2188,70 @@ so either way.
 
 Neither is a bug fix. Both change what the project optimises, so both belong in a plan with
 their own falsifier rather than in a maintenance pass.
+
+## 2026-10-04 — both structural blockers from the audit are now closed
+
+The audit found two gates that made self-improvement impossible by construction. Both are
+fixed, and the fixes are verified against real data rather than asserted.
+
+### Blocker 1: a promoted strategy never traded
+
+`select` gave probation absolute priority and admission held the backlog at the cap, so the
+queue was effectively never empty:
+
+```
+cap PROBATION_CYCLES 13 | backlog 17 | actionable at the last price 9 (53%)
+P(no actionable candidate) = (1-0.53)^13 = 5.6e-05
+```
+
+5.6e-05 per cycle is not "rarely chosen", it is unreachable — and the queue could not be
+drained, because serving a candidate is what lowers the backlog, which is what reopens
+admission. One promotion existed; it was selected 0 times in the following 146 cycles.
+
+`INCUMBENT_SHARE = 5` reserves one cycle in five for an ACTIVE strategy that declares an
+action, counted on `sum(cumulative_cycles)` so it is stateless. Measured on the live library
+over twenty selections:
+
+```
+with the reserved share:  16/20 discovery   4/20 tiny-fixed-size-001
+without it:               20/20 discovery          incumbent never selected
+```
+
+### Blocker 2: the research stage could never return a verdict
+
+The gate demands `required_trades` independent out-of-sample bets and the fold count was
+hardcoded at 3, while `out_of_sample_trades == n_folds` is an identity — one contiguous
+holding period per segment. 26 trials, 26 `INSUFFICIENT`, 0 verdicts, ever.
+
+`n_folds` now defaults to `max(3, required_trades)`. **`required_trades` is untouched** — the
+bar still rises as `sqrt(trials)`; this only provisions the evidence it counts, because a gate
+nothing can pass is a veto and this repository already says that about the promotion gate. An
+explicitly-passed `n_folds` below the requirement is honoured but records that the `INSUFFICIENT`
+is structural, so the reason is on the record rather than inferred.
+
+On the real 847-bar cache:
+
+```
+trials   required  folds  oos trades  oos return  verdict
+      1         10     10          10     +0.076%  OVERFIT
+     10         32     32          32     +0.009%  OVERFIT
+     27         52     52          52     -0.002%  OVERFIT
+     40         64     64          64     -0.012%  OVERFIT
+```
+
+**The stage now returns real verdicts, and the answer is `OVERFIT`** — these strategies do not
+generalise. That is consistent with every other measurement taken: no decision source shows a
+day-adjusted edge, and all three strategies with broker-verified PnL are behind the market.
+
+### What is still not achieved
+
+Both blockers were *gates*, and removing them does not create an edge. The honest position
+after this work: the loop can now reach a verdict, act on a promotion, and have research
+report a result — and on the evidence available all three say **no**. The next need is not
+another gate but a search space with something in it, and at 847 bars a 52-fold segment is 15
+bars, so each bet is short. Roughly 5,220 bars would give 52 segments of ~100 bars.
+
+That is a data question, not a design one, and it is the only thing standing between this
+project and a defensible null.
+
+`make verify`: 52 classes, 0 failed, 1442 executions across 62 files; 917 pytest pass.
