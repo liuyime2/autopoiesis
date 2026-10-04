@@ -2485,3 +2485,46 @@ through the trial accounting instead of the lifecycle counters.
   transitions run on live data and close the loop in replay.
 - **Profitability**: no. The search has found nothing that passes, and the live record shows the
   promoted strategies running behind holding.
+
+## 2026-10-04 — 7x24 validation over 3514 real cycles
+
+The replay harness had only ever been run over the 847-bar cache, so the "the loop closes" claim
+rested on four days. With 20448 real bars now cached, the same harness was run over the whole
+window - the real `TradingLoop`, the real `Guardian`, the real lifecycle rules, the evolution half
+driven by the daemon rather than called by hand:
+
+```
+cycles: 3514   errors: 0
+  REFLECTION_GENERATED           714
+  STRATEGY_EVALUATION_RECORDED   714
+  COUNTERFACTUAL_EVALUATED       1172
+  OFFLINE_VALIDATION_COMPLETED    109
+  STRATEGY_LIFECYCLE_UPDATED       2
+  PNL_EVIDENCE_FAILED            1173
+rulings:
+  PROBATION -> RETIRED
+  "offline validation rejected its own recorded decisions:
+   115 scored decision(s), 4 correct, correct_outcome_ratio 0.035"
+final_lifecycle: RETIRED
+filled_orders: 138.0
+```
+
+This is 4x the cycles of the previous run and covers 2026-05-01 to 2026-10-02 rather than four
+days, so it is real evidence for the unattended claim: the loop ran 3514 cycles without an error
+and ended by retiring a strategy on its own scored evidence, carrying the numbers in the reason.
+Every stage fired on its own.
+
+**What it does not show, stated plainly.** The decision engine in a replay is `MomentumEngine`,
+not the LLM - the real engine costs ~118s per call, so 3514 cycles of it is not something anyone
+runs on purpose. And the outcome is a retirement, not a promotion: a strategy with a
+`correct_outcome_ratio` of 0.035 is exactly what should be retired. This is evidence that the
+evolution machinery works end to end and that it rejects bad rules; it is not evidence that the
+system finds good ones.
+
+`PNL_EVIDENCE_FAILED` at 1173 is expected and correct: replay fills are `REPLAYED` and never
+`SUBMITTED`, so broker-verified PnL cannot exist in a replay. Recording that as a failure rather
+than inventing a PnL number is the behaviour the project already requires.
+
+The `make verify` gate stays on the 847-bar cache deliberately - `runtime/` is not committed, so a
+fresh clone would not have the large one, and a gate that needs a 20448-bar download is not a gate
+anyone runs.
