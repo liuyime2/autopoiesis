@@ -2345,3 +2345,74 @@ been acting on:
 The minimum thing a trading rule must be able to do, and the only thing none of these can do, is
 **close and re-enter.** That is a capability, not a tuning change, and it belongs in its own
 plan rather than in a threshold guard that would trade one permanent error for a temporary one.
+
+## 2026-10-04 — the data constraint is gone, and the design claim above was wrong
+
+### Real history at proper depth
+
+`tools/fetch_replay_bars.py` has no page cap on the historical endpoint, so the 4-day cache was
+a choice, not a limit. Fetching the window the gate actually needs:
+
+```
+cached 20448 real 5Min SPY bars -> runtime/min_agent/replay/SPY_5Min_2026-05-01_2026-10-03.json
+  2026-05-01 13:30:00+00:00 .. 2026-10-02 23:55:00+00:00
+  close 722.32 .. 769.86   high 779.37   low 714.99
+```
+
+20448 bars is **3.4x** the ~6000 the gate was estimated to need, and the range is 715.94-779.22 -
+**8.84% peak-to-peak**, against +0.27% over the whole 4-day cache. So "the library's thresholds
+of 1.0%-3.0% can never fire" was a statement about four days, not about the instrument.
+
+### The gate opens on real data, and says OVERFIT
+
+```
+design                    closed  closed/bar  oos(f=52)   req  verdict
+TREND_FOLLOW 0.001            2      0.0001         90    52  OVERFIT
+TREND_FOLLOW 0.002            2      0.0001         62    52  OVERFIT
+TREND_FOLLOW 0.005            1      0.0000         34    52  INSUFFICIENT
+TREND_FOLLOW 0.010            1      0.0000         13    52  INSUFFICIENT
+TREND_FOLLOW 0.020            1      0.0000          4    52  INSUFFICIENT
+TREND_FOLLOW 0.030            1      0.0000          0    52  INSUFFICIENT
+```
+
+This is the first time the research gate has produced a verdict on real data rather than
+`INSUFFICIENT` or a 4-day sample. It opens on the two thresholds that clear 52 out-of-sample
+trades, and the answer on both is `OVERFIT`.
+
+### Correcting the "nothing can close and re-enter" claim
+
+The section above concluded that no design in the space can close and re-enter, and that a
+round-trip capability was the missing thing. **That is wrong on real data.** Holding the dataset
+fixed and changing only the fold count:
+
+```
+same 20448 real bars, only the fold count changes:
+ folds  segment bars  oos trades  per fold
+    13           1571          51      3.92
+    26            785          71      2.73
+    52            392          90      1.73
+   104            196         121      1.16
+   208             98         193      0.93
+```
+
+Trade rate per fold rises with segment length, from 0.93 at 98-bar segments to 3.92 at 1571-bar
+segments. So `TREND_FOLLOW` **does** round-trip; it anchors on the first bar of its window, and a
+window only contains as many round trips as the oscillation around that first price allows. The
+4-day cache simply had no oscillation. Nothing about the design space needed changing - the
+dataset did.
+
+What this leaves, stated precisely:
+
+- **Not a data problem any more.** Real history at 3.4x the required depth is on disk.
+- **Still a design-space problem, but a different one.** Three kinds, two of which trade, and
+  both of those are long-only. At the 52 folds the gate demands, segments are 392 bars and each
+  design manages 1.73 trades per fold - enough to clear 52, but only just, and with no room for a
+  design to prove itself with independent bets.
+- **The verdict is a real null.** `OVERFIT` on real data at proper depth, from a gate that was
+  unreachable a day ago, is the first honest answer this project has produced about whether the
+  rules it generates have an edge. It is a negative result, obtained correctly.
+
+The remaining structural gap for fully autonomous exploration is now unambiguous and is not about
+rules or data: **`record_trial()` has no production caller.** The research stage can run and
+return a verdict, but nothing in the loop ever invokes it, so exploration is manual by
+construction.
