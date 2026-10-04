@@ -405,15 +405,19 @@ class StrategyLifecycleManager:
         at cycle 5, having had less than half the cycles it was promised and none of the
         chance to produce the ten informative decisions the screen needs. Twelve of the
         seventeen strategies ever paused here had attempted no trade at all.
+
+        The budget is counted in `cumulative_cycles` rather than the windowed `cycles`,
+        for the same reason `_needs_probation` counts it that way: `cycles` is the
+        reflection window and tops out at 7 for any single strategy, so both thresholds
+        were unreachable against it.
         """
         if strategy.kind == "HOLD_BASELINE" or strategy.lifecycle == "BASELINE":
             return False
         if result is None:
             return False
-        required = (
-            self.probation_cycles if strategy.lifecycle == "PROBATION" else self.min_active_cycles
-        )
-        return result.cycles >= required and result.trade_attempts == 0
+        if strategy.lifecycle == "PROBATION":
+            return result.cumulative_cycles >= self.probation_cycles and result.trade_attempts == 0
+        return result.cycles >= self.min_active_cycles and result.trade_attempts == 0
 
 
 class StrategySelector:
@@ -605,11 +609,22 @@ class StrategySelector:
         return bool(cls._declared_actions(strategy, last_price) & uncovered)
 
     def _needs_probation(self, strategy: StrategySpec, result: StrategyResult | None) -> bool:
+        """Has this candidate had its probation budget yet?
+
+        Measured against `cumulative_cycles` - cycles this strategy has been selected
+        for across the whole journal - and not `cycles`, which counts only the
+        reflection window. The window is 50 records shared by everything that traded in
+        it and currently tops out at 7 for any one strategy, so a 13-cycle budget
+        compared against it can never be met. That made probation endless: candidates
+        never left the queue, the queue never emptied, and because the queue has
+        absolute priority the one ACTIVE strategy was selected 0 times in the 146
+        cycles after its promotion.
+        """
         if strategy.lifecycle != "PROBATION":
             return False
         if result is None:
             return True
-        return result.cycles < self.min_probation_cycles
+        return result.cumulative_cycles < self.min_probation_cycles
 
 
 class StrategyExecutor:

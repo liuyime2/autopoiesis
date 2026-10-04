@@ -1382,3 +1382,81 @@ correction on this same point ("the journal has no rotation" was wrong). It is s
 still got repeated here, because scanning one file is the path of least resistance when the
 question is "what is on record". **Measure the journal through `JsonlJournal.read_all()`**,
 or say which file was read next to the number.
+
+## 2026-10-04 — probation was budgeted against a quantity no candidate could reach
+
+`e9317a6` made the probation budget and the probation verdict one constant. That was
+necessary and it was not sufficient, because **both numbers were being compared against the
+wrong quantity**, and that is the actual reason this loop has never promoted a candidate
+since 2026-09-30.
+
+`result.cycles` — which `_needs_probation` and the degenerate guard both read — comes from
+the reflection window:
+
+```
+reflection_window = 50  (config.py:65)
+last_n(50) spans 2026-10-02T11:03 -> 15:58, about five hours
+  11 strategies appear in it
+  cycles per strategy: 7 6 6 5 5 5 4 4 3 3 2 0 0
+  max it can hold for any one strategy: 7
+  probation budget compared against it: 13
+```
+
+So the budget was unreachable by construction. Measured consequences:
+
+```
+PROBATION candidates on disk: 18
+  still owing probation: 18 (every one), 223 cycles owed
+ACTIVE strategies: 1  (tiny-fixed-size-001)
+  selected in the 146 cycles since its promotion: 0
+lifetime cycles served, from the full record:
+  42 strategies ever selected, max 44, and 9 have served 13 or more
+```
+
+`StrategySelector.select` returns from the probation queue whenever any candidate is
+actionable, and considers the incumbent only otherwise. With 18 candidates that can never
+leave probation, **absolute priority held forever and the one promoted strategy never
+traded.** Nine strategies have genuinely served their budget and none of them could be
+released.
+
+### The change
+
+`StrategyResult` and `StrategyEvaluation` carry `cumulative_cycles` — cycles served across
+the whole journal — and exactly two rules read it, because exactly two rules mean "service
+owed": `_needs_probation` and the `PROBATION` branch of `_is_degenerate_no_exploration`. The
+daemon derives it from `journal.read_all()`, which this cycle already calls eight times
+(lines 481, 549, 560, 833, 839, 856, 999), so it adds no new read.
+
+Everything else keeps the windowed number on purpose: failure and rejection *rates* are
+recent-reliability judgements, `score` is a window judgement, and the exploration floor is
+defined in windows. A test pins that a rate cannot become a lifetime ratio.
+
+Not changed: `reflection_window` stays at 50. Making 13 reachable per strategy would need
+~234 cycles, about a day and a half of wall time, and would make every score that stale —
+trading one wrong number for a worse one.
+
+### What this does and does not fix
+
+It fixes the instrument, and one candidate is released immediately:
+
+```
+candidates owing probation   before 18   after 17
+released now: trend-follow-buy-010, 15 lifetime cycles
+```
+
+The queue is still 17 deep because **16 of the 18 candidates have never been selected at
+all** — lifetime 0 to 6. That is serving capacity, not measurement, and it is now the
+binding constraint: 9 of the 17 are actionable in the recent price range and need 13 cycles
+each, about 117 cycles against an observed ~36 cycles a day, so roughly three days of
+probation before the incumbent can trade at all.
+
+**Not claimed:** that any strategy is promoted or that the incumbent trades. Both are claims
+about the live record after the daemon has run, and both are recorded as falsifiers in
+`docs/superpowers/plans/2026-10-04-probation-measured-against-a-window.md`.
+
+While making this change an edit to `models.py` silently deleted `StrategyEvaluation.
+rejected_orders`, because the match omitted a line between two identical anchors. The suite
+caught it in the same run; it is recorded because the failure mode — an `oldString` that
+matches while dropping a field — is invisible in review and only a test finds it.
+
+`make verify`: 52 classes, 0 failed, 1408 executions across 62 files; 896 pytest pass.

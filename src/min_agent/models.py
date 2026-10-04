@@ -584,6 +584,10 @@ class StrategyEvaluation(BaseModel):
 
     strategy_id: str = Field(min_length=1)
     cycles: int = Field(ge=0)
+    #: Cycles this strategy was selected for across the whole journal, as opposed to
+    #: `cycles`, which counts only the reflection window. See `StrategyResult` for why
+    #: the probation rules cannot use the windowed number.
+    cumulative_cycles: int = Field(default=0, ge=0)
     submitted_orders: int = Field(ge=0)
     rejected_orders: int = Field(ge=0)
     skipped_orders: int = Field(ge=0)
@@ -658,7 +662,22 @@ class StrategyResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     strategy_id: str = Field(min_length=1)
+    #: Cycles this strategy was selected for, **within the reflection window**.
+    #: This is a freshness measure: error and rejection rates, the score and the
+    #: exploration floor are all recent-behaviour judgements and belong here.
     cycles: int = Field(ge=0)
+    #: Cycles this strategy has been selected for across the whole journal.
+    #:
+    #: A different quantity from `cycles`, and the only correct one for "has this
+    #: candidate had its probation budget". The window is 50 cycle records shared by
+    #: every strategy that traded in it, so it currently tops out at 7 cycles for any
+    #: one strategy - which made a 13-cycle probation budget, and the verdict that
+    #: checks it, unreachable. Probation then never ended, the queue never emptied,
+    #: and because the queue has absolute priority the one ACTIVE strategy was
+    #: selected 0 times in the 146 cycles after its promotion.
+    #:
+    #: Defaults to 0 so a result built without it behaves exactly as before.
+    cumulative_cycles: int = Field(default=0, ge=0)
     submitted_orders: int = Field(ge=0)
     rejected_orders: int = Field(ge=0)
     errors: int = Field(ge=0)

@@ -257,6 +257,30 @@ class AgentDaemon:
         if self.cycle_count % self.curriculum_every == 0 and self.curriculum_agent is not None:
             self._curriculum_proposal()
 
+    def _cumulative_cycles_by_strategy(self) -> dict[str, int]:
+        """Cycles each strategy has been selected for, over the whole journal.
+
+        The reflection window is `reflection_window` records - 50 by default, about
+        five hours - shared by every strategy that traded in it, so it currently
+        holds at most 7 cycles for any one strategy. Probation is budgeted at 13 and
+        was being compared against that number, which made the budget unreachable:
+        candidates never left probation, the queue never emptied, and because the
+        queue has absolute priority in the selector the one ACTIVE strategy was
+        selected 0 times in the 146 cycles after its promotion.
+
+        The journal is the single source of truth for how often a strategy has run,
+        and this cycle already reads it in full several times over, so the count
+        costs nothing that is not already being paid.
+        """
+        counts: dict[str, int] = {}
+        if self.journal is None:
+            return counts
+        for record in self.journal.read_all():
+            strategy_id = record.decision.strategy_id
+            if strategy_id:
+                counts[strategy_id] = counts.get(strategy_id, 0) + 1
+        return counts
+
     def _reflect(self, *, evidence: BrokerEvidenceBatch | None = None) -> None:
         if self.journal is None or self.reflection_memory is None:
             return
@@ -267,6 +291,7 @@ class AgentDaemon:
                 evidence=evidence,
                 fills=self._confirmed_fills(),
                 seeded_fills=self._confirmed_fill_activities(),
+                cumulative_cycles=self._cumulative_cycles_by_strategy(),
             )
             self.reflection_memory.save(reflection)
             self._append_event(

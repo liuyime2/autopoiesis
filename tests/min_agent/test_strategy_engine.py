@@ -201,7 +201,9 @@ def test_strategy_selector_does_not_force_orders_for_mature_probation():
         created_at=datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc),
     )
     results = [
-        StrategyResult(strategy_id="old", cycles=3, submitted_orders=0, rejected_orders=0, errors=0, score=0.9, evaluated_at=datetime.now(tz=timezone.utc)),
+        # cumulative_cycles, not cycles: the budget counts cycles served across the
+        # journal, and this strategy has served its full budget of 3.
+        StrategyResult(strategy_id="old", cycles=3, cumulative_cycles=3, submitted_orders=0, rejected_orders=0, errors=0, score=0.9, evaluated_at=datetime.now(tz=timezone.utc)),
     ]
 
     chosen = selector.select([old, new], results)
@@ -258,6 +260,7 @@ def test_lifecycle_manager_pauses_hold_only_trend_after_evidence_cycles():
     result = StrategyResult(
         strategy_id="trend",
         cycles=3,
+        cumulative_cycles=3,
         submitted_orders=0,
         rejected_orders=0,
         errors=0,
@@ -280,6 +283,7 @@ def test_lifecycle_manager_pauses_degenerate_fixed_size_no_exploration():
     result = StrategyResult(
         strategy_id="hold-fixed",
         cycles=3,
+        cumulative_cycles=3,
         submitted_orders=0,
         rejected_orders=0,
         errors=0,
@@ -336,6 +340,7 @@ def test_probation_candidate_is_degenerate_once_its_budget_is_spent():
     result = StrategyResult(
         strategy_id="quiet",
         cycles=13,
+        cumulative_cycles=13,
         submitted_orders=0,
         rejected_orders=0,
         errors=0,
@@ -381,6 +386,104 @@ def test_promoted_strategy_that_stops_acting_is_still_paused_at_min_active_cycle
 
     assert decision.new_lifecycle == "PAUSED"
     assert "no exploration" in decision.reason
+
+
+def test_a_served_candidate_leaves_probation_even_with_an_empty_window():
+    """The budget is cumulative service, so an empty window cannot restart it.
+
+    This is the case that made probation endless. `cycles` is the reflection window -
+    50 records shared by everything that traded in it, which tops out at 7 for any one
+    strategy - and the budget is 13, so a candidate measured against the window could
+    never be released no matter how long it had served. With 18 candidates in the queue
+    the probation branch of `select` therefore always won, and the one ACTIVE strategy
+    was selected 0 times in the 146 cycles after its promotion.
+    """
+    selector = StrategySelector()
+    budget = selector.min_probation_cycles
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION")
+    incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE")
+
+    served = [
+        # Served its whole budget, but has traded nothing in the current window.
+        StrategyResult(
+            strategy_id="candidate", cycles=0, cumulative_cycles=budget,
+            submitted_orders=0, rejected_orders=0, errors=0, score=0.1,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+        StrategyResult(
+            strategy_id="incumbent", cycles=4, cumulative_cycles=40, submitted_orders=8,
+            trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+    ]
+
+    assert selector.select([candidate, incumbent], served).strategy_id == "incumbent"
+
+
+def test_a_candidate_with_service_left_stays_in_probation_whatever_the_window_says():
+    """The converse, so the first test cannot pass by ignoring the count entirely."""
+    selector = StrategySelector()
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION")
+    incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE")
+
+    results = [
+        StrategyResult(
+            strategy_id="candidate", cycles=selector.min_probation_cycles,
+            cumulative_cycles=selector.min_probation_cycles - 1,
+            submitted_orders=0, rejected_orders=0, errors=0, score=0.1,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+        StrategyResult(
+            strategy_id="incumbent", cycles=4, cumulative_cycles=40, submitted_orders=8,
+            trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+    ]
+
+    assert selector.select([candidate, incumbent], results).strategy_id == "candidate"
+
+
+def test_probation_rates_stay_windowed_so_a_lifetime_count_cannot_become_a_rate():
+    """Cumulative service feeds the budget, never the failure rate.
+
+    `cumulative_cycles` is new and it would be easy to reach for it everywhere. These are
+    the rules that must keep the windowed number: an error rate is a statement about
+    recent reliability, and dividing one error by 44 lifetime cycles would report 2%
+    failure for a strategy that failed on a third of the cycles that actually ran.
+    """
+    manager = StrategyLifecycleManager(max_error_rate=0.25)
+    strategy = make_spec(strategy_id="noisy", kind="FIXED_SIZE", lifecycle="ACTIVE",
+                         action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="noisy", cycles=3, cumulative_cycles=44,
+        submitted_orders=1, rejected_orders=0, errors=1, score=0.1,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+
+    assert manager._is_degenerate_no_exploration(strategy, result) is False
+    [decision] = manager.review([strategy], [result])
+
+    assert decision.new_lifecycle == "PAUSED"
+    assert "error rate" in decision.reason
+
+
+def test_a_strategy_result_built_without_the_new_count_behaves_exactly_as_before():
+    """The default must be inert, which is what makes the other 892 tests evidence.
+
+    A result with no `cumulative_cycles` reads as zero served, so a PROBATION candidate
+    is still inside its budget and is not paused - the same answer the windowed code gave
+    before the field existed.
+    """
+    manager = StrategyLifecycleManager(probation_cycles=13)
+    strategy = make_spec(strategy_id="legacy", kind="FIXED_SIZE", lifecycle="PROBATION",
+                         action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="legacy", cycles=13, submitted_orders=0, rejected_orders=0, errors=0,
+        score=0.0, evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=0,
+    )
+
+    assert result.cumulative_cycles == 0
+    assert manager._is_degenerate_no_exploration(strategy, result) is False
 
 
 def test_lifecycle_manager_pauses_high_rejection_rate():
@@ -1327,9 +1430,13 @@ def test_a_candidate_leaves_probation_only_once_it_could_be_screened():
     incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE")
 
     def with_cycles(n):
+        # `cumulative_cycles` is the quantity the budget is measured against: cycles
+        # served across the whole journal. `cycles` is the reflection window, which
+        # tops out at 7 for any one strategy and so can never express a budget of 13.
         return [
             StrategyResult(
-                strategy_id="candidate", cycles=n, submitted_orders=0, rejected_orders=0,
+                strategy_id="candidate", cycles=3, cumulative_cycles=n,
+                submitted_orders=0, rejected_orders=0,
                 errors=0, score=0.5, evaluated_at=datetime.now(tz=timezone.utc),
             ),
             # The incumbent outscores the candidate, so once the candidate leaves

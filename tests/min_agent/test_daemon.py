@@ -100,7 +100,7 @@ class FailingLoop:
 
 
 class FailingReflectionMemory(ReflectionMemory):
-    def reflect(self, records, evidence=None, fills=None, seeded_fills=None):
+    def reflect(self, records, evidence=None, fills=None, seeded_fills=None, cumulative_cycles=None):
         raise RuntimeError("reflection boom")
 
 
@@ -917,7 +917,8 @@ def test_offline_screening_never_promotes_a_strategy(tmp_path):
 
     decisions = StrategyLifecycleManager().review(
         [_spec("sound", lifecycle="PROBATION")],
-        [type("R", (), {"strategy_id": "sound", "cycles": 0, "submitted_orders": 0,
+        [type("R", (), {"strategy_id": "sound", "cycles": 0, "cumulative_cycles": 0,
+                        "submitted_orders": 0,
                         "rejected_orders": 0, "errors": 0, "score": 0.5,
                         "trade_attempts": 0, "pnl_evidence": "", "realized_pnl": None,
                         "strategy_fault_rejections": None, "subbed_orders": 0,
@@ -943,7 +944,8 @@ def test_a_first_cycle_candidate_is_never_touched(tmp_path):
 
     decisions = StrategyLifecycleManager().review(
         [_spec("fresh", lifecycle="PROBATION")],
-        [type("R", (), {"strategy_id": "fresh", "cycles": 1, "submitted_orders": 0,
+        [type("R", (), {"strategy_id": "fresh", "cycles": 1, "cumulative_cycles": 1,
+                        "submitted_orders": 0,
                         "rejected_orders": 0, "errors": 0, "score": 0.5,
                         "trade_attempts": 0, "pnl_evidence": "", "realized_pnl": None,
                         "strategy_fault_rejections": None,
