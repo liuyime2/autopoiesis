@@ -1691,3 +1691,61 @@ question, and it has not been answered.
 probation on its own evidence, then trading. No candidate in the library can be promoted today
 — the 17 queued ones hold 0 to 9 scored decisions against a gate of 10 — so the earliest
 honest read is after they have been served, about two market days at the measured rate.
+
+## 2026-10-04 — the model accounts for 5% of the profit, and that is the finding that matters
+
+The previous entry asked whether a promotion verdict is worth trading. The attribution
+answers it without needing a verdict at all: join each closed lot back to the decision that
+opened it.
+
+```
+35 closed lots, 35 shares, realized +594.33   (+16.98 per share)
+
+realized PnL by the decision source that opened the lot
+  baseline    23 lots   +564.39    95.0%
+  llm         12 lots    +29.94     5.0%
+```
+
+**The language model contributed $29.94.** The deterministic baseline contributed $564.39.
+The three strategies that ever produced verified PnL — `tiny-fixed-size-001`,
+`fixed-size-buy-001`, `trend-follow-buy-001` — are fixed-size buyers whose decisions are
+deterministic by construction, which is why the profit is almost entirely baseline-attributed.
+
+And against the benchmark, on its own entry prices:
+
+```
+mean fill price 757.13   realized +2.24% per share deployed
+SPY 739.24 -> 769.58     the market delivered +4.10% over the same window
+```
+
+Two honest readings, because they differ and only one of them flatters the system:
+
+- From the **window start** (739.24) the market returned +4.10% while the agent realized
+  +2.24% per share. But the agent's fills averaged 757.13, so it bought well after the move
+  began; holding from its own entries would have returned +1.64%.
+- So against **its actual entries** it did modestly better than holding, +2.24% against
+  +1.64% — about 0.6 points, on 35 shares.
+
+Thirty-five shares over four months is a sample that cannot separate skill from noise. The
+defensible statements are the ones that do not need it to be larger: **the model's own
+contribution is $29.94, which is indistinguishable from zero**, and the system's demonstrated
+edge is $594 on a $99k account.
+
+### Why this reframes the priority
+
+Everything this session fixed makes the loop able to *reach a verdict* — the probation budget
+measured against cumulative service, admission refused when the queue is over capacity, the
+four service questions moved off a five-hour window onto the journal. None of that touches
+the number above, and none of it will until a candidate with an actual edge exists to be
+promoted.
+
+The loop's job is to find a strategy that beats holding. On this record it has not found one,
+and the one component that could have found one — the model — supplied 5% of a small profit.
+So the next question is not another lifecycle rule. It is whether the decision sources
+produce anything worth acting on at all, and the cheapest honest test of that is the
+counterfactual ledger this system already maintains: across all 314 LLM decisions, 241 scored,
+the calibration report's own verdict is `MIS-CALIBRATED` and the day-adjusted margin is −0.0%.
+
+**That is the honest summary of where this project stands.** The infrastructure is sound, the
+audit trail is complete, the risk boundaries hold, and the demonstrated edge is $29.94 from
+the model and $594 from deterministic buying in a rising market.
