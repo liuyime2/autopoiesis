@@ -2400,6 +2400,50 @@ def check_data_integrity() -> Result:
     return Result("data-integrity", PASS if rc == 0 else FAIL, _tail(out))
 
 
+def check_selection_pressure_reaches_the_rules() -> Result:
+    """The lifecycle rules must react to the system's own scored evidence.
+
+    The defect this catches shipped and was live for months. The REJECT veto lived in
+    `AgentDaemon._apply_offline_rejection`, not in `StrategyLifecycleManager`, so the
+    promotion gate was reachable from the rule set while the rejection was not. Measured over
+    847 real bars: 580 scored decisions, 304 of them losing trades,
+    `correct_outcome_ratio` 0.476, verdict REJECT_POOR_DECISIONS - and `review()` returned no
+    ruling at all. A journal could carry a REJECT for a strategy still marked PROBATION with
+    nothing anywhere saying why.
+
+    This asserts, from the rule set alone with no daemon in the picture, that REJECT retires
+    with its evidence in the reason, that INCONCLUSIVE and absent evidence do not - silence
+    must never be read as failure, the error the admission gate made once already - and that
+    `_review_one` itself names the verdict rather than depending on a caller's side effect.
+
+    It is a check about the mechanism. It is not evidence that any strategy has ever been
+    retired, and must not be cited as if it were.
+    """
+    rc, out = _run([sys.executable, "tools/selection_pressure_probe.py"])
+    if rc != 0:
+        return Result(
+            "selection-pressure-reaches-the-rules", FAIL,
+            f"selection-pressure probe did not run: {_tail(out)}",
+        )
+    try:
+        found = json.loads(out.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return Result(
+            "selection-pressure-reaches-the-rules", FAIL,
+            f"unreadable probe output: {_tail(out)}",
+        )
+    if found:
+        return Result(
+            "selection-pressure-reaches-the-rules", FAIL,
+            f"the rules do not react to scored evidence: {'; '.join(found)}",
+        )
+    return Result(
+        "selection-pressure-reaches-the-rules", PASS,
+        "a REJECT verdict retires from the rule set carrying its ratio, while "
+        "INCONCLUSIVE and absent evidence do not",
+    )
+
+
 def check_replay_cannot_reach_the_account() -> Result:
     """The replay harness must be structurally unable to touch the account.
 
@@ -2760,6 +2804,7 @@ def check_all_tests_classified() -> Result:
 # the class-count gate and the run itself cannot disagree: three readers of one list rather
 # than three independent recollections of it.
 BESPOKE_CHECK_NAMES = (
+    "selection-pressure-reaches-the-rules",
     "replay-cannot-reach-the-account",
     "docs-no-deleted-commands",
     "example-runs",
@@ -3259,6 +3304,7 @@ def main() -> int:
     results.append(_safe(check_data_integrity, "data-integrity"))
     results.append(_safe(check_shadow_live_consistency, "shadow-live-consistency"))
     results.append(_safe(check_replay_cannot_reach_the_account, "replay-cannot-reach-the-account"))
+    results.append(_safe(check_selection_pressure_reaches_the_rules, "selection-pressure-reaches-the-rules"))
 
     for cls in CHECK_CLASSES:
         if wanted and cls not in wanted:

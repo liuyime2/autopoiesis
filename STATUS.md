@@ -804,3 +804,76 @@ the queue is serial, so draining all 13 actionable candidates costs ~169 cycles 
 days. Everything else in this audit is downstream of that.
 
 `make verify`: 50 classes, 0 failed, 1376 executions across 62 files; 876 pytest pass.
+
+## 2026-10-03 — self-evolution, in the only sense that is falsifiable: the rules react to scored evidence
+
+The request was to make the system self-evolve. Measured first, because the honest version is
+narrower than the phrase: 87.7% of PnL is one exit at one price, confidence is bimodal, Brier
+is 0.5342. Against that evidence, "self-evolution makes strategies better" is not falsifiable.
+What **is** falsifiable is whether the system's own selection pressure reacts to its own
+scored evidence. That is what now works, for the first time in this project's history.
+
+### The measurement that found the defect
+
+Driving the real loop over 847 real bars, then feeding the scored decisions through the real
+screen and the real lifecycle manager:
+
+```
+该策略的决策裁定: 819
+离线筛查: verdict=REJECT_POOR_DECISIONS scored=580 correct_outcome_ratio=0.475862
+  good_holds=6 good_trades=270 false_trades=304 missed_alpha=0
+lifecycle 裁定: None（留在 PROBATION）
+```
+
+**A screen saying `REJECT_POOR_DECISIONS` produced no ruling at all.** A strategy with 304
+losing trades out of 580 scored stayed in probation and nothing anywhere said so. Isolated to
+20 GOOD_TRADE + 25 FALSE_TRADE it reproduced, and `_review_one`'s source does not contain
+`REJECT_POOR_DECISIONS` at all.
+
+### Root cause
+
+The veto lived in `AgentDaemon._apply_offline_rejection`, not in `StrategyLifecycleManager`.
+`_screen_all_strategies` called it as a side effect. So the **promotion gate was reachable
+from the rule set while the rejection was not** — an asymmetry with no principled basis, which
+meant any other caller got half the selection pressure, and the journal could hold a REJECT for
+a strategy still marked PROBATION. Same class of defect as the three drifted verdict copies
+fixed earlier: one authoritative rule, restated as control flow elsewhere, and the two drift.
+
+### The change
+
+`_review_one` gained a branch, beside every other lifecycle rule, and `_evidence_rejection_reason`
+reports why with the numbers in the message:
+
+```
+lifecycle 裁定: [('RETIRED', 'offline validation rejected its own recorded decisions:
+                  580 scored decision(s), 276 correct, correct_outcome_ratio 0.476')]
+```
+
+`RETIRED` rather than the `PAUSED` the daemon used, because `RETIRED` is terminal in these
+rules while `PAUSED` is not, and a strategy whose own recorded decisions were 48% correct has
+earned a final answer rather than another probation. That is the one behavioural difference,
+and it is deliberate. The daemon's own path is unchanged in effect.
+
+**The veto must never fire on silence.** `INCONCLUSIVE` means "cannot tell yet", and treating
+it as failure is the error the admission gate already made once — a first-cycle candidate told
+INCONCLUSIVE came back paused. A rule that retired on silence would empty the library. Tests
+cover REJECT, INCONCLUSIVE, absent evidence, PASS, and an already-RETIRED strategy.
+
+**Machine-checked, and checked against a deliberate break.**
+`tools/selection_pressure_probe.py` asserts from the rule set alone — with no daemon in the
+picture — that REJECT retires carrying its ratio, that INCONCLUSIVE and absent evidence do
+not, and that `_review_one` itself names the verdict rather than depending on a caller's side
+effect. Removing the branch makes it report
+`a REJECT_POOR_DECISIONS verdict produced no retirement from the rule set; decisions were
+none`, so it is not a check that always passes. `make verify` runs it as
+`selection-pressure-reaches-the-rules`.
+
+### What this is not
+
+It is not proof that any strategy has an edge, and not proof that any strategy has actually
+been retired — the check's docstring records that distinction, as the replay check does. The
+next honest step is the one the objective forbids skipping: a rejection reason to steer a
+generator is premature while there have been **zero promotions**. The number to watch is the
+first `PASS_SCREENED`.
+
+`make verify`: 51 classes, 0 failed, 1380 executions across 62 files; 880 pytest pass.

@@ -228,6 +228,25 @@ class StrategyLifecycleManager:
             return StrategyLifecycleDecision(strategy, "PAUSED", "error rate above lifecycle threshold")
         if rejection_rate > self.max_rejection_rate:
             return StrategyLifecycleDecision(strategy, "PAUSED", "Guardian rejection rate above lifecycle threshold")
+
+        # A screen verdict that says REJECT retires the strategy here, in the rule set,
+        # rather than in `AgentDaemon._apply_offline_rejection`.
+        #
+        # It used to live there, and that was an asymmetry with no principled basis: any
+        # other caller of `review()` got the promotion gate but not the rejection veto, so a
+        # replay harness or a fresh process could read `REJECT_POOR_DECISIONS` on the record
+        # and see the strategy still sitting in PROBATION with nothing anywhere saying why.
+        # Measured over 847 real bars: 580 scored decisions, 304 of them losing trades,
+        # `correct_outcome_ratio` 0.476, verdict REJECT_POOR_DECISIONS - and the lifecycle
+        # returned no ruling at all. One authoritative rule, not a rule plus a side effect.
+        #
+        # RETIRED rather than the PAUSED the daemon used, because RETIRED is terminal in
+        # these rules while PAUSED is not, and a strategy whose own recorded decisions were
+        # 48% correct has earned a final answer rather than another probation. That is the
+        # one behavioural difference this change makes, and it is deliberate.
+        rejection = self._evidence_rejection_reason(evidence)
+        if rejection is not None:
+            return StrategyLifecycleDecision(strategy, "RETIRED", rejection)
         if strategy.lifecycle == "PROBATION" and result.cycles >= self.min_active_cycles:
             if self._is_degenerate_no_exploration(strategy, result):
                 return StrategyLifecycleDecision(strategy, "PAUSED", "probation produced no exploration evidence")
@@ -287,6 +306,35 @@ class StrategyLifecycleManager:
         if self._is_degenerate_no_exploration(strategy, result):
             return StrategyLifecycleDecision(strategy, "PAUSED", "no exploration evidence over the evaluation window")
         return None
+
+    def _evidence_rejection_reason(self, evidence: object | None) -> str | None:
+        """Why this strategy's own recorded decisions retire it, or None.
+
+        Strictly one thing: a verdict of REJECT. `INCONCLUSIVE` must never fire here. It
+        means "cannot tell yet", and treating silence as failure is the error the admission
+        gate made once already - a first-cycle candidate told INCONCLUSIVE came back paused,
+        because silence was being read as a bad decision. A rule that retires on silence
+        would empty the library.
+
+        The counts go in the reason so the journal says what happened in numbers, rather than
+        asserting that a strategy was bad.
+        """
+        if evidence is None:
+            return None
+        if getattr(evidence, "verdict", None) != "REJECT_POOR_DECISIONS":
+            return None
+        scored = getattr(evidence, "scored", 0) or 0
+        correct = getattr(evidence, "correct_outcomes", None)
+        ratio = getattr(evidence, "correct_outcome_ratio", None)
+        detail = [f"{scored} scored decision(s)"]
+        if correct is not None:
+            detail.append(f"{correct} correct")
+        if ratio is not None:
+            detail.append(f"correct_outcome_ratio {float(ratio):.3f}")
+        return (
+            "offline validation rejected its own recorded decisions: "
+            + ", ".join(detail)
+        )
 
     def _promotion_evidence_gate(self, evidence: object | None) -> str | None:
         """Why this strategy may not be promoted, or None if it may.

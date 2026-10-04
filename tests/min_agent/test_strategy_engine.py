@@ -1294,3 +1294,89 @@ def test_the_reason_is_written_when_the_lifecycle_is_written():
     assert 'model_copy(update={"lifecycle": decision.new_lifecycle' not in lifecycle_writes
     assert '"lifecycle_reason": decision.reason' in lifecycle_writes
     assert '"lifecycle_reason": review.reason' in inspect.getsource(strategy_admission)
+
+
+# --------------------------------------------------------------------------
+# selection pressure lives in the rules, not in the daemon's control flow
+# --------------------------------------------------------------------------
+
+def _screen_evidence(verdict, *, scored=0, correct=0):
+    from min_agent.offline_validation import OfflineValidationResult
+
+    return OfflineValidationResult(
+        strategy_id="s", verdict=verdict, reason="test", decisions=scored, scored=scored,
+        good_holds=correct, missed_alpha=0, false_trades=scored - correct, good_trades=0,
+    )
+
+
+def _probation_result(strategy_id="s"):
+    return StrategyResult(
+        strategy_id=strategy_id, cycles=60, submitted_orders=45, rejected_orders=0,
+        errors=0, score=0.5, trade_attempts=45,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+
+
+def test_a_screen_verdict_of_reject_retires_the_strategy_with_its_evidence():
+    """The defect this fixes, measured.
+
+    Over 847 real bars: 580 scored decisions, 304 of them losing trades,
+    `correct_outcome_ratio` 0.476, verdict REJECT_POOR_DECISIONS - and
+    `StrategyLifecycleManager.review()` returned no ruling at all. The veto lived in
+    `AgentDaemon._apply_offline_rejection`, so any caller of the rule set got the promotion
+    gate but not the rejection, and the journal could hold a REJECT for a strategy still
+    marked PROBATION with nothing saying why.
+    """
+    spec = make_spec(strategy_id="s", kind="FIXED_SIZE", lifecycle="PROBATION")
+
+    decisions = StrategyLifecycleManager().review(
+        [spec], [_probation_result()],
+        {"s": _screen_evidence("REJECT_POOR_DECISIONS", scored=580, correct=276)},
+    )
+
+    assert len(decisions) == 1
+    assert decisions[0].new_lifecycle == "RETIRED"
+    reason = decisions[0].reason
+    assert "580 scored" in reason
+    assert "0.476" in reason, "the ruling must carry the numbers, not an assertion"
+
+
+def test_the_rejection_veto_does_not_fire_on_silence():
+    """INCONCLUSIVE means "cannot tell yet". Retiring on it would empty the library.
+
+    This is the same error the admission gate made once already: a first-cycle candidate
+    told INCONCLUSIVE came back paused, because silence was being read as failure. A rule
+    that retires on silence is not strict, it is broken.
+    """
+    spec = make_spec(strategy_id="s", kind="FIXED_SIZE", lifecycle="PROBATION")
+    manager = StrategyLifecycleManager()
+
+    inconclusive = manager.review([spec], [_probation_result()], {"s": _screen_evidence("INCONCLUSIVE")})
+    no_evidence = manager.review([spec], [_probation_result()], {})
+
+    assert not [d for d in inconclusive if d.new_lifecycle == "RETIRED"]
+    assert not [d for d in no_evidence if d.new_lifecycle == "RETIRED"]
+
+
+def test_a_passing_verdict_is_not_a_ruling_against_the_strategy():
+    """The veto must not fire on a pass either - promotion handles that."""
+    spec = make_spec(strategy_id="s", kind="FIXED_SIZE", lifecycle="PROBATION")
+
+    decisions = StrategyLifecycleManager().review(
+        [spec], [_probation_result()],
+        {"s": _screen_evidence("PASS_SCREENED", scored=40, correct=28)},
+    )
+
+    assert not [d for d in decisions if d.new_lifecycle == "RETIRED"]
+
+
+def test_an_already_retired_strategy_is_not_re_judged():
+    """A terminal state must stay terminal however the evidence reads."""
+    spec = make_spec(strategy_id="s", kind="FIXED_SIZE", lifecycle="RETIRED")
+
+    decisions = StrategyLifecycleManager().review(
+        [spec], [_probation_result()],
+        {"s": _screen_evidence("REJECT_POOR_DECISIONS", scored=580, correct=276)},
+    )
+
+    assert decisions == []

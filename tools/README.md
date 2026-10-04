@@ -13,7 +13,7 @@ this refactor removed.
 
 ## The gate — `verify.py`
 
-**`python tools/verify.py`** is the project gate: 50 check classes, non-zero exit on any
+**`python tools/verify.py`** is the project gate: 51 check classes, non-zero exit on any
 failure. `make verify` runs it. Three modes:
 
 - `--self-test` breaks the gate on purpose and asserts it reports failure, because a
@@ -28,6 +28,15 @@ failure. `make verify` runs it. Three modes:
 journal text, with no production code involved, and compares them to what the system
 reported. It is deliberately naive arithmetic over the record: if it agreed with the
 system by construction it would prove nothing.
+
+**`selection_pressure_probe.py`** is the machine-checked form of the claim that the
+lifecycle rules react to the system's own scored evidence: a `REJECT_POOR_DECISIONS` verdict
+must retire from `StrategyLifecycleManager` carrying its ratio in the reason, while
+`INCONCLUSIVE` and absent evidence must not — silence is not failure. This caught a defect
+that was live for months, where the veto existed only in `AgentDaemon._apply_offline_rejection`
+so any caller of the rule set got promotion gating without rejection. `make verify` calls it
+through `check-selection-pressure-reaches-the-rules`; like the replay probe it verifies the
+mechanism, not that any strategy has actually been retired.
 
 **`replay_safety_probe.py`** is the machine-checked form of the four properties that keep
 the replay harness out of the PnL ledger: it holds no broker client, reports `REPLAYED`
