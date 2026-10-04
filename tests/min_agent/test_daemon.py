@@ -1109,3 +1109,111 @@ def test_a_calibration_claim_is_published_only_with_records_to_attribute_it_to(
         "cycles to cite - a claim with nothing behind it must not be published"
     )
     assert journal.read_events("KNOWLEDGE_ARTIFACT_PROPOSED") == []
+
+
+def _calibration_daemon(tmp_path):
+    """A daemon with the pieces `_record_calibration_lesson` needs, over one real cycle."""
+    from min_agent.knowledge_library import KnowledgeLibrary
+
+    cfg = config(tmp_path, interval=0)
+    journal = JsonlJournal(cfg.journal_path)
+    knowledge_library = KnowledgeLibrary(cfg.knowledge_dir)
+    daemon = AgentDaemon(
+        config=cfg,
+        loop=FakeLoop(journal=journal, strategy_id="hold-strategy"),
+        sleep=lambda seconds: None,
+        journal=journal,
+        strategy_library=StrategyLibrary(cfg.strategy_dir),
+        knowledge_admission=KnowledgeAdmission(knowledge_library=knowledge_library),
+    )
+    daemon.run(max_cycles=1)
+    return daemon, journal, knowledge_library
+
+
+def test_a_day_effect_is_not_published_to_the_model_as_a_character_trait(tmp_path, monkeypatch):
+    """The lesson this project was teaching was a description of the weather.
+
+    For weeks every maintenance pass told the model its confidence "runs backwards",
+    with a 0.0-0.2 bucket at 90.6% and a 0.6-0.8 bucket at 6%. Both numbers were the
+    market's: correctness on this account is mostly the trading day's, and those buckets
+    sat on different days. Read against their own days the margins are zero. Publishing
+    that reading as a lesson puts a false claim into every subsequent decision prompt,
+    so the lesson is gated on the day-adjusted margin being materially negative - and with
+    it at zero, nothing is published.
+    """
+    from min_agent import calibration
+
+    daemon, journal, knowledge_library = _calibration_daemon(tmp_path)
+    monkeypatch.setattr(calibration, "calibrate", lambda rows, **kw: calibration.CalibrationReport(
+        source="llm", total_decisions=200, scored=200, brier=0.40, day_brier=0.27, days=4,
+        base_rate=0.53, verdict="MIS-CALIBRATED: brier 0.40",
+        buckets=(
+            calibration.Bucket(low=0.0, high=0.2, n=40, correct=36, day_expected_accuracy=0.90),
+            calibration.Bucket(low=0.4, high=0.6, n=80, correct=60, day_expected_accuracy=0.60),
+            calibration.Bucket(low=0.6, high=0.8, n=160, correct=10, day_expected_accuracy=0.06),
+        ),
+        top_bucket_day_margin=-0.001,
+        worst_bucket_day_margin=-0.001,
+    ))
+
+    daemon._record_calibration_lesson()
+
+    assert knowledge_library.list(status="ACCEPTED") == [], (
+        "a raw inversion that its own days explain must not become a lesson"
+    )
+    assert journal.read_events("KNOWLEDGE_ARTIFACT_PROPOSED") == []
+
+
+def test_the_lesson_that_is_published_quotes_the_day_adjusted_margin(tmp_path, monkeypatch):
+    """When the finding survives the control, the model is told the controlled number.
+
+    Otherwise the fix is only a deletion: the lesson would go quiet and the one stratum
+    that genuinely underperforms - high-confidence trades, 19 points under their days on
+    the live record - would stop reaching the model at all.
+    """
+    from min_agent import calibration, counterfactual
+
+    daemon, journal, knowledge_library = _calibration_daemon(tmp_path)
+    # The lesson cites scored cycles, and `build_rows` only keeps decisions whose
+    # `decision_source` is the model - so the cycle has to be an LLM one. It is written by
+    # hand rather than through `FakeLoop`, which does not set that field.
+    llm_record = journal.read_all()[0].model_copy(update={
+        "decision": TradeDecision(
+            symbol="SPY", action="HOLD", quantity=0, confidence=0.6, rationale="r",
+            strategy_id="hold-strategy", decision_source="llm",
+        ),
+    })
+    journal.append(llm_record)
+    record_cycle_id = llm_record.cycle_id
+    monkeypatch.setattr(
+        counterfactual, "evaluate",
+        lambda records, **kw: type(
+            "R", (), {"rows": [type("Row", (), {"cycle_id": record_cycle_id,
+                                                "verdict": calibration.FALSE_TRADE})()]}
+        )(),
+    )
+    monkeypatch.setattr(calibration, "calibrate", lambda rows, **kw: calibration.CalibrationReport(
+        source="llm", total_decisions=200, scored=200, brier=0.40, day_brier=0.27, days=4,
+        base_rate=0.53, verdict="MIS-CALIBRATED: brier 0.40",
+        buckets=(
+            calibration.Bucket(low=0.6, high=0.8, n=160, correct=10, day_expected_accuracy=0.34),
+            calibration.Bucket(low=0.4, high=0.6, n=40, correct=24, day_expected_accuracy=0.62),
+        ),
+        top_bucket_day_margin=-0.28,
+        worst_bucket_day_margin=-0.28,
+    ))
+
+    daemon._record_calibration_lesson()
+
+    accepted = knowledge_library.list(status="ACCEPTED")
+    assert len(accepted) == 1, [a.artifact_id for a in accepted]
+    answer = accepted[0].answer
+    assert "days it was taken on were right 34%" in answer, answer
+    # 10/160 = 6% against a 34% expectation. The margin is computed from the bucket rather
+    # than copied from the report's field, so the sentence cannot state a number the
+    # buckets do not support.
+    assert "a margin of -28%" in answer, answer
+    assert "0.130 of the gap is the market's direction" in answer, answer
+    assert "runs backwards" not in answer, (
+        "the claim that was measured to be a day effect must not come back"
+    )

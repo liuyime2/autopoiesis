@@ -1022,3 +1022,68 @@ does not own decides what gets built — and building either before that decisio
 of anticipatory infrastructure this project has been deleting.
 
 `make verify`: 52 classes, 0 failed, 1383 executions across 62 files; 881 pytest pass.
+
+## 2026-10-03 — the calibration report was measuring the weather
+
+`doctor` had said `MIS-CALIBRATED` every day for weeks, and the daemon published a lesson
+to the model built from it: *"your stated confidence does not predict whether you are
+right, and the relationship runs backwards… a 0.0-0.2 confidence bucket was right 91% of
+the time while a 0.6-0.8 bucket was right 6%… Judge your own past decisions by what
+followed them, not by how sure you felt."*
+
+**That is a description of the market's direction, not of the model.** Correctness on this
+account is mostly the trading day's:
+
+| day | scored | correct | rate |
+|---|---|---|---|
+| 2026-09-28 | 65 | 63 | **96.9%** |
+| 2026-09-29 | 64 | 17 | **26.6%** |
+| 2026-09-30 | 47 | 40 | **85.1%** |
+| 2026-10-01 | 65 | 8 | **12.3%** |
+
+On a down day a HOLD is right; on an up day the same HOLD is a `MISSED_ALPHA`. So the
+bucket that looked 90.6% accurate was one day's base rate and nothing else. Within a day the
+confidence strata are identical — 2026-09-28: 29/29 against 33/33; 2026-09-29: 0/3 against
+1/44 — and the entire raw spread is between days.
+
+```
+Brier raw            0.3962
+Brier day-adjusted   0.2705   <- expectation = that day's own base rate
+```
+
+**A third of the reported mis-calibration was the day.** Every HOLD bucket lands within one
+point of its own days after the adjustment (+0.003 / −0.003 / −0.010), so on holds the
+model's stated confidence carries essentially no information — but it does not run
+backwards.
+
+`calibrate` now computes each day's base rate, a day-adjusted Brier, and a per-bucket margin
+against the days a bucket appears on, and the verdict quotes those. The live report now
+reads:
+
+> MIS-CALIBRATED: Brier 0.396 against the 0.25 a constant 0.5 claim scores, so the stated
+> confidence adds no usable information. Brier 0.271 against the 4 day(s) those decisions
+> were taken on, so 0.126 of it is the market's direction rather than the model's. … The
+> worst bucket against its own days is −19.0%
+
+**The one adverse finding that survives the control** is on trades: the 0.6-0.8 bucket runs
+19 points under the days it appears on. That is now the claim the report makes, and it is
+the one that would ever justify touching `min_confidence`.
+
+The lesson the model reads is gated on that margin being materially negative, so a day
+effect can no longer be taught to it as a character trait. With one day of evidence the
+adjusted figures are left `None` rather than silently equal to the raw ones — the control
+needs something to control for. Six new tests pin the distinction, including that a bucket
+which underperforms its own days is still reported, so the fix is not only a deletion.
+
+`make verify`: 52 classes, 0 failed, 1395 executions across 62 files; 886 pytest pass. The
+daemon was restarted onto the new code.
+
+### The next question, left open on purpose
+
+**Should `min_confidence` exist at all?** 209 of 241 scored decisions clear the gate, one
+refusal in 1179 cycles, and HOLDs return approved before the check — so it is a threshold
+that has never bound, while the stratum that is genuinely worse than its days is the most
+confident *trades*. Changing a risk-adjacent gate needs its own experiment with its own
+falsifier; fixing a measurement is not a reason to do it in the same change.
+
+`make verify`: 52 classes, 0 failed, 1395 executions across 62 files; 886 pytest pass.

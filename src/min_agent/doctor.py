@@ -709,16 +709,21 @@ def _check_model_calibration(
     # The verdict is reported whole, not truncated to its label.
     #
     # `verdict.split(":")[0]` printed "MIS-CALIBRATED" and discarded the rest, which is
-    # where the actionable half lives: `calibration.calibrate` had already computed that
-    # the most confident bucket was right 5.6% of the time against a 46.2% base rate - a
-    # margin of -40.6% - and stated it in the sentence that was thrown away.
+    # where the actionable half lives: `calibration.calibrate` had already computed the
+    # bucket accuracies and their margins and stated them in the sentence that was thrown
+    # away.
     #
     # That is the same defect this file already records twice, in a new place. A label
     # saying "miscalibrated" invites the reading "the model is overconfident, raise
-    # `min_confidence`". The measured direction says the opposite: the confident
-    # decisions are the *worst* ones, so tightening the gate rejects the decisions that
-    # were right and admits the ones that lose. A reader given only the label cannot tell
-    # those two situations apart, and the wrong response here degrades a risk gate.
+    # `min_confidence`" - and the earlier version of this comment argued the opposite
+    # from the raw figures, that the confident decisions were the worst ones.
+    #
+    # **That argument was itself the bug, and it has been removed rather than reversed.**
+    # Correctness is mostly the trading day's: on this account the per-day base rate runs
+    # 96.9% / 26.6% / 85.1% / 12.3%, so the bucket that looked 90.6% accurate was one
+    # day's rate and the confident bucket looked terrible because it landed on the other
+    # days. `calibrate` now reads every bucket against its own days and the verdict
+    # carries that margin, so neither reading has to be inferred here.
     detail = (
         f"{result.total_decisions} llm decision(s), {result.scored} scored, "
         f"{result.pending} still awaiting an outcome; {result.verdict}"

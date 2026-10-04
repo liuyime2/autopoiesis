@@ -975,18 +975,21 @@ class AgentDaemon:
 
         The system has been measuring whether the model's stated confidence predicts
         its decisions turning out right, and reporting the answer - and nothing acted
-        on it. On this account the answer is that confidence is *inverted*: the
-        0.6-0.8 bucket was right 5.6% of the time while the 0.0-0.2 bucket was right
-        90.6%. So `min_confidence`, which uses exactly that number as a proxy for
-        decision quality, admitted 178 decisions that were 38.2% right and blocked 32
-        that would have been 90.6% right.
-
-        `doctor` has said `MIS-CALIBRATED` about this for days. A measurement no
+        on it. `doctor` has said `MIS-CALIBRATED` about this for days. A measurement no
         component reads is not self-evolution, it is a log line. The knowledge library
         already carries journal measurements to the model through `context["lessons"]`,
         so this uses that path rather than adding a second one, and the artifact says
         what was measured rather than what to conclude - the risk limits stay where
         they are and the model is the one being told.
+
+        **The first version of this lesson was wrong and said so to the model every
+        maintenance pass.** It read "confidence is inverted" off a comparison against the
+        overall base rate, which on this account is the market's direction: the per-day
+        rate of scored decisions runs 96.9% / 26.6% / 85.1% / 12.3%, so the 0.0-0.2
+        bucket that looked 90.6% correct was one day's base rate and nothing else. Read
+        against its own days, the HOLD buckets sit within a point of zero margin. The
+        lesson is now gated on the day-adjusted margin being materially negative, so a
+        day effect cannot be taught to the model as a character trait.
 
         Cheap enough for every maintenance pass: 0.34s over 1179 cycles, dominated by
         reading the journal rather than by the evaluation.
@@ -1020,17 +1023,45 @@ class AgentDaemon:
         scored_refs = [row.cycle_id for row in rows if row.informative][-200:]
         if not scored_refs:
             return
-        best = max(buckets, key=lambda b: b.accuracy or 0.0)
-        worst = min(buckets, key=lambda b: b.accuracy or 1.0)
+        # Refuse to teach an inversion that the day-adjusted figures do not support.
+        #
+        # The raw comparison said confidence "runs backwards", and that reading survived
+        # in this lesson for weeks - but the per-day base rate on this account runs
+        # 96.9% / 26.6% / 85.1% / 12.3%, so the bucket that looked 90.6% accurate was the
+        # one day it came from. Once each bucket is read against its own days, the HOLD
+        # buckets land within one point of zero margin. Telling a model that its
+        # confidence is inverted, when what the record shows is that holding is right on
+        # down days, is a lesson that changes behaviour and is not true.
+        #
+        # So the lesson is only published when the day-adjusted margin is materially
+        # negative, and it quotes that margin rather than the raw accuracy spread.
+        if report.top_bucket_day_margin is None:
+            return
+        if report.top_bucket_day_margin >= -calibration.MIN_MATERIAL_MARGIN:
+            return
+        # Only buckets the control could judge are eligible to be called the worst; a
+        # bucket with no day expectation carries no margin and sorting it first would
+        # report a number the report does not have.
+        judged = [(b.day_margin, b) for b in buckets if b.day_margin is not None]
+        if not judged:
+            return
+        worst = min(judged, key=lambda pair: pair[0])[1]
+        day_clause = (
+            f" Against the {report.days} day(s) those decisions were taken on, its Brier "
+            f"is {report.day_brier:.3f}, so {(report.brier - report.day_brier):.3f} of "
+            "the gap is the market's direction rather than yours."
+            if report.day_brier is not None else ""
+        )
         answer = (
             f"On this account your stated confidence does not predict whether you are "
-            f"right, and the relationship runs backwards. Across {report.scored} scored "
-            f"decisions (base rate {report.base_rate:.0%}), a {worst.low:.1f}-"
+            f"right. Across {report.scored} scored decisions on {report.days} trading "
+            f"days (base rate {report.base_rate:.0%}), a {worst.low:.1f}-"
             f"{worst.high:.1f} confidence bucket was right {worst.accuracy:.0%} of the "
-            f"time while a {best.low:.1f}-{best.high:.1f} bucket was right "
-            f"{best.accuracy:.0%}. Brier {report.brier:.3f} against the 0.25 that "
-            f"always answering 0.5 would score. Judge your own past decisions by what "
-            f"followed them, not by how sure you felt."
+            f"time while the days it was taken on were right "
+            f"{worst.day_expected_accuracy:.0%} - a margin of "
+            f"{worst.day_margin:+.0%}. Brier {report.brier:.3f} against the 0.25 that "
+            f"always answering 0.5 would score.{day_clause} Judge your own past "
+            f"decisions by what followed them, not by how sure you felt."
         )
         digest = hashlib.sha1(f"calibration|{answer}".encode()).hexdigest()[:12]
         artifact = KnowledgeArtifact(
@@ -1038,8 +1069,9 @@ class AgentDaemon:
             artifact_type="LESSON",
             answer=answer,
             summary=(
-                f"Confidence is inversely related to correctness on this account: "
-                f"Brier {report.brier:.3f} over {report.scored} scored decisions."
+                f"Confidence does not predict correctness on this account: the worst "
+                f"bucket is {worst.day_margin:+.0%} against its own days, Brier "
+                f"{report.brier:.3f} over {report.scored} scored decisions."
             ),
             tags=("calibration", "model", "counterfactual"),
             source_kind="journal",

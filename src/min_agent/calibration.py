@@ -11,6 +11,14 @@ The pairing is already available and needs no new data: every decision carries a
 confidence, and the counterfactual ledger already scores every decision against the
 first real broker quote at or after the horizon. This joins the two.
 
+One control is not optional, though. Correctness is mostly a property of the *trading day*,
+not of the decision: on the live record the per-day base rate of scored decisions runs
+96.9% / 26.6% / 85.1% / 12.3% over four consecutive days, because on a down day a HOLD is
+the right answer and on an up day the same HOLD is a MISSED_ALPHA. A bucket compared against
+the overall base rate is therefore comparing days, and the first version of this report did
+exactly that and published "confidence is inverted" - a description of the market's
+direction. Every figure below is stated both raw and against the days it came from.
+
 What it deliberately does not do is produce a score and call it a result. On the live
 journal **all 67 LLM decisions are PENDING** - they all fall inside a single session
 on 2026-09-28, and the 24-hour horizon needs a quote from the following day, which
@@ -23,6 +31,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 
 from min_agent import coerce
 from min_agent.counterfactual import (
@@ -76,6 +85,15 @@ class CalibrationRow:
     action: str
     verdict: str
     decision_source: str
+    #: The trading day the decision was taken on, taken from the record's own snapshot.
+    #: `None` only when a caller builds rows by hand without one.
+    #:
+    #: This exists because correctness is mostly a property of the *day*: on the live
+    #: record the per-day base rate of scored decisions runs 96.9% / 26.6% / 85.1% /
+    #: 12.3% across four consecutive days, because on a down day a HOLD is right and on
+    #: an up day it is MISSED_ALPHA. Comparing buckets across days therefore compares
+    #: days, and the report was doing exactly that - see `_day_expectation`.
+    day: date | None = None
 
     @property
     def informative(self) -> bool:
@@ -107,11 +125,22 @@ class Bucket:
     n: int = 0
     correct: int = 0
     mean_confidence: float = 0.0
+    #: What this bucket's accuracy would be if confidence carried no information at
+    #: all - the mean base rate of the days its decisions were taken on. The margin
+    #: between the two is the only comparison here that is about the model.
+    day_expected_accuracy: float | None = None
     _conf_sum: float = field(default=0.0, repr=False)
 
     @property
     def accuracy(self) -> float | None:
         return None if self.n == 0 else self.correct / self.n
+
+    @property
+    def day_margin(self) -> float | None:
+        """Accuracy above what the bucket's own days predict, or `None` without days."""
+        if self.accuracy is None or self.day_expected_accuracy is None:
+            return None
+        return self.accuracy - self.day_expected_accuracy
 
     def to_payload(self) -> dict:
         return {
@@ -120,6 +149,11 @@ class Bucket:
             "correct": self.correct,
             "accuracy": None if self.accuracy is None else round(self.accuracy, 4),
             "mean_confidence": round(self.mean_confidence, 4),
+            "day_expected_accuracy": (
+                None if self.day_expected_accuracy is None
+                else round(self.day_expected_accuracy, 4)
+            ),
+            "day_margin": None if self.day_margin is None else round(self.day_margin, 4),
         }
 
 
@@ -132,7 +166,17 @@ class CalibrationReport:
     neutral: int = 0
     correct: int = 0
     brier: float | None = None
+    #: The same score with each decision compared against the base rate of its own day.
+    #: The gap between the two is the share of the apparent mis-calibration that is the
+    #: market's direction rather than the model's. On the live record: 0.396 raw,
+    #: 0.271 adjusted, so roughly a third of it was the day.
+    day_brier: float | None = None
     base_rate: float | None = None
+    #: Trading days the scored decisions fall on, and their base rates. Empty when the
+    #: caller built rows without one, and then the day-adjusted figures stay `None`
+    #: rather than silently reproducing the cross-day ones.
+    days: int = 0
+    day_base_rates: dict[str, float] = field(default_factory=dict)
     buckets: list[Bucket] = field(default_factory=list)
     passed_gate_n: int = 0
     passed_gate_accuracy: float | None = None
@@ -140,6 +184,12 @@ class CalibrationReport:
     #: the report publishes and what a reader outside this module sees.
     top_bucket: dict[str, object] | None = None
     top_bucket_accuracy: float | None = None
+    #: The most confident populated bucket's margin over its own days. The comparison the
+    #: verdict is about; `top_bucket_accuracy` alone says more about the market.
+    top_bucket_day_margin: float | None = None
+    #: And the worst one, because a confidence that is merely uninformative and a
+    #: confidence that is actively misleading call for different responses.
+    worst_bucket_day_margin: float | None = None
     verdict: str = ""
     notes: list[str] = field(default_factory=list)
 
@@ -152,6 +202,11 @@ class CalibrationReport:
             "neutral": self.neutral,
             "correct": self.correct,
             "brier": None if self.brier is None else round(self.brier, 6),
+            "day_brier": None if self.day_brier is None else round(self.day_brier, 6),
+            "days": self.days,
+            "day_base_rates": {
+                key: round(value, 6) for key, value in sorted(self.day_base_rates.items())
+            },
             "base_rate": None if self.base_rate is None else round(self.base_rate, 6),
             "buckets": [b.to_payload() for b in self.buckets],
             "passed_gate_n": self.passed_gate_n,
@@ -179,6 +234,11 @@ def build_rows(
         cycle_id = getattr(record, "cycle_id", None)
         if not cycle_id:
             continue
+        # The day comes from the record's own market-data timestamp, not from when the
+        # verdict was computed: it is the day the decision was taken on, which is the day
+        # whose base rate it has to be compared against.
+        snapshot = getattr(record, "snapshot", None)
+        stamp = getattr(snapshot, "timestamp", None)
         rows.append(
             CalibrationRow(
                 cycle_id=cycle_id,
@@ -186,6 +246,7 @@ def build_rows(
                 action=decision.action,
                 verdict=verdicts_by_cycle.get(cycle_id, "UNSCORED"),
                 decision_source=decision.decision_source,
+                day=stamp.date() if stamp is not None else None,
             )
         )
     return rows
@@ -236,18 +297,66 @@ def calibrate(
         (r.confidence - (1.0 if r.correct else 0.0)) ** 2 for r in scored
     ) / report.scored
 
+    # The control. Correctness is mostly the day's, not the decision's: the same HOLD is
+    # right on a down day and a MISSED_ALPHA on an up one. So each day's own base rate is
+    # the expectation, and a bucket's accuracy is read against the days it appears on
+    # rather than against the whole record.
+    #
+    # Needs more than one day to mean anything. With a single day the adjusted figures
+    # would reproduce the raw ones and the control would be theatre, so they are left
+    # `None` and the verdict says the comparison is unavailable instead of implying one.
+    day_totals: dict[str, list[int]] = {}
+    for r in scored:
+        if r.day is None:
+            continue
+        entry = day_totals.setdefault(r.day.isoformat(), [0, 0])
+        entry[0] += 1
+        entry[1] += 1 if r.correct else 0
+    expectations: dict[str, float] = {}
+    if len(day_totals) > 1:
+        report.days = len(day_totals)
+        report.day_base_rates = {
+            key: correct / total for key, (total, correct) in day_totals.items()
+        }
+        expectations = {
+            r.cycle_id: report.day_base_rates[r.day.isoformat()]
+            for r in scored
+            if r.day is not None
+        }
+        report.day_brier = sum(
+            (r.confidence - expectations[r.cycle_id]) ** 2
+            for r in scored
+            if r.cycle_id in expectations
+        ) / report.scored
+    elif day_totals:
+        report.notes.append(
+            "scored decisions fall on a single trading day, so correctness cannot be "
+            "separated from the market's direction for that day; the day-adjusted "
+            "figures are unavailable rather than equal to the raw ones"
+        )
+
     n_buckets = max(1, round(1.0 / BUCKET_WIDTH))
     for i in range(n_buckets):
         low = i * BUCKET_WIDTH
         bucket = Bucket(low=low, high=low + BUCKET_WIDTH)
+        expected_sum = 0.0
+        expected_n = 0
         for r in scored:
             index = min(int(r.confidence / BUCKET_WIDTH), n_buckets - 1)
             if index == i:
                 bucket.n += 1
                 bucket.correct += 1 if r.correct else 0
                 bucket._conf_sum += r.confidence
+                if r.cycle_id in expectations:
+                    expected_sum += expectations[r.cycle_id]
+                    expected_n += 1
         if bucket.n:
             bucket.mean_confidence = bucket._conf_sum / bucket.n
+        # Counted, not truthiness-tested: a day on which nothing was right has an
+        # expectation of exactly 0.0, and `if expected_sum:` would discard that bucket's
+        # margin - which is precisely the bucket that matters most on a bad day.
+        if expected_n:
+            bucket.day_expected_accuracy = expected_sum / expected_n
         report.buckets.append(bucket)
 
     # The decision that actually matters: of the decisions that were confident enough
@@ -264,12 +373,17 @@ def calibrate(
     # decision - which is how the first version of this test could not distinguish a
     # model that separates good from bad from one that does not. Whether the *most
     # confident* bucket beats the base rate is the question "does confidence identify
-    # the good decisions" actually asks.
+    # the good decisions" actually asks - and since that question was being answered
+    # against a base rate the market set, it is now asked against the bucket's own days.
     populated = [b for b in report.buckets if b.n >= 10]
     if populated:
         top = max(populated, key=lambda b: b.mean_confidence)
         report.top_bucket = top.to_payload()
         report.top_bucket_accuracy = top.accuracy
+        report.top_bucket_day_margin = top.day_margin
+        judged = [b.day_margin for b in populated if b.day_margin is not None]
+        if judged:
+            report.worst_bucket_day_margin = min(judged)
 
     if report.passed_gate_n < 10:
         report.verdict = (
@@ -285,16 +399,40 @@ def calibrate(
         # margin over a 96.8% base rate, with a Brier of 0.589 - which is 2.4x worse
         # than always claiming 0.5. The accuracy said nothing; the Brier said the
         # stated confidence is worse than useless.
+        #
+        # What it must not say is that the most confident bucket is less accurate than
+        # the least. That comparison is against a base rate the market set: on the live
+        # record the per-day rate runs 96.9% / 26.6% / 85.1% / 12.3%, and the 0.0-0.2
+        # bucket that looked 90.6% accurate was simply the Tuesday. So the bucket is read
+        # against its own days, and the day-adjusted Brier is what the verdict quotes.
+        if report.day_brier is not None:
+            day_clause = (
+                f" Brier {report.day_brier:.3f} against the {report.days} day(s) those "
+                "decisions were taken on, so "
+                f"{(report.brier - report.day_brier):.3f} of it is the market's "
+                "direction rather than the model's"
+            )
+        else:
+            day_clause = (
+                " The decisions fall on a single day, so how much of that is the "
+                "market's direction cannot be separated here"
+            )
         margin = None
         if report.top_bucket_accuracy is not None and report.base_rate is not None:
             margin = report.top_bucket_accuracy - report.base_rate
+        worst_clause = ""
+        if report.worst_bucket_day_margin is not None:
+            worst_clause = (
+                f". The worst bucket against its own days is "
+                f"{report.worst_bucket_day_margin:+.1%}"
+            )
         report.verdict = (
-            f"MIS-CALIBRATED: Brier {report.brier:.3f} against the {BRIER_UNINFORMATIVE:.2f} "
-            "a constant 0.5 claim scores, so the stated confidence is worse than "
-            f"useless. Accuracy is {report.base_rate:.1%} and the most confident "
-            f"bucket is {report.top_bucket_accuracy:.1%} (margin "
-            f"{margin:+.1%} if positive), which on a base rate that high cannot "
-            "discriminate anything"
+            f"MIS-CALIBRATED: Brier {report.brier:.3f} against the "
+            f"{BRIER_UNINFORMATIVE:.2f} a constant 0.5 claim scores, so the stated "
+            f"confidence adds no usable information.{day_clause}. Measured against the "
+            f"whole record rather than the days, accuracy is {report.base_rate:.1%} and "
+            f"the most confident bucket is {report.top_bucket_accuracy:.1%} (margin "
+            f"{margin:+.1%} if positive){worst_clause}"
         )
     elif (
         report.top_bucket_accuracy is not None
