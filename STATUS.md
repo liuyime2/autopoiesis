@@ -1636,3 +1636,58 @@ That is what the `submitted_orders <= 0` guard exists for. Its pause cites a rul
 exists, and it stays paused anyway, because nothing in the current rules would release it.
 
 `make verify`: 52 classes, 0 failed, 1416 executions across 62 files; 904 pytest pass.
+
+## 2026-10-04 — the honest answer to "does any of this beat holding SPY?" is: not yet, and it is close
+
+Every change this session made the loop *able* to learn. None of them is evidence that it
+learns anything worth trading. That is the measurement that matters, so it is taken here
+rather than left implied.
+
+Broker-verified realized PnL, the whole recorded life of the system:
+
+```
+strategy_realized_pnl:  tiny-fixed-size-001 +366.03
+                        fixed-size-buy-001    +146.94
+                        trend-follow-buy-001  +81.36
+                        total                 +594.33     across 35 closed lots
+orders submitted: 62      shares filled: 116      submitted notional: $88,342
+three strategies have ever produced verified PnL; all three are now PAUSED or RETIRED
+```
+
+And what the market did over the same window:
+
+```
+2026-06-09 -> 2026-10-02, 1179 cycles
+SPY                739.24 -> 769.58   = +4.10%
+account equity     99,675.71 -> 99,342.92 = -0.33%
+```
+
+The Guardian caps allowlist exposure at $20,000, so the comparable question is what $20,000 of
+SPY would have returned: **about +$820**. The agent realized **+$594** on closed lots and
+still holds the remainder. On the capital it was allowed to risk, that is *slightly worse*
+than doing nothing, and the account's own equity line fell while SPY rose.
+
+**A correction first.** An earlier pass in this session simulated "follow every non-HOLD
+decision" and reported **+37.22%** against +4.10% for holding. That number is wrong and was
+never committed: the simulation bought 1082 shares — about $811,000 — against $73,923 of
+starting cash, so it spent money the sleeve did not have and reported the leverage of an
+unbounded wallet. Cash-constrained or not, it is not a measurement of this system. The
+broker-verified figures above are the ones to use, and they come from the ledger the system
+maintains rather than from a re-derivation.
+
+### What this does and does not say
+
+It does **not** say the loop is pointless. It says that after 1179 cycles and 62 orders the
+demonstrated edge is $594 on a $99k account, which is inside the noise of a handful of lots,
+and that the honest benchmark is holding SPY rather than the zero the project started from.
+
+The lifecycle work this session is upstream of that number, not a substitute for it:
+`min_confidence` measured, probation made reachable, admission capped to what the loop can
+evaluate, and the four service questions moved off a five-hour window onto the journal. What
+those buy is the ability to reach a verdict. Whether a verdict is worth acting on is the next
+question, and it has not been answered.
+
+**The falsifier for all of it** is unchanged and still unmeasured: a strategy promoted out of
+probation on its own evidence, then trading. No candidate in the library can be promoted today
+— the 17 queued ones hold 0 to 9 scored decisions against a gate of 10 — so the earliest
+honest read is after they have been served, about two market days at the measured rate.
