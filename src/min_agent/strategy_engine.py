@@ -78,6 +78,19 @@ class StrategyLifecycleDecision:
 #: 0.75-0.91 per selected cycle.
 PROBATION_CYCLES = 13
 
+#: Selected cycles between which an actionable ACTIVE strategy is served.
+#:
+#: Probation has absolute priority in `StrategySelector.select`, and admission holds the
+#: probation backlog at `PROBATION_CYCLES`, so the queue is effectively never empty and a
+#: promoted strategy is unreachable - measured at 5.6e-05 of cycles. One promotion in the
+#: current era had been selected 0 times in the 146 cycles after it.
+#:
+#: Five, rather than a reordering, because the split between discovery and use is a real
+#: trade with no obviously correct answer, and the loop cannot learn the answer without
+#: running it. Twenty per cent is enough for the incumbent to open and close lots and leaves
+#: discovery four fifths of the throughput.
+INCUMBENT_SHARE = 5
+
 
 class StrategyLifecycleManager:
     def __init__(
@@ -467,9 +480,11 @@ class StrategySelector:
         *,
         min_probation_cycles: int = PROBATION_CYCLES,
         exploration_floor_cycles: int = 5,
+        incumbent_share: int = INCUMBENT_SHARE,
     ):
         self.min_probation_cycles = min_probation_cycles
         self.exploration_floor_cycles = exploration_floor_cycles
+        self.incumbent_share = incumbent_share
 
     def select(
         self,
@@ -487,6 +502,39 @@ class StrategySelector:
 
         result_by_id = {result.strategy_id: result for result in results or []}
         tradable = [strategy for strategy in eligible if strategy.kind != "HOLD_BASELINE" and strategy.lifecycle != "BASELINE"]
+        # A promoted strategy that never trades has not been promoted.
+        #
+        # Measured on the live library: the probation queue is non-empty on 5.6e-05 of
+        # cycles at a steady-state backlog of 13 with a 53% actionable fraction, and the
+        # queue cannot be drained because serving a candidate is what lowers the backlog,
+        # which is what reopens admission. So the one ACTIVE strategy was selected 0 times
+        # in the 146 cycles after it was promoted, and promotion had no consequence.
+        #
+        # Reserved rather than reordered. Serving the incumbent first would fund
+        # exploitation entirely from discovery; the share leaves four fifths of throughput
+        # with probation, which is enough for the incumbent to open and close lots (35
+        # lots came from 62 orders over 1179 cycles) while the admission cap added for
+        # the opposite reason keeps doing its job.
+        #
+        # Counted on `cumulative_cycles`, which is the journal's own monotone count of
+        # service served, so the cadence is stateless: nothing to persist, nothing to
+        # reset, and it cannot drift from the record. It is deliberately *not* the
+        # windowed count - that is the instrument that made probation unfinishable twice.
+        served = sum(r.cumulative_cycles for r in results or [])
+        if (
+            self.incumbent_share > 0
+            and served % self.incumbent_share == 0
+            and last_price is not None
+        ):
+            actionable_incumbents = [
+                strategy
+                for strategy in tradable
+                if strategy.lifecycle == "ACTIVE" and self._declared_actions(strategy, last_price)
+            ]
+            if actionable_incumbents:
+                return sorted(
+                    actionable_incumbents, key=lambda s: (s.created_at, s.strategy_id)
+                )[0]
         probation = [strategy for strategy in tradable if self._needs_probation(strategy, result_by_id.get(strategy.strategy_id))]
         # A candidate that cannot trade at this price would spend the cycle on a HOLD.
         #

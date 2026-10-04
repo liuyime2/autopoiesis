@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from min_agent.models import AccountSnapshot, DataSnapshot, StrategyResult, StrategySpec
 from min_agent.strategy_engine import (
+    INCUMBENT_SHARE,
     PROBATION_CYCLES,
     StrategyExecutor,
     StrategyLibrary,
@@ -1663,3 +1664,76 @@ def test_an_already_retired_strategy_is_not_re_judged():
     )
 
     assert decisions == []
+
+
+def _service(strategy_id, cumulative, *, cycles=0, trade_attempts=0, score=0.5):
+    return StrategyResult(
+        strategy_id=strategy_id, cycles=cycles, cumulative_cycles=cumulative,
+        submitted_orders=trade_attempts, rejected_orders=0, errors=0, score=score,
+        evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=trade_attempts,
+    )
+
+
+def test_a_promoted_strategy_is_served_on_its_cadence_turn():
+    """A strategy that is promoted and then never trades has not been promoted.
+
+    Probation has absolute priority and admission holds the backlog at the cap, so the
+    queue is effectively never empty - 5.6e-05 of cycles on the live library - and the one
+    ACTIVE strategy was selected 0 times in the 146 cycles after its promotion.
+    """
+    selector = StrategySelector(incumbent_share=INCUMBENT_SHARE)
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION",
+                          action="BUY", quantity=1)
+    incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE",
+                          action="BUY", quantity=1)
+
+    # total cumulative service 9, share 5 -> not a cadence turn
+    between = [_service("candidate", 8), _service("incumbent", 1, score=0.9)]
+    on_turn = [_service("candidate", 9), _service("incumbent", 1, score=0.9)]
+
+    assert selector.select([candidate, incumbent], between, last_price=100.0).strategy_id == "candidate"
+    assert selector.select([candidate, incumbent], on_turn, last_price=100.0).strategy_id == "incumbent"
+
+
+def test_the_incumbent_cadence_advances_on_cumulative_service_not_the_window():
+    """The distinction this session has been about, and the one that broke probation twice.
+
+    Both results carry zero windowed cycles - the incumbent has not traded recently - and
+    differ only in cumulative service. If the cadence were read from the windowed count it
+    would sit at zero and never advance, which is the bug that made probation unfinishable.
+    """
+    selector = StrategySelector(incumbent_share=INCUMBENT_SHARE)
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION",
+                          action="BUY", quantity=1)
+    incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE",
+                          action="BUY", quantity=1)
+    results = [_service("candidate", 4, cycles=0), _service("incumbent", 1, cycles=0, score=0.9)]
+
+    assert selector.select([candidate, incumbent], results, last_price=100.0).strategy_id == "incumbent"
+
+
+def test_with_no_promoted_strategy_selection_is_unchanged():
+    """The reserved share must cost nothing when there is nothing to reserve for."""
+    selector = StrategySelector(incumbent_share=INCUMBENT_SHARE)
+    only = make_spec(strategy_id="only", kind="FIXED_SIZE", lifecycle="PROBATION",
+                     action="BUY", quantity=1)
+
+    for cumulative in (0, 5, 10, 25):
+        results = [_service("only", cumulative, cycles=1)]
+        assert selector.select([only], results, last_price=100.0).strategy_id == "only"
+
+
+def test_an_incumbent_that_cannot_act_leaves_every_turn_to_probation():
+    """A reserved turn is not a wasted turn: the share is for cycles that can do something.
+
+    A FIXED_SIZE always declares, so this uses a TREND_FOLLOW anchored so its band contains
+    the price - it is ACTIVE, on a cadence turn, and cannot fire.
+    """
+    selector = StrategySelector(incumbent_share=INCUMBENT_SHARE)
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION",
+                          action="BUY", quantity=1)
+    dormant = make_spec(strategy_id="incumbent", kind="TREND_FOLLOW", lifecycle="ACTIVE",
+                        reference_price=100.0, threshold_pct=0.05)
+    results = [_service("candidate", 5), _service("incumbent", 0, score=0.9)]
+
+    assert selector.select([candidate, dormant], results, last_price=100.0).strategy_id == "candidate"
