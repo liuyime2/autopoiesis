@@ -2255,3 +2255,93 @@ That is a data question, not a design one, and it is the only thing standing bet
 project and a defensible null.
 
 `make verify`: 52 classes, 0 failed, 1442 executions across 62 files; 917 pytest pass.
+
+## 2026-10-04 — the search space contains nothing the loop can evaluate
+
+With both gates open and all three saying no, the next question is the one underneath:
+**is there anything in the search space to find?** Measured, the answer is no, and the reason
+is the design space rather than the data.
+
+```
+the backtest supports three kinds: FIXED_SIZE, TREND_FOLLOW, HOLD_BASELINE
+two of them trade, and both are long-only and effectively "enter once, hold"
+```
+
+**`FIXED_SIZE` cannot re-enter.** The BUY branch requires `position == 0`, and the rule says
+BUY on every bar, so it opens once and holds to the end: **1 closed trade on 847 bars, and on
+3,000 bars of a strongly oscillating synthetic series, still exactly 1.**
+
+**`TREND_FOLLOW` anchors on the first bar of whatever window it is shown**, not on a fixed
+level:
+
+```python
+anchor = bars[0].price
+move = (price - anchor) / anchor
+fired_action = "BUY" if move > 0 else "SELL"
+```
+
+So it is a *drift from the window start*, not a band crossing, and it fires once per window:
+
+```
+threshold   closed trades on the real 847-bar cache
+    0.001                      4
+    0.002                      1
+    0.005                      1
+    0.010                      0
+    0.020                      0
+```
+
+The cache's largest drift from any window start is **+0.27%**. And every TREND_FOLLOW in the
+live library is parameterised between **1.0% and 3.0%**:
+
+```
+threshold 1.0%: 4   1.2%: 2   1.5%: 8   1.8%: 3   2.0%: 16   2.5%: 3   3.0%: 9
+```
+
+**So all 45 TREND_FOLLOW strategies in the library cannot fire on the market they are
+anchored to.** That is the same finding as "7 of 17 queued candidates are dormant", seen from
+the other side: dormancy is not bad luck in the queue, it is the whole TREND_FOLLOW population.
+
+### Correcting my own correction
+
+Yesterday I recorded that the research gate "cannot be fixed by gathering more bars", on the
+evidence that `out_of_sample_trades` stayed at 3 for 100/200/400/847 bars. That was correct
+**at the pinned fold count of 3**, and wrong as a general claim. Two corrections:
+
+- `oos_trades == n_folds` is not an identity. It holds when the holding period is at least the
+  segment length, which is the case for these designs on this data. A `TREND_FOLLOW` at a 0.2%
+  threshold does round-trip — 40 closes on 3,000 oscillating bars — and then
+  `oos_trades` is no longer pinned to `n_folds`.
+- **More data is a lever again**, now that the fold count is not pinned. Measured with the fold
+  count derived:
+
+```
+ bars  folds  segment bars  oos trades  required
+  847     52             15          21        52   INSUFFICIENT
+ 2000     52             38          26        52   INSUFFICIENT
+ 4000     52             76          41        52   INSUFFICIENT
+ 6000     52            115          64        52   OVERFIT
+```
+
+Longer segments let a round-tripping design fit more than one bet per segment, and the gate
+opens at roughly **6,000 bars — about 7x the cache.** So the original "~8,800 bars" estimate was
+right in magnitude and wrong in mechanism; what actually governs is segment length, not trades
+per bar.
+
+### What this leaves
+
+Two honest statements, and they point in opposite directions from the ones this project has
+been acting on:
+
+1. **The library cannot be evaluated as it stands.** 45 of 64 strategies are dormant on real
+   data, so probation budget is being spent on candidates that cannot produce a decision, let
+   alone a verdict. The admission gate checks that a `reference_price` is near spot; nothing
+   checks that the *threshold* is reachable.
+2. **Refusing wide-threshold candidates would be wrong.** A strategy dormant this week may
+   fire next week, so a reachability rule at admission would make the library a function of
+   current volatility. The defect is not the threshold; it is that the search space has no
+   design capable of taking more than one bet per segment.
+
+The minimum thing a trading rule must be able to do, and the only thing none of these can do, is
+**close and re-enter.** That is a capability, not a tuning change, and it belongs in its own
+plan rather than in a threshold guard that would trade one permanent error for a temporary one.
