@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -13,7 +14,18 @@ class TradingLoop:
     # genuinely stuck order is reconciled rather than silently blocking trading.
     IN_FLIGHT_WINDOW_MINUTES = 30
 
-    def __init__(self, *, data_gateway, decision_engine, guardian, executor, journal, mode: str, trade_counter=None):
+    def __init__(
+        self,
+        *,
+        data_gateway,
+        decision_engine,
+        guardian,
+        executor,
+        journal,
+        mode: str,
+        trade_counter=None,
+        now: Callable[[], datetime] | None = None,
+    ):
         self.data_gateway = data_gateway
         self.decision_engine = decision_engine
         self.guardian = guardian
@@ -24,6 +36,17 @@ class TradingLoop:
         self.journal = journal
         self.mode = mode
         self.trade_counter = trade_counter
+        #: What time the Guardian should judge snapshot freshness against.
+        #:
+        #: `None` keeps live behaviour exactly: the Guardian falls back to
+        #: `datetime.now`. It exists because the staleness check compares the snapshot's
+        #: timestamp against the current time, so a replay over real bars from last week
+        #: was refused on all 847 cycles as "data snapshot is stale" - correctly, since
+        #: those bars really are stale. Pointing this at the replayed session's own clock
+        #: runs the *same* check against the correct time base rather than weakening it,
+        #: which is the difference between testing the real risk path and testing a
+        #: system that nobody ships.
+        self.now = now
 
     def _identical_order_already_in_flight(self, decision: TradeDecision) -> str | None:
         """A client_order_id of the client_order_id of a submission we never saw fill.
@@ -190,6 +213,7 @@ class TradingLoop:
             decision,
             snapshot,
             mode=self.mode,
+            now=self.now() if self.now else None,
             trades_today=trades_today,
             # What the agent itself holds, so a SELL cannot reach the account
             # owner's pre-existing shares. Derived from the journal's own confirmed
@@ -209,7 +233,9 @@ class TradingLoop:
                 "rationale": f"skip: {in_flight}",
             })
             guardian_result = self.guardian.review(
-                decision, snapshot, mode=self.mode, trades_today=trades_today,
+                decision, snapshot, mode=self.mode,
+                now=self.now() if self.now else None,
+                trades_today=trades_today,
                 agent_position_quantity=self._agent_holding(decision.symbol),
             )
             # Deliberately NOT appended to `errors`.

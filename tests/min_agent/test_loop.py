@@ -78,8 +78,13 @@ class FakeGuardian:
     def __init__(self):
         self.trades_today = None
 
+    # `now` mirrors the real Guardian's signature. The loop passes it so a replay over
+    # historical bars is judged for staleness against the replayed session's clock rather
+    # than wall-clock; a fake that omitted it would hide that interface drift instead of
+    # catching it.
     def review(self, decision, snapshot, mode="paper", trades_today=0,
-               agent_position_quantity=None):
+               agent_position_quantity=None, now=None):
+        self.now = now
         self.trades_today = trades_today
         return GuardianResult(approved=True, reason="approved")
 
@@ -527,3 +532,32 @@ def _base_record():
         strategy_id=None,
         error=None,
     )
+
+
+def test_the_guardian_clock_is_injectable_and_defaults_to_live_behaviour():
+    """Replay over historical bars needs staleness judged in session time.
+
+    The Guardian compares a snapshot's timestamp against the current time, so a replay over
+    real bars from last week was refused on all 847 cycles as "data snapshot is stale" -
+    correctly, because those bars really are stale. Pointing the Guardian at the replayed
+    session's own clock runs the *same* check against the correct time base; relaxing
+    staleness instead would be testing a system nobody ships.
+
+    What matters is that the default is untouched: with no clock injected the Guardian must
+    still receive `None` and fall back to wall-clock, so the live path cannot drift.
+    """
+    guardian = FakeGuardian()
+
+    def build(**kwargs):
+        return TradingLoop(
+            data_gateway=FakeDataGateway(), decision_engine=FakeDecisionEngine(),
+            guardian=guardian, executor=FakeExecutor(), journal=FakeJournal(),
+            mode="paper", **kwargs,
+        )
+
+    build().run_once("SPY")
+    assert guardian.now is None, "the live path must not have its clock overridden"
+
+    injected = datetime(2026, 10, 1, 14, 30, tzinfo=timezone.utc)
+    build(now=lambda: injected).run_once("SPY")
+    assert guardian.now == injected

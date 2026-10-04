@@ -13,7 +13,7 @@ this refactor removed.
 
 ## The gate — `verify.py`
 
-**`python tools/verify.py`** is the project gate: 49 check classes, non-zero exit on any
+**`python tools/verify.py`** is the project gate: 50 check classes, non-zero exit on any
 failure. `make verify` runs it. Three modes:
 
 - `--self-test` breaks the gate on purpose and asserts it reports failure, because a
@@ -28,6 +28,15 @@ failure. `make verify` runs it. Three modes:
 journal text, with no production code involved, and compares them to what the system
 reported. It is deliberately naive arithmetic over the record: if it agreed with the
 system by construction it would prove nothing.
+
+**`replay_safety_probe.py`** is the machine-checked form of the four properties that keep
+the replay harness out of the PnL ledger: it holds no broker client, reports `REPLAYED`
+with no `order_id`, its snapshot source says real-bars-simulated-account, and a journal of
+replayed fills evaluates to zero realized PnL. Run standalone it prints a JSON list of
+whatever failed, so a failure is legible rather than a traceback. `make verify` calls it
+through `check_replay_cannot-reach-the-account`; the docstring there records the same
+distinction `check_shadow_live_consistency` insists on — this proves the mechanism, not
+that any replay has been run.
 
 **`audit_defects.py`** checks the 61 assertions across 15 recorded regressions are still fixed, and asserts the
 D8 safety properties over the ops scripts that remain — that no script assigns a risk

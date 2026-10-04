@@ -663,3 +663,59 @@ Also worth stating plainly: the retained window is **not** 14 days of trading. I
 reason that has nothing to do with rotation.
 
 `make verify`: 49 classes, 0 failed, 1340 executions across 61 files; 863 pytest pass.
+
+## 2026-10-03 — a replay environment over real bars, and what it cost to build honestly
+
+The request was a simulated account reproducing real conditions, so development could
+continue and be verified before anything touched Alpaca. One correction first: **the system
+is already on Alpaca paper** — credentials in place, PnL coming back through that API. So
+the missing piece was never "connect to Alpaca"; it was a place to verify a change that
+alters which strategies trade.
+
+**The bars are real, not synthetic.** Fetched from Alpaca's own history and cached to
+`runtime/min_agent/replay/SPY_5min_2026-09-28_2026-10-02.json`: **847 real five-minute SPY
+bars**, 2026-09-28 to 2026-10-02, high 772.65 / low 758.79 — the same range the live journal
+saw, and the 766.57 exit falls inside it. A replay over invented prices can only show that
+code runs.
+
+**Not a second implementation.** `TradingLoop` already takes its collaborators by injection,
+so exactly two are substituted — `ReplayDataGateway` (real bars, one per cycle) and
+`ReplayExecutor` (fills at the next bar's open). The decision engine and the Guardian are
+the real ones.
+
+**Fills use the next bar's open, never the decision bar's close.** Filling on the close of
+the bar the decision was made from assumes the close was knowable before it printed; that is
+the standard way to manufacture a backtest.
+
+**The acceptance test found a real defect, which is why it existed.** Driving the real loop
+over the 847 bars refused **all 847 cycles** with `data snapshot is stale` — the Guardian
+compares snapshot time to wall-clock, and those bars are from last week. It was right and
+the replay was useless. Relaxing staleness would have produced a harness that trades and
+proved nothing, because it would have tested a risk system nobody ships. Instead
+`TradingLoop` gained an optional `now` passed to `guardian.review(now=...)`, defaulting to
+`None` so **the live path is unchanged** and still uses wall-clock; a replay passes the
+replayed session's clock. Same check, correct time base.
+
+After the fix: **130 replayed fills over 847 cycles, and still `submitted_orders=0`,
+`account_realized_or_reported_pnl=None`, `closed_lot_count=0`,
+`pnl_evidence=missing_fill_price_and_broker_activity`.** The safety property holds under
+real trading load, not only on an idle path.
+
+**The safety claims are machine-checked, not asserted.** `tools/replay_safety_probe.py`
+verifies four properties — no broker client or paper executor referenced, `REPLAYED` is a
+distinct status with no `order_id`, the source says real-bars-simulated-account, and a
+journal of replayed fills yields zero realized PnL and never broker verification — and
+`make verify` runs it as `replay-cannot-reach-the-account`. It was checked against a
+deliberately broken executor, which it caught with three specific failures, so it is not a
+check that always passes.
+
+Two repo rules caught me rather than the other way round: `save_bars` first wrote with a bare
+`write_text`, which tripped the recorded defect **D12 "no bare write_text outside
+atomicio"**; it now writes atomically, because a half-written bars file is a replay that
+silently starts mid-session.
+
+**A replayed profit is not a profit.** Nothing here is trading evidence (AGENTS.md #5, #17),
+and the check's docstring records the same distinction `check_shadow_live_consistency`
+insists on: this proves the mechanism, not that any replay has been run.
+
+`make verify`: 50 classes, 0 failed, 1376 executions across 62 files; 876 pytest pass.

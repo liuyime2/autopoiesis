@@ -840,7 +840,11 @@ class ExecutionResult(BaseModel):
     # does not know SHADOWED will not count it as executed, which is the safe
     # default; tests/min_agent/test_shadow.py proves the PnL ledger reports zero
     # from shadow-only cycles, so a shadow order can never be mistaken for a fill.
-    status: Literal["SKIPPED", "SUBMITTED", "REJECTED", "ERROR", "SHADOWED"]
+    # REPLAYED is a real outcome of a real decision made over real bars, and it is a
+    # distinct value for the same reason SHADOWED is: anything branching on this field
+    # that does not know REPLAYED will not count it as executed, which is the safe
+    # default. A replayed fill is not a broker fill and must never enter the PnL ledger.
+    status: Literal["SKIPPED", "SUBMITTED", "REJECTED", "ERROR", "SHADOWED", "REPLAYED"]
     order_id: str | None
     client_order_id: str | None = None
     filled_quantity: float = Field(ge=0)

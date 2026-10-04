@@ -132,6 +132,12 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
         "shadow-live-consistency", "guardian-bypass-prevention",
         "pnl-accounting", "broker-reconciliation",
     ),
+    # Replay runs the real loop over real bars against a simulated account, so the
+    # properties it must never break are the same ones shadow must not break.
+    "test_replay.py": (
+        "shadow-live-consistency", "point-in-time-no-leakage",
+        "pnl-accounting", "guardian-bypass-prevention",
+    ),
     "test_fill_reconciler.py": ("broker-reconciliation",),
     "test_governance_invariants.py": (
         "guardian-bypass-prevention", "shadow-live-consistency",
@@ -2394,6 +2400,52 @@ def check_data_integrity() -> Result:
     return Result("data-integrity", PASS if rc == 0 else FAIL, _tail(out))
 
 
+def check_replay_cannot_reach_the_account() -> Result:
+    """The replay harness must be structurally unable to touch the account.
+
+    A replayed fill leaking into the PnL ledger would be the most dangerous bug available:
+    the account would show profit from money never risked, and an unvalidated path would
+    look like the best one on record. That is why this is a gate and not a docstring -
+    prose is what failed the last three times.
+
+    Four properties, all machine-checked by `tools/replay_safety_probe.py`:
+
+    1. the module imports no broker client and no paper/live executor;
+    2. `REPLAYED` is a distinct execution status, never `SUBMITTED`, and carries no
+       `order_id`, so reconciliation cannot match it to a real order;
+    3. a journal of replayed fills evaluates to zero realized PnL and never claims broker
+       verification;
+    4. the snapshot source says what it is - real bars, simulated account.
+
+    This verifies the *mechanism*, the same distinction `check_shadow_live_consistency`
+    insists on. It is not evidence that any replay has been run, and must not be cited as
+    if it were.
+    """
+    rc, out = _run([sys.executable, "tools/replay_safety_probe.py"])
+    if rc != 0:
+        return Result(
+            "replay-cannot-reach-the-account", FAIL,
+            f"replay safety probe did not run: {_tail(out)}",
+        )
+    try:
+        found = json.loads(out.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return Result(
+            "replay-cannot-reach-the-account", FAIL,
+            f"unreadable probe output: {_tail(out)}",
+        )
+    if found:
+        return Result(
+            "replay-cannot-reach-the-account", FAIL,
+            f"replay can reach the account: {'; '.join(found)}",
+        )
+    return Result(
+        "replay-cannot-reach-the-account", PASS,
+        "replay holds no broker client, reports REPLAYED with no order_id, and a journal "
+        "of replayed fills evaluates to zero realized PnL",
+    )
+
+
 def check_shadow_live_consistency() -> Result:
     """Live must be unreachable, probation must be a real gate, shadow must exist.
 
@@ -2708,6 +2760,7 @@ def check_all_tests_classified() -> Result:
 # the class-count gate and the run itself cannot disagree: three readers of one list rather
 # than three independent recollections of it.
 BESPOKE_CHECK_NAMES = (
+    "replay-cannot-reach-the-account",
     "docs-no-deleted-commands",
     "example-runs",
     "tools-readme-accurate",
@@ -3205,6 +3258,7 @@ def main() -> int:
     results.append(_safe(check_syntax_import, "syntax-import"))
     results.append(_safe(check_data_integrity, "data-integrity"))
     results.append(_safe(check_shadow_live_consistency, "shadow-live-consistency"))
+    results.append(_safe(check_replay_cannot_reach_the_account, "replay-cannot-reach-the-account"))
 
     for cls in CHECK_CLASSES:
         if wanted and cls not in wanted:
