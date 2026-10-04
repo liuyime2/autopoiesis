@@ -1749,3 +1749,67 @@ the calibration report's own verdict is `MIS-CALIBRATED` and the day-adjusted ma
 **That is the honest summary of where this project stands.** The infrastructure is sound, the
 audit trail is complete, the risk boundaries hold, and the demonstrated edge is $29.94 from
 the model and $594 from deterministic buying in a rising market.
+
+## 2026-10-04 — the evaluation instrument cannot measure the project's success metric
+
+Measuring every decision source against its own day expectation, and against holding over
+the same horizon, produces one clean result and one structural finding.
+
+```
+all scored decisions, day-adjusted against the base rate of the days they came from
+  source                     scored  correct    rate   day-adj margin
+  baseline                      344      241   70.1%          -0.2%
+  llm                           241      128   53.1%          +1.8%
+  fallback_policy_engine         13        7   53.8%         -28.0%
+```
+
+**No source demonstrates an edge.** The baseline is exactly at its day expectation. The LLM is
++1.8 points, which on 241 decisions with overlapping 24-hour horizons is not a sample that can
+carry that claim. The fallback engine is clearly negative, though n=13.
+
+### The structural finding
+
+Comparing every non-HOLD decision against holding over the identical window gives an excess of
+**−0.05% for all three sources — the same number, to the basis point.** That is not a
+coincidence, and it is not a bug. It is what the instrument measures:
+
+```python
+gross = (future_price - price) / price * 100.0      # counterfactual.py:262
+net   = gross - assumed_cost_pct
+```
+
+`price` is the quote at the decision and `future_price` the quote at the horizon, so a trade's
+return **is** the return to holding from that same instant, minus the assumed round-trip cost.
+A trade can therefore never beat holding in this ledger, by construction. The verdicts —
+`GOOD_TRADE`, `FALSE_TRADE`, `GOOD_HOLD`, `MISSED_ALPHA` — answer a different and legitimate
+question: *given the direction the market took, was this action right?*
+
+**So the loop promotes strategies on decision quality, while the project's success metric is
+beating holding, and nothing in the system measures the second.** That is the mismatch worth
+recording, and it explains why the work this session produced — reachable probation budgets,
+capped admission, cumulative service accounting — cannot move the number in the previous
+entry. Those fixes make the loop able to reach a verdict. The verdict it reaches is about
+decision quality, and decision quality at +1.8% day-adjusted is not an edge over SPY.
+
+### What follows, and what deliberately does not
+
+The honest consequence is that a promotion, when it comes, will not by itself be evidence of
+profitability — and the cheapest way to close that gap already exists in data the system holds.
+Every closed lot carries `buy_price`, `sell_price`, `quantity` and timestamps, so "what would
+holding this capital over this window have returned" is arithmetic on the broker's own record,
+not new infrastructure.
+
+That comparison is deliberately **not** built here. The portfolio-level number already answers
+the question for the system as a whole — $594 realized against roughly +$820 for holding the
+$20,000 the Guardian allowed it to risk — and a per-strategy benchmark is worth adding when
+there is a promoted strategy to attribute one to. Today there is none: all 17 queued
+candidates hold 0 to 9 scored decisions against a gate of 10.
+
+**What would change this conclusion.** A source whose day-adjusted margin is positive by more
+than the noise on non-overlapping windows, or a promoted strategy whose realized PnL exceeds
+holding on the same capital over the same window. Neither exists on this record.
+
+**One methodological note for whoever measures it next:** the horizons overlap. A 24-hour
+window scored every 5 minutes is not 241 independent observations, and any significance claim
+built on treating them as independent would be wrong. The day adjustment in `calibration.py`
+partly handles this; a per-strategy benchmark should not assume independence it does not have.
