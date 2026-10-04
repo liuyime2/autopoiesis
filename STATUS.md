@@ -2106,3 +2106,78 @@ or the control is expressed in a unit a long-only strategy can actually move —
 which scale with the dataset, rather than trades, which scale with the strategy's design. Which
 of those two is right is the experiment; what is no longer in doubt is that a fixed dataset and
 an unbounded search cannot both stand.
+
+## 2026-10-04 — audit: can this system run 7x24, fully autonomous, discovering and improving itself?
+
+Asked directly, so answered directly with measured evidence rather than from intent. **No.**
+Three of the four properties do not hold. One holds and is narrower than "validation".
+
+### What is true
+
+**Unattended 7x24 operation, and it is safe.** The daemon has produced 18,438 journal events
+across 116 days, every hour including overnight, and is currently up and writing. Paper-only is
+enforced at three layers rather than by convention: `ALPACA_BASE_URL` is the paper endpoint,
+`MIN_AGENT_MODE=paper`, and `Guardian.review`'s first statement refuses any mode that is not
+paper. No risk limit was breached on this record.
+
+### What is false
+
+**7x24 *validation* — false.** Validation means testing hypotheses against reality and learning
+from the result. The stage that does that has never once returned a result:
+
+```
+research trials: 26      verdicts: INSUFFICIENT 26      usable verdicts: 0
+```
+
+Only 21 distinct days in 116 carry any activity, and no cycle has run since 2026-10-02. Also
+worth stating plainly: **0 of 1179 cycles has a positive `filled_quantity`** — every one of the
+62 orders sat at `pending_new` and was confirmed retrospectively by a reconciler, which is a
+documented design choice but means the execution path has never confirmed a fill inline.
+
+**Fully autonomous strategy exploration — partial.** Producing candidates works and is
+autonomous: 380 curriculum proposals, 213 admission reviews, 68 accepted, no human in the loop.
+Producing *evidence* about them does not, and that is the half that matters. Exploration here
+generates hypotheses and never tests one.
+
+**Self-optimization — false.**
+
+```
+transitions to ACTIVE, all time: 8
+  six on 2026-06-11..06-18, two on 2026-09-30 (both tiny-fixed-size-001)
+promotions since 2026-09-30: 0
+times the promoted strategy was selected in the 146 cycles after it: 0
+```
+
+The last line is the damning one. Even a *successful* promotion does not lead to trading, because
+probation has absolute priority in the selector and its queue never empties — so a promoted
+strategy is starved by the very exploration it was promoted out of.
+
+**Measurable improvement — false.** The model contributed $29.94 of $594.33 realized (5%). All
+three strategies that ever produced broker-verified PnL are behind the market (−0.29, −1.98,
+−2.18 points; −$270.86 on $21,077 at risk). No decision source shows a day-adjusted edge:
+baseline −0.2%, llm +1.8%, fallback −28%.
+
+### The two structural blockers, both measured
+
+1. **The research verdict gate is unsatisfiable.** 52 out-of-sample trades required against 3
+   achievable; ~8,800 bars needed at the best observed rate against an 847-bar cache; and the
+   requirement rises as `sqrt(trials)` while the dataset is fixed, so the gap widens as the
+   search broadens.
+2. **The promotion chain cannot complete.** A promoted strategy is not selected while any
+   actionable probation candidate exists, and the queue cannot drain, so promotion leads to
+   nothing.
+
+Underneath both: **there is no edge for the loop to find.** The infrastructure is sound and the
+audit trail is complete, but the search space is empty and two gates make it impossible to say
+so either way.
+
+### What would have to change for the claim to hold
+
+- Bound the search so `required_trades` stops rising, **or** express the multiple-testing control
+  in folds-and-bars, which scale with the data, rather than trades, which scale with a strategy's
+  design. Not lowering the bar — that is a multiple-testing control.
+- Make probation yield to a promoted strategy, so a promotion actually means trading.
+- Then run long enough to produce either an edge or a defensible null.
+
+Neither is a bug fix. Both change what the project optimises, so both belong in a plan with
+their own falsifier rather than in a maintenance pass.
