@@ -2377,10 +2377,28 @@ def check_research_trial_ledger() -> Result:
         verdict = str(record.get("verdict", "")).upper()
         if verdict and verdict not in known_verdicts:
             problems.append(f"record {index} has an unrecognised verdict {verdict!r}")
-    identities = [r.get("strategy_id") for r in recorded if r.get("strategy_id")]
+    # A trial's identity is the rule *and* the dataset it was judged on, because those two
+    # together determine the result. Keying on strategy_id alone was correct while every candidate
+    # was judged exactly once, but the scheduled search re-evaluates each candidate whenever the
+    # broker fetch brings new bars, and that re-evaluation is a genuinely new trial which the
+    # ledger is required to record rather than suppress. Observed here:
+    #   search-trend-follow-0p0005  bars=20448  oos=87 trades
+    #   search-trend-follow-0p0005  bars=24162  oos=155 trades
+    # Two evaluations, two answers, one rule - and 0 duplicate (strategy_id, bars) pairs in the
+    # whole ledger. Keying on strategy_id alone made this check refuse the exact behaviour the
+    # driver exists to produce. The original defect it was written for is still caught: the same
+    # rule judged twice on the same number of bars is a double-count and still fails.
+    identities = [
+        (r.get("strategy_id"), r.get("bars"))
+        for r in recorded
+        if r.get("strategy_id")
+    ]
     duplicates = len(identities) - len(set(identities))
     if duplicates:
-        problems.append(f"{duplicates} duplicate strategy_id(s): a trial recorded twice")
+        problems.append(
+            f"{duplicates} duplicate trial(s): the same rule recorded twice against the "
+            "same bar count, so one evaluation is counted twice"
+        )
 
     summary = trials.summarise(recorded)
     if summary["trials_run"] != len(recorded):

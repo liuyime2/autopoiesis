@@ -143,6 +143,43 @@ def test_new_data_re_evaluates_a_candidate_already_on_record(tmp_path):
     assert len(trials.read_trials(path)) == 4
 
 
+def test_every_cache_file_is_merged_and_deduplicated(tmp_path):
+    """A rolling fetch writes a new dated file per run, so no single file is the dataset.
+
+    Taking the largest file would pin the search to whichever window happened to be widest and
+    ignore the newest tape; taking the newest would throw away everything before it. Overlapping
+    windows share timestamps, so the merge has to deduplicate or the series gains phantom bars.
+    """
+    from min_agent.replay import ReplayBar, save_bars
+
+    cache = tmp_path / "replay"
+    cache.mkdir()
+    shared = _oscillating(n=400, amplitude=0.01, period=12)
+    later = _oscillating(n=400, amplitude=0.02, period=12)
+
+    def _rows(prices, start=0):
+        from datetime import datetime, timedelta
+
+        t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        return [
+            ReplayBar(
+                timestamp=t0 + timedelta(minutes=5 * (start + i)),
+                open=p, high=p, low=p, close=p, volume=1.0,
+            )
+            for i, p in enumerate(prices)
+        ]
+
+    save_bars(cache / "SPY_5Min_2026-01-01_2026-01-02.json", "SPY", _rows(shared))
+    save_bars(cache / "SPY_5Min_2026-01-01_2026-01-03.json", "SPY", _rows(shared + later))
+
+    bars, provenance = driver._load_real_bars(cache)
+
+    assert len(bars) == 800, "400 + 400, with the 400 overlapping bars counted once"
+    assert len({b.timestamp for b in bars}) == len(bars), "no timestamp appears twice"
+    assert bars == sorted(bars, key=lambda b: b.timestamp), "the series is chronological"
+    assert "2 file(s)" in provenance, "the report says how much history it merged"
+
+
 def test_an_unwritable_ledger_does_not_lose_the_run(tmp_path):
     """A trial that cannot be journalled still ran; the count is reported, not hidden."""
     report = driver.search(

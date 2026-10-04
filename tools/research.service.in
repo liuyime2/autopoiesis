@@ -1,0 +1,43 @@
+[Unit]
+Description=QuantVoyager unattended strategy research: fetch real bars, then search
+Documentation=file://@ROOT@/docs/superpowers/specs/2026-09-28-min-agent-runbook.md
+After=network-online.target min-agent.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+Environment=PYTHONPATH=@ROOT@/src
+Environment=PATH=@ENVBIN@:/usr/local/bin:/usr/bin:/bin
+# Paper credentials, same as the daemon: the bars are historical, but the endpoint is the paper
+# one because this project does not hold a live key and does not trade history.
+Environment=MIN_AGENT_MODE=paper
+Environment=ALPACA_BASE_URL=https://paper-api.alpaca.markets
+Environment=APCA_API_BASE_URL=https://paper-api.alpaca.markets
+
+# Rendered from the same variable as min-agent.service, and no leading `-` for the same reason as
+# the watchdog: a missing credentials file must stop this unit with the actual cause named, rather
+# than starting it and producing a research run with no bars.
+EnvironmentFile=@ENVFILE@
+
+# Fetch first, search second. Type=oneshot permits several ExecStart= lines and runs them in
+# order, which is what makes this a pipeline rather than two racing commands.
+#
+# The fetch is followed by `|| echo ...` so its failure is tolerated rather than fatal: it is
+# expected on any day the broker has no new bars to give, and the search must still run and say
+# so. Coupling the two would mean a broker outage silently stops research. The fetch itself
+# refuses to invent bars - it returns non-zero and writes nothing - so a failure here cannot turn
+# into a verdict on invented prices.
+#
+# The search is *not* tolerant. If the driver exits non-zero the cache was missing or unusable,
+# which is a real failure and should fail the unit.
+# The window ends yesterday, not today. Measured: a fetch ending 2026-10-03 returned 4338 bars
+# and one ending 2026-10-04 failed with "subscription does not permit querying recent SIP data" -
+# the paper account cannot be asked for the current day's tape, so a window ending "now" is a
+# window that always fails. Yesterday is always a completed session, which is also the point of
+# running after the close.
+ExecStart=/bin/sh -c '@PYTHON@ tools/fetch_replay_bars.py SPY "$(date -u -d "-6 months" +%%Y-%%m-%%dT13:30:00Z)" "$(date -u -d "-1 day" +%%Y-%%m-%%dT20:00:00Z)" 5Min || echo "bar fetch returned $?; searching the existing cache anyway"'
+ExecStart=@PYTHON@ -m min_agent.research.driver
+
+StandardOutput=append:@ROOT@/runtime/min_agent/research.log
+StandardError=append:@ROOT@/runtime/min_agent/research.log

@@ -2528,3 +2528,73 @@ than inventing a PnL number is the behaviour the project already requires.
 The `make verify` gate stays on the 847-bar cache deliberately - `runtime/` is not committed, so a
 fresh clone would not have the large one, and a gate that needs a 20448-bar download is not a gate
 anyone runs.
+
+## 2026-10-04 — exploration is continuous: it fetches, searches, and records on a timer
+
+`2622bb3` made the search unattended. That was not the same as continuous, and the difference was
+the dataset. The driver's only input was the replay cache, which `tools/fetch_replay_bars.py`
+writes - a command a human types. So a scheduled search would have run forever and correctly
+decided nothing:
+
+```
+bars: 20448 ...  candidates: 37 ... repeats: 11
+```
+
+`repeats: 11` is every candidate. The journal is not an alternative source - it carries no price
+series at all (0 events with a price; only `ORDER_FILL_CONFIRMED` has one, 62 in total).
+
+`quant-research.timer` now fires daily at 06:30 UTC + up to 30 min jitter, after the close and
+before the next session, running `fetch_replay_bars.py` then `min_agent.research.driver`. It is a
+separate unit rather than something the daemon invokes, because `check_production_research_separation`
+fails the gate when any production module imports the research package, and a component that both
+searches and trades can grade itself on its own output.
+
+Run end to end by systemd on the real host:
+
+```
+bars: 24162 from 5 file(s): SPY_5Min_2026-04-04_2026-10-03.json (24162), ... [alpaca historical bars; not synthetic]
+candidates: 48 (cumulative: 37 already in the ledger)  required_trades: 70  repeats: 0
+```
+
+The fetch wrote a new dated file, the driver merged and deduplicated all five (54,089 raw bars to
+24,162 unique), the larger dataset made every candidate a *new* trial, 11 were recorded, and the
+bar rose 61 -> 70. That is the loop the objective asks for, running unattended.
+
+### Three defects, found only by running the real thing
+
+**The rolling fetch never worked.** The first real run logged `subscription does not permit
+querying recent SIP data`, fell through to searching the stale cache, and **exited 0** - so it
+would have looked like a successful unattended run every day. Measured: a window ending
+2026-10-03 returned 4338 bars; the same window ending 2026-10-04 failed. The paper account cannot
+be asked for the current day's tape. The window now ends yesterday.
+
+**The timer was enabled and never fired.** `install-service` used `systemctl --user enable`, which
+only arranges for a timer to run at next boot:
+
+```
+-  -  -  quant-research.timer  quant-research.service     <- no next run
+Sun 14:28:16 EDT  6min  quant-watchdog.timer             <- active (waiting)
+```
+
+`Active: inactive (dead)`, `Trigger: n/a`, and `minictrl service start` starts only the daemon, so
+the printed hint could not start it either. Now `enable --now`, with the started state checked
+rather than assumed - the same false success the comment three lines above warns about.
+
+**The ledger gate forbade what the driver exists to do.** Re-judging a candidate on more data is a
+new trial, and duplicates keyed on `strategy_id` alone refused it. The ledger settled it:
+
+```
+search-trend-follow-0p0005  bars=20448  oos=87 trades
+search-trend-follow-0p0005  bars=24162  oos=155 trades
+0 duplicate (strategy_id, bars) pairs
+```
+
+Identity is rule *and* dataset. Both directions verified against the real check: a genuine
+double-count on the same bar count still FAILs, the same rule on new data PASSes.
+
+### Unchanged by any of this
+
+Nothing passes. Every candidate clearing the evidence bar is `OVERFIT`, and that is the honest
+answer on 24,162 real bars. The pipeline is now correct and continuous; what it produces is a
+negative result, produced correctly and reproducibly, which is the most this design space has
+given so far.

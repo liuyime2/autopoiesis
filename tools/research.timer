@@ -1,0 +1,17 @@
+[Unit]
+Description=Run the QuantVoyager strategy search daily on freshly fetched real bars
+
+[Timer]
+OnCalendar=*-*-* 06:30:00
+# 06:30 UTC is after the US close and before the next session, so a run never competes with
+# trading for the network or the disk, and the bars it fetches are a settled tape rather than a
+# partial one.
+# Spread across a jittered window so several agents on one host do not all fetch at the same minute.
+RandomizedDelaySec=1800
+AccuracySec=60s
+# A missed run - a laptop asleep, a reboot - should still fetch and search rather than silently
+# skipping a day of data that then takes a week of history to make up for.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -201,6 +201,13 @@ def search(
 def _load_real_bars(cache_dir: pathlib.Path = DEFAULT_CACHE_DIR) -> tuple[list[Bar], str]:
     """Real bars from the fetch tool's cache, with the provenance it recorded.
 
+    Every `*.json` in the cache is merged and deduplicated by timestamp, because a rolling fetch
+    names its file after the window it fetched - `SPY_5Min_2026-05-01_2026-10-03.json` - so a
+    scheduled search accumulates one file per fetch and any single one of them is a partial view.
+    Picking the largest file instead would silently prefer whichever window happened to be widest
+    rather than whichever covers the most recent tape, and picking the newest would throw away
+    everything before it.
+
     Fails loudly rather than falling back to a generator: `replay.py`'s rule is that a run over
     invented prices can only show that code runs, and the same is true of a search. An absent
     cache means the driver has nothing to decide, which is an error worth stopping for - not a
@@ -216,13 +223,28 @@ def _load_real_bars(cache_dir: pathlib.Path = DEFAULT_CACHE_DIR) -> tuple[list[B
     files = sorted(cache_dir.glob("*.json"))
     if not files:
         raise SystemExit(f"no bar files in {cache_dir}; run tools/fetch_replay_bars.py first")
-    chosen = max(files, key=lambda p: p.stat().st_size)
-    payload = json.loads(chosen.read_text(encoding="utf-8"))
-    provenance = str(payload.get("provenance", "unstated"))
-    bars = [Bar(timestamp=b.timestamp, price=b.close) for b in load_bars(chosen)]
+
+    by_timestamp: dict[Any, Bar] = {}
+    provenance: set[str] = set()
+    used: list[str] = []
+    for path in files:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        rows = load_bars(path)
+        if not rows:
+            continue
+        provenance.add(str(payload.get("provenance", "unstated")))
+        used.append(f"{path.name} ({len(rows)})")
+        for row in rows:
+            bar = Bar(timestamp=row.timestamp, price=row.close)
+            by_timestamp.setdefault(row.timestamp, bar)
+
+    bars = [by_timestamp[key] for key in sorted(by_timestamp)]
     if not bars:
-        raise SystemExit(f"{chosen} holds no usable bars")
-    return bars, f"{chosen.name} ({provenance})"
+        raise SystemExit(f"no usable bars in {cache_dir}")
+    return bars, f"{len(files)} file(s): {', '.join(used)} [{'; '.join(sorted(provenance))}]"
 
 
 def main(argv: list[str] | None = None) -> int:

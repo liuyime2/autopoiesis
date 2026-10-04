@@ -106,12 +106,23 @@ and fails silently.
 
 ## Service templates
 
-`min-agent.service.in`, `watchdog.service.in`, `ollama.service.in` (the timer unit ships as a file, `tools/watchdog.timer`, which `minictrl` copies into place) —
+`min-agent.service.in`, `watchdog.service.in`, `ollama.service.in`, `research.service.in` (the
+timer units ship as files, `tools/watchdog.timer` and `tools/research.timer`, which `minictrl`
+copies into place) —
 substituted by `minictrl install-service`, which uses `systemd_unit_dir.sh` to ask
 the systemd user manager where it actually searches rather than trusting the shell's
 `XDG_CONFIG_HOME`. Installing to the latter produces files systemd never opens, while
 `systemctl is-enabled` still answers "enabled".
 
-The timer is `watchdog.timer`. It ships as a file and `minictrl` copies it into place,
-rather than being templated inline, because a timer has no `ExecStart` to substitute into.
-That makes it the one unit here that is not a `.in` template.
+The timers are `watchdog.timer` and `research.timer`. They ship as files and `minictrl` copies
+them into place, rather than being templated inline, because a timer has no `ExecStart` to
+substitute into. That makes them the units here that are not `.in` templates.
+
+`research.service.in` installs as the unit quant-research.service: it fetches real bars from
+the broker and then runs `min_agent.research.driver`. It is a separate unit rather than something
+the daemon invokes because `check_production_research_separation` fails the gate when any
+production module imports the research package — letting the daemon run the search would break
+that separation for the sake of one scheduler, and a component that both searches and trades can
+grade itself. Its fetch is followed by `|| echo ...` so a broker outage yields "no new bars" and
+still runs the search, rather than silently stopping research; the search itself is not tolerant,
+because a missing cache is a real failure.
