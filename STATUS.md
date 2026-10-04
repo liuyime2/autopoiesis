@@ -1970,3 +1970,52 @@ That number is worth watching for a specific reason rather than in general: the 
 observed in the recent range and can never be selected until the market leaves those bands.
 Seven is below the cap of 13, so the gate reopens on its own as the actionable candidates are
 served — the floor is a floor on the *backlog*, not a reason the gate stays shut.
+
+## 2026-10-04 — 147 cycle errors, and the one that costs a strategy
+
+The record carries `error_count: 147` over 1179 cycles, which reads as a 12.5% failure rate in
+the decision layer. It is worth knowing what those 147 actually are.
+
+```
+133  llm output format   HOLD carrying a quantity, confidence as 70 or 50 instead of 0.7,
+                        rationale missing, symbol missing, no JSON object in the response
+ 12  in_flight_order    the double-submission guard refusing to resubmit an order whose
+                        fill has not been confirmed
+  2  ollama timeout     localhost:11434 read timeout, once in June and once on 2026-09-30
+```
+
+The 133 are almost all June: the last of that class is 2026-09-30, so the model's output
+contract is now essentially clean and the decision layer's error rate is close to zero. That is
+a real improvement in the record and nothing had measured it.
+
+**The 12 are the double-submission guard, and the defect that charged it to strategies was
+already fixed** — commit `3aafc18`, 2026-10-03, with the same measurement in its comment. All
+12 cycles predate it (2026-10-02), so it is not a live bug, and I was one step from reporting a
+fixed defect as a current one. Recording it because the *consequence* has not been cleaned up:
+
+```
+strategy                     cycles  errored  in_flight  genuine  screen verdict
+fixed-size-probe-0001            16        3          3        0   REJECT (11 scored)
+fixed-size-sell-005             17        3          3        0   PASS_SCREENED (12 scored)
+fixed-size-sell-006              7        4          4        0   INCONCLUSIVE (0 scored)
+trend-follow-20260627-001         5        2          2        0   INCONCLUSIVE (0 scored)
+```
+
+Every one of the four was paused for "error rate above lifecycle threshold" on **100%
+guard-firing errors and zero genuine errors**. Three of them would be paused anyway on other
+grounds — one is rejected by its own screen, two have no evidence at all.
+
+**`fixed-size-sell-005` is the real cost.** It passed the offline screen on 12 scored
+decisions, and it was excluded from selection on the strength of three cycles in which the
+system correctly refused to double its position. That is the loop discarding the only
+candidate on this record that both has a passing screen and no genuine errors.
+
+**The repair cannot be done correctly yet, and doing it now would be worse than waiting.**
+`PAUSED` is terminal in `_review_one`, so nothing re-derives it — but the reflection window is
+frozen on the last 50 cycles, all from 2026-10-02, so it still carries those three errors.
+Re-adjudicating today would pause it again for exactly the stale reason the fix removed. The
+repair becomes correct once new cycles roll the window past 2026-10-02, which needs a market
+session.
+
+So this joins the queue drain as something the next session can settle, and both are blocked
+on the same thing rather than on a decision.
