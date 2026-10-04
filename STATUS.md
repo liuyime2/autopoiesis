@@ -2416,3 +2416,72 @@ The remaining structural gap for fully autonomous exploration is now unambiguous
 rules or data: **`record_trial()` has no production caller.** The research stage can run and
 return a verdict, but nothing in the loop ever invokes it, so exploration is manual by
 construction.
+
+## 2026-10-04 — the research stage runs itself now, and finds nothing
+
+### The gap, measured on the live record
+
+Candidate *generation* was already autonomous; candidate *evaluation* did not exist. The journal
+has 382 `CURRICULUM_PROPOSED` events over months of operation, and **zero** events from the
+research stage, because `record_trial()` had no caller anywhere outside its own package:
+
+```
+$ grep -rn "record_trial" src/ tools/ --include=*.py | grep -v "src/min_agent/research/"
+(no matches)
+```
+
+Every verdict this project had ever reported - including the `OVERFIT` in `112731f` - came from a
+person typing a script. The pipeline in `research/__init__.py` stops after backtest because its
+first six steps are library functions nobody calls.
+
+(An earlier reading of this journal reported no curriculum events at all. That was my error: I
+grepped the key `event` when the field is `event_type`.)
+
+### The driver
+
+`src/min_agent/research/driver.py`, run as its own entry point so production never imports
+research - the separation `tools/verify.py` enforces would break otherwise, and a component that
+both searches and trades can grade itself. It sweeps the rule space that already exists, runs
+`run_walk_forward`, and records every trial with its figures.
+
+```
+bars: 20448 from SPY_5Min_2026-05-01_2026-10-03.json (alpaca historical bars; not synthetic)
+candidates: 37 (cumulative: 37 already in the ledger)  required_trades: 61  repeats: 11
+  search-trend-follow-0p0005    OVERFIT      oos  +0.043% over  141 trades
+  search-trend-follow-0p0010    OVERFIT      oos  +0.038% over  102 trades
+  search-trend-follow-0p0020    OVERFIT      oos  +0.027% over   67 trades
+  search-trend-follow-0p0050    INSUFFICIENT oos  -0.009% over   34 trades
+  search-fixed-size-buy-hold    OVERFIT      oos  +0.094% over   61 trades
+trials_run: 11  passed: 0
+```
+
+**Nothing passes.** `OVERFIT` means the out-of-sample leg is far worse than the in-sample leg, so
+three candidates with positive out-of-sample returns still fail. This is the first negative the
+research gate has produced on real data at proper depth, and it is a real one.
+
+### Two defects, both found by the falsifiers written before the code
+
+**The bar reset per run.** `trials` counted only this search's candidates, so a ledger holding 37
+trials got the bar for 11 - and a daily driver would buy a cheap verdict every day and the project
+could shop across runs for a winner. Now every distinct trial on record counts.
+
+**Repeats inflated the count.** Recording idempotently was not enough: `already + len(space)`
+counted repeats, so a second identical run moved `required_trades` 15 -> 20 on a static dataset
+with nothing new tried. `verify.py` caught this before the test did, refusing 11 duplicate
+`strategy_id`s. The fix belongs in the driver, not the gate: identity is *rule plus dataset*,
+since those two determine the result, so a repeat is not a trial and more data is.
+
+Both are the same windowed-versus-cumulative error as the probation bug in `e02a8ff`, arriving
+through the trial accounting instead of the lifecycle counters.
+
+### Where the objective actually stands
+
+- **7x24 operation**: yes. Daemon PID 2160271, journal written 50s before this check, 18467
+  events, hourly overnight cycles.
+- **7x24 validation**: still not proven. 21 active days, all confirmations retrospective.
+- **Autonomous exploration**: now real and unattended - it runs, it records, it returns verdicts,
+  and the answers are negative.
+- **Self-optimisation**: reflection, counterfactual evaluation, screening and lifecycle
+  transitions run on live data and close the loop in replay.
+- **Profitability**: no. The search has found nothing that passes, and the live record shows the
+  promoted strategies running behind holding.

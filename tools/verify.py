@@ -128,6 +128,12 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_research_backtest.py": (
         "point-in-time-no-leakage", "pnl-accounting", "lifecycle-invariants",
     ),
+    # The driver is the autonomous search: it runs the real walk-forward over real
+    # bars and records trials, so it is held to no-leakage and to the lifecycle
+    # invariants the trial ledger already is.
+    "test_research_driver.py": (
+        "point-in-time-no-leakage", "lifecycle-invariants", "unit-integration",
+    ),
     "test_shadow.py": (
         "shadow-live-consistency", "guardian-bypass-prevention",
         "pnl-accounting", "broker-reconciliation",
