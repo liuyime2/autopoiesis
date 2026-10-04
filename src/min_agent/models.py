@@ -374,11 +374,18 @@ class PnLEvidence(BaseModel):
     account_return_pct: float | None = None
     strategy_realized_pnl: dict[str, float] = Field(default_factory=dict)
     strategy_fees: dict[str, float] = Field(default_factory=dict)
-    #: Entry cost of each strategy's closed lots: the capital its realized PnL was
-    #: earned on. Cumulative turnover across sequential round trips, **not**
-    #: concurrent exposure - the Guardian bounds the latter separately.
-    strategy_deployed_capital: dict[str, float] = Field(default_factory=dict)
-    #: Realized PnL over that capital, per cent. A strategy with no closed lots is
+    #: Peak capital each strategy held at risk at one time: the cost basis of its open
+    #: position at its largest, across closed and still-open lots.
+    #:
+    #: Named for what it is rather than "deployed capital", because that phrase was
+    #: read as cumulative turnover and produced a benchmark that was wrong by
+    #: construction. A strategy that cycles one share fifteen times turns over 15x the
+    #: capital it ever risked, so dividing realized PnL by turnover understates its
+    #: return — here by 0.5 points on the largest strategy — and then compares it
+    #: against a market return computed on capital held once. Two different
+    #: denominators, so the "excess" was not an excess of anything.
+    strategy_peak_exposure: dict[str, float] = Field(default_factory=dict)
+    #: Realized PnL over that peak exposure, per cent. A strategy with no closed lots is
     #: absent rather than zero: "did not trade" is not "returned nothing".
     strategy_return_pct: dict[str, float] = Field(default_factory=dict)
     #: The same instrument's return over the same window, from the prices this

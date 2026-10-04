@@ -530,19 +530,14 @@ def _pnl_evidence(
 
     # The holding benchmark, from the prices this evaluation already holds rather than
     # a second source that could disagree with the lots.
-    deployed_capital: dict[str, float] = {}
-    for lot in closed_lots:
-        deployed_capital[lot.strategy_id] = deployed_capital.get(lot.strategy_id, 0.0) + (
-            lot.buy_price * lot.quantity
-        )
-    deployed_capital = {k: round(v, 6) for k, v in deployed_capital.items()}
+    peak_exposure = _peak_exposure_by_strategy(closed_lots, open_lots)
     strategy_return = {
-        strategy_id: round(strategy_realized[strategy_id] / capital * 100.0, 6)
-        for strategy_id, capital in deployed_capital.items()
-        if capital > 0 and strategy_id in strategy_realized
+        strategy_id: round(strategy_realized[strategy_id] / exposure * 100.0, 6)
+        for strategy_id, exposure in peak_exposure.items()
+        if exposure > 0 and strategy_id in strategy_realized
     }
     market_return_pct = _market_return_pct(records)
-    if market_return_pct is None and deployed_capital:
+    if market_return_pct is None and peak_exposure:
         missing_reasons.append(
             "no price series covers the closed-lot window, so no holding benchmark can be stated"
         )
@@ -575,7 +570,7 @@ def _pnl_evidence(
         account_return_pct=account_return_pct,
         strategy_realized_pnl=strategy_realized,
         strategy_fees=strategy_fees,
-        strategy_deployed_capital=deployed_capital,
+        strategy_peak_exposure=peak_exposure,
         strategy_return_pct=strategy_return,
         market_return_pct=market_return_pct,
         strategy_excess_vs_market_pct=excess_vs_market,
@@ -1008,3 +1003,47 @@ def _score(
         return min(1.0, score * (1.0 + PNL_BONUS))
     return max(0.0, score * (1.0 - PNL_PENALTY))
 
+
+
+def _peak_exposure_by_strategy(
+    closed_lots: Sequence[ClosedLotAttribution],
+    open_lots: Sequence[OpenLotAttribution],
+) -> dict[str, float]:
+    """Peak cost basis each strategy held at risk at any one moment.
+
+    The denominator for "what did the capital I entrusted to this strategy return".
+    Deliberately **not** cumulative turnover: a strategy that cycles one share fifteen
+    times turns over fifteen times the capital it ever risked, so turnover as a
+    denominator understates its return and then compares it against a market return
+    computed on capital held once. Measured here, turnover understated the largest
+    strategy by 0.5 points and turned a -0.82 excess into a -1.38 one - the same sign
+    by luck, which is worse than being wrong in one direction.
+
+    Replayed in timestamp order across closed and still-open lots, because a strategy
+    that held one lot at a time and a strategy that held eight at once are different
+    exposures and only the replay tells them apart.
+    """
+    events: dict[str, list[tuple[datetime, float]]] = {}
+    for lot in closed_lots:
+        notional = lot.buy_price * lot.quantity
+        bucket = events.setdefault(lot.strategy_id, [])
+        bucket.append((lot.opened_at, notional))
+        bucket.append((lot.closed_at, -notional))
+    for open_lot in open_lots:
+        events.setdefault(open_lot.strategy_id, []).append(
+            (open_lot.opened_at, open_lot.entry_price * open_lot.quantity)
+        )
+    peaks: dict[str, float] = {}
+    for strategy_id, moves in events.items():
+        # Sorted by timestamp; ties do not matter because a peak is a maximum over a
+        # sum, and a same-instant open/close cannot raise it above either side.
+        moves.sort(key=lambda item: item[0])
+        held = 0.0
+        peak = 0.0
+        for _, delta in moves:
+            held += delta
+            if held > peak:
+                peak = held
+        if peak > 0:
+            peaks[strategy_id] = round(peak, 6)
+    return peaks

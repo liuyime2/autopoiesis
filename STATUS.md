@@ -1838,14 +1838,29 @@ broker-verified PnL is behind the market:
 
 ```
 [WARN] pnl vs holding   3 of 3 strategy/ies behind the market:
-        tiny-fixed-size-001  =+3.29% vs market +4.10%  (-0.82)
-        trend-follow-buy-001 =+2.73% vs market +4.10%  (-1.38)
-        fixed-size-buy-001   =+1.21% vs market +4.10%  (-2.89)
+        tiny-fixed-size-001  =+3.81% vs market +4.10%  (-0.29)
+        trend-follow-buy-001 =+2.12% vs market +4.10%  (-1.98)
+        fixed-size-buy-001   =+1.92% vs market +4.10%  (-2.18)
 ```
 
 Those figures were computed by hand from the broker record before this code existed, and the
 emitted values reproduce them exactly — which is the check that matters, because a benchmark
 assembled independently of the code it judges is the only kind worth having.
+
+**A correction to the first version of those numbers**, and to the denominator behind them.
+They were originally computed on *cumulative turnover* — the sum of each closed lot's entry
+cost — and the field was named `strategy_deployed_capital`. Both were wrong. A strategy that
+cycles one share fifteen times turns over fifteen times the capital it ever risked, so
+turnover understates its return; here it understated the largest strategy by 0.5 points, and
+then compared a turnover-based return against a market return computed on capital held once.
+Two different denominators, so the "excess" was not an excess of anything. It happens to have
+kept the same sign, which is luck rather than a defence.
+
+The denominator is now **peak exposure** — the cost basis of the largest position the strategy
+held at one time, replayed in timestamp order across closed and still-open lots — and the field
+is named `strategy_peak_exposure` for what it is. Corrected totals: $21,077 at risk, +$594.33
+realized, **+2.82% against the market's +4.10%, an excess of −$270.86**. The conclusion that
+every strategy is behind the market survives the correction; the magnitude does not.
 
 **What this deliberately does not do.** It does not change the promotion gate. Requiring a
 strategy to beat holding before promotion is a risk-adjacent policy change, and it is only
@@ -1854,6 +1869,8 @@ Today the gate's criterion has produced three strategies, and all three lost to 
 that is now a fact in the report rather than an inference, and the decision about the gate
 belongs to its own experiment.
 
-A note on what `capital` is: the sum of each closed lot's entry cost, so cumulative turnover
-across sequential round trips — $26,243 against the $20,000 the Guardian allows as
-*concurrent* exposure. It is not a limit breach and is not reported as one.
+The $21,077 of peak exposure is the capital these strategies were actually entrusted with,
+against the $20,000 the Guardian allows as concurrent exposure — so the aggregate is over the
+limit only because the strategies did not all hold at once, and the Guardian's own bound is on
+concurrent exposure, measured separately at about $19,793. Not a breach, and not reported as
+one.

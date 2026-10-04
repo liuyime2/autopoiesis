@@ -118,3 +118,40 @@ could not previously be taken on evidence: the gate's criterion has now been obs
 produce three strategies, and all three lost to the market. Whether promotion should require
 beating holding is a risk-adjacent policy question and needs its own experiment with its own
 falsifier — not a side effect of adding a report.
+
+## 8. Correction: turnover was the wrong denominator
+
+The first version of this reported each strategy's return on **cumulative turnover** — the
+sum of every closed lot's entry cost — and named the field `strategy_deployed_capital`.
+
+Both were wrong, and the error was mine, made in the same commit that added the measurement.
+A strategy that cycles one share fifteen times turns over fifteen times the capital it ever
+risked. Turnover as a denominator therefore understates the return, and then compares it
+against a market return computed on capital held *once* — two different denominators, so the
+"excess" was not an excess of anything.
+
+Measured, on the live record:
+
+```
+                            turnover basis    peak-exposure basis
+tiny-fixed-size-001              +3.29%                 +3.81%
+fixed-size-buy-001               +1.21%                 +1.92%
+trend-follow-buy-001             +2.73%                 +2.12%
+market                            +4.10%                +4.10%
+```
+
+The peak exposures are $9,603, $7,641 and $3,833 — not the ~$769 a single-share assumption
+would have given, which is what should have caught it. Turnover understated the largest
+strategy by 0.5 points and the excess it reported was **larger** than the truth (−0.82 against
+a real −0.29). It kept the right sign by luck, which is worse than being wrong in one
+direction, because a correct-looking sign is what would have stopped the next reader looking.
+
+Fixed by `_peak_exposure_by_strategy`: lots replayed in timestamp order across closed and
+still-open positions, taking the maximum running cost basis. The field is renamed
+`strategy_peak_exposure` because "deployed capital" is precisely the ambiguous phrase that
+produced the mistake. A test states the distinction on numbers where turnover gives +8.33%
+and peak exposure gives +12.5% for the same realized PnL.
+
+**The conclusion survives**: all three strategies are behind the market, by −0.29, −1.98 and
+−2.18 points, totalling −$270.86 on $21,077 at risk. What changed is the size of the claim and
+the fact that it is now measured on the capital the strategies were actually given.

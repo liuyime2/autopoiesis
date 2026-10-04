@@ -131,31 +131,55 @@ def test_no_price_series_yields_no_benchmark_rather_than_a_guess():
     assert _market_return_pct([_Rec(TS, 100.0)]) is None
 
 
-def test_a_return_is_per_cent_of_the_capital_it_was_earned_on():
+def test_a_return_is_per_cent_of_the_capital_it_was_entrusted_with():
     """The arithmetic behind `strategy_return_pct`, stated on numbers that can be checked.
 
-    10.00 realized on 100.00 of entry cost is +10.0%. This is the figure the project's
-    success metric needs and nothing reported it: the promotion gate screens on decision
-    quality, and the counterfactual ledger cannot see this number at all - a trade's
-    return there is holding from the same instant less cost, so every decision shows an
-    excess of exactly the assumed cost over holding.
+    10.00 realized on a peak exposure of 100.00 is +10.0%. This is the figure the
+    project's success metric needs and nothing reported it: the promotion gate screens on
+    decision quality, and the counterfactual ledger cannot see this number at all - a
+    trade's return there is holding from the same instant less cost, so every decision
+    shows an excess of exactly the assumed cost over holding.
     """
     realized = {"s1": 10.0}
-    capital = {"s1": 100.0}
+    peak = {"s1": 100.0}
     market = 4.0
 
-    returns = {k: round(realized[k] / capital[k] * 100.0, 6) for k in capital if capital[k] > 0}
+    returns = {k: round(realized[k] / peak[k] * 100.0, 6) for k in peak if peak[k] > 0}
     excess = {k: round(v - market, 6) for k, v in returns.items()}
 
     assert returns == {"s1": 10.0}
     assert excess == {"s1": 6.0}
 
 
+def test_turnover_is_not_the_denominator_for_what_the_capital_returned():
+    """A strategy that cycles one share many times turns over far more than it risked.
+
+    Cumulative turnover as the denominator understated `tiny-fixed-size-001` by 0.5 points
+    and then compared it against a market return computed on capital held once - two
+    different denominators, so the "excess" was not an excess of anything. Peak exposure
+    is what the strategy was actually entrusted with: here 3 lots of 40 turnover a peak
+    of only 80, so the return on turnover reads +5.0% where the return on capital at
+    risk is +12.5%.
+    """
+    lots = 3
+    notional_each = 40.0
+    turnover = lots * notional_each
+    peak = 2 * notional_each          # never more than two lots open at once
+    realized = 10.0
+
+    on_turnover = realized / turnover * 100.0
+    on_peak = realized / peak * 100.0
+
+    assert on_turnover == pytest.approx(8.333333, abs=1e-5)
+    assert on_peak == pytest.approx(12.5)
+    assert on_peak > on_turnover
+
+
 def test_a_strategy_that_did_not_trade_is_absent_rather_than_zero():
     """"Did not trade" must not render as "returned nothing"."""
     realized = {"s1": 10.0}
-    capital = {"s1": 100.0}
+    peak = {"s1": 100.0}
 
-    returns = {k: round(realized[k] / capital[k] * 100.0, 6) for k in capital if k in realized}
+    returns = {k: round(realized[k] / peak[k] * 100.0, 6) for k in peak if k in realized}
 
     assert "s2" not in returns
