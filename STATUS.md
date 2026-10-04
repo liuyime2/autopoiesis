@@ -763,3 +763,44 @@ costs ~169 cycles ≈ 2.6 trading days. That is the number to plan against — n
 strategies in the library.
 
 `make verify`: 50 classes, 0 failed, 1376 executions across 62 files; 876 pytest pass.
+
+## 2026-10-03 — requirement-by-requirement audit: three of the five gaps are already closed
+
+Auditing each audit finding against the journal rather than against my earlier summary of it.
+Three items turn out to be mis-framed, and one is fixed but unverified live.
+
+**"PnL 证据失败 1193 vs 成功 1926" — not a defect. My audit framed it as one.** All 1193
+`PNL_EVIDENCE_FAILED` events carry the reason **`profit target not satisfied`**, and the last
+was 2026-06-23. That is the system correctly recording that the 10%-daily-profit *target* was
+not met — a failed target, not a failed computation — and a 38% rate of "the target wasn't
+met" over five months is what an honest agent looks like. No check anywhere flags it, and
+`pnl attribution` reports PASS on evidence. The audit quoted a count and called it an error
+rate without reading the reason.
+
+**"347 周期无可用策略" — already fixed, and has not recurred.** Last occurrence
+**2026-06-10**, five months ago. The cause was the oldest-first probation queue serving
+candidates that could not act at the current price, fixed by the dormancy filter and by the
+selector filtering what it falls through to. Zero occurrences across the five most recent
+trading days (2026-09-28 … 10-02). Nothing is needed here.
+
+**"12.5% 周期带错误" — the fix has landed but has never run live.** The largest single cause
+was LLM output failing validation (100 cycles on a malformed `confidence`, 135 fail-closed
+HOLDs — about 20% of the whole history). That is what `DECISION_INSTRUCTION` addresses. Its
+last occurrence was 2026-09-30, which *predates* the fix. So the honest statement is: cause
+identified and closed, effect unmeasured, and it cannot be measured until the market opens.
+
+Where the five gaps actually stand:
+
+| gap | state |
+|---|---|
+| 1. not 7x24, no off-hours learning | **measured, deliberately not built** — evidence-starved; 7697/10130 screens returned INCONCLUSIVE, and more compute multiplies inconclusive verdicts rather than creating evidence |
+| 2. no self-representation surface | **closed** — `DECISION_INSTRUCTION`, with a schema-correspondence test so a new field cannot again cost 20% of the history |
+| 3. autonomy diluted | **closed but unverified** — the 1193 figure was not a defect, the 347 starvation has not recurred since June, and the malformed-output cause is fixed pending a live window |
+| 4. PAUSED unreachable / journal truncation | **split** — truncation is now visible and measured as *not* binding; re-adjudication was measured and deliberately not built because it lengthens the queue |
+| 5. no proven edge | **open, and not a code problem** — 87.7% of PnL is one exit at one price; needs cross-day real evidence |
+
+**The one number to plan against:** each candidate needs ~13 cycles of exclusive attention and
+the queue is serial, so draining all 13 actionable candidates costs ~169 cycles ≈ 2.6 trading
+days. Everything else in this audit is downstream of that.
+
+`make verify`: 50 classes, 0 failed, 1376 executions across 62 files; 876 pytest pass.
