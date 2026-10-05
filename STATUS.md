@@ -2967,3 +2967,62 @@ running longer:
   will not self-shrink.
 
 Both are decisions for the operator, not defects to fix in code.
+
+## 2026-10-05 23:00 EDT — sweep: every plan closed, and the one unmeasured claim measured
+
+Asked to fix everything, re-review, and confirm it runs to plan autonomously. Six checks. Three
+found something.
+
+### Two plans were never closed, though the work was done
+
+A sweep comparing every plan's `Status:` line against the commit log found two unfinished:
+
+- **`2026-10-04-the-research-gate-demands-more-bets-than-folds.md` still said `PLAN`** — but
+  `d60b7c6` implemented it. Re-derived from the code as it stands: `required_trades(27) = 52`,
+  exactly as the plan titled itself. **The bar was never lowered**; the fold count moved, and the
+  gate now returns real verdicts on 24,270 bars.
+- **`2026-10-03-close-the-audit-gaps.md` had an empty `Status:` line** — a 242-line plan, executed,
+  never revisited. All four buildable items landed (`e26b098` for the verdict-set merge,
+  `b17ea05` for rotation truncation, plus the instruction extraction); the two "do not build yet"
+  items are still not built, which is the plan working rather than stalling.
+
+Two plans in a row whose status outlived their work is the same failure as every stale
+measurement in this project: true when written, untrue later, nobody looking. Both are now closed
+against the commits.
+
+### The unmeasured claim, measured
+
+The instruction plan's own success criterion — malformed-output rate against a 12.5% baseline — was
+never verified, and I had recorded it as unrecoverable. That was wrong. 1,232 untyped cycle
+records carry the full `snapshot`/`decision`/`guardian` shape, so the malformed cases are visible
+in the decisions themselves:
+
+```
+LLM-authored cycles : 277   (2026-09-29 .. 2026-10-05)
+  malformed confidence : 0  (0.00%)
+  HOLD with quantity   : 0  (0.00%)
+```
+
+against 12.5% (92 malformed `confidence` plus 135 fail-closed HOLDs). **12.5% -> 0.00%.**
+
+Caveat recorded rather than rounded up: those 277 cycles span only 2026-09-29 onward, so the
+malformed era is not in this population — the journal's earlier cycles carry a different or absent
+model field. This shows "no malformed output since the fix"; it cannot show the rate before it.
+
+### Autonomous operation confirmed, including the skip
+
+Timer fired unattended, fetched nothing because nothing new could exist, and said so:
+
+```
+cache already current: newest bar 2026-10-05T16:55:00+00:00; not fetching
+candidates: 59 (cumulative: 59)  required_trades: 77  repeats: 11  unrecorded: 0
+```
+
+The ledger stayed at 59 rows and the cache at 6 files — correct, because the dataset did not change,
+so every candidate is a repeat. **This is the behaviour the earlier version got wrong**: it wrote
+a duplicate file and reported a bar count that looked like progress.
+
+Daemon across the whole session: `cycle_count 35`, `error_count 0`, `NRestarts 0`, and
+`market closed; maintenance only` — correctly idle overnight rather than failing.
+
+Gate: 52 classes, 0 failed, 1497 executions across 64 files. ruff and mypy clean.

@@ -1,7 +1,7 @@
 # The multiple-testing gate demands 52 bets and the fold count is hardcoded at 3
 
 Date: 2026-10-04
-Status: **PLAN - the unsatisfiability is measured exactly, and the fix provisions the evidence rather than lowering the bar**
+Status: **DONE - the gate opens and returns real verdicts on 24,270 bars; required_trades unchanged at 52 for 27 trials**
 Baseline commit for rollback: `3407ebc`
 Scope: `src/min_agent/research/walk_forward.py` and its tests. No change to
 `required_trades`, `BASE_REQUIRED_TRADES`, the screen, or any production module.
@@ -120,3 +120,36 @@ opened.
 - `ruff`, `mypy`, `test_research_backtest.py`, then the full `make verify`.
 - The behavioural claim — a default run returning a verdict other than `INSUFFICIENT` — is
   checked by the first test and demonstrated on the real cache.
+---
+
+## Result (recorded late; the work was done in `d60b7c6` and the status line was never closed)
+
+`n_folds=None` now derives the fold count from `required_trades`, so the stage provisions the
+evidence it counts instead of demanding it and never getting it. Re-derived from the code as it
+stands:
+
+```
+BASE_REQUIRED_TRADES = 10
+  required_trades( 1) = ceil(10 * sqrt( 1)) = 10
+  required_trades(10) = ceil(10 * sqrt(10)) = 32
+  required_trades(27) = ceil(10 * sqrt(27)) = 52
+  required_trades(40) = ceil(10 * sqrt(40)) = 64
+```
+
+**The bar is unchanged** — 52 at 27 trials, exactly as the plan titled itself. Nothing was lowered;
+the fold count moved.
+
+The predicted outcome has since been demonstrated on real data, which the plan could not do at the
+time: the gate opens and returns verdicts rather than `INSUFFICIENT`. On 24,270 real bars with 59
+cumulative trials and `required_trades: 77`, three candidates clear the evidence bar and all three
+return `OVERFIT`.
+
+That is the honest end of this plan. The unsatisfiability is gone and the answer it was blocking
+is a real one: three rules clear 77 out-of-sample trades and none generalises.
+
+**Why the status line said PLAN for two days.** The plan was written, implemented, committed and
+then never revisited - the work moved on to the next defect. A plan document's status is only as
+current as the last time somebody read it, which is the same failure as every stale measurement in
+this project: something true when written, untrue later, and nobody looking. The sweep in this
+session is what caught it, by comparing every `Status:` line against the commits rather than
+against memory.
