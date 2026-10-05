@@ -1737,3 +1737,100 @@ def test_an_incumbent_that_cannot_act_leaves_every_turn_to_probation():
     results = [_service("candidate", 5), _service("incumbent", 0, score=0.9)]
 
     assert selector.select([candidate, dormant], results, last_price=100.0).strategy_id == "candidate"
+
+
+def test_the_incumbent_cadence_advances_per_cycle_not_per_reflection_window():
+    """The property the live run was missing, and the reason it was missing.
+
+    The cadence is defined over cycles. It used to be measured against
+    `sum(cumulative_cycles)`, which reaches the selector only through `reflection.json` -
+    rewritten every 30 minutes - so the sum was frozen for a whole window and
+    `served % 5 == 0` was one constant across the ~6 cycles it covered. The rule became a
+    batch gate: every cycle in a qualifying window, or none.
+
+    Measured live on 2026-10-05: `served` was 146, `146 % 5 == 1`, and the incumbent was
+    selected 0 times in 8 cycles. Stepping `served` by one per cycle is what the caller now
+    does, and this asserts the share is both correct and unclustered.
+    """
+    selector = StrategySelector()
+    incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE")
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION")
+
+    picks = [
+        (selector.select([candidate, incumbent], [], last_price=100.0, served=n).strategy_id)
+        for n in range(1, 21)
+    ]
+    served_incumbent = sum(1 for p in picks if p == "incumbent")
+
+    assert served_incumbent == 4, f"1 in 5 over 20 cycles, got {served_incumbent}"
+    # Unclustered: the incumbent's turns are 5 apart, not 6 in a row then 24 idle.
+    positions = [i for i, p in enumerate(picks) if p == "incumbent"]
+    from itertools import pairwise
+
+    gaps = [b - a for a, b in pairwise(positions)]
+    assert gaps == [selector.incumbent_share] * (len(positions) - 1), (
+        f"incumbent turns bunched instead of spaced: positions={positions} gaps={gaps}"
+    )
+
+
+def test_the_cadence_ignores_a_frozen_reflection_count_when_served_is_given():
+    """A stale reflection snapshot must not be able to starve the incumbent again.
+
+    `146 % 5 == 1` held for the whole window on the live run, so the incumbent was refused
+    on every cycle of it. Passing the live count has to override that, or the fix is only
+    cosmetic.
+    """
+    selector = StrategySelector()
+    incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE")
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION")
+    # The candidate keeps budget left, so it is a genuine fallback rather than an
+    # already-served one: `1 + 145 = 146`, the exact frozen total from the live run.
+    frozen = [
+        StrategyResult(
+            strategy_id="candidate", cycles=0, cumulative_cycles=1,
+            submitted_orders=0, rejected_orders=0, errors=0, score=0.1,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+        StrategyResult(
+            strategy_id="incumbent", cycles=4, cumulative_cycles=145,
+            submitted_orders=8, trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+    ]
+
+    # The frozen snapshot alone starves it: 146 % 5 == 1.
+    assert selector.select([candidate, incumbent], frozen, last_price=100.0).strategy_id == "candidate"
+    # The live count rescues it on the fifth cycle.
+    assert (
+        selector.select([candidate, incumbent], frozen, last_price=100.0, served=5).strategy_id
+        == "incumbent"
+    )
+
+
+def test_omitting_served_keeps_the_previous_derivation_exactly():
+    """So the default path stays pinned and no existing caller changes meaning.
+
+    `served=None` must still derive the count from `results`, because that is what every
+    other caller and test in this file relies on.
+    """
+    selector = StrategySelector()
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION")
+    incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE")
+    budget = selector.min_probation_cycles
+    results = [
+        StrategyResult(
+            strategy_id="candidate", cycles=0, cumulative_cycles=budget,
+            submitted_orders=0, rejected_orders=0, errors=0, score=0.1,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+        StrategyResult(
+            strategy_id="incumbent", cycles=4, cumulative_cycles=40,
+            submitted_orders=8, trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+    ]
+
+    assert selector.select([candidate, incumbent], results).strategy_id == "incumbent"
+    assert (
+        selector.select([candidate, incumbent], results, served=None).strategy_id == "incumbent"
+    )

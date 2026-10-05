@@ -87,6 +87,12 @@ class AgentDaemon:
         strategy_library: StrategyLibrary | None = None,
         reflection_memory: ReflectionMemory | None = None,
         curriculum_agent: StructuredCurriculumAgent | None = None,
+        #: Called with the running cycle count after each cycle, so a caller that needs a
+        #: per-cycle number can hold it. The incumbent cadence is defined over cycles but
+        #: reads `reflection.json`, which is a 30-minute-old snapshot, so without this the
+        #: cadence advances once per reflection window and fires in whole-window batches
+        #: rather than one cycle in five.
+        on_cycle_count=None,
         strategy_admission: StrategyAdmission | None = None,
         journal: JsonlJournal | None = None,
         broker_evidence_provider=None,
@@ -110,6 +116,7 @@ class AgentDaemon:
         self.journal = journal
         self.broker_evidence_provider = broker_evidence_provider
         self.lifecycle_manager = lifecycle_manager
+        self.on_cycle_count = on_cycle_count
         self.knowledge_admission = knowledge_admission
         self.reflect_every = reflect_every
         self.curriculum_every = curriculum_every
@@ -198,6 +205,11 @@ class AgentDaemon:
             record = self.loop.run_once(symbol)
             self.cycle_count += 1
             self.daily_cycle_count += 1
+            if self.on_cycle_count is not None:
+                # Reported even when the cycle failed, so the number stays monotone and never
+                # skips. A cadence measured against a counter that jumped would be a cadence
+                # against something other than the cycle count.
+                self.on_cycle_count(self.cycle_count)
             if record is None:
                 # run_once already journaled CYCLE_FAILED; there is no snapshot
                 # to report on, so do not invent a last_cycle_id.

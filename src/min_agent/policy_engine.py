@@ -16,6 +16,7 @@ class PolicyEngine:
         selector: StrategySelector | None = None,
         executor: StrategyExecutor | None = None,
         max_lessons: int = 5,
+        served_provider=None,
     ):
         self.strategy_library = strategy_library
         self.reflection_memory = reflection_memory
@@ -23,6 +24,20 @@ class PolicyEngine:
         self.selector = selector or StrategySelector()
         self.executor = executor or StrategyExecutor()
         self.max_lessons = max_lessons
+        #: The daemon's own monotone cycle count, used for the incumbent cadence.
+        #: `select()` cannot derive it: the only count it can see is the one in
+        #: `reflection.json`, which is a 30-minute-old snapshot, so a cadence measured
+        #: against it fires in whole-window batches rather than one cycle in five.
+        self.served_provider = served_provider
+
+    def served(self) -> int | None:
+        """The daemon's current cycle count, or `None` to let the selector derive it."""
+        if self.served_provider is None:
+            return None
+        try:
+            return int(self.served_provider())
+        except (TypeError, ValueError):
+            return None
 
     def decide_snapshot(self, snapshot: DataSnapshot) -> TradeDecision:
         strategies = self.strategy_library.list()
@@ -32,7 +47,7 @@ class PolicyEngine:
             if reflection is not None:
                 results = self.reflection_memory.strategy_results(reflection)
 
-        strategy = self.selector.select(strategies, results)
+        strategy = self.selector.select(strategies, results, served=self.served())
         if strategy is None:
             return TradeDecision(
                 # Named so a fallback decision is never confused with a model

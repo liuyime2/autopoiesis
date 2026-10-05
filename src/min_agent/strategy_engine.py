@@ -491,7 +491,24 @@ class StrategySelector:
         strategies: list[StrategySpec],
         results: list[StrategyResult] | None = None,
         last_price: float | None = None,
+        served: int | None = None,
     ) -> StrategySpec | None:
+        """Pick the strategy to serve this cycle.
+
+        `served` is the monotone count of service already served, and it is what the
+        incumbent cadence is measured against. `None` derives it from `results`, which is
+        what the first version did unconditionally - and that is the defect this parameter
+        exists to fix. `cumulative_cycles` reaches the selector out of
+        `reflection.json`, which is rewritten only on the reflection interval, so the sum
+        was frozen for the whole 30-minute window and `served % incumbent_share == 0` was a
+        constant condition across the ~6 cycles it covered. The rule stopped being a cadence
+        and became a batch gate: every cycle in a qualifying window, or none. Measured live
+        on 2026-10-05, `served` was 146, `146 % 5 == 1`, and the incumbent was selected 0
+        times in 8 cycles.
+
+        The caller that knows the per-cycle count passes it. The default keeps the old
+        derivation so every existing caller and test means exactly what it meant before.
+        """
         eligible = [
             strategy
             for strategy in strategies
@@ -520,7 +537,8 @@ class StrategySelector:
         # service served, so the cadence is stateless: nothing to persist, nothing to
         # reset, and it cannot drift from the record. It is deliberately *not* the
         # windowed count - that is the instrument that made probation unfinishable twice.
-        served = sum(r.cumulative_cycles for r in results or [])
+        if served is None:
+            served = sum(r.cumulative_cycles for r in results or [])
         if (
             self.incumbent_share > 0
             and served % self.incumbent_share == 0

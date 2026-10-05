@@ -273,6 +273,12 @@ class HybridDecisionEngine:
                 # as an exit let the library report SELL as covered while being
                 # unable to sell.
                 snapshot.last_price,
+                # The daemon's own cycle count, not the one in reflection.json. That
+                # file is rewritten every 30 minutes, so a cadence measured against it
+                # advances once per window rather than once per cycle: measured live on
+                # 2026-10-05 the incumbent was selected 0 times in 8 cycles because
+                # `served` was frozen at 146 and `146 % 5 == 1` for the whole window.
+                self._served(),
             )
             if selected is not None:
                 strategy_id = selected.strategy_id
@@ -461,6 +467,24 @@ class HybridDecisionEngine:
             return list(self.lessons(strategy_id))[: self.max_lessons]
         except Exception:
             return []
+
+    def _served(self) -> int | None:
+        """The policy engine's live cycle count, or `None` to let `select` derive it.
+
+        Reached through `getattr` rather than called directly. `_context` catches every
+        exception and degrades to a decision with no selected strategy, so calling
+        `policy_engine.served()` on a policy engine that does not have it would raise
+        `AttributeError` *inside* that guard and silently drop the strategy - which is
+        exactly what two provenance tests caught, by asserting the mandate reached the
+        model and got a strategy_id back.
+        """
+        served = getattr(self.policy_engine, "served", None)
+        if served is None:
+            return None
+        try:
+            return int(served())
+        except (TypeError, ValueError):
+            return None
 
     def _results(self):
         engine = self.policy_engine

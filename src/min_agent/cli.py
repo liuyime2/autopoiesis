@@ -298,10 +298,18 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         max_account_value=config.max_account_value or None,
         max_snapshot_age_seconds=config.stale_after_seconds,
     )
+    # Declared before the daemon so the provider can read the daemon's own cycle count. The
+    # incumbent cadence is defined over cycles, and the only cycle count the selector could
+    # otherwise see is the one in reflection.json - a snapshot rewritten every 30 minutes, so
+    # a cadence measured against it advances once per window and fires in whole-window
+    # batches. Measured live on 2026-10-05: 0 incumbent selections in 8 cycles.
+    served_count: dict[str, int] = {"cycles": 0}
+
     policy_engine = PolicyEngine(
         strategy_library=strategy_library,
         reflection_memory=reflection_memory,
         knowledge_library=knowledge_library,
+        served_provider=lambda: served_count["cycles"],
     )
     # The LLM proposes; the policy engine is the disclosed fallback. Guardian
     # reviews whatever comes out either way. Previously the daemon injected
@@ -355,6 +363,10 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         journal=journal,
         strategy_library=strategy_library,
         reflection_memory=reflection_memory,
+        # The live per-cycle count, read through the cell above so the policy engine and
+        # the selector measure the incumbent cadence against cycles rather than against a
+        # 30-minute-old reflection snapshot.
+        on_cycle_count=lambda n: served_count.__setitem__("cycles", n),
         curriculum_agent=(
             StructuredCurriculumAgent(
                 transport=_ollama_curriculum_transport(config),
