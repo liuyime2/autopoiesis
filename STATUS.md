@@ -2830,3 +2830,64 @@ first. **Not changed here**: that is an operator decision, not something to flip
 ### Gate
 
 52 classes, 0 failed, 1483 test executions across 63 files. 934 pytest. ruff and mypy clean.
+
+## 2026-10-05 15:35 EDT — both fixes hold on the live session
+
+Verified after the restart onto `906f104` and `c1a389e`, from two consecutive reflections
+(15:21:36Z and 15:34:34Z):
+
+```
+tiny-fixed-size-001
+  cycles 1   cumulative_cycles 22   submitted_orders 0   rejected_orders 0
+  strategy_fault_rejections 0     errors 0             score 0.275
+  lifecycle: ACTIVE
+```
+
+**Defect 2 is fixed in production, not just in a test.** The window recorded three position-cap
+refusals, all after the restart:
+
+```
+x1  this buy would leave 13873.14 SPY held against a max_position_value of 5000.00
+x1  this buy would leave 13868.64 SPY held against a max_position_value of 5000.00
+x1  this buy would leave 13871.70 SPY held against a max_position_value of 5000.00
+```
+
+Under the old classification those three would have been `strategy_fault_rejections`, and with
+every cycle refused on the cap the failure rate would be 1.00 against a 0.75 threshold - the
+library's only ACTIVE strategy retired for obeying the system. It reads
+`strategy_fault_rejections: 0` and the strategy is still `ACTIVE`.
+
+The three distinct prices are themselves the evidence that it is being served on more than one
+cycle: the incumbent is only selected when `served % 5 == 0`, and it was refused three times at
+three different prices inside one 50-cycle window.
+
+**Defect 1 is fixed, and the evidence is indirect but real.** The incumbent's
+`cumulative_cycles` rose to 22 and its `score` moved off the 0.0 floor to 0.275, so it is being
+served and scored. It does not appear as a `SHADOW_ORDER_INTENT` because its BUY is refused and
+refusals journal no intent - the same property that exposed defect 2.
+
+**Shadow accounting is visible in the same record**, which is worth reading as the honest state
+of the feedback loop:
+
+```
+window_cycles 50   submitted_orders 5   shadowed_orders 11   skipped_orders 31
+guardian_approved 47   guardian_rejected 3   execution_errors 0
+```
+
+Note `submitted_orders 5` against `shadowed_orders 11`: the five are historical fills from before
+shadow was enabled, and the eleven are this window's intents that never reached the broker. The
+Guardian approved 47 decisions and rejected 3, so the decision path is being exercised hard; the
+sink is what stops it becoming an execution. `skipped_orders 31` is the dormant TREND_FOLLOW
+population holding rather than firing, consistent with the search-space measurement.
+
+## What is still open, stated plainly
+
+1. **No fills.** `MIN_AGENT_SHADOW=1` replaces the final broker call with a journalled intent, so
+   broker-verified PnL stays empty and the 17-share position will not shrink on its own. Turning
+   it off is a real decision about the account, gated on the paper-trading audit AGENTS.md 16
+   requires. Not taken unilaterally.
+2. **The search finds nothing.** Every candidate clearing the evidence bar is `OVERFIT` on
+   24,162 real bars. The pipeline is correct and continuous; the design space has no demonstrable
+   edge, and that is a fact about the rules, not about the plumbing.
+3. **7x24 continuity is qualified** by the 97-day gap documented above: the service runs
+   unattended whenever deployed, with seven days on this host, not every day since June.
