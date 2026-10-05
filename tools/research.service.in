@@ -31,12 +31,28 @@ EnvironmentFile=@ENVFILE@
 #
 # The search is *not* tolerant. If the driver exits non-zero the cache was missing or unusable,
 # which is a real failure and should fail the unit.
-# The window ends yesterday, not today. Measured: a fetch ending 2026-10-03 returned 4338 bars
-# and one ending 2026-10-04 failed with "subscription does not permit querying recent SIP data" -
-# the paper account cannot be asked for the current day's tape, so a window ending "now" is a
-# window that always fails. Yesterday is always a completed session, which is also the point of
-# running after the close.
-ExecStart=/bin/sh -c '@PYTHON@ tools/fetch_replay_bars.py SPY "$(date -u -d "-6 months" +%%Y-%%m-%%dT13:30:00Z)" "$(date -u -d "-1 day" +%%Y-%%m-%%dT20:00:00Z)" 5Min || echo "bar fetch returned $?; searching the existing cache anyway"'
+# The window ends 20 minutes ago, not yesterday and not now.
+#
+# Measured 2026-10-05, sweeping the end time across the session while the cache sat at
+# 2026-10-02T23:55Z:
+#
+#   end=2026-10-05T16:30Z  24265 bars  newest 16:30Z
+#   end=2026-10-05T16:55Z  24270 bars  newest 16:55Z
+#   end=2026-10-05T17:00Z  REFUSED: subscription does not permit querying recent SIP data
+#   end=now - 20 min       24269 bars  newest 16:50Z
+#   end=now - 60 min       24261 bars  newest 16:10Z
+#
+# The paper account's data trails real time by roughly 15 minutes, so the refusal is about how
+# recent the request is, not about the calendar. Two consequences, both of which were bugs:
+#
+# - ending at "yesterday 20:00Z" cannot ever ask for today's bars, so the dataset could not
+#   grow at all while this unit ran. It was stale by construction, not merely restricted.
+# - ending at "now" is refused outright whenever the run lands inside the trailing window,
+#   which is exactly what happened on the 06:42 unattended run.
+#
+# Twenty minutes clears the measured ~15 minute lag with a margin, and the fetcher skips
+# entirely when the cache already holds a bar inside the last interval.
+ExecStart=/bin/sh -c '@PYTHON@ tools/fetch_replay_bars.py SPY "$(date -u -d "-6 months" +%%Y-%%m-%%dT13:30:00Z)" "$(date -u -d "-20 minutes" +%%Y-%%m-%%dT%%H:%%M:00Z)" 5Min ROLLING || echo "bar fetch returned $?; searching the existing cache anyway"'
 ExecStart=@PYTHON@ -m min_agent.research.driver
 
 StandardOutput=append:@ROOT@/runtime/min_agent/research.log

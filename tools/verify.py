@@ -134,6 +134,13 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_research_driver.py": (
         "point-in-time-no-leakage", "lifecycle-invariants", "unit-integration",
     ),
+    # The scheduled fetch decides whether to query the broker at all, from the cached
+    # last-bar timestamp against the broker's clock. Getting that wrong either writes a
+    # daily near-duplicate or silently stops the dataset growing, so it is held to data
+    # integrity and to the replay determinism the cache feeds.
+    "test_replay_bar_fetch.py": (
+        "data-integrity", "replay-determinism", "unit-integration",
+    ),
     "test_shadow.py": (
         "shadow-live-consistency", "guardian-bypass-prevention",
         "pnl-accounting", "broker-reconciliation",
