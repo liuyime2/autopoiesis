@@ -2752,3 +2752,81 @@ function returns **17.0**, matching the broker exactly. A pre-open review that t
 convenient sum would have reported a fabricated ownership breach and "fixed" a system that was
 correct. The clamp exists so the historical over-sell stays visible rather than being netted into
 a balance, and it should be read through `TradingLoop._agent_holding`, not recomputed.
+
+## 2026-10-05 15:20 EDT — the open session found two real defects in the live system
+
+Market open (`is_open: True`, Monday 10:10 ET at the first check). Six cycles by the first look,
+`error_count: 0`, the daemon running normally. Two of the three pending verifications landed
+immediately, and the third uncovered a defect in a feature committed two days earlier.
+
+### Verified live
+
+```
+PROBATION backlog 17 -> 16   fixed-size-20260722-001 PROBATION -> RETIRED
+                                "severe operational failure rate 1.00"
+SHADOW_ORDER_INTENT  fixed-size-sell-20260724-001  SELL 1 @ 0.7  guardian_approved: true
+```
+
+A SELL-capable strategy was selected by the running daemon, passed the real Guardian, and the
+selection repeated on later cycles. The backlog drains. **Both are correct behaviour**, and note
+the intent's own reasoning in the selection: "Current SPY position of 17 shares (~$13,108.53)
+exceeds the max_position_value limit of $5,000, so reducing exposure is appropriate" - the system
+identified the over-cap position and chose the one action the cap permits.
+
+### Defect 1: the incumbent cadence ran once per reflection window (`906f104`)
+
+`INCUMBENT_SHARE = 5` selects the incumbent when `served % 5 == 0`, with
+`served = sum(cumulative_cycles)`. But `cumulative_cycles` reaches the selector only through
+`reflection.json`, rewritten every 30 minutes:
+
+```
+reflection generated_at: 2026-10-05T14:05:22Z
+TOTAL served = 146
+  146 % 5 = 1  ->  incumbent served this window: False
+```
+
+The sum is frozen for the whole window, so the rule is a **batch gate, not a cadence**: either
+every cycle in a window or none, with the residue stepping 1, 2, 3, 4, 0. The average lands near
+20% while the distribution is hours of starvation then a burst. Observed as 0 incumbent
+selections in 8 cycles. The same defect class as the windowed probation count in `e02a8ff`,
+reached through a different door: a rule reading a periodic snapshot of a monotone counter is
+driven by the snapshot's period, not by the traffic it governs.
+
+Fixed by passing the daemon's own cycle count through `on_cycle_count` into `select(served=...)`.
+The comment above the rule described the intent correctly - only the input was stale. New test
+asserts 4 incumbent selections in 20 cycles, exactly 5 apart, which the old implementation cannot
+produce.
+
+### Defect 2: a cap the strategy cannot see was charged to it as its own fault (`c1a389e`)
+
+With the incumbent finally being selected, its BUY was refused on the position cap - and that
+refusal would have retired it. `failure_rate = (errors + fault_rejections) / cycles` against a
+0.75 threshold, and every cycle refused on the cap gives **1.00**.
+
+The prefix list deliberately excludes position-limit messages, reasoning that a strategy asking
+for more than its own specification permits is what the fault counter is for. That holds for the
+strategy's own limit and not for this one: `tiny-fixed-size-001` declares
+`max_position_value=1000` and orders one share at $769.72, comfortably inside it. The 17 shares
+that breached the $5,000 cap predated its promotion. The strategy was charged for account state
+it can neither see nor change, and its only correct response - decline to buy - was the thing
+that would have avoided the refusal. Same reasoning the list already applies to the
+journal-derived agent holding and the broker-derived allowlist exposure.
+
+The consequence was the library's only ACTIVE strategy being removed for obeying the system,
+landing back on the no-ACTIVE-strategy state `3407ebc` was committed to end. One prefix added;
+`test_a_genuine_strategy_fault_is_still_charged` still passes, so this is not amnesty for risk
+refusals generally.
+
+### Shadow mode, and what it means for the feedback loop
+
+`MIN_AGENT_SHADOW=1`, so the final broker call is replaced by a journalled intent. Every
+`SHADOW_ORDER_INTENT` carries `shadowed: true` and `approved=True`; **no order has reached the
+broker**. The Guardian, the model, the selector and the journal above the sink are the real ones,
+so the decision path is genuinely being validated - but fills cannot happen yet, so broker-
+verified PnL stays empty and the position will not shrink on its own. Enabling paper execution is
+a deliberate step, and per AGENTS.md 16 it requires the paper-trading behaviour to be audited
+first. **Not changed here**: that is an operator decision, not something to flip while auditing.
+
+### Gate
+
+52 classes, 0 failed, 1483 test executions across 63 files. 934 pytest. ruff and mypy clean.
