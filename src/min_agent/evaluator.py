@@ -73,6 +73,29 @@ SYSTEM_REJECTION_REASON_PREFIXES = (
     # come from a broker snapshot. Neither is a property of the strategy.
     "cannot sell ",
     "the agent's own holding of ",
+    # Measured against the account's position, not the strategy's own specification.
+    #
+    # The comment below this list deliberately excludes "position value exceeds hard
+    # limit", and that is right for a strategy whose *own* max_position_value its order
+    # breaches. It does not hold for this one, which brackets the position the agent
+    # already holds: "this buy would leave 13854.96 SPY held against a max_position_value
+    # of 5000.00".
+    #
+    # tiny-fixed-size-001 declares max_position_value=1000 and its order is one share at
+    # $769.72, comfortably inside its own limit. What breached the cap was a 17-share
+    # position that predated its promotion, accumulated while the rule still measured the
+    # order rather than the position. The strategy is charged for account state it can
+    # neither see nor change, and its only correct response - decline to buy - is the very
+    # thing that would have avoided the refusal. Measured live on 2026-10-05: every cycle
+    # refused on this message gives failure_rate 1.00 against a 0.75 threshold, so the
+    # library's only ACTIVE strategy was being retired for refusals it did not cause -
+    # which is the no-ACTIVE-strategy state 3407ebc was written to end.
+    #
+    # Same reasoning as the two entries above it: derived from a broker snapshot, so not a
+    # property of the strategy. The Guardian still sizes a single order against the
+    # strategy's own limit, so a strategy asking for more than its specification permits
+    # is still charged by that check, and the aggregate caps keep their own prefixes.
+    "this buy would leave ",
     # Aggregate account state the strategy cannot see or choose.
     "agent exposure ",
     "account total ",
