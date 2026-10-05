@@ -2891,3 +2891,79 @@ population holding rather than firing, consistent with the search-space measurem
    edge, and that is a fact about the rules, not about the plumbing.
 3. **7x24 continuity is qualified** by the 97-day gap documented above: the service runs
    unattended whenever deployed, with seven days on this host, not every day since June.
+
+## 2026-10-05 17:20 EDT — continuous monitoring: the dataset grew for the first time
+
+Asked to keep monitoring and confirm the plan is executing. Four checks, three of them found
+something.
+
+**Running as planned.** Daemon `active/running`, `NRestarts=0`, `error_count: 0`. Both timers
+scheduled. Gate 52 classes, 0 failed, 1497 executions across 64 files.
+
+**The unattended research run fired at 06:42 EDT** and its log revealed the fetch had failed:
+
+```
+alpaca_trade_api.rest.APIError: subscription does not permit querying recent SIP data
+bar fetch returned 1; searching the existing cache anyway
+```
+
+The `|| echo` fallback worked as designed - the search ran and reported - but the cause was not
+the one I had fixed, and the cache had grown to **seven files that all ended on 2026-10-02**.
+
+### The SIP restriction is a data wall, not a calendar
+
+I had set the window to end "yesterday" on 2026-10-03, reasoning that the current day is
+unavailable. Sweeping the end time across today's session instead:
+
+```
+end=2026-10-05T16:30Z  24265 bars  newest 16:30Z
+end=2026-10-05T16:55Z  24270 bars  newest 16:55Z
+end=2026-10-05T17:00Z  REFUSED
+end=now - 20 min       24269 bars  newest 16:50Z
+end=now - 60 min       24261 bars  newest 16:10Z
+```
+
+**The paper account's data trails real time by about 15 minutes.** Both windows were wrong in
+opposite directions, and each was wrong in a way that a single date test could not reveal:
+
+- **"yesterday" could never fetch today's bars.** Not restricted - *stale by construction*. The
+  dataset was incapable of growing while the unit ran, which is the real reason seven cache files
+  existed holding one dataset.
+- **"now" is refused** whenever a run lands inside the trailing window, which is what the 06:42
+  run did.
+
+The lesson matches the rest of this project's: the first explanation fit the one observation I
+had, and sweeping the boundary was the only thing that corrected it. A date I tested by hand
+succeeded at one moment and failed minutes later - the same wall, seen from two sides.
+
+Window now ends 20 minutes ago. Three fixes in `tools/fetch_replay_bars.py` (`b1f6717`): the
+cache is named after the data so the rolling fetch overwrites one `SPY_5Min_rolling.json`; a
+failed fetch writes nothing; and the fetch skips entirely when the clock says it cannot add a bar.
+That last fix was itself buggy on arrival - it compared against `clock.timestamp`, which is *now*,
+so the skip could never fire. Both that and the closed-market cutoff (`next_open - 1 day` is an
+*open*, not the previous close) are pinned by tests carrying the measured numbers.
+
+### Verified end to end
+
+```
+cached 24270 real 5Min SPY bars -> SPY_5Min_rolling.json
+candidates: 59 (cumulative: 48)  required_trades: 77  repeats: 0
+```
+
+24,162 bars ending `2026-10-02T23:55Z` became **24,270 bars ending `2026-10-05T16:55Z`**,
+including today's session. `repeats: 0` and 11 fresh trials recorded, evidence bar 70 -> 77.
+Two superseded dated files deleted; `make verify` still runs its 847-cycle replay.
+
+### Where the objective stands, unchanged and honest
+
+Every capability is evidenced and the gate is green, but two facts are not going to change by
+running longer:
+
+- **The search finds nothing.** `OVERFIT` on every candidate clearing the bar, now on 24,270 real
+  bars. Two trading rule kinds, both long-only, 15 of 16 eligible strategies dormant at typical
+  SPY volatility.
+- **No fills.** `MIN_AGENT_SHADOW=1`; the decision path is validated (Guardian approved 47,
+  rejected 3 in one window) but nothing reaches the broker, so the 17-share over-cap position
+  will not self-shrink.
+
+Both are decisions for the operator, not defects to fix in code.
