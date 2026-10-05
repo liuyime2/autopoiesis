@@ -2685,3 +2685,70 @@ All three are verifications of changes already committed and unit-tested (`3407e
 `e02a8ff`). They are not regressions, and they are not new capability; they are the last thing
 between "written" and "observed", and the objective asks about what the system does, not what the
 tests say it does.
+
+## 2026-10-04 22:25 EDT — pre-open readiness review
+
+Asked to confirm every component is ready for the open. The market was in fact **closed**
+(Sunday 22:22 EDT; Alpaca's clock: `is_open False`, `next_open 2026-10-05 09:30 ET`), so the three
+live verifications remain unobtainable. What could be answered is readiness, and one real finding
+came out of it.
+
+### Every component
+
+| Component | State |
+| --- | --- |
+| daemon | active/running, `NRestarts=0`, up since 11:21 EDT |
+| ollama | active/running, `qwen3.8:27b` present |
+| timers | watchdog active; `quant-research.timer` fires Mon 06:42 EDT |
+| paper mode | `MIN_AGENT_MODE=paper`, both endpoints paper, keys valid |
+| broker | equity $99,432.81, status ACTIVE, **0 open orders** |
+| clock | closed; opens Mon 2026-10-05 09:30 ET |
+| library | 64 strategies, 18 selector-eligible, 1 ACTIVE and enabled |
+| `lifecycle_reason` | fix `538b496` confirmed working on the one post-fix transition |
+| disk | 21T free |
+| `doctor` | `ok: true`, 0 failures, 12 warnings |
+| `make verify` | 52 classes, 52 passed, 0 failed, 1478 executions |
+
+### The finding: BUY capacity is zero until the position shrinks
+
+The account holds 17 SPY, all of them the agent's own, worth **$13,085 against a $5,000
+`max_position_value`**. The corrected position rule counts every share of the symbol, so any BUY
+is refused:
+
+```
+this buy would leave 13854.96 SPY held against a max_position_value of 5000.00
+```
+
+A labelled dry run - real account, real prices, real Guardian, real agent holding, with only
+`snapshot.market_open` flipped, because the Guardian correctly refuses everything while the market
+is shut - over all 18 eligible strategies:
+
+```
+REFUSED     5     (every BUY: the position is over cap)
+WOULD TRADE 13    of which 9 are HOLD no-ops and 4 are real orders, all SELL:
+                 fixed-size-sell-20260724-001  SELL 1 @ 0.70
+                 trend-follow-20260804-001     SELL 1 @ 0.65
+                 trend-follow-20260806-001     SELL 1 @ 0.65
+                 trend-follow-20260808-001     SELL 1 @ 0.65
+```
+
+**This is not a deadlock.** Four strategies can sell, the agent owns the shares so ownership
+permits it, and as those fill the position falls below 6 shares ($4,618) and BUY capacity returns.
+The system will reduce its own exposure and then be able to build again. It is also legacy state,
+not a rule problem: the 17 shares accumulated while the position rule still measured the *order*
+rather than the position, which is the bug `3407ebc`/`max_position_value` corrected.
+
+No limit was changed to make this pass. Raising `max_position_value` to fit the existing position
+would be exactly the "automatically weakening a hard risk limit" that standing constraint 17
+forbids, and it would also re-admit the unbounded growth the rule was written to stop.
+
+### A trap worth recording
+
+Measuring the agent's own holding by summing its fills gives **-12**, which reads as a deadlock:
+the agent appears to have sold 12 shares it never bought, and the broker says 17 are held. That
+arithmetic is wrong, and `loop.py` documents exactly why - a commutative sum gives
+`buys - sells` and an in-order replay with a floor at zero gives the real figure. The real
+function returns **17.0**, matching the broker exactly. A pre-open review that trusted the
+convenient sum would have reported a fabricated ownership breach and "fixed" a system that was
+correct. The clamp exists so the historical over-sell stays visible rather than being netted into
+a balance, and it should be read through `TradingLoop._agent_holding`, not recomputed.
