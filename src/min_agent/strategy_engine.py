@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import cast
@@ -63,6 +63,12 @@ class StrategyLifecycleDecision:
     strategy: StrategySpec
     new_lifecycle: str
     reason: str
+    #: Fields to write alongside the lifecycle, for transitions that carry state rather than
+    #: only a label. Returning a strategy to probation needs `probation_restarts` bumped,
+    #: because `cumulative_cycles` is journal-derived and monotone: without this the
+    #: candidate is transitioned back and still reads as budget-spent, so it is "fixed" into
+    #: a state the selector still will not serve. Measured 2026-10-06.
+    update: dict[str, object] = field(default_factory=dict)
 
 
 #: Selected cycles a candidate is guaranteed before the probation queue moves on.
@@ -323,8 +329,36 @@ class StrategyLifecycleManager:
             # produced. That is a real bar rather than an infinite probation - a
             # long-only strategy may never close a lot, but its decisions are still
             # scored against the market.
+            # **Returning to probation, not `None`.** A candidate that has spent its whole
+            # budget without ever submitting an order is not judged - it is untried, and it
+            # cannot be tried, because `_needs_probation` is now false so the selector no
+            # longer serves it. `None` left it budget-spent, evidence-less and unreviewable:
+            # out of the queue, not ACTIVE, not PAUSED, not RETIRED.
+            #
+            # Measured on the live library 2026-10-06: `fixed-size-sell-20260724-001`, the
+            # only servable SELL route, cumulative_cycles 15 against a 13 budget,
+            # submitted_orders 0, trade_attempts 8 - all of them shadow intents or
+            # position-cap refusals. It was therefore never served, could never trade, and
+            # so the 17-share over-cap position could never be reduced by the system at all.
+            # The trap is self-sealing: the service that would have produced evidence is the
+            # service the stranding removed.
+            #
+            # Not promotion - a strategy that never opened a lot has no evidence of any
+            # kind, and the fallback that promoted on "it did not crash" is what this branch
+            # replaced. Not retirement - it has not failed, it has not been tried. Returning
+            # it to probation is the only outcome that is true and that lets it become
+            # judgeable.
             if result.submitted_orders <= 0:
-                return None
+                return StrategyLifecycleDecision(
+                    strategy,
+                    "PROBATION",
+                    (
+                        f"served its full {result.cumulative_cycles}-cycle probation "
+                        f"budget without submitting an order, so it has no outcome to "
+                        f"judge; returns to probation to be served again"
+                    ),
+                    update={"probation_restarts": strategy.probation_restarts + 1},
+                )
             gate = self._promotion_evidence_gate(evidence)
             if gate is not None:
                 return None
@@ -677,9 +711,36 @@ class StrategySelector:
         A capability with several routes has other chances to be tried. One with a
         single route - or none - does not, and that is the strategy the queue was
         about to keep deferring.
+
+        **Counted over strategies that can actually be served.** It used to count the
+        whole library, so `PAUSED` and `RETIRED` strategies counted as routes for
+        actions the system cannot currently express. Measured on 2026-10-06, the first
+        live session after execution was enabled: `SELL` counted 5 routes, of which
+        four were unservable -
+
+            fixed-size-sell-001           RETIRED
+            fixed-size-sell-005           PAUSED   (2026-10-02, error rate)
+            fixed-size-sell-006           PAUSED   (2026-10-02, error rate)
+            trend-follow-sell-002         PAUSED   (2026-09-29, no exploration evidence)
+            fixed-size-sell-20260724-001  PROBATION   <- the only real route
+
+        so `SELL` did not read as uncovered, the single real route was never preferred
+        over older HOLD-only candidates, and the position could not be reduced at all -
+        the agent could not buy because the cap forbids it and would not serve the only
+        thing it could sell. Same shape as `probation_backlog` in `b86990b`: one
+        predicate applied to a different population on each side.
+
+        `enabled` is honoured too, for the same reason - a disabled strategy is not a
+        route.
+
+        Deliberately *not* filtered by `_needs_probation`: a candidate past its budget is
+        on its way to ACTIVE and remains a genuine route. The defect was about lifecycles
+        that cannot be served at all.
         """
         counts: dict[str, int] = {"BUY": 0, "SELL": 0}
         for strategy in strategies:
+            if not strategy.enabled or strategy.lifecycle in {"PAUSED", "RETIRED"}:
+                continue
             for action in cls._declared_actions(strategy, last_price):
                 counts[action] = counts.get(action, 0) + 1
         return {action for action, count in counts.items() if count <= 1}
@@ -706,7 +767,14 @@ class StrategySelector:
             return False
         if result is None:
             return True
-        return result.cumulative_cycles < self.min_probation_cycles
+        # Each return to probation grants one further budget, because `cumulative_cycles`
+        # is journal-derived and monotone - it cannot be reset by the transition, so a
+        # returned strategy would read as budget-spent forever. That was measured
+        # immediately after the return was introduced (2026-10-06): the strategy was
+        # correctly transitioned back to PROBATION and `_needs_probation` still answered
+        # false, so the selector still would not serve it.
+        granted = self.min_probation_cycles * (1 + strategy.probation_restarts)
+        return result.cumulative_cycles < granted
 
 
 class StrategyExecutor:

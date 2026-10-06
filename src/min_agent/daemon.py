@@ -1275,6 +1275,11 @@ class AgentDaemon:
                 update={
                     "lifecycle": decision.new_lifecycle,
                     "lifecycle_reason": decision.reason,
+                    # A transition that carries state (e.g. a probation restart bumping
+                    # `probation_restarts`) writes it here too; without it the lifecycle
+                    # label changes and the state does not, which is the "fixed into a state
+                    # nothing will serve" failure measured on 2026-10-06.
+                    **(decision.update or {}),
                 }
             )
             self.strategy_library.save(updated)

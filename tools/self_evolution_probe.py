@@ -68,7 +68,16 @@ def probe() -> list[str]:
         )
 
     # A ruling has to say what happened in numbers, not merely that the strategy was bad.
+    #
+    # Only rulings that actually changed the lifecycle. A same-state transition is not a
+    # ruling - it is a no-op that leaves the file as it was - and 2026-10-06 added one:
+    # a candidate that spent its whole probation budget without submitting an order is
+    # returned to PROBATION so it can be served again. That decision rests on cumulative
+    # cycles and submitted orders, not on scored decisions, and requiring counterfactual
+    # evidence of it would be requiring a justification it does not have.
     for ruling in result["rulings"]:
+        if ruling.get("old_lifecycle") == ruling.get("new_lifecycle"):
+            continue
         reason = str(ruling.get("reason") or "")
         if "scored decision" not in reason or "correct_outcome_ratio" not in reason:
             problems.append(f"a ruling carries no evidence: {reason!r}")

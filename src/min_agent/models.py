@@ -470,6 +470,19 @@ class StrategySpec(BaseModel):
     #: still holds when the reason was not kept. Defaults to empty so every strategy
     #: written before this still loads.
     lifecycle_reason: str = ""
+    #: How many times this strategy has been sent back to probation for want of evidence.
+    #:
+    #: `cumulative_cycles` is derived from the journal and is therefore monotone: it cannot
+    #: be reset by a lifecycle transition, so returning a strategy to PROBATION on its own
+    #: does not make it servable again. Measured 2026-10-06: `fixed-size-sell-20260724-001`
+    #: was returned to probation with 15 cumulative cycles against a 13 budget, and
+    #: `_needs_probation` still read false - it had been "fixed" into a state the selector
+    #: still would not serve.
+    #:
+    #: Each restart grants one further budget, counted against this field. It is a count of
+    #: retries, not an attempt limit: nothing here decides that a strategy has had enough
+    #: chances. That stays with the screen and the promotion gate, which judge outcomes.
+    probation_restarts: int = Field(default=0, ge=0)
     created_at: datetime
     rationale: str = Field(min_length=1)
 

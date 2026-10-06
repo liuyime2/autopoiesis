@@ -1834,3 +1834,229 @@ def test_omitting_served_keeps_the_previous_derivation_exactly():
     assert (
         selector.select([candidate, incumbent], results, served=None).strategy_id == "incumbent"
     )
+
+
+def test_a_paused_strategy_is_not_a_route_for_a_capability():
+    """Four unservable SELLs must not make SELL look like a covered capability.
+
+    `_uncovered_capabilities` exists so a capability the library cannot otherwise express gets
+    served first instead of being deferred behind older candidates. It used to count every
+    strategy on disk, so PAUSED and RETIRED strategies counted as routes for actions the
+    system cannot currently emit.
+
+    Measured on the first live session after execution was enabled: `SELL` counted 5 routes
+    of which four were unservable - two PAUSED for error rate, one PAUSED for no exploration
+    evidence, one RETIRED - leaving `fixed-size-sell-20260724-001` as the only real route.
+    Because `SELL` read as covered, that strategy was never preferred, and the position
+    could not be reduced at all: the agent could not buy (the position cap forbids it) and
+    would not serve the only thing it could sell.
+    """
+    sel = StrategySelector()
+    price = 100.0
+    only_route = make_spec(strategy_id="sell-probation", kind="FIXED_SIZE", lifecycle="PROBATION")
+    only_route = only_route.model_copy(
+        update={"parameters": {"action": "SELL", "quantity": 1, "confidence": 0.6}}
+    )
+    dead = []
+    for i, lifecycle in enumerate(("PAUSED", "PAUSED", "RETIRED")):
+        spec = make_spec(strategy_id=f"dead-{i}", kind="FIXED_SIZE", lifecycle=lifecycle)
+        spec = spec.model_copy(
+            update={"parameters": {"action": "SELL", "quantity": 1, "confidence": 0.6}}
+        )
+        dead.append(spec)
+    buyers = [make_spec(strategy_id=f"buy-{i}", kind="FIXED_SIZE", lifecycle="PROBATION") for i in range(3)]
+
+    specs = [only_route, *dead, *buyers]
+
+    assert "SELL" in sel._uncovered_capabilities(specs, price), (
+        "a capability with one servable route is uncovered"
+    )
+    assert sel._supplies_capability(only_route, sel._uncovered_capabilities(specs, price), price)
+    assert "BUY" not in sel._uncovered_capabilities(specs, price), (
+        "three BUY routes is not uncovered"
+    )
+
+
+def test_a_disabled_strategy_is_not_a_route_either():
+    """Same reasoning: the selector skips disabled strategies, so they express nothing."""
+    sel = StrategySelector()
+    price = 100.0
+    off = make_spec(strategy_id="disabled-sell", kind="FIXED_SIZE", lifecycle="PROBATION")
+    off = off.model_copy(update={"enabled": False})
+    off = off.model_copy(
+        update={"parameters": {"action": "SELL", "quantity": 1, "confidence": 0.6}}
+    )
+    buyer = make_spec(strategy_id="buyer", kind="FIXED_SIZE", lifecycle="PROBATION")
+
+    assert "SELL" in sel._uncovered_capabilities([off, buyer], price)
+
+
+def test_a_strategy_past_its_probation_budget_is_still_a_route():
+    """Deliberately not filtered by `_needs_probation`.
+
+    A candidate that has served its budget is on its way to ACTIVE, and it remains a real
+    route to the capability. The defect this fixes was about lifecycles that cannot be
+    served at all, not about candidates that have graduated.
+    """
+    sel = StrategySelector()
+    price = 100.0
+    spec = make_spec(strategy_id="sell-finished", kind="FIXED_SIZE", lifecycle="PROBATION")
+    spec = spec.model_copy(
+        update={"parameters": {"action": "SELL", "quantity": 1, "confidence": 0.6}}
+    )
+    result = StrategyResult(
+        strategy_id="sell-finished", cycles=13, cumulative_cycles=sel.min_probation_cycles,
+        submitted_orders=1, rejected_orders=0, errors=0, score=0.9,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+    assert not sel._needs_probation(spec, result), "precondition: budget is spent"
+
+    # Two graduated SELL routes. With two, SELL is covered, which is only true if both
+    # counted - a graduated candidate must not be filtered out the way a PAUSED one is.
+    other = make_spec(strategy_id="sell-finished-2", kind="FIXED_SIZE", lifecycle="PROBATION")
+    other = other.model_copy(
+        update={"parameters": {"action": "SELL", "quantity": 1, "confidence": 0.6}}
+    )
+    assert "SELL" not in sel._uncovered_capabilities([spec, other], price), (
+        "a graduated candidate still counts as a route to the capability"
+    )
+
+
+def test_the_single_route_is_served_before_an_older_candidate_that_cannot_act():
+    """The rule's actual purpose, asserted end to end through `select`.
+
+    `e7bb23f` added this for exactly the case measured on 2026-10-06: a SELL strategy the
+    curriculum built because the library could not sell, deferred forever behind older
+    HOLD-only candidates.
+    """
+    sel = StrategySelector()
+    price = 100.0
+    older_hold = make_spec(
+        strategy_id="older-hold", kind="TREND_FOLLOW", lifecycle="PROBATION",
+        reference_price=100.0, threshold_pct=0.02,
+    )
+    sell = make_spec(strategy_id="only-sell", kind="FIXED_SIZE", lifecycle="PROBATION")
+    sell = sell.model_copy(
+        update={"parameters": {"action": "SELL", "quantity": 1, "confidence": 0.6}}
+    )
+    specs = [older_hold, sell]
+
+    picked = sel.select(specs, [], last_price=price, served=4)
+    assert picked is not None and picked.strategy_id == "only-sell"
+    # And nothing was resurrected: both are still what they were.
+    assert {s.lifecycle for s in specs} == {"PROBATION"}
+
+
+def test_a_candidate_that_spent_its_budget_without_trading_returns_to_probation():
+    """It has not failed, it has not been tried, and it cannot be tried.
+
+    Measured on the live library 2026-10-06: `fixed-size-sell-20260724-001` had
+    cumulative_cycles 15 against a 13 budget, submitted_orders 0 and trade_attempts 8 - all
+    of them shadow intents or position-cap refusals. `_needs_probation` is false so the
+    selector stopped serving it; `submitted_orders <= 0` made `review` return `None` so it
+    was never promoted, paused or retired. Stranded, and it was the only servable SELL
+    route, so the over-cap position could never be reduced by the system at all.
+
+    Returning it to probation is the only outcome that is both true and judgeable.
+    """
+    mgr = StrategyLifecycleManager(probation_cycles=13)
+    spec = make_spec(strategy_id="sell", kind="FIXED_SIZE", lifecycle="PROBATION")
+    # The live shape, including the attempts that make it non-degenerate: it tried 15 times,
+    # so `_is_degenerate_no_exploration` does not pause it. It simply never got an order out.
+    spent = StrategyResult(
+        strategy_id="sell", cycles=15, cumulative_cycles=15, cumulative_trade_attempts=15,
+        submitted_orders=0, trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+
+    decisions = mgr.review([spec], [spent])
+
+    assert len(decisions) == 1, "a stranded candidate must produce a decision, not silence"
+    assert decisions[0].new_lifecycle == "PROBATION"
+    assert "without submitting an order" in decisions[0].reason
+    # And the point of it: it is back in the population the selector serves.
+    selector = StrategySelector(min_probation_cycles=13)
+    assert not selector._needs_probation(spec, spent), "precondition: budget spent"
+    assert selector._needs_probation(spec, None), (
+        "after returning to probation the candidate must be servable again"
+    )
+
+
+def test_the_stranding_fix_does_not_promote_a_strategy_with_no_orders():
+    """The evidence bar must not move. No orders means no evidence of any kind."""
+    mgr = StrategyLifecycleManager(probation_cycles=13)
+    spec = make_spec(strategy_id="quiet", kind="FIXED_SIZE", lifecycle="PROBATION")
+    spent = StrategyResult(
+        strategy_id="quiet", cycles=15, cumulative_cycles=15, cumulative_trade_attempts=15,
+        submitted_orders=0, trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+
+    assert mgr.review([spec], [spent])[0].new_lifecycle != "ACTIVE"
+
+
+def test_a_spent_budget_candidate_with_orders_keeps_its_existing_outcome():
+    """Only the no-orders case changes; promotion and the gates are untouched."""
+    mgr = StrategyLifecycleManager(probation_cycles=13)
+    spec = make_spec(strategy_id="trader", kind="FIXED_SIZE", lifecycle="PROBATION")
+    with_orders = StrategyResult(
+        strategy_id="trader", cycles=15, cumulative_cycles=15, cumulative_trade_attempts=15,
+        submitted_orders=4, trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+
+    decisions = mgr.review([spec], [with_orders])
+
+    # No verified PnL and no scored decisions, so it waits - the pre-existing behaviour.
+    assert decisions == [], "a candidate with orders is not automatically returned"
+
+
+def test_returning_to_probation_actually_restarts_the_budget():
+    """The first version of this fix was incomplete, and the gap was measured.
+
+    Returning the candidate to PROBATION is not enough on its own: `cumulative_cycles` is
+    derived from the journal and is monotone, so a candidate with 15 cycles against a 13
+    budget read as budget-spent *after* the transition too - correctly transitioned and
+    still unserved. Each return therefore grants one further budget via
+    `probation_restarts`, which is carried on the decision and written with it.
+    """
+    selector = StrategySelector(min_probation_cycles=13)
+    spec = make_spec(strategy_id="sell", kind="FIXED_SIZE", lifecycle="PROBATION")
+    spent = StrategyResult(
+        strategy_id="sell", cycles=15, cumulative_cycles=15, cumulative_trade_attempts=15,
+        submitted_orders=0, trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+    assert not selector._needs_probation(spec, spent), "precondition: budget spent"
+
+    mgr = StrategyLifecycleManager(probation_cycles=13)
+    decision = mgr.review([spec], [spent])[0]
+    assert decision.update == {"probation_restarts": 1}, (
+        "the transition must carry the restart, not only the lifecycle label"
+    )
+
+    returned = spec.model_copy(
+        update={"lifecycle": decision.new_lifecycle, **decision.update}
+    )
+    assert selector._needs_probation(returned, spent), (
+        "after one restart the candidate must be servable again"
+    )
+
+    # And it is not unlimited: a second restart is required, and grants another budget.
+    still_spent = spent.model_copy(update={"cumulative_cycles": 26})
+    assert not selector._needs_probation(returned, still_spent)
+    twice = returned.model_copy(update={"probation_restarts": 2})
+    assert selector._needs_probation(twice, still_spent)
+
+
+def test_the_daemon_writes_a_transition_update_alongside_the_lifecycle():
+    """A lifecycle label without its state is the failure this plan exists to prevent."""
+    import inspect
+
+    from min_agent.daemon import AgentDaemon
+
+    source = inspect.getsource(AgentDaemon)
+    assert "decision.update" in source, (
+        "the apply path must write the decision's update dict, or a probation restart "
+        "changes the lifecycle and leaves the state behind"
+    )
