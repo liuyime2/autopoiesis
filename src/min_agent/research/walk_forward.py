@@ -340,8 +340,26 @@ def run_walk_forward(
     for i in range(n_folds):
         start = min_train_bars + i * test_size
         end = start + test_size if i < n_folds - 1 else len(bars)
-        train = list(bars[:start])
         test = list(bars[start:end])
+        # The in-sample leg is length-matched to the out-of-sample leg it is compared
+        # against by `FoldResult.degraded`.
+        #
+        # It used to be `bars[:start]`, which grows to 23,786 bars by the last fold while
+        # the test leg stays at 466 - a ratio of 51:1, measured. And `return_pct` is
+        # `realized / spent` (backtest.py), which *accumulates* across round trips rather
+        # than annualising: the same rule over 100 bars returns -0.207% and over 23,800
+        # returns +2.134% with seven trades either way, because the extra bars are
+        # still-held drift that the force-close books as realized. On a rising series more
+        # bars is therefore a bigger number, so `oos < is * 0.5` tripped on length alone
+        # - 46 of 52 folds, which is why every candidate that cleared the evidence bar
+        # returned OVERFIT.
+        #
+        # Length-matched, contiguous and immediately preceding: the same regime on both
+        # sides of the boundary, which is the entire point of the comparison. `max(0, ...)`
+        # because fold 0 starts at 20 bars and there is not yet 466 of history - that fold
+        # is honestly short rather than skipped or padded. `train_bars` still records how
+        # much history preceded the fold.
+        train = list(bars[max(0, start - len(test)):start])
         result.folds.append(
             FoldResult(
                 index=i,

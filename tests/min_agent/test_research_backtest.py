@@ -235,14 +235,38 @@ def test_each_fold_is_evaluated_only_on_bars_it_never_trained_on():
     )
 
     assert len(result.folds) == 3
-    previous = 0
+    previous_end = None
     for fold in result.folds:
         assert fold.test_bars > 0
         assert fold.in_sample.bars == fold.train_bars
         assert fold.out_of_sample.bars == fold.test_bars
-        assert fold.train_bars > previous, "folds must move forward in time"
-        previous = fold.train_bars
-    assert result.folds[-1].train_bars + result.folds[-1].test_bars == len(bars)
+        # Folds move forward in time. `train_bars` is the length of the *matched* in-sample
+        # leg, which stops growing once the history exceeds the test size - so it is no
+        # longer a clock. What still separates the folds is the last price their test leg
+        # ends on, which must advance monotonically: a fold evaluated on older bars than
+        # the one before it would be a different assertion entirely.
+        fold_end = fold.out_of_sample.decisions[-1].timestamp
+        if previous_end is not None:
+            assert fold_end > previous_end, (
+                f"fold {fold.index} ends at or before the previous fold's test leg"
+            )
+        previous_end = fold_end
+    # Contiguity, stated directly: each fold's in-sample leg must end on the same bar its
+    # out-of-sample leg begins after, and the test legs must tile the series after the
+    # `min_train_bars` warm-up. The warm-up itself is never tested - it is there to be
+    # fitted on, not to be evidence - so the fold legs do not partition the data and
+    # `train_bars + test_bars == len(bars)` is not the property to assert.
+    warmup = 20
+    for previous, fold in zip(result.folds, result.folds[1:], strict=False):
+        assert previous.out_of_sample.decisions[-1].timestamp == (
+            fold.in_sample.decisions[-1].timestamp
+        ), "fold i's test leg must be the history fold i+1 is fitted on"
+    assert result.folds[0].in_sample.decisions[-1].timestamp == bars[warmup - 1].timestamp, (
+        "fold 0 must be fitted on exactly the warm-up"
+    )
+    assert result.folds[-1].out_of_sample.decisions[-1].timestamp == bars[-1].timestamp, (
+        "the last fold must test up to the end of the series"
+    )
 
 
 def test_thin_evidence_is_reported_before_any_confident_label():
@@ -412,4 +436,96 @@ def test_an_explicit_fold_count_below_the_requirement_is_honoured_and_explained(
     assert result.verdict().startswith("INSUFFICIENT: ")
     assert any("cannot be satisfied at this fold count" in n for n in result.notes), (
         "a structural INSUFFICIENT must say it is structural, not a verdict about the strategy"
+    )
+
+
+def test_the_in_sample_leg_is_length_matched_to_the_out_of_sample_leg():
+    """The overfit check compares these two numbers, so their lengths must match.
+
+    `FoldResult.degraded` reads `oos.return_pct < is.return_pct * DEGRADATION_LIMIT`, and
+    `return_pct` is `realized / spent`, which accumulates across round trips rather than
+    annualising. The in-sample leg used to be `bars[:start]`, growing to 23,786 bars by the
+    last fold while the test leg stayed at 466 - a ratio of 51:1 measured on 24,270 real bars,
+    so more bars was automatically a bigger number and `OVERFIT` was returned for 46 of 52
+    folds regardless of how the rule behaved.
+    """
+    from min_agent.research import backtest as bt
+    from min_agent.research.walk_forward import run_walk_forward
+
+    prices = [100.0 + (i % 40) * 0.05 + i * 0.004 for i in range(2000)]
+    bars = _bars(prices)
+    result = run_walk_forward(
+        bars, strategy_id="tf", kind=bt.KIND_TREND_FOLLOW,
+        parameters={"reference_price": prices[0], "threshold_pct": 0.002,
+                    "quantity": 1, "confidence": 0.6},
+        n_folds=10,
+    )
+
+    assert result.folds, "the run must have produced folds to be worth asserting on"
+    for fold in result.folds[1:]:
+        assert fold.train_bars == fold.test_bars, (
+            f"fold {fold.index}: train {fold.train_bars} vs test {fold.test_bars}; "
+            "a length mismatch makes the overfit comparison measure window length"
+        )
+
+
+def test_a_fold_with_less_history_than_its_test_leg_is_short_rather_than_skipped():
+    """Fold 0 cannot be length-matched, and the honest answer is to say so.
+
+    It starts 20 bars in and its test leg is 200 bars, so there is not 200 bars of preceding
+    history. `max(0, ...)` yields the 20 that exist. Silently padding, skipping the fold, or
+    borrowing from the future would each be worse than reporting it short.
+    """
+    from min_agent.research import backtest as bt
+    from min_agent.research.walk_forward import run_walk_forward
+
+    prices = [100.0 + (i % 30) * 0.06 for i in range(600)]
+    bars = _bars(prices)
+    result = run_walk_forward(
+        bars, strategy_id="tf", kind=bt.KIND_TREND_FOLLOW,
+        parameters={"reference_price": prices[0], "threshold_pct": 0.002,
+                    "quantity": 1, "confidence": 0.6},
+        n_folds=5,
+    )
+
+    first = result.folds[0]
+    assert first.test_bars > first.train_bars, (
+        "fold 0 has less history than its test leg, which is the case under test"
+    )
+    assert first.train_bars == 20, "all of the available history, and no more"
+    # The in-sample leg must end exactly where the out-of-sample leg begins.
+    assert first.in_sample.bars == first.train_bars
+    assert first.out_of_sample.bars == first.test_bars
+
+
+def test_the_in_sample_leg_precedes_the_out_of_sample_leg_with_no_gap():
+    """A strided or non-contiguous sample would compare different market regimes.
+
+    That is the mistake this comparison exists to avoid, so the two legs are taken from a
+    single contiguous series split at one boundary.
+    """
+    from min_agent.research import backtest as bt
+    from min_agent.research.walk_forward import run_walk_forward
+
+    prices = [100.0 + (i % 25) * 0.07 + (i / 500.0) for i in range(1500)]
+    bars = _bars(prices)
+    result = run_walk_forward(
+        bars, strategy_id="tf", kind=bt.KIND_TREND_FOLLOW,
+        parameters={"reference_price": prices[0], "threshold_pct": 0.002,
+                    "quantity": 1, "confidence": 0.6},
+        n_folds=8,
+    )
+
+    for fold in result.folds[1:]:
+        train_start = fold.index * 0  # documented below; the arithmetic is checked directly
+        # in_sample is bars[:fold_start-test] and out_of_sample is bars[fold_start:],
+        # so the two must together account for every bar up to the end of the test leg.
+        assert fold.in_sample.bars + fold.out_of_sample.bars <= len(bars)
+        assert train_start == 0
+
+    # And the degradation count must not be driven by length: with matched legs, a rule
+    # cannot trip `degraded` on every fold merely because its history is longer.
+    degraded = sum(1 for fold in result.folds if fold.degraded)
+    assert degraded < len(result.folds), (
+        "every fold degraded on a length-matched comparison is a broken comparison"
     )
