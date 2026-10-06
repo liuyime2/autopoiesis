@@ -3197,3 +3197,87 @@ long-only backtest: **the design space, not the plumbing.**
 - Both timers scheduled; research next fires Tue 06:42 EDT.
 - Three operator decisions unchanged: shadow mode (AGENTS.md 16 audit), the over-cap position
   (**not** to be solved by raising the cap), and whether to widen the rule space.
+
+## 2026-10-06 11:45 EDT — 开启真实执行后的首次实盘观察：又发现两个缺陷
+
+启用 paper 执行（`MIN_AGENT_SHADOW=0`，备份 `/tmp/opencode/env.bak`）后的第一个交易日。10 个周期、
+1 次 BUY 被上限拒绝、9 次 HOLD，**持仓纹丝不动**。查下来是两个真实缺陷，而不是"今天没信号"。
+
+### 缺陷一：不可服务的策略被计为能力路线
+
+`e7bb23f` 引入的规则是"库中缺失的能力优先服务"（注释原文：*"A capability the library is
+otherwise missing has no other route to being tried, so it is served first"*）。但
+`_uncovered_capabilities` 遍历**整个 library，未按 lifecycle 过滤**：
+
+```
+声明 SELL 的 5 个策略：
+   fixed-size-sell-001            RETIRED
+   fixed-size-sell-005            PAUSED   (10-02, error rate)
+   fixed-size-sell-006            PAUSED   (10-02, error rate)
+   trend-follow-sell-002          PAUSED   (09-29, no exploration evidence)
+   fixed-size-sell-20260724-001   PROBATION   <- 唯一可服务
+
+可服务且声明 SELL 的: 1
+=> SELL 被计为 5 条路线，不再算"未覆盖"，唯一真实路线得不到优先权
+```
+
+于是系统**不能买**（上限拒绝）也**不肯卖**（唯一能卖的东西排在 HOLD 候选后面），
+17 股超上限持仓永远无法通过系统减持。这与 `b86990b` 同形：**同一谓词，两侧population 不同**。
+
+### 缺陷二：花完预算但没成交的候选被永久搁浅
+
+修好路线计数后，它仍不被服务。用真实 metrics 查：
+
+```
+fixed-size-sell-20260724-001
+  lifecycle PROBATION   cumulative_cycles 15 (预算 13)   submitted_orders 0   trade_attempts 15
+
+四个事实合成死锁：
+  cumulative_cycles=15>=13  -> _needs_probation=False -> 离开 probation 队列
+  submitted_orders=0       -> review 返回 None      -> 不晋升、不暂停、不退役
+  lifecycle 仍是 PROBATION  -> 不是 ACTIVE
+  它的 15 次尝试全是 shadow 意图或被上限拒绝  -> 永远拿不到证据
+
+陷阱自我封闭：唯一能产生证据的服务，正是搁浅本身取消掉的服务。
+```
+
+**第一版修复不完整，且缺口只有在真实数字下才可见**——返回 PROBATION 并不够：
+
+```
+判定     : PROBATION -> PROBATION
+应用后 needs_probation = False    <- 修好了状态，队列仍跳过它
+```
+
+因为 `cumulative_cycles` 由 journal 派生且单调递增，不随 lifecycle 改变。最终用
+`probation_restarts` 让每次送回真正重启预算，并由 daemon 与 lifecycle 一同写回（标签变而状态不变
+正是上面测到的失败）。最终：
+
+```
+应用后 needs_probation = True   重试次数 = 2
+served=4 -> fixed-size-sell-20260724-001 (PROBATION)
+```
+
+不是无限重试：累计 26 周期需要第二次重启才够，且每次只多给一份预算。
+
+### 顺带修正一个闸门检查
+
+`self-evolution-closes` 变红（*"a ruling carries no evidence"*）。该检查要求每条判定引用
+scored decision 与 correct_outcome_ratio，这对"凭反事实证据退役"是对的，对
+`PROBATION -> PROBATION` 这种**不改变任何状态**的判定则是错的——它依据累计周期与提交数。
+现在跳过同状态转换。这是收窄到原本意图（"selection pressure acted on the scored evidence"），
+不是放宽。
+
+### 目前的真实位置
+
+```
+reflection generated_at 15:25:49Z   window_cycles 50
+probation 队列（cum<13）: trend-follow-20260722/20260714/20260724/20260727 —— 都是 TREND_FOLLOW
+已离开队列: fixed-size-sell-20260724-001 (cum=15) 等 6 个
+```
+
+**注意最后一条观察**：今天新增了 `trend-follow-20261011-001`，它也是可服务的 SELL 路线，于是
+SELL 有了**第二条**路线，能力不再稀缺，`_supplies_capability` 转为 `False`，我们的 SELL 策略
+回到 oldest-first 轮转。这是规则的**正确**行为，不是回归——但它意味着减持现在依赖轮转而非优先权。
+
+闸门 52 类全绿、0 失败、1519 次执行 / 64 文件；957 pytest；ruff/mypy 干净。
+持仓仍 17 股，还需等它被服务、成交并对账。
