@@ -252,3 +252,115 @@ def test_a_fresh_library_refuses_nothing_for_capacity(tmp_path):
 
     assert result.accepted is True
     assert "probation" not in result.reason
+
+
+def _trend_follow(library, strategy_id, *, reference_price, threshold_pct,
+                  lifecycle="PROBATION", quantity=1):
+    """Write a queued TREND_FOLLOW straight into the library, as admission would.
+
+    `make_spec` hardcodes `threshold_pct` to 0.02 and does not take a lifecycle, and the
+    property under test is exactly which thresholds put the price inside the band - so this
+    writes the spec the way `_queued_candidate` does, through `model_copy`.
+    """
+    spec = make_spec(strategy_id=strategy_id, kind="TREND_FOLLOW",
+                     reference_price=reference_price, quantity=quantity).model_copy(
+        update={
+            "lifecycle": lifecycle,
+            "parameters": {
+                "reference_price": reference_price,
+                "threshold_pct": threshold_pct,
+                "quantity": quantity,
+                "confidence": 0.8,
+            },
+        }
+    )
+    library.save(spec)
+    return spec
+
+
+def test_a_candidate_that_cannot_act_does_not_hold_the_capacity_budget(tmp_path):
+    """The selector filters non-actionable candidates before serving them, so one that
+    cannot emit an order at this price is never served and can never spend the 13 cycles
+    it is holding.
+
+    Measured on the live library: 14 candidates in probation short of budget, of which 6
+    could not act at SPY 769.72 - TREND_FOLLOW strategies whose trigger band brackets the
+    market, all admitted the day before `26c341d` began refusing that shape. They were a
+    standing claim on 78 cycles that could never be spent, and since the backlog gates
+    admission they also helped refuse new candidates (24 refusals citing "17 candidate(s)
+    are in probation").
+
+    The predicate is `_declared_actions`, shared with the selector and with
+    `_reference_price_rejection_reason`, so the two agree by construction.
+    """
+    library, admission = admission_fixture(tmp_path)
+    admission.set_market_prices({"SPY": 100.0})
+
+    # A band of 99..101 brackets the price exactly, so it can only ever HOLD.
+    _trend_follow(library, "banded", reference_price=100.0, threshold_pct=0.01)
+    library.save(make_spec(strategy_id="actable").model_copy(update={"lifecycle": "PROBATION"}))
+
+    assert admission.probation_backlog() == 1, "the banded candidate is not in the queue"
+    assert admission.dormant_probation() == 1
+
+
+def test_a_dormant_candidate_returns_to_the_queue_when_the_market_leaves_its_band(tmp_path):
+    """Reversible by design, and the reason nothing is retired here.
+
+    `StrategySelector` treats dormancy as price-dependent and reversible: "when the market
+    leaves the band the strategy becomes selectable again. Nothing is retired here." The
+    budget count has to behave the same way, or a temporary condition would cost a
+    candidate its queue position permanently.
+    """
+    library, admission = admission_fixture(tmp_path)
+    _trend_follow(library, "banded", reference_price=100.0, threshold_pct=0.01)
+
+    admission.set_market_prices({"SPY": 100.0})
+    assert admission.probation_backlog() == 0, "inside the band: not queued"
+    assert admission.dormant_probation() == 1
+
+    # 105 is outside [99.00, 101.00], so the rule can act.
+    admission.set_market_prices({"SPY": 105.0})
+    assert admission.probation_backlog() == 1, "outside the band: queued again"
+    assert admission.dormant_probation() == 0
+
+    assert library.exists("banded"), "nothing was retired or deleted"
+
+
+def test_without_a_market_price_the_backlog_counts_every_candidate(tmp_path):
+    """Missing data degrades to the permissive side, never the blocking one.
+
+    The class already takes this position for the reference-price checks - "the checks are
+    skipped rather than guessed" - and refusing admission because no price was available
+    would be a worse failure than counting too many.
+    """
+    library, admission = admission_fixture(tmp_path)
+    _trend_follow(library, "banded", reference_price=100.0, threshold_pct=0.01)
+    library.save(make_spec(strategy_id="actable").model_copy(update={"lifecycle": "PROBATION"}))
+
+    assert admission.probation_backlog() == 2
+    assert admission.dormant_probation() == 0, "dormancy is unknowable without a price"
+
+
+def test_the_capacity_refusal_names_both_the_queued_and_the_dormant_counts(tmp_path):
+    """Otherwise "14 candidates in probation" beside a backlog of 8 is unexplainable."""
+    library, admission = admission_fixture(tmp_path)
+    admission.set_market_prices({"SPY": 100.0})
+    _trend_follow(library, "banded", reference_price=100.0, threshold_pct=0.01)
+    admission.max_probation_queue = 1
+    for i in range(2):
+        library.save(make_spec(strategy_id=f"queued-{i}").model_copy(
+            update={"lifecycle": "PROBATION", "quantity": 3 + i}
+        ))
+
+    backlog, dormant = admission.probation_backlog(), admission.dormant_probation()
+    reason = admission._capacity_rejection_reason(
+        backlog, dormant=dormant, total=backlog + dormant
+    )
+
+    assert reason is not None
+    assert f"{backlog} candidate(s)" in reason
+    assert "further candidate(s) in probation cannot act" in reason
+    assert str(backlog + dormant) in reason.replace(" further", f" ({dormant}) further"), (
+        "the total must be recoverable from the message"
+    )
