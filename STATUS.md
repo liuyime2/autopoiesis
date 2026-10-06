@@ -3114,3 +3114,86 @@ a position without a prior buy — is new capability, not a fix, and needs its o
 | 7x24 continuity qualified | 97 days undeployed (June→Sep); service runs unattended whenever deployed, 7 days on this host | Deployment continuity, not code |
 
 Gate: 52 classes, 0 failed, 1506 executions across 64 files. 944 pytest. ruff and mypy clean.
+
+## 2026-10-06 00:40 EDT — a fifth defect class found by auditing for the previous one
+
+Asked to fix everything and re-review. Four broken measurements in a row invites looking for the
+same *class* rather than the same instance, so this pass audited every rate in the codebase for a
+mismatched numerator and denominator. One live problem found, and one hazard confirmed **not** live.
+
+### The hazard I checked and cleared
+
+`failure_rate = (errors + fault_rejections) / result.cycles` divides by a **windowed** count that
+can be zero. Two strategies currently sit at `cycles == 0` in the live reflection
+(`fixed-size-buy-001` with 30 cumulative cycles, `trend-follow-buy-001` with 19), which would be a
+`ZeroDivisionError` if either had collected an error.
+
+Simulated directly: `cycles=0, errors=1`, `cycles=0, errors=5` — all return no decision, because
+`if result.cycles <= 0: return None` sits above the division (`strategy_engine.py:255`).
+
+**Not a defect**, and worth recording why: `errors` comes from the same windowed source as
+`cycles`, so the pair is self-consistent. This is the opposite of the walk-forward case, where the
+two sides of the comparison came from different-length windows. The distinction is whether the
+numerator and denominator are drawn from the same population.
+
+### The live defect: six dormant candidates holding unreachable budget
+
+```
+trend-follow-20260714-001  created 2026-10-02  ref=764.16  thr=0.025   DORMANT
+trend-follow-20260721-001  created 2026-10-02  ref=770.615 thr=0.018   DORMANT
+trend-follow-20260722-001  created 2026-10-02  ref=769.41  thr=0.015   DORMANT
+trend-follow-20260723-001  created 2026-10-02  ref=769.30  thr=0.015   DORMANT
+trend-follow-20260724-001  created 2026-10-02  ref=769.58  thr=0.012   DORMANT
+trend-follow-20260726-001  created 2026-10-02  ref=769.58  thr=0.030   DORMANT
+```
+
+`probation_backlog()` counted every candidate short of budget, while `StrategySelector` filters
+non-actionable candidates *before serving them*. So these six held 13 cycles each that could never
+be spent — 78 cycles — and the backlog feeds the capacity cap, so they also helped refuse new
+candidates (28 refusals citing the backlog).
+
+All six were admitted 2026-10-02, one day before `26c341d` began refusing that shape, and each is
+refused by the gate today with the reason spelled out. **The gate is correct; this was pre-fix
+backlog that nothing had ever cleaned up.**
+
+The model diagnosed it unprompted, in a proposal rationale from 2026-10-05:
+
+> *"All existing TREND_FOLLOW strategies anchor their reference at or near the current 769.58
+> price, yielding bands that bracket the market and can only ever HOLD. This spec places the
+> reference at 790.00 with a 2% band (lower edge 774.20), so the entire trigger zone sits above
+> last_price."*
+
+So the pipeline is working: every proposal since has anchored outside the band, and 5 of the 12
+newest candidates are actionable.
+
+**Fixed** (`b86990b`): `probation_backlog()` counts only servable candidates, using the selector's
+own `_declared_actions` so the two agree by construction. Backlog **14 → 8**, 78 cycles released.
+Nothing retired — the test asserts a banded candidate returns to the queue when the price leaves
+its band, because dormancy is reversible by design and retiring would destroy candidates a later
+regime could use.
+
+`daemon-source-matches-worktree` went red after the change and was cleared with `make restart`.
+That check is why changing code under a live system is safe here: it caught the deployment gap
+instead of leaving a mismatch to be found by behaviour.
+
+### The supply ceiling, now quantified
+
+```
+242 admission reviews: 68 accepted, 174 refused
+  58  duplicate TREND_FOLLOW parameters
+  51  behavioural twins / duplicate ids
+  28  capacity (the backlog this change relieves)
+  ~37  reference band swallows spot, or far from it
+```
+
+What remains admissible is close to *"a TREND_FOLLOW anchored outside the current band"* — a space
+of perhaps 6-8 distinct candidates across plausible placements. That is the same finding as the
+long-only backtest: **the design space, not the plumbing.**
+
+### Standing state
+
+- Daemon: active, 35 cycles this session, 0 errors, 0 restarts, fingerprint current.
+- Gate: 52 classes, 0 failed, 1510 executions across 64 files. 948 pytest. ruff/mypy clean.
+- Both timers scheduled; research next fires Tue 06:42 EDT.
+- Three operator decisions unchanged: shadow mode (AGENTS.md 16 audit), the over-cap position
+  (**not** to be solved by raising the cap), and whether to widen the rule space.
