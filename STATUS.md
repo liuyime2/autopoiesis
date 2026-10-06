@@ -3026,3 +3026,91 @@ Daemon across the whole session: `cycle_count 35`, `error_count 0`, `NRestarts 0
 `market closed; maintenance only` — correctly idle overnight rather than failing.
 
 Gate: 52 classes, 0 failed, 1497 executions across 64 files. ruff and mypy clean.
+
+## 2026-10-06 00:00 EDT — the OVERFIT verdict was the instrument, not the rule
+
+Asked to review the outstanding problems and say what would solve them. The negative research
+result turned out to be one more broken measurement, and the fourth in this project to be the
+same shape: a real signal read through an instrument that could not report it.
+
+### The comparison was 51:1 mismatched
+
+`run_walk_forward` built each fold as `train=bars[:start]`, `test=bars[start:end]`, so:
+
+```
+train/test length ratio: min=0.043 max=50.043
+  fold 0:  train=20     test=466
+  fold 51: train=23786  test=484
+```
+
+`FoldResult.degraded` compares those two numbers, and `return_pct` is `realized / spent`
+(`backtest.py:325`) — it **accumulates** across round trips rather than annualising:
+
+```
+n=  100  trades=3  return_pct=  -0.207%   price move -0.01%
+n= 4000  trades=7  return_pct=  +1.114%   price move +9.14%
+n=23800  trades=7  return_pct=  +2.134%   price move +16.28%
+```
+
+Seven trades either way, ten times the return. The extra bars are still-held drift that the
+force-close books as realized, and the series rose 17.70%, so **more bars is automatically a
+bigger number** and `oos < is * 0.5` tripped on length alone. 46 of 52 folds.
+
+Length-matching the in-sample leg and changing nothing else:
+
+```
+degraded: 15/52   (was 46/52)
+train/test ratio now: min=0.043 max=1.000
+fold 5: train=466 test=466  IS=-0.350%  OOS=-0.040%  degraded=False   (was True)
+```
+
+Folds 5, 6, 7 and 51 were failing a test they did not fail.
+
+### The negative result survived
+
+`OVERFIT` still returns, which is the important part:
+
+```
+mean buy-and-hold over the 52 OOS legs: +0.3110%
+mean TREND_FOLLOW over the same legs   : +0.1216%
+difference                            : -0.1894%
+folds where the rule beat holding     : 16/52
+```
+
+The rule is worse than doing nothing on two thirds of the folds. A repaired gate that had started
+*passing* candidates would have been the alarming outcome here, not the reassuring one.
+
+### An existing test was asserting the bug
+
+`test_each_fold_is_evaluated_only_on_bars_it_never_trained_on` asserted `train_bars` strictly
+increases and `train_bars + test_bars == len(bars)` — both true only because the in-sample leg was
+the growing history. Asserting forward progress on a length that deliberately stops growing is
+asserting the defect. Rewritten to assert contiguity instead: each fold's test leg *is* the next
+fold's fitted history, no gap, no overlap. `min_train_bars` is warm-up and is never tested, which
+is why the old equality was always slightly wrong.
+
+### The structural ceiling, stated plainly
+
+The search space cannot express an edge, and the reason is concrete rather than mysterious:
+
+- `backtest.py` is long-only by design — *"A SELL with no position is a no-op, not a short"*.
+- `TREND_FOLLOW` derives its action from the sign of drift, so a SELL can only close a position
+  already held.
+- So no rule can profit from a fall without holding shares, and the ceiling on all of them is
+  buy-and-hold's own return: **+17.70%** on this window.
+- The entire prize available to any entry-timing rule is the spread between buying at the window's
+  low (+18.83%) and at its high (-0.66%).
+
+That is a property of the rule space. Widening it — a short-capable backtest, a rule that can open
+a position without a prior buy — is new capability, not a fix, and needs its own authorisation.
+
+### The four problems currently open, and what each needs
+
+| Problem | Diagnosis | Needs |
+| --- | --- | --- |
+| Research finds nothing | **Measured**: rule space is long-only and 2 kinds wide; the rules lose to holding on 36/52 folds | New capability — authorisation, not a bugfix |
+| No fills | `MIN_AGENT_SHADOW=1`; the decision path is validated but nothing reaches the broker | Operator decision, gated on the AGENTS.md 16 audit |
+| BUY capacity zero | 17 SPY ($13.1k) against a $5k `max_position_value`; the Guardian correctly refuses every buy | Operator decision about the account; **do not raise the cap** |
+| 7x24 continuity qualified | 97 days undeployed (June→Sep); service runs unattended whenever deployed, 7 days on this host | Deployment continuity, not code |
+
+Gate: 52 classes, 0 failed, 1506 executions across 64 files. 944 pytest. ruff and mypy clean.
