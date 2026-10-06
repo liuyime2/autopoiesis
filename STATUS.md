@@ -3281,3 +3281,76 @@ SELL 有了**第二条**路线，能力不再稀缺，`_supplies_capability` 转
 
 闸门 52 类全绿、0 失败、1519 次执行 / 64 文件；957 pytest；ruff/mypy 干净。
 持仓仍 17 股，还需等它被服务、成交并对账。
+
+## 2026-10-06 13:55 EDT — 完整闭环达成，13 万美元的限制第一次由系统自己纠正
+
+启用真实执行后的第一个交易日收盘前。**持仓 17 股 → 6 股，11 笔全部成交，且恰好停在上限内。**
+
+```
+12:20  fixed-size-sell-20260724-001  SELL 1  SUBMITTED   <- 被搁浅的策略获得服务
+12:53  trend-follow-20261011-001     SELL 1  SUBMITTED
+13:01  trend-follow-20261011-001     SELL 1  SUBMITTED
+13:28  trend-follow-20261011-001     SELL 1  SUBMITTED
+13:35  trend-follow-20261011-001     SELL 7  SUBMITTED   <- 见下
+```
+
+券商侧 5 笔 filled（16:22 / 16:55 / 17:03 / 17:30 / 17:37 UTC），0 笔未成交，**0 笔 BUY**。
+
+### 那笔 7 股是 LLM 的自主合规决策，不是数量改写
+
+策略声明 `quantity=1`，决策是 7。查 `decision_source` 与理由：
+
+```
+13:35:18  action=SELL qty=7  source=llm  model=qwen3.8:27b
+rationale: price 779.97 is 2.5% below reference 800.0, exceeding the 2% threshold,
+indicating a downtrend. Position value 10140.26 exceeds max_position_value 5000.0
+(over_position_limit=true). Selling 7 shares reduces position to 6 shares
+(~4679.82), bringing it under the 5000 limit while honoring the bearish trend signal.
+```
+
+模型自己读出 `over_position_limit=true`，自己解出卖 7 股能让持仓落进上限，然后执行。这正是
+`llm_decision.py` 里 `exposure` 字段存在的理由——注释写着 *"This is arithmetic on the broker
+positions already in the context, not a hint to trade"*。它生效了。
+
+### 合规性复核：两个上限都满足
+
+```
+SPY 6 股 x $774.74 = $4,648.44
+  max_position_value  $5,000   合规（余量 $351.56）
+  max_total_exposure  $20,000  合规（仅 allowlist 标的计入）
+起始 17 股 $13,033.73  ->  现在 6 股 $4,648.44   减持 11 股
+
+_agent_holding("SPY") = 6.0   与券商一致
+```
+
+对账一致：agent 从自己的成交事件重放出的持仓与券商完全相同。
+
+### 完整自我优化闭环
+
+```
+15:31  fixed-size-sell-20260724-001  PROBATION -> PROBATION  无订单，返回 probation
+15:53  fixed-size-sell-20260724-001  PROBATION -> PROBATION  同上（restarts 递增）
+16:39  fixed-size-sell-20260724-001  PROBATION -> RETIRED
+       "offline validation rejected its own recorded decisions:
+        12 scored decision(s), 0 correct, correct_outcome_ratio 0.00"
+```
+
+被搁浅 → 返回 probation → 获得服务 → 真实成交 → 决策被打分 → **0/12 正确 → 带证据退役**。
+它卖在 780 附近而 SPY 继续上行，所以退出时点是错的，系统如实认定了这一点。
+
+今日周期：36 个，`HOLD 28 / SELL 5 / BUY 3`，3 次 BUY 全部被持仓上限拒绝。
+`error_count=0`、`execution_errors=0`、策略级 errors 合计 0、`NRestarts=0`。
+
+### 与今早诊断的对照
+
+今早记录"持仓纹丝不动，原因是两个缺陷"。今日的对照：
+
+| 今早 | 现在 |
+| --- | --- |
+| 4 个 PAUSED/RETIRED 被计为 SELL 路线 | 路线过滤生效，`uncovered` 只统计可服务策略 |
+| SELL 策略搁浅，`needs_probation=False` | 返回 PROBATION + `probation_restarts` 预算重启，被服务 |
+| 唯一 SELL 路线无优先权 | 12:20 获得服务并成交 |
+
+**仍然待观察**：第二轮修复后出现的 `trend-follow-20261011-001` 构成第二条 SELL 路线，使
+`_supplies_capability` 转 False，减持靠轮转而非优先权——今天它成交了 4 笔（其中一笔 7 股），
+所以这条路径也已验证可行。
