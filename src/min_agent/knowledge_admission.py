@@ -93,7 +93,7 @@ class KnowledgeAdmission:
         key = lesson_key(artifact)
         try:
             existing = self.knowledge_library.list(status="ACCEPTED")
-        except Exception:
+        except OSError:  # `list` already skips unparseable files; only I/O is left to fail
             return
         for other in existing:
             if (
