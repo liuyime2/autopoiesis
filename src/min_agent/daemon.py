@@ -38,7 +38,14 @@ from min_agent.models import (
 )
 from min_agent.reflection_memory import ReflectionMemory
 from min_agent.strategy_admission import StrategyAdmission
-from min_agent.strategy_engine import StrategyLibrary, StrategyLifecycleManager
+from min_agent.strategy_engine import (
+    StrategyLibrary,
+    StrategyLifecycleDecision,
+    StrategyLifecycleManager,
+)
+
+#: Calendar days a strategy stays PAUSED before it may be re-examined at all.
+PAUSED_REVIEW_DAYS = 3
 
 
 def source_fingerprint() -> str:
@@ -1275,50 +1282,131 @@ class AgentDaemon:
         # see "no evidence" for everyone and block every promotion permanently -
         # a gate that cannot be satisfied is not a gate, it is a freeze.
         evidence = self._offline_evidence_by_strategy(_validation=_validation)
-        for decision in self.lifecycle_manager.review(
-            self.strategy_library.list(), results, evidence
-        ):
-            old_lifecycle = decision.strategy.lifecycle
-            payload = {
-                "old_lifecycle": old_lifecycle,
-                "new_lifecycle": decision.new_lifecycle,
-                "reason": decision.reason,
+        decisions = self.lifecycle_manager.review(self.strategy_library.list(), results, evidence)
+        decisions.extend(self._reconsider_paused(results, evidence))
+        for decision in decisions:
+            self._apply_lifecycle_decision(decision)
+
+    def _apply_lifecycle_decision(self, decision) -> None:
+        if self.strategy_library is None:
+            return
+        old_lifecycle = decision.strategy.lifecycle
+        payload = {
+            "old_lifecycle": old_lifecycle,
+            "new_lifecycle": decision.new_lifecycle,
+            "reason": decision.reason,
+        }
+        # Journal the intent, write the file, then journal the outcome.
+        #
+        # Saving first meant a crash between the save and the event left a
+        # strategy in a terminal state with no recorded decision - and that is
+        # exactly what happened here: eight duplicate retirements landed on
+        # disk while nothing was journalled, which the provenance check could
+        # not even see, let alone report. Writing the event first means the
+        # worst case is an event for a transition that did not happen, which
+        # is visible and harmless; the reverse is a silent state change.
+        event_id = self._append_event(
+            "STRATEGY_LIFECYCLE_UPDATED",
+            status="SUCCESS",
+            message=decision.reason,
+            strategy_id=decision.strategy.strategy_id,
+            payload={**payload, "phase": "decided"},
+        )
+        updated = decision.strategy.model_copy(
+            update={
+                "lifecycle": decision.new_lifecycle,
+                "lifecycle_reason": decision.reason,
+                # A transition that carries state (e.g. a probation restart bumping
+                # `probation_restarts`) writes it here too; without it the lifecycle
+                # label changes and the state does not, which is the "fixed into a state
+                # nothing will serve" failure measured on 2026-10-06.
+                **(decision.update or {}),
             }
-            # Journal the intent, write the file, then journal the outcome.
-            #
-            # Saving first meant a crash between the save and the event left a
-            # strategy in a terminal state with no recorded decision - and that is
-            # exactly what happened here: eight duplicate retirements landed on
-            # disk while nothing was journalled, which the provenance check could
-            # not even see, let alone report. Writing the event first means the
-            # worst case is an event for a transition that did not happen, which
-            # is visible and harmless; the reverse is a silent state change.
-            event_id = self._append_event(
-                "STRATEGY_LIFECYCLE_UPDATED",
-                status="SUCCESS",
-                message=decision.reason,
-                strategy_id=decision.strategy.strategy_id,
-                payload={**payload, "phase": "decided"},
-            )
-            updated = decision.strategy.model_copy(
-                update={
-                    "lifecycle": decision.new_lifecycle,
-                    "lifecycle_reason": decision.reason,
-                    # A transition that carries state (e.g. a probation restart bumping
-                    # `probation_restarts`) writes it here too; without it the lifecycle
-                    # label changes and the state does not, which is the "fixed into a state
-                    # nothing will serve" failure measured on 2026-10-06.
-                    **(decision.update or {}),
-                }
-            )
-            self.strategy_library.save(updated)
-            self._append_event(
-                "STRATEGY_LIFECYCLE_UPDATED",
-                status="SUCCESS",
-                message=decision.reason,
-                strategy_id=decision.strategy.strategy_id,
-                payload={**payload, "phase": "applied", "decided_event_id": event_id},
-            )
+        )
+        self.strategy_library.save(updated)
+        self._append_event(
+            "STRATEGY_LIFECYCLE_UPDATED",
+            status="SUCCESS",
+            message=decision.reason,
+            strategy_id=decision.strategy.strategy_id,
+            payload={**payload, "phase": "applied", "decided_event_id": event_id},
+        )
+
+    def _reconsider_paused(self, results, evidence) -> list:
+        """Return at most one PAUSED strategy to probation per pass, and only on evidence.
+
+        PAUSED used to be terminal by construction - `_review_one` returns early for it -
+        so 37 of 75 strategies could never be looked at again, including some paused under
+        rules that have since been replaced. Reopening them all was measured and rejected in
+        STATUS.md: it lengthens the serial probation queue and produces no promotion. So the
+        bar is every one of:
+
+        - paused for at least `PAUSED_REVIEW_DAYS`, read from the journalled transition -
+          a strategy whose pause time is not on the record is not reopened, since its age
+          would be invented;
+        - its latest screen is PASS_SCREENED under the day-adjusted gate (`day_margin`
+          present): no worse than its days, which is evidence, not a raw ratio;
+        - the probation queue has room, by the same count admission uses;
+        - the lifecycle rules, run on the reopened copy, would not immediately pause or
+          retire it again - otherwise this is churn, and a HOLD-only strategy would be
+          re-paused for "no exploration" on the very next pass.
+
+        The best margin goes first; one per pass so the queue is never flooded.
+        """
+        if (
+            self.journal is None
+            or self.strategy_library is None
+            or self.strategy_admission is None
+            or self.lifecycle_manager is None
+        ):
+            return []
+        admission = self.strategy_admission
+        if admission.probation_backlog(results) >= admission.max_probation_queue:
+            return []
+        paused_at: dict[str, datetime] = {}
+        for event in self.journal.read_events("STRATEGY_LIFECYCLE_UPDATED"):
+            if event.strategy_id and event.payload.get("phase") == "applied":
+                if event.payload.get("new_lifecycle") == "PAUSED":
+                    paused_at[event.strategy_id] = event.timestamp
+                else:
+                    paused_at.pop(event.strategy_id, None)
+        budget = admission.probation_selector.min_probation_cycles
+        by_id = {result.strategy_id: result for result in results}
+        candidates = []
+        for spec in self.strategy_library.list():
+            if spec.lifecycle != "PAUSED" or not spec.enabled:
+                continue
+            since = paused_at.get(spec.strategy_id)
+            screen = evidence.get(spec.strategy_id)
+            if since is None or (self.now() - since).days < PAUSED_REVIEW_DAYS:
+                continue
+            if screen is None or screen.verdict != offline_validation.PASS_SCREENED:
+                continue
+            if screen.day_margin is None:
+                continue
+            served = by_id[spec.strategy_id].cumulative_cycles if spec.strategy_id in by_id else 0
+            reopened = spec.model_copy(update={
+                "lifecycle": "PROBATION",
+                # A fresh budget on top of what it has already been served, so it is not
+                # read as budget-spent the moment it returns.
+                "probation_restarts": served // max(budget, 1) + 1,
+            })
+            if any(
+                d.new_lifecycle in {"PAUSED", "RETIRED"}
+                for d in self.lifecycle_manager.review([reopened], results, evidence)
+            ):
+                continue
+            candidates.append((screen.day_margin, spec, reopened))
+        if not candidates:
+            return []
+        margin, spec, reopened = max(candidates, key=lambda item: item[0])
+        return [StrategyLifecycleDecision(
+            spec, "PROBATION",
+            f"re-examined after {(self.now() - paused_at[spec.strategy_id]).days} day(s) "
+            f"paused: screened PASS against its days (margin {margin:+.3f}), the probation "
+            f"queue has room, and the lifecycle rules would not pause it again",
+            update={"probation_restarts": reopened.probation_restarts},
+        )]
 
     def _due(self, last_at: datetime | None, interval_seconds: int) -> bool:
         if last_at is None:

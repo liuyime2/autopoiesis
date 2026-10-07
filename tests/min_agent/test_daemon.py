@@ -1243,3 +1243,87 @@ def test_one_maintenance_pass_screens_on_the_scores_it_just_recorded(tmp_path):
     screen = _screen_payloads(journal).get("s1", {})
     graded = screen.get("scored", 0) + screen.get("neutral", 0)
     assert graded == 3, f"and screened on all three in the same pass, got {screen}"
+
+
+# --- PAUSED is re-examined, but only on evidence and only with room ----------
+
+
+def _paused_setup(tmp_path, *, paused_days_ago=5, backlog=0, margin=0.05, verdict="PASS_SCREENED",
+                  record_pause=True, rules_would_repause=False):
+    from datetime import timedelta
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from min_agent.models import JournalEvent
+    from min_agent.offline_validation import OfflineValidationResult
+    from min_agent.strategy_engine import StrategyLifecycleDecision
+
+    now = datetime.now(tz=timezone.utc)
+    cfg = config(tmp_path, interval=0)
+    journal = JsonlJournal(cfg.journal_path)
+    library = StrategyLibrary(cfg.strategy_dir)
+    spec = StrategySpec(
+        strategy_id="p1", name="p1", kind="FIXED_SIZE", symbols=("SPY",),
+        parameters={"action": "BUY", "quantity": 1, "confidence": 0.7}, max_position_value=1000,
+        enabled=True, lifecycle="PAUSED", created_at=now, rationale="test",
+    )
+    library.save(spec)
+    if record_pause:
+        journal.append_event(JournalEvent(
+            event_id=str(uuid4()), event_type="STRATEGY_LIFECYCLE_UPDATED",
+            timestamp=now - timedelta(days=paused_days_ago), status="SUCCESS", message="m",
+            strategy_id="p1", payload={"phase": "applied", "new_lifecycle": "PAUSED"},
+        ))
+
+    class _Rules:
+        def review(self, strategies, results, evidence):
+            if rules_would_repause:
+                return [StrategyLifecycleDecision(strategies[0], "PAUSED", "no exploration")]
+            return []
+
+    admission = SimpleNamespace(
+        probation_backlog=lambda results: backlog, max_probation_queue=13,
+        probation_selector=SimpleNamespace(min_probation_cycles=13),
+    )
+    daemon = AgentDaemon(
+        config=cfg, loop=FakeLoop(journal=journal), sleep=lambda s: None, journal=journal,
+        strategy_library=library, lifecycle_manager=_Rules(), strategy_admission=admission,
+        now=lambda: now,
+    )
+    screen = OfflineValidationResult(strategy_id="p1", verdict=verdict, reason="r", scored=12,
+                                     day_margin=margin)
+    return daemon, {"p1": screen}
+
+
+def test_a_paused_strategy_with_evidence_and_room_returns_to_probation(tmp_path):
+    daemon, evidence = _paused_setup(tmp_path)
+    (decision,) = daemon._reconsider_paused([], evidence)
+    assert decision.new_lifecycle == "PROBATION"
+    assert decision.update["probation_restarts"] == 1
+    assert "margin +0.050" in decision.reason
+
+
+def test_a_full_queue_reopens_nothing(tmp_path):
+    daemon, evidence = _paused_setup(tmp_path, backlog=13)
+    assert daemon._reconsider_paused([], evidence) == []
+
+
+def test_a_recent_pause_is_not_reopened(tmp_path):
+    daemon, evidence = _paused_setup(tmp_path, paused_days_ago=1)
+    assert daemon._reconsider_paused([], evidence) == []
+
+
+def test_a_pause_time_not_on_the_record_is_not_invented(tmp_path):
+    daemon, evidence = _paused_setup(tmp_path, record_pause=False)
+    assert daemon._reconsider_paused([], evidence) == []
+
+
+def test_a_raw_gate_pass_is_not_enough(tmp_path):
+    daemon, evidence = _paused_setup(tmp_path, margin=None)
+    assert daemon._reconsider_paused([], evidence) == []
+
+
+def test_a_strategy_the_rules_would_pause_again_is_left_paused(tmp_path):
+    """Reopen-then-repause is churn: STATUS.md measured it lengthening the queue for nothing."""
+    daemon, evidence = _paused_setup(tmp_path, rules_would_repause=True)
+    assert daemon._reconsider_paused([], evidence) == []
