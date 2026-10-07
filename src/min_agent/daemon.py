@@ -585,6 +585,9 @@ class AgentDaemon:
                         "gross_return_pct": row.gross_return_pct,
                         "net_return_pct": row.net_return_pct,
                         "verdict": row.verdict,
+                        "rule_action": row.rule_action,
+                        "rule_verdict": row.rule_verdict,
+                        "override_value_pct": row.override_value_pct,
                     }
                     for row in fresh
                 ],

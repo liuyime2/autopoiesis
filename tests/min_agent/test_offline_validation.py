@@ -474,3 +474,21 @@ def test_days_that_decided_every_outcome_neither_pass_nor_reject():
     result = validate(decisions, strategy_id="s", day_up={"2026-10-05": 1.0})
     assert result.verdict == INCONCLUSIVE
     assert result.day_margin_se == 0.0
+
+
+def test_a_strategy_is_screened_on_its_rule_not_on_the_model_s_override():
+    """The model vetoed the strategy's SELL; the strategy is graded on the SELL it decided."""
+    from min_agent.offline_validation import collect_decisions
+
+    class _E:
+        payload = {"rows": [
+            {"cycle_id": "c1", "strategy_id": "s", "action": "HOLD", "verdict": "MISSED_ALPHA",
+             "rule_action": "SELL", "rule_verdict": "FALSE_TRADE", "net_return_pct": 1.0,
+             "decided_at": "2026-10-07T15:00:00"},
+            {"cycle_id": "c2", "strategy_id": "s", "action": "HOLD", "verdict": "GOOD_HOLD",
+             "net_return_pct": -1.0, "decided_at": "2026-10-07T16:00:00"},
+        ]}
+
+    first, second = collect_decisions([_E()], "s")
+    assert (first.action, first.verdict) == ("SELL", "FALSE_TRADE")
+    assert (second.action, second.verdict) == ("HOLD", "GOOD_HOLD"), "unpaired rows are unchanged"

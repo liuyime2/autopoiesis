@@ -132,6 +132,14 @@ class CounterfactualRow:
     net_return_pct: float | None
     verdict: str
     decision_source: str | None = None
+    #: The selected strategy's own action on this snapshot (`TradeDecision.rule_action`), and
+    #: the verdict it would have earned had it been the action taken. None on cycles that
+    #: predate the field. A strategy is screened on these, not on what the model chose.
+    rule_action: str | None = None
+    rule_verdict: str | None = None
+    #: Probe value, in percent, of the action taken minus the rule's action: what departing
+    #: from the rule was worth. Zero when they agree; None when unpaired or unscored.
+    override_value_pct: float | None = None
 
     @property
     def pending(self) -> bool:
@@ -229,6 +237,36 @@ def _horizon_quote(
     return None, None, "PENDING"
 
 
+#: A one-share probe's position for each action: what it holds over the horizon.
+_DIRECTION = {"BUY": 1, "HOLD": 0, "SELL": -1}
+
+
+def _grade(action: str, gross: float, cost: float, dead_band: float) -> tuple[str, float]:
+    """The verdict and the probe value (percent) of `action` given the market's `gross` move.
+
+    One function for the action taken and the rule's action alike, so a paired comparison
+    cannot be a comparison of two different arithmetics.
+    """
+    net = gross - cost
+    if action == "HOLD":
+        # The counterfactual trade is a standard probe entry. A gain it would have made is
+        # alpha the agent did not take; a loss is damage it avoided. Holding itself is worth 0.
+        if net > dead_band:
+            return MISSED_ALPHA, 0.0
+        if net < -dead_band:
+            return GOOD_HOLD, 0.0
+        return NEUTRAL, 0.0
+    # A trade, signed for its side and charged the cost either way. This was
+    # `net if BUY else -net`, and `-net` is `cost - gross`: a sell was credited the round
+    # trip instead of charged it.
+    value = _DIRECTION[action] * gross - cost
+    if value > dead_band:
+        return GOOD_TRADE, value
+    if value < -dead_band:
+        return FALSE_TRADE, value
+    return NEUTRAL, value
+
+
 def evaluate(
     records: list[CycleRecord],
     *,
@@ -273,28 +311,17 @@ def evaluate(
 
         gross = (future_price - price) / price * 100.0
         net = gross - assumed_cost_pct
-        if action == "HOLD":
-            # The counterfactual trade is a standard probe entry. A gain it would
-            # have made is alpha the agent did not take; a loss is damage it avoided.
-            if net > dead_band_pct:
-                verdict = MISSED_ALPHA
-            elif net < -dead_band_pct:
-                verdict = GOOD_HOLD
-            else:
-                verdict = NEUTRAL
-        elif record.execution.status in NEVER_LEFT_STATUSES:
+        verdict, taken_value = _grade(action, gross, assumed_cost_pct, dead_band_pct)
+        if action != "HOLD" and record.execution.status in NEVER_LEFT_STATUSES:
             verdict = NOT_EXECUTED
-        else:
-            # A real decision, signed for the side actually taken and charged the cost either
-            # way. This was `net if BUY else -net`, and `-net` is `cost - gross`: a sell was
-            # credited the round trip instead of charged it.
-            signed = (gross if action == "BUY" else -gross) - assumed_cost_pct
-            if signed > dead_band_pct:
-                verdict = GOOD_TRADE
-            elif signed < -dead_band_pct:
-                verdict = FALSE_TRADE
-            else:
-                verdict = NEUTRAL
+        # The rule's action is graded as a decision, not as an execution: the comparison is
+        # between two decisions on the same snapshot, and both would face the same Guardian.
+        rule_action = record.decision.rule_action
+        rule_verdict: str | None = None
+        override_value: float | None = None
+        if rule_action in _DIRECTION:
+            rule_verdict, rule_value = _grade(rule_action, gross, assumed_cost_pct, dead_band_pct)
+            override_value = round(taken_value - rule_value, 6)
 
         report.rows.append(
             CounterfactualRow(
@@ -306,6 +333,8 @@ def evaluate(
                 gross_return_pct=round(gross, 6),
                 assumed_cost_pct=assumed_cost_pct, net_return_pct=round(net, 6),
                 verdict=verdict, decision_source=record.decision.decision_source,
+                rule_action=rule_action, rule_verdict=rule_verdict,
+                override_value_pct=override_value,
             )
         )
     return report

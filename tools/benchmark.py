@@ -268,6 +268,11 @@ def main() -> int:
     attribution, extras = _pick(report.checks, "pnl attribution")
     _print_split_section("LLM increment vs the deterministic baseline", attribution, extras)
 
+    paired, _ = _pick(report.checks, "llm vs rule")
+    if paired is not None:
+        print(f"llm vs rule (paired)  {paired}")
+        print()
+
     registry, _ = _pick(report.checks, "model registry")
     if registry is not None:
         print(f"attribution coverage   {registry}")

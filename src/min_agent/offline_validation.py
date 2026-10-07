@@ -195,10 +195,18 @@ def collect_decisions(
             if not cycle_id:
                 continue
             decided_at = row.get("decided_at")
+            # A strategy is judged on what its own rule decided. Where the cycle recorded the
+            # rule's action, its verdict is the rule's: a model override is the model's
+            # decision, measured as such (`override_value_pct`), and must not be charged to -
+            # or credited to - the strategy it overrode. That is also what stops a HOLD that
+            # vetoed this strategy's SELL from being graded as the strategy's HOLD.
+            rule_action = row.get("rule_action")
+            rule_verdict = row.get("rule_verdict")
+            paired = bool(rule_action) and bool(rule_verdict)
             latest[cycle_id] = DecisionRecord(
                 cycle_id=cycle_id,
-                action=coerce.field_str(row.get("action"), "row.action"),
-                verdict=coerce.field_str(row.get("verdict"), "row.verdict"),
+                action=coerce.field_str(rule_action if paired else row.get("action"), "row.action"),
+                verdict=coerce.field_str(rule_verdict if paired else row.get("verdict"), "row.verdict"),
                 net_return_pct=coerce.field_float(row.get("net_return_pct"), "row.net_return_pct"),
                 day=str(decided_at)[:10] if decided_at else None,
             )

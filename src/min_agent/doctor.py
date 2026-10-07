@@ -545,6 +545,38 @@ def _check_decision_quality(
         )
     else:
         report.add("decision quality", OK, detail)
+    _report_llm_against_the_rule(report, result.rows)
+
+
+def _report_llm_against_the_rule(report: DoctorReport, rows: list) -> None:
+    """What the model's departures from the strategy's rule were worth, paired per cycle.
+
+    Every LLM decision since rule_action was recorded carries the rule's action on the same
+    snapshot, and its counterfactual row the probe value of the action taken minus the
+    rule's. Their sum is the model's increment over the rule on identical inputs - the
+    number the PnL-lot attribution could only approximate. Cycles before that have no pair
+    and are not counted, rather than estimated.
+    """
+    paired = [
+        row for row in rows
+        if row.decision_source == "llm" and row.override_value_pct is not None
+    ]
+    if not paired:
+        report.add(
+            "llm vs rule", WARN,
+            "no scored LLM decision carries the rule's action yet; the paired comparison "
+            "starts with the first cycle recorded with rule_action and needs 24h to score",
+        )
+        return
+    overrides = [row for row in paired if row.action != row.rule_action]
+    total = sum(row.override_value_pct for row in overrides)
+    helped = sum(1 for row in overrides if row.override_value_pct > 0)
+    report.add(
+        "llm vs rule", OK,
+        f"{len(paired)} paired LLM decision(s), {len(overrides)} override(s) of the rule, "
+        f"{helped} of them worth more than the rule; overrides net {total:+.3f}% of probe "
+        f"value (one share, 24h, after the assumed cost)",
+    )
 
 
 def _check_experiment_chain(

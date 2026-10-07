@@ -285,3 +285,40 @@ def test_orders_that_went_out_or_would_have_are_scored(status):
     ]
     report = cf.evaluate(records, symbol="SPY", horizon_hours=4.0)
     assert next(r for r in report.rows if r.action == "BUY").verdict == cf.GOOD_TRADE
+
+
+def _paired(cycle_id, when, price, action, rule_action, source="llm"):
+    record = _record(cycle_id, when, price, action=action)
+    return record.model_copy(update={"decision": record.decision.model_copy(
+        update={"rule_action": rule_action, "decision_source": source})})
+
+
+def test_a_veto_of_a_sell_before_a_rise_is_worth_what_the_sell_would_have_lost():
+    """The model held where the rule sold, and the price rose 1%.
+
+    Graded alone that HOLD is MISSED_ALPHA - wrong - because a HOLD is graded against a buy.
+    Paired with the rule, it avoided a sell that lost 1% plus cost: an override worth +1.05.
+    """
+    records = [
+        _paired("veto", T0, 100.0, action="HOLD", rule_action="SELL"),
+        _record("later", T0 + timedelta(hours=5), 101.0),
+    ]
+    row = next(r for r in cf.evaluate(records, horizon_hours=4.0).rows if r.cycle_id == "veto")
+    assert row.verdict == cf.MISSED_ALPHA
+    assert row.rule_verdict == cf.FALSE_TRADE
+    assert row.override_value_pct == pytest.approx(1.05)
+
+
+def test_agreeing_with_the_rule_is_worth_nothing_either_way():
+    records = [
+        _paired("same", T0, 100.0, action="BUY", rule_action="BUY"),
+        _record("later", T0 + timedelta(hours=5), 103.0),
+    ]
+    row = next(r for r in cf.evaluate(records, horizon_hours=4.0).rows if r.cycle_id == "same")
+    assert row.override_value_pct == 0.0
+
+
+def test_a_cycle_without_a_rule_action_is_unpaired_not_zero():
+    records = [_record("old", T0, 100.0, action="BUY"), _record("later", T0 + timedelta(hours=5), 103.0)]
+    row = next(r for r in cf.evaluate(records, horizon_hours=4.0).rows if r.cycle_id == "old")
+    assert row.rule_verdict is None and row.override_value_pct is None
