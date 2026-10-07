@@ -159,7 +159,7 @@ runs the documented commands.
 | --- | --- |
 | Clones | `git clone` to an empty directory; `runtime/` absent, as gitignore intends |
 | Installs | New `conda create -n freshclone-test python=3.10`, then `pip install -e ".[dev]"` |
-| Runs | `min-agent --help` works; 957 tests pass; lint clean |
+| Runs | `min-agent --help` works; the whole suite passes and lint is clean - `docs/evidence/fresh-clone.log` holds the run and its count |
 | Works without credentials | All of the above with zero Alpaca variables set |
 
 **Three defects found only here**, none of which reproduces on the live machine: `ruff` and
