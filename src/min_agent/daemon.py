@@ -47,8 +47,8 @@ def source_fingerprint() -> str:
     Hashed from the source files rather than a git revision, because the question being
     asked is not "which commit is checked out" but "is the process running the same code
     that is on disk" - and the two differ constantly while a daemon is left running
-    across an edit. Reading the imported module's own file is what makes it a statement
-    about the running code rather than about the worktree.
+    across an edit. On its own this reads the worktree; it describes the running code only
+    when taken at import, which is what `LOADED_SOURCE_FINGERPRINT` is for.
 
     Falls back to hashing the module's bytecode if the source is unavailable, so an
     installed package without .py files still produces a stable value.
@@ -66,6 +66,14 @@ def source_fingerprint() -> str:
             except OSError:
                 continue
     return digest.hexdigest()[:16]
+
+
+#: The fingerprint of the code this process imported, taken once. The heartbeat used to call
+#: `source_fingerprint()` on every beat, which re-reads the files on disk - so after an edit a
+#: daemon still running the old code reported the new fingerprint, and the check built to catch
+#: exactly that passed. Python does not re-import on a file change, so the value at import time
+#: is the one that describes what is running.
+LOADED_SOURCE_FINGERPRINT = source_fingerprint()
 
 
 class DaemonAlreadyRunningError(RuntimeError):
@@ -1346,7 +1354,7 @@ class AgentDaemon:
             error_count=self.error_count,
             last_cycle_id=self.last_cycle_id,
             message=message,
-            source_fingerprint=source_fingerprint(),
+            source_fingerprint=LOADED_SOURCE_FINGERPRINT,
         )
         self.health.write(payload)
 
