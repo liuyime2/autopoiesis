@@ -7,7 +7,7 @@ from typing import Any
 
 import requests
 
-from min_agent import coerce
+from min_agent import coerce, regime
 from min_agent.coerce import is_number
 from min_agent.models import DataSnapshot, KnowledgeArtifact, TradeDecision
 
@@ -68,7 +68,9 @@ DECISION_INSTRUCTION = (
     "rule_decision in the context is what the selected strategy's own rule decided. It is "
     "the default: if your action differs from rule_decision.action, override_reason must "
     "say in one sentence what in the context makes the rule wrong here; otherwise set "
-    "override_reason to null. An override without a reason is discarded."
+    "override_reason to null. An override without a reason is discarded. "
+    "market in the context summarises recent prices from your own record - regime, trend, "
+    "volatility and returns - and is description, not an instruction to trade."
 )
 
 #: The one transport contract: (prompt, context, num_ctx) -> the parsed body.
@@ -211,6 +213,7 @@ class HybridDecisionEngine:
         max_lessons: int = 5,
         risk_limits: dict[str, object] | None = None,
         cost_basis: Callable[[], dict[str, dict[str, object]]] | None = None,
+        market_history: Callable[[], list] | None = None,
     ):
         self.llm = llm
         self.policy_engine = policy_engine
@@ -224,6 +227,10 @@ class HybridDecisionEngine:
         # Without a cost basis the model cannot tell profit from loss. Every price
         # in it is broker-reported, from confirmed fills.
         self.cost_basis = cost_basis
+        #: Recent journal records, for the `market` block. The model was given one price and
+        #: nothing about how it got there - no return, no volatility, no regime - so a rule's
+        #: trend parameters and the model's override were both reasoning without a past.
+        self.market_history = market_history
         #: The selected strategy's own decision for the snapshot `_context` last built.
         self._rule_decision: TradeDecision | None = None
 
@@ -397,7 +404,47 @@ class HybridDecisionEngine:
         if lots:
             context["open_lots"] = lots
         context["lessons"] = [a.summary for a in self._lessons(strategy_id)]
+        market = self._market(snapshot)
+        if market is not None:
+            context["market"] = market
         return context
+
+    def _market(self, snapshot: DataSnapshot) -> dict[str, Any] | None:
+        """Recent price behaviour from the agent's own record, up to this snapshot only.
+
+        Built from journalled snapshots plus the current one, so it contains nothing the
+        loop had not observed by now. Returns are against the last observed price at least
+        one hour / one day earlier; None where the record does not reach that far back.
+        """
+        if self.market_history is None:
+            return None
+        try:
+            bars = regime.bars_from_records(self.market_history(), snapshot.symbol)
+        except Exception:
+            return None
+        bars = [bar for bar in bars if bar.timestamp < snapshot.timestamp]
+        if not bars or bars[-1].price != snapshot.last_price:
+            bars.append(regime.Bar(snapshot.timestamp, snapshot.last_price))
+        # Today's session only: `classify` refuses a window with a gap in it, and any window
+        # long enough to be useful spans the overnight close, so over the whole history the
+        # label was UNKNOWN on every cycle.
+        label = regime.classify([bar for bar in bars if bar.timestamp.date() == snapshot.timestamp.date()])
+
+        def change_since(hours: float) -> float | None:
+            cutoff = snapshot.timestamp.timestamp() - hours * 3600.0
+            earlier = [bar for bar in bars if bar.timestamp.timestamp() <= cutoff]
+            if not earlier:
+                return None
+            return round((snapshot.last_price / earlier[-1].price - 1.0) * 100.0, 3)
+
+        return {
+            "regime": label.label,
+            "trend_pct": label.trend_pct,
+            "volatility_pct": label.volatility_pct,
+            "return_1h_pct": change_since(1.0),
+            "return_1d_pct": change_since(24.0),
+            "observations": len(bars),
+        }
 
     def _exposure(
         self, snapshot: DataSnapshot, lots: Mapping[str, Mapping[str, object]] | None = None

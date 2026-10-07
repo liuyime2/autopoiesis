@@ -347,6 +347,9 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
             "max_account_value": config.max_account_value or None,
         },
         cost_basis=cost_basis,
+        # ~300 five-minute cycles is a little over three trading days: enough for a 1-day
+        # return and the regime's 78-bar window after repeated quotes are collapsed.
+        market_history=lambda: journal.last_n(300),
     )
     loop = TradingLoop(
         data_gateway=AlpacaDataGateway(client=client),

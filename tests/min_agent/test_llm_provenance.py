@@ -1251,3 +1251,51 @@ def test_the_fallback_records_its_own_rule_as_the_rule_action(tmp_path):
     decision = engine.decide_snapshot(_snapshot())
     assert decision.decision_source == "fallback_policy_engine"
     assert decision.rule_action == decision.action == "BUY"
+
+
+# --- the model sees how the price got here, and nothing after now -------------
+
+
+def _history(prices_by_minutes_ago):
+    from datetime import timedelta
+
+    from min_agent.models import CycleRecord, ExecutionResult, GuardianResult, TradeDecision
+
+    out = []
+    for i, (minutes, price) in enumerate(prices_by_minutes_ago):
+        snap = _snapshot(price=price).model_copy(update={"timestamp": NOW - timedelta(minutes=minutes)})
+        out.append(CycleRecord(
+            cycle_id=f"h{i}", snapshot=snap,
+            decision=TradeDecision(symbol="SPY", action="HOLD", quantity=0, confidence=0.5, rationale="r"),
+            guardian=GuardianResult(approved=True, reason="ok"),
+            execution=ExecutionResult(status="SKIPPED", order_id=None, message="m", filled_quantity=0),
+        ))
+    return out
+
+
+def test_the_model_is_given_returns_from_its_own_record(tmp_path):
+    llm = _llm_says("BUY")
+    engine, _ = _engine(tmp_path, llm)
+    engine.market_history = lambda: _history([(1500, 700.0), (70, 740.0), (30, 745.0)])
+    engine.decide_snapshot(_snapshot(price=REAL_SPY_PRICE))
+    market = llm.calls[0]["market"]
+    assert market["return_1h_pct"] == round((REAL_SPY_PRICE / 740.0 - 1) * 100, 3)
+    assert market["return_1d_pct"] == round((REAL_SPY_PRICE / 700.0 - 1) * 100, 3)
+
+
+def test_the_market_block_never_sees_a_price_after_the_snapshot(tmp_path):
+    """Point-in-time: a record stamped after this snapshot must not shape what the model sees."""
+    llm = _llm_says("BUY")
+    engine, _ = _engine(tmp_path, llm)
+    engine.market_history = lambda: _history([(90, 740.0), (-30, 9999.0)])  # -30 = the future
+    engine.decide_snapshot(_snapshot(price=REAL_SPY_PRICE))
+    market = llm.calls[0]["market"]
+    assert market["observations"] == 2, "the past quote and this snapshot, not the future one"
+    assert market["return_1h_pct"] == round((REAL_SPY_PRICE / 740.0 - 1) * 100, 3)
+
+
+def test_without_history_there_is_no_market_block_rather_than_an_invented_one(tmp_path):
+    llm = _llm_says("BUY")
+    engine, _ = _engine(tmp_path, llm)
+    engine.decide_snapshot(_snapshot())
+    assert "market" not in llm.calls[0]
