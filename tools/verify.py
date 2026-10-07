@@ -2519,7 +2519,7 @@ def check_self_evolution_closes() -> Result:
     return Result(
         "self-evolution-closes", PASS,
         "847 real-bar cycles drove reflect -> counterfactual -> screen -> lifecycle with no "
-        "daemon errors, and produced an attributed retirement",
+        "daemon errors, and the lifecycle followed the screen's verdict",
     )
 
 

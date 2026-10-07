@@ -376,22 +376,32 @@ def _dr(i, action, verdict, day):
                           net_return_pct=0.0, day=day)
 
 
-def test_day_direction_is_the_share_of_outcomes_that_went_up():
+def test_day_direction_is_the_market_s_move_not_the_decisions_grade():
+    """The base rate comes from the price, so a strategy is not measured against itself.
+
+    The first version read it from verdicts; with one strategy trading a day, its margin was
+    zero by construction. Here every row on the 29th is a losing SELL, yet the day is up -
+    because the price rose - and that is what the SELLs have to be read against.
+    """
     from min_agent.offline_validation import day_direction
 
     class _E:
         def __init__(self, rows):
             self.payload = {"rows": rows}
 
+    def row(cid, action, verdict, day, net):
+        return {"cycle_id": cid, "action": action, "verdict": verdict,
+                "decided_at": f"2026-09-{day}T14:00:00", "net_return_pct": net}
+
     rows = [
-        {"cycle_id": "a", "action": "BUY", "verdict": "GOOD_TRADE", "decided_at": "2026-09-29T14:00:00"},
-        {"cycle_id": "b", "action": "HOLD", "verdict": "MISSED_ALPHA", "decided_at": "2026-09-29T15:00:00"},
-        {"cycle_id": "c", "action": "SELL", "verdict": "GOOD_TRADE", "decided_at": "2026-09-30T15:00:00"},
-        {"cycle_id": "d", "action": "HOLD", "verdict": "NEUTRAL", "decided_at": "2026-09-30T16:00:00"},
+        row("a", "SELL", "FALSE_TRADE", 29, 0.8),
+        row("b", "SELL", "FALSE_TRADE", 29, 0.6),
+        row("c", "HOLD", "GOOD_HOLD", 30, -0.4),
+        row("d", "BUY", "GOOD_TRADE", 30, 0.3),
+        row("e", "HOLD", "NEUTRAL", 30, 0.01),   # inside the band: no direction
     ]
-    # a stale row for `a` earlier in the journal must be superseded, not double counted
-    stale = [{"cycle_id": "a", "action": "BUY", "verdict": "FALSE_TRADE", "decided_at": "2026-09-29T14:00:00"}]
-    assert day_direction([_E(stale), _E(rows)]) == {"2026-09-29": 1.0, "2026-09-30": 0.0}
+    stale = [row("a", "SELL", "GOOD_TRADE", 29, -0.8)]  # superseded by the later row
+    assert day_direction([_E(stale), _E(rows)]) == {"2026-09-29": 1.0, "2026-09-30": 0.5}
 
 
 def test_a_seller_on_rising_days_is_not_rejected_for_the_market():

@@ -61,11 +61,23 @@ def probe() -> list[str]:
             "no lifecycle ruling was produced, so selection pressure never acted on the "
             "scored evidence"
         )
-    if result["final_lifecycle"] == "PROBATION":
+    # The screen's verdict has to reach the lifecycle, and only in the direction it points.
+    # This used to require the strategy to end retired, which encoded what the raw-ratio gate
+    # said about this rule: 44 of 125 right, rejected at < 0.5. Read against its days -
+    # 37.5 expected from the market's direction alone - the same record is a margin of
+    # +0.052, so the honest verdict is no longer a rejection and "must end retired" became
+    # a requirement that the screen be wrong. What the probe guards is the wiring.
+    screen = result.get("final_screen") or {}
+    verdict = screen.get("verdict")
+    if not screen or not screen.get("scored"):
+        problems.append("the screen never scored a decision, so no evidence reached the lifecycle")
+    elif verdict == "REJECT_POOR_DECISIONS" and result["final_lifecycle"] in {"PROBATION", "ACTIVE"}:
         problems.append(
-            "the strategy was still PROBATION at the end; a screen verdict of "
-            "REJECT_POOR_DECISIONS produced no applied transition"
+            f"the screen said {verdict} but the strategy ended {result['final_lifecycle']}; "
+            "the verdict produced no applied transition"
         )
+    elif verdict != "REJECT_POOR_DECISIONS" and result["final_lifecycle"] == "RETIRED":
+        problems.append(f"the strategy was retired although the screen said {verdict}")
 
     # A ruling has to say what happened in numbers, not merely that the strategy was bad.
     #

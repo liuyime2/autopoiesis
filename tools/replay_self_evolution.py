@@ -177,7 +177,12 @@ def run(bars_path: str = BARS) -> dict:
         and e.payload.get("phase") == "applied"
     ]
     final = library.try_load(STRATEGY_ID)
+    screens = [
+        e.payload for e in events
+        if e.event_type == "OFFLINE_VALIDATION_COMPLETED" and e.strategy_id == STRATEGY_ID
+    ]
     return {
+        "final_screen": screens[-1] if screens else None,
         "cycles": daemon.cycle_count,
         "errors": daemon.error_count,
         "events": kinds,

@@ -59,6 +59,7 @@ INCONCLUSIVE = "INCONCLUSIVE_INSUFFICIENT_EVIDENCE"
 # Re-exported, not redeclared: this was the third hand-written copy of the verdict set,
 # and it had drifted from `calibration`'s. See `counterfactual` for the account.
 from min_agent.counterfactual import (
+    DEFAULT_DEAD_BAND_PCT,
     FALSE_TRADE,
     GOOD_HOLD,
     GOOD_TRADE,
@@ -204,42 +205,40 @@ def collect_decisions(
     return [latest[key] for key in sorted(latest)]
 
 
-#: (action, verdict) pairs that say the price went up after the decision, net of cost.
-_UP = frozenset({("BUY", GOOD_TRADE), ("SELL", FALSE_TRADE), ("HOLD", MISSED_ALPHA)})
-#: Pairs that say it went down.
-_DOWN = frozenset({("BUY", FALSE_TRADE), ("SELL", GOOD_TRADE), ("HOLD", GOOD_HOLD)})
-
-
-def day_direction(counterfactual_events: Iterable[object]) -> dict[str, float]:
-    """Per trading day, the share of graded outcomes - across every strategy - in which the
-    price rose after the decision.
+def day_direction(
+    counterfactual_events: Iterable[object], *, dead_band_pct: float = DEFAULT_DEAD_BAND_PCT
+) -> dict[str, float]:
+    """Per trading day, the share of the market's 24-hour moves that rose.
 
     Every verdict is a one-share probe over the next 24 hours, so on a day the market rose
     every BUY is right and every HOLD and SELL wrong, whoever made it. Measured on the live
     journal on 2026-10-07: on 9 of 13 days this share was 0.0-0.04 or 0.98-1.0, and each
-    strategy's raw ratio sat within about 0.12 of what its days alone predicted. A raw
-    ratio is therefore mostly a record of which days a strategy happened to trade on; this
-    is the base rate it has to be read against. Latest row per cycle, as in
-    `collect_decisions`.
+    strategy's raw ratio sat within about 0.12 of what its days alone predicted. A raw ratio
+    is therefore mostly a record of which days a strategy happened to trade on; this is the
+    base rate it has to be read against.
+
+    Read from each row's `net_return_pct` - the probe's move, which depends on the price and
+    not on the decision - over every cycle that day, whatever its action or strategy. The
+    first version derived it from verdicts instead, which made it a statement about the
+    decisions being graded: with one strategy on a day, the strategy was measured against
+    itself and its margin was zero by construction. Moves inside the dead band say nothing
+    and are left out, as they are from the verdicts. Latest row per cycle.
     """
-    latest: dict[str, tuple[str, str, str]] = {}
+    latest: dict[str, tuple[str, float]] = {}
     for event in counterfactual_events:
         payload = coerce.field_dict(coerce.field_of(event, "payload"), "event.payload")
         for row in coerce.field_dict_tuple(payload.get("rows"), "payload.rows"):
             cycle_id = coerce.field_str(row.get("cycle_id"), "row.cycle_id")
             decided_at = row.get("decided_at")
-            if cycle_id and decided_at:
-                latest[cycle_id] = (
-                    str(decided_at)[:10],
-                    coerce.field_str(row.get("action"), "row.action"),
-                    coerce.field_str(row.get("verdict"), "row.verdict"),
-                )
+            net = coerce.field_float(row.get("net_return_pct"), "row.net_return_pct")
+            if cycle_id and decided_at and net is not None:
+                latest[cycle_id] = (str(decided_at)[:10], net)
     totals: dict[str, list[int]] = {}
-    for day, action, verdict in latest.values():
-        if (action, verdict) in _UP or (action, verdict) in _DOWN:
+    for day, net in latest.values():
+        if abs(net) > dead_band_pct:
             entry = totals.setdefault(day, [0, 0])
             entry[0] += 1
-            entry[1] += 1 if (action, verdict) in _UP else 0
+            entry[1] += 1 if net > 0 else 0
     return {day: up / total for day, (total, up) in totals.items()}
 
 
