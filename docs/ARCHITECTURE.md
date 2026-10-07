@@ -44,12 +44,20 @@ broker fill and cannot reach the PnL ledger even by accident.
    they leave for this symbol, the exposure headroom, the cost basis, how many shares
    can actually be sold. The arithmetic is Guardian's, so the context and the gate
    cannot disagree about whether a buy fits.
-3. **Act.** The model returns an action, a confidence, and a reason. If it cannot be
-   reached the deterministic policy engine decides, and the decision is labelled
-   `fallback_policy_engine` - recorded, not disguised.
-4. **Gate.** Guardian refuses on: per-symbol position value, total exposure, daily
+3. **Act.** The selected strategy's own rule decides first, and the model is shown that
+   decision (`rule_decision`) beside a `market` block of recent returns, volatility and
+   regime from the agent's own record. The model may override the rule only by giving an
+   `override_reason`; an override without one is discarded and the rule's decision taken.
+   Every decision records `rule_action` beside the action taken, so the model's
+   contribution is a paired comparison on identical inputs. If the model cannot be reached
+   the policy engine decides, labelled `fallback_policy_engine` - recorded, not disguised.
+   Actions are BUY, SELL (reduce a long), HOLD, and - behind `MIN_AGENT_SHORTS`, off by
+   default - SHORT and COVER.
+4. **Gate.** Guardian refuses on: per-symbol position value, total exposure (gross), daily
    loss, trades per day, confidence below minimum, a stale snapshot, a symbol outside
-   the mandate, a sell the agent does not own, or any mode that is not paper.
+   the mandate, a sell the agent does not own, or any mode that is not paper. A SHORT is
+   refused while the account holds any long in the symbol (Alpaca would sell that long
+   first) and is capped like a long; a COVER only up to what the agent itself shorted.
 5. **Settle.** The order is submitted or journalled as an intent, and the cycle is
    written to the journal.
 
@@ -67,14 +75,14 @@ decision → counterfactual → calibration → reflection → curriculum
 
 | Stage | What it produces | Measured on this journal |
 |---|---|---|
-| Counterfactual | Every decision scored against what the market did next: `GOOD_HOLD`, `MISSED_ALPHA`, `FALSE_TRADE` | 350 evaluations |
+| Counterfactual | Every decision scored against what the market did next: `GOOD_HOLD`, `MISSED_ALPHA`, `GOOD_TRADE`, `FALSE_TRADE`; a refused order is `NOT_EXECUTED`. Paired cycles also carry the rule's verdict and `override_value_pct` | 350 evaluations |
 | Calibration | Whether the model's stated confidence predicts its decisions turning out right | Brier 0.433 against 0.25 for a constant 0.5 claim |
 | Reflection | A window summary plus per-strategy evidence | 859 |
 | Curriculum | The model proposing a strategy the library lacks | 344 proposed, 50 failed |
 | Admission | Whether that proposal is admissible at all | 177 reviewed |
-| Offline screen | Whether the candidate's real recorded decisions were any good | 9,646 |
+| Offline screen | Whether the candidate's own rule did better than its days alone would have: each day's up-share comes from the market's moves, and a strategy is rejected only when worse than that by two standard errors | 9,646 |
 | Lifecycle | Promotion, pausing, retirement - each with its reason | 90 changes |
-| Knowledge | What the model is told about its own reliability | 47 proposed |
+| Knowledge | What the model is told about its own reliability. Lessons are de-duplicated by content with figures masked, each is shown on half of cycles, and one with no measured effect after 10 trading days is retired | 47 proposed |
 
 **Promotion is evidence-gated and cannot be earned by inaction.** A candidate reaches
 `ACTIVE` on broker-verified realised PnL, or on decision quality that clears the
@@ -82,6 +90,10 @@ evidence gate. It does not reach it by not crashing: an earlier version promoted
 "acceptable operational metrics", which meant a strategy that existed, never submitted
 an order, and therefore had no PnL of any kind was being promoted for having avoided
 trouble.
+
+**A pause is not forever, but reopening is bounded.** A PAUSED strategy returns to probation
+only after three days, on a day-adjusted PASS, with room in the queue, and only if the rules
+would not pause it again at once - one per maintenance pass.
 
 **The system may remove itself.** Retirement reasons recorded on this journal:
 `probation produced no exploration evidence`, `behaviourally identical to existing

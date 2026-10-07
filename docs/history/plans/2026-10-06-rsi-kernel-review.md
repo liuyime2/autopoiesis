@@ -1,8 +1,8 @@
 # The RSI kernel, reviewed: what it does, what it is not, and what to change
 
 Date: 2026-10-06
-Status: **REVIEW + PLAN. Nothing in here has been implemented.** §3.1, §3.2 and the verdict
-half of §3.3 were corrected the same day; see the correction at the head of §3.
+Status: **ACTED ON, 2026-10-07** — every item's outcome is in §13 at the end. §3.1, §3.2 and
+the verdict half of §3.3 were corrected on 2026-10-06; see the correction at the head of §3.
 Baseline commit: `b97a6b2`
 Supersedes: nothing. `STATUS.md` remains the record of what has happened; this file is the
 record of what should happen next, and it is a dated document too — when it is acted on, the
@@ -821,3 +821,54 @@ counterfactual rows and is retracted in §3.) So the loop filters on a signal th
 market direction, and calls it self-improvement. Fix the measurement first, make strategies executable
 second, and open-source the result with the negative results stated on the front page — which
 is a more credible and more useful artefact than a profit claim would have been.
+
+## 13. What was done, item by item (2026-10-07)
+
+Each row names the commit; each commit message carries its measurement. "Waits on data" means
+the instrument is built and running and the answer needs market days, not code.
+
+### Measurement (section 4, P0)
+
+| Item | Outcome |
+| --- | --- |
+| P0.2 benchmark denominators | **Done** `73c6a0c`. Both legs on the same capital and window. Falsifier fired: fixed-size-probe-0001 went from -4.29 to +0.49 against SPY. Verdict still FAIL, 4 of 5 behind. Also fixed: the verdict named the least-bad strategy as "worst" (`c037f11`) |
+| P0.1 day-adjusted screen | **Done** `7147b6d`, `a1733b6`. On 9 of 13 days nearly every outcome went one way; raw ratios sat within ~0.12 of what the days predicted. 6 rejections became INCONCLUSIVE; the falsifier ("SELL grades do not move") is refuted |
+| P0.3 standing bias check | **Done** `c0ac0da`, `screen-direction-neutral`; a fixture proves it fails |
+
+Defects in the instrument found while doing this, all fixed: refused orders graded as trades
+and a SELL credited the cost it pays (`7186d4b`) — on the corrected instrument executed SELLs
+were right **1 of 25**, close to the retracted "0 of 43" but for the right reason; screens read
+back without `good_trades` (`bf51a89`); a maintenance pass acting on stale reads (`3115fe1`);
+calibration graded with default cost (`b10486c`); the daemon's code fingerprint read from disk,
+so the stale-code check could never fail (`561fc64`).
+
+### Making the loop able to learn (P1, P2)
+
+| Item | Outcome |
+| --- | --- |
+| P1.1 rule as the default, LLM overrides with a reason | **Done** `ba9e421`. First live override, 2026-10-07 11:00: rule BUY, model HOLD, reason "the position cap leaves no room" |
+| P2.1 paired / direction-neutral scoring | **Done** `49fd028`. Strategies screened on their own rule; the model on `override_value_pct`. The vetoed-SELL grading flaw of §3.3 is gone for paired cycles. **Waits on data**: the first paired cycle scores 24h after it is decided |
+| P1.2 market context | **Done** `f63a08f`. Regime, trend, volatility, 1h/1d returns; ~40 tokens. Whether it helps waits on the paired comparison |
+| P2.2 knowledge channel | **Done** `9bd1d04` (dedup: 5 copies of one lesson → 4 distinct), `683fe1b` (each lesson shown on half of cycles), `ad595fe` (retire after 10 trading days with no effect). **Waits on data**: inert until 10 days of ablation |
+| P2.3 re-open PAUSED | **Done** `bfcbdc7`, bounded. Today the queue is over its cap (16/13), so nothing reopens; with room, 1 of 6 eligible strategies would, the other 5 being re-paused at once by the existing rules |
+| Short selling and a rule DSL (from the first review) | **Built** — `docs/history/plans/2026-10-07-bounded-short-and-rule-dsl.md`. Rollout at `MIN_AGENT_SHORTS=shadow`; `paper` waits on a shadow session, and no SHORT can be approved until the account is flat |
+
+### Evidence base (P3)
+
+| Item | Outcome |
+| --- | --- |
+| P3.1 synthetic journal so `make benchmark` runs on a fresh clone | **Not built, deliberately.** Every snapshot model refuses `source` values like `synthetic` or `mock` — the code form of `AGENTS.md` §17. A fixture would parse only by calling itself something else, which defeats the guard rather than satisfying it, and the real bars the replay uses cannot be redistributed here. A fresh clone gets `make benchmark` exit 2 ("nothing to measure"), the no-broker example cycle, and the full offline gate |
+| P3.2 research trials out of the ignored tree | **Done** `5b08b8e`: 59 trials, 47 INSUFFICIENT, 12 OVERFIT, 0 PASS |
+| P3.3 attribution epoch | **Done** with P1.1: cycles from 2026-10-07 10:55 carry `rule_action`; the paired comparison counts only those and does not estimate the rest |
+| P3.4 benchmark's own defects | **Done** in `8727f17` and `c037f11` |
+| The 29 unmatched shares | **Done** `cf4ac8d`: priced against the owner's recorded fills - 29 shares, cost 19,408.88, proceeds 22,230.53, owner gain +2,821.65, outside every strategy's PnL |
+
+### Open source (sections 8-11)
+
+All done: LICENSE (`51050b3`), host paths (`51050b3`), lock file and unit names (`2378c0c`), CI
+mypy and conda-free operation (`92977d1`), docs reorganised into `docs/history/` with git history
+kept (`b3d435b`), community files (`63c3cef`), README front page and counts guarded by a test
+(`0014a9c`), fresh-clone evidence regenerated in a new venv (`adeffd1`, after fixing the one
+gate check that failed on a clone, `49b3b1c`). **Left for the operator:** the repository name
+and `[project.urls]`, and pushing — GitHub refused every push with an internal server error on
+2026-10-07.

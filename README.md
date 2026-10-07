@@ -84,6 +84,8 @@ wrappers each duplicated a flag below.
 | `make status` | is the daemon alive and what is it doing | ~1s |
 | `make run` / `make stop` / `make restart` | control the daemon via systemd | ~2s |
 | `make reproduce` | record commit, config, versions, broker clock, metrics for this run | ~5s |
+| `make benchmark` | does the system beat SPY buy-and-hold on the same capital and window; exit 0 met / 1 behind / 2 nothing to measure | ~30s |
+| `./minictrl owner-history` | journal the account owner's fills (read-only) so an agent sale beyond its own lots can be priced | ~60s |
 
 `make type` runs mypy and blocks. It is part of `make check`, so a type
 regression fails the fast loop rather than waiting for review.
@@ -185,6 +187,11 @@ has no bypass - it is called on the single path that can submit an order.
 | max daily loss | `MIN_AGENT_MAX_DAILY_LOSS` | $500 |
 | max trades per day | `MIN_AGENT_MAX_TRADES_PER_DAY` | 10 |
 | min confidence | `MIN_AGENT_MIN_CONFIDENCE` | 0.5 |
+| short selling | `MIN_AGENT_SHORTS` | `off` (`shadow` journals SHORT/COVER as intents; `paper` submits them) |
+
+A short is a separate rule, not a relaxation of these: it is refused while the account holds
+any long in the symbol, capped by the same position and exposure limits (measured gross), and
+a COVER may only buy back what the agent itself shorted.
 
 They are environment-overridable, so a *lower* limit is a legitimate tightening and a
 *higher* one is a risk decision that belongs to whoever operates the account, not to the

@@ -33,6 +33,25 @@ the commit message; the long-form record is in [`docs/history/`](docs/history/RE
 - The RSI kernel review's headline - every SELL scored 0.000 - came from reading the oldest
   counterfactual row per cycle; corrected to 26.5% SELL vs 66.2% BUY.
 
+### Added (2026-10-07, later)
+- The strategy's own rule decides first; the model may override it only with a reason, and
+  every decision records both (`rule_action`, `override_reason`). doctor reports `llm vs rule`.
+- A `market` block in the decision context: regime, trend, volatility, 1h and 1d returns.
+- Each lesson is shown on half of cycles; a lesson with no measured effect after 10 trading
+  days is retired.
+- PAUSED strategies are re-examined on evidence, one per pass, never into immediate re-pause.
+- SHORT and COVER, behind `MIN_AGENT_SHORTS` (default off) and a Guardian rule with its own
+  limits; short lots in the ledger; shorts in the counterfactual and the backtest.
+- A `RULE` strategy kind: a constrained, parameter-only DSL the curriculum may propose.
+- `minictrl owner-history`: prices an agent sale beyond its own lots against the account
+  owner's recorded fills, reported as the owner's exit.
+- `docs/evidence/research_trials-2026-10-07.jsonl`: every research trial, 0 of 59 passed.
+
+### Fixed (2026-10-07, later)
+- `PositionSnapshot` rejected a negative market value, so the first real short would have
+  failed every later snapshot.
+- An owner-history ingest was read as the latest evidence batch.
+
 ### To do before the first public release
 - Settle the repository name and add `[project.urls]` to `pyproject.toml`.
 
