@@ -4,19 +4,20 @@ Produced by running the following in a clone made from the committed tree.
 Reproduce with: docs/evidence/run-fresh-clone.sh
 
 $ git clone <repo> fc && cd fc
-$ python -m pip install -e ".[dev]"
+$ python3 -m venv .venv
+$ .venv/bin/python -m pip install -e ".[dev]"
 
 ## commit under test
-0331c6d Fail the gate when a unit's ExecStart is a path that does not exist
+49b3b1c Let the gate run on a fresh clone again: skip the replay when there is no runtime/
 
 ## environment
-interpreter: /home/liuyime2/miniconda3/bin/python3
+interpreter: /tmp/claude-29424/-localscratch-liuyime2-QuantGroup/9bfb655b-c44f-48e7-973e-43347422735b/scratchpad/fc/.venv/bin/python
 version: 3.13.2
 credentials: none present (verified by probing, after unset)
 
 ## install
-$ python3 -m pip install -e ".[dev]"
-Obtaining file:///tmp/opencode/fc2
+$ /tmp/claude-29424/-localscratch-liuyime2-QuantGroup/9bfb655b-c44f-48e7-973e-43347422735b/scratchpad/fc/.venv/bin/python -m pip install -e ".[dev]"
+Obtaining file:///tmp/claude-29424/-localscratch-liuyime2-QuantGroup/9bfb655b-c44f-48e7-973e-43347422735b/scratchpad/fc
   Installing build dependencies: started
   Installing build dependencies: finished with status 'done'
   Checking if build backend supports build_editable: started
@@ -25,83 +26,158 @@ Obtaining file:///tmp/opencode/fc2
   Getting requirements to build editable: finished with status 'done'
   Preparing editable metadata (pyproject.toml): started
   Preparing editable metadata (pyproject.toml): finished with status 'done'
-Requirement already satisfied: alpaca-trade-api<4,>=3.2 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from min-agent==0.1.0) (3.2.0)
-Requirement already satisfied: pydantic<3,>=2.9 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from min-agent==0.1.0) (2.10.3)
-Requirement already satisfied: requests<3,>=2.31 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from min-agent==0.1.0) (2.32.3)
-Requirement already satisfied: pytest<9,>=8 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from min-agent==0.1.0) (8.4.2)
-Requirement already satisfied: ruff>=0.6 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from min-agent==0.1.0) (0.16.9)
-Requirement already satisfied: mypy>=1.11 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from min-agent==0.1.0) (2.3.1)
-Requirement already satisfied: pandas>=0.18.1 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (2.3.2)
-Requirement already satisfied: numpy>=1.11.1 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (2.2.6)
-Requirement already satisfied: urllib3<2,>1.24 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (1.26.20)
-Requirement already satisfied: websocket-client<2,>=0.56.0 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (1.9.0)
-Requirement already satisfied: websockets<11,>=9.0 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (10.4)
-Requirement already satisfied: msgpack==1.0.3 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (1.0.3)
-Requirement already satisfied: aiohttp<4,>=3.8.3 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (3.13.2)
-Requirement already satisfied: PyYAML==6.0.1 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (6.0.1)
-Requirement already satisfied: deprecation==2.1.0 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (2.1.0)
-Requirement already satisfied: packaging in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from deprecation==2.1.0->alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (24.2)
-Requirement already satisfied: typing_extensions>=4.6.0 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from mypy>=1.11->min-agent==0.1.0) (4.12.2)
-Requirement already satisfied: mypy_extensions>=1.0.0 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from mypy>=1.11->min-agent==0.1.0) (1.1.0)
-Requirement already satisfied: pathspec>=1.0.0 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from mypy>=1.11->min-agent==0.1.0) (1.1.1)
-Requirement already satisfied: librt>=0.13.0 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from mypy>=1.11->min-agent==0.1.0) (0.16.0)
-Requirement already satisfied: ast-serialize<1.0.0,>=0.6.0 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from mypy>=1.11->min-agent==0.1.0) (0.11.2)
-Requirement already satisfied: annotated-types>=0.6.0 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from pydantic<3,>=2.9->min-agent==0.1.0) (0.6.0)
-Requirement already satisfied: pydantic-core==2.27.1 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from pydantic<3,>=2.9->min-agent==0.1.0) (2.27.1)
-Requirement already satisfied: iniconfig>=1 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from pytest<9,>=8->min-agent==0.1.0) (2.3.0)
-Requirement already satisfied: pluggy<2,>=1.5 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from pytest<9,>=8->min-agent==0.1.0) (1.5.0)
-Requirement already satisfied: pygments>=2.7.2 in /home/liuyime2/.local/lib/python3.13/site-packages (from pytest<9,>=8->min-agent==0.1.0) (2.19.2)
-Requirement already satisfied: charset-normalizer<4,>=2 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from requests<3,>=2.31->min-agent==0.1.0) (3.3.2)
-Requirement already satisfied: idna<4,>=2.5 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from requests<3,>=2.31->min-agent==0.1.0) (2.10)
-Requirement already satisfied: certifi>=2017.4.17 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from requests<3,>=2.31->min-agent==0.1.0) (2025.4.26)
-Requirement already satisfied: aiohappyeyeballs>=2.5.0 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (2.6.1)
-Requirement already satisfied: aiosignal>=1.4.0 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (1.4.0)
-Requirement already satisfied: attrs>=17.3.0 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (25.4.0)
-Requirement already satisfied: frozenlist>=1.1.1 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (1.8.0)
-Requirement already satisfied: multidict<7.0,>=4.5 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (6.7.0)
-Requirement already satisfied: propcache>=0.2.0 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (0.4.1)
-Requirement already satisfied: yarl<2.0,>=1.17.0 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (1.22.0)
-Requirement already satisfied: python-dateutil>=2.8.2 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from pandas>=0.18.1->alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (2.9.0.post0)
-Requirement already satisfied: pytz>=2020.1 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from pandas>=0.18.1->alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (2025.2)
-Requirement already satisfied: tzdata>=2022.7 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from pandas>=0.18.1->alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (2025.2)
-Requirement already satisfied: six>=1.5 in /home/liuyime2/miniconda3/lib/python3.13/site-packages (from python-dateutil>=2.8.2->pandas>=0.18.1->alpaca-trade-api<4,>=3.2->min-agent==0.1.0) (1.17.0)
+Collecting alpaca-trade-api<4,>=3.2 (from min-agent==0.1.0)
+  Using cached alpaca_trade_api-3.2.0-py3-none-any.whl.metadata (29 kB)
+Collecting pydantic<3,>=2.9 (from min-agent==0.1.0)
+  Using cached pydantic-2.13.5-py3-none-any.whl.metadata (110 kB)
+Collecting requests<3,>=2.31 (from min-agent==0.1.0)
+  Using cached requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+Collecting pytest<9,>=8 (from min-agent==0.1.0)
+  Using cached pytest-8.4.2-py3-none-any.whl.metadata (7.7 kB)
+Collecting ruff>=0.6 (from min-agent==0.1.0)
+  Using cached ruff-0.16.10-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (20 kB)
+Collecting mypy>=1.11 (from min-agent==0.1.0)
+  Using cached mypy-2.4.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+Collecting pandas>=0.18.1 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached pandas-3.0.6-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (79 kB)
+Collecting numpy>=1.11.1 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached numpy-2.5.3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+Collecting urllib3<2,>1.24 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached urllib3-1.26.20-py2.py3-none-any.whl.metadata (50 kB)
+Collecting websocket-client<2,>=0.56.0 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached websocket_client-1.9.2-py3-none-any.whl.metadata (8.3 kB)
+Collecting websockets<11,>=9.0 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached websockets-10.4-cp313-cp313-linux_x86_64.whl
+Collecting msgpack==1.0.3 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached msgpack-1.0.3-cp313-cp313-linux_x86_64.whl
+Collecting aiohttp<4,>=3.8.3 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached aiohttp-3.14.4-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.3 kB)
+Collecting PyYAML==6.0.1 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached pyyaml-6.0.1-cp313-cp313-linux_x86_64.whl
+Collecting deprecation==2.1.0 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached deprecation-2.1.0-py2.py3-none-any.whl.metadata (4.6 kB)
+Collecting packaging (from deprecation==2.1.0->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+Collecting typing_extensions>=4.6.0 (from mypy>=1.11->min-agent==0.1.0)
+  Using cached typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting mypy_extensions>=1.0.0 (from mypy>=1.11->min-agent==0.1.0)
+  Using cached mypy_extensions-1.1.0-py3-none-any.whl.metadata (1.1 kB)
+Collecting pathspec>=1.0.0 (from mypy>=1.11->min-agent==0.1.0)
+  Using cached pathspec-1.1.1-py3-none-any.whl.metadata (14 kB)
+Collecting librt>=0.16.0 (from mypy>=1.11->min-agent==0.1.0)
+  Using cached librt-0.16.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (1.3 kB)
+Collecting ast-serialize<1.0.0,>=0.11.2 (from mypy>=1.11->min-agent==0.1.0)
+  Using cached ast_serialize-0.12.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.4 kB)
+Collecting annotated-types>=0.6.0 (from pydantic<3,>=2.9->min-agent==0.1.0)
+  Using cached annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+Collecting pydantic-core==2.46.5 (from pydantic<3,>=2.9->min-agent==0.1.0)
+  Using cached pydantic_core-2.46.5-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.6 kB)
+Collecting typing-inspection>=0.4.2 (from pydantic<3,>=2.9->min-agent==0.1.0)
+  Using cached typing_inspection-0.4.4-py3-none-any.whl.metadata (2.6 kB)
+Collecting iniconfig>=1 (from pytest<9,>=8->min-agent==0.1.0)
+  Using cached iniconfig-2.3.1-py3-none-any.whl.metadata (2.8 kB)
+Collecting pluggy<2,>=1.5 (from pytest<9,>=8->min-agent==0.1.0)
+  Using cached pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+Collecting pygments>=2.7.2 (from pytest<9,>=8->min-agent==0.1.0)
+  Using cached pygments-2.21.0-py3-none-any.whl.metadata (2.5 kB)
+Collecting charset_normalizer<4,>=2 (from requests<3,>=2.31->min-agent==0.1.0)
+  Using cached charset_normalizer-3.5.2-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (46 kB)
+Collecting idna<4,>=2.5 (from requests<3,>=2.31->min-agent==0.1.0)
+  Using cached idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+Collecting certifi>=2023.5.7 (from requests<3,>=2.31->min-agent==0.1.0)
+  Using cached certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+Collecting aiohappyeyeballs>=2.5.0 (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached aiohappyeyeballs-2.7.1-py3-none-any.whl.metadata (5.9 kB)
+Collecting aiosignal>=1.4.0 (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
+Collecting attrs>=17.3.0 (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached attrs-26.1.0-py3-none-any.whl.metadata (8.8 kB)
+Collecting frozenlist>=1.1.1 (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached frozenlist-1.8.0-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (20 kB)
+Collecting multidict<7.0,>=4.5 (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached multidict-6.9.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.3 kB)
+Collecting propcache>=0.2.0 (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached propcache-0.5.4-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (25 kB)
+Collecting yarl<2.0,>=1.25.1 (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached yarl-1.25.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (111 kB)
+Collecting python-dateutil>=2.8.2 (from pandas>=0.18.1->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+Collecting six>=1.5 (from python-dateutil>=2.8.2->pandas>=0.18.1->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
+  Using cached six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
+Using cached alpaca_trade_api-3.2.0-py3-none-any.whl (34 kB)
+Using cached deprecation-2.1.0-py2.py3-none-any.whl (11 kB)
+Using cached mypy-2.4.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (15.5 MB)
+Using cached pydantic-2.13.5-py3-none-any.whl (472 kB)
+Using cached pydantic_core-2.46.5-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+Using cached pytest-8.4.2-py3-none-any.whl (365 kB)
+Using cached requests-2.34.2-py3-none-any.whl (73 kB)
+Using cached ruff-0.16.10-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.4 MB)
+Using cached aiohttp-3.14.4-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.9 MB)
+Using cached annotated_types-0.8.0-py3-none-any.whl (13 kB)
+Using cached ast_serialize-0.12.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.3 MB)
+Using cached certifi-2026.7.22-py3-none-any.whl (136 kB)
+Using cached charset_normalizer-3.5.2-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (254 kB)
+Using cached idna-3.20-py3-none-any.whl (69 kB)
+Using cached iniconfig-2.3.1-py3-none-any.whl (7.6 kB)
+Using cached librt-0.16.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (531 kB)
+Using cached mypy_extensions-1.1.0-py3-none-any.whl (5.0 kB)
+Using cached numpy-2.5.3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.7 MB)
+Using cached packaging-26.3-py3-none-any.whl (129 kB)
+Using cached pandas-3.0.6-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (10.8 MB)
+Using cached pathspec-1.1.1-py3-none-any.whl (57 kB)
+Using cached pluggy-1.6.0-py3-none-any.whl (20 kB)
+Using cached pygments-2.21.0-py3-none-any.whl (1.3 MB)
+Using cached typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+Using cached typing_inspection-0.4.4-py3-none-any.whl (14 kB)
+Using cached urllib3-1.26.20-py2.py3-none-any.whl (144 kB)
+Using cached websocket_client-1.9.2-py3-none-any.whl (95 kB)
+Using cached aiohappyeyeballs-2.7.1-py3-none-any.whl (15 kB)
+Using cached aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+Using cached attrs-26.1.0-py3-none-any.whl (67 kB)
+Using cached frozenlist-1.8.0-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (234 kB)
+Using cached multidict-6.9.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (336 kB)
+Using cached propcache-0.5.4-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (234 kB)
+Using cached python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+Using cached yarl-1.25.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (117 kB)
+Using cached six-1.17.0-py2.py3-none-any.whl (11 kB)
 Building wheels for collected packages: min-agent
   Building editable for min-agent (pyproject.toml): started
   Building editable for min-agent (pyproject.toml): finished with status 'done'
-  Created wheel for min-agent: filename=min_agent-0.1.0-0.editable-py3-none-any.whl size=7273 sha256=14902f1a1073ce64d27184675042dc584f10010d1699dd97a95124be2c5abd11
-  Stored in directory: /tmp/pip-ephem-wheel-cache-lhu6yx6x/wheels/f4/d0/d6/1a19626497b8cc041bde25b08fe339362bd9805c2bf17b44ba
+  Created wheel for min-agent: filename=min_agent-0.1.0-0.editable-py3-none-any.whl size=12563 sha256=3ae1f5b75dfc1c1fd43481fb9d22fa1b1eb1a0dbba5861e414f6958312d930bd
+  Stored in directory: /tmp/pip-ephem-wheel-cache-j0wn2x_i/wheels/4e/24/96/17c539bb5b04cb97240f0e8b4bb73e92e0cce6e90c507de9a0
 Successfully built min-agent
-Installing collected packages: min-agent
-  Attempting uninstall: min-agent
-    Found existing installation: min-agent 0.1.0
-    Uninstalling min-agent-0.1.0:
-      Successfully uninstalled min-agent-0.1.0
-Successfully installed min-agent-0.1.0
+Installing collected packages: msgpack, websockets, websocket-client, urllib3, typing_extensions, six, ruff, PyYAML, pygments, propcache, pluggy, pathspec, packaging, numpy, mypy_extensions, multidict, librt, iniconfig, idna, frozenlist, charset_normalizer, certifi, attrs, ast-serialize, annotated-types, aiohappyeyeballs, yarl, typing-inspection, requests, python-dateutil, pytest, pydantic-core, mypy, deprecation, aiosignal, pydantic, pandas, aiohttp, alpaca-trade-api, min-agent
+Successfully installed PyYAML-6.0.1 aiohappyeyeballs-2.7.1 aiohttp-3.14.4 aiosignal-1.4.0 alpaca-trade-api-3.2.0 annotated-types-0.8.0 ast-serialize-0.12.1 attrs-26.1.0 certifi-2026.7.22 charset_normalizer-3.5.2 deprecation-2.1.0 frozenlist-1.8.0 idna-3.20 iniconfig-2.3.1 librt-0.16.0 min-agent-0.1.0 msgpack-1.0.3 multidict-6.9.1 mypy-2.4.0 mypy_extensions-1.1.0 numpy-2.5.3 packaging-26.3 pandas-3.0.6 pathspec-1.1.1 pluggy-1.6.0 propcache-0.5.4 pydantic-2.13.5 pydantic-core-2.46.5 pygments-2.21.0 pytest-8.4.2 python-dateutil-2.9.0.post0 requests-2.34.2 ruff-0.16.10 six-1.17.0 typing-inspection-0.4.4 typing_extensions-4.16.0 urllib3-1.26.20 websocket-client-1.9.2 websockets-10.4 yarl-1.25.1
+
+[notice] A new release of pip is available: 24.3.1 -> 26.2.1
+[notice] To update, run: /tmp/claude-29424/-localscratch-liuyime2-QuantGroup/9bfb655b-c44f-48e7-973e-43347422735b/scratchpad/fc/.venv/bin/python -m pip install --upgrade pip
 
 ## lint
-$ python3 -m ruff check src/ tools/ tests/ examples/
+$ /tmp/claude-29424/-localscratch-liuyime2-QuantGroup/9bfb655b-c44f-48e7-973e-43347422735b/scratchpad/fc/.venv/bin/python -m ruff check src/ tools/ tests/ examples/
 All checks passed!
 RESULT: PASS
 
 ## test
-$ python3 -m pytest -q
-........................................................................ [  8%]
-.......................................s................................ [ 17%]
-........................................................................ [ 26%]
-........................................................................ [ 34%]
-........................................................................ [ 43%]
+$ /tmp/claude-29424/-localscratch-liuyime2-QuantGroup/9bfb655b-c44f-48e7-973e-43347422735b/scratchpad/fc/.venv/bin/python -m pytest -q
+........................................................................ [  7%]
+..................................................s..................... [ 14%]
+........................................................................ [ 22%]
+........................................................................ [ 29%]
+........................................................................ [ 37%]
+........................................................................ [ 44%]
 ........................................................................ [ 52%]
-........................................................................ [ 61%]
-................................................................s....... [ 69%]
-.........................s.............................................. [ 78%]
-............................................s........................... [ 87%]
-........................................................................ [ 96%]
-...............................                                          [100%]
-819 passed, 4 skipped in 13.06s
+........................................................................ [ 59%]
+.......................................s................................ [ 67%]
+...................s.................................................... [ 74%]
+...............................................................s........ [ 82%]
+........................................................................ [ 89%]
+........................................................................ [ 97%]
+..........................                                               [100%]
+958 passed, 4 skipped in 36.47s
 RESULT: PASS
 
 ## example
-$ python3 examples/minimal_cycle.py
+$ /tmp/claude-29424/-localscratch-liuyime2-QuantGroup/9bfb655b-c44f-48e7-973e-43347422735b/scratchpad/fc/.venv/bin/python examples/minimal_cycle.py
 1. a buy that is inside every limit
    BUY 1 @ 600.00 -> approved=True
    reason: approved
@@ -118,7 +194,7 @@ $ python3 examples/minimal_cycle.py
 RESULT: PASS
 
 ## entry-point
-$ python3 -m min_agent.cli --help
+$ /tmp/claude-29424/-localscratch-liuyime2-QuantGroup/9bfb655b-c44f-48e7-973e-43347422735b/scratchpad/fc/.venv/bin/python -m min_agent.cli --help
 usage: cli.py [-h] [--check-env] [--once] [--daemon] [--status] [--stop]
               [--reconcile] [--ingest-evidence] [--evidence-report]
               [--verify-profit-target] [--max-cycles MAX_CYCLES] [--doctor]
@@ -151,22 +227,22 @@ options:
 RESULT: PASS
 
 ## provenance
-$ python3 tools/provenance.py
+$ /tmp/claude-29424/-localscratch-liuyime2-QuantGroup/9bfb655b-c44f-48e7-973e-43347422735b/scratchpad/fc/.venv/bin/python tools/provenance.py
 # provenance for one run of min-agent
-generated: 2026-10-03T12:44:12Z
+generated: 2026-10-07T12:09:59Z
 
 ## code
-commit: 0331c6d3230943cbb6dd4a921caa7cc900996785
+commit: 49b3b1c5067b0e6956a6eea6ddac6d5210f74b08
 dirty:  yes
 
 ## environment
 python: 3.13.2
 packages:
   alpaca-trade-api==3.2.0
-  pydantic==2.10.3
-  requests==2.32.3
+  pydantic==2.13.5
+  requests==2.34.2
   pytest==8.4.2
-  ruff==0.16.9
+  ruff==0.16.10
 
 ## configuration in effect
   mode                paper
@@ -199,7 +275,7 @@ packages:
 RESULT: PASS
 
 ## self-test
-$ python3 tools/verify.py --self-test
+$ /tmp/claude-29424/-localscratch-liuyime2-QuantGroup/9bfb655b-c44f-48e7-973e-43347422735b/scratchpad/fc/.venv/bin/python tools/verify.py --self-test
 verify self-test: the gate must be able to fail
 
   ok  a failing test makes its class FAIL
@@ -220,62 +296,64 @@ whose ExecStart is a path that does not exist.
 RESULT: PASS
 
 ## gate
-$ python3 tools/verify.py
+$ /tmp/claude-29424/-localscratch-liuyime2-QuantGroup/9bfb655b-c44f-48e7-973e-43347422735b/scratchpad/fc/.venv/bin/python tools/verify.py
 ==============================================================================
 verify: every check class, one gate
 ==============================================================================
 
-[PASS] test-coverage-map                all 61 test files are assigned, and each is assigned to at least one class that actually runs it
-[PASS] class-coverage                   all 12 behaviour classes have tests; 22 repository/system checks are exempt by name
-[PASS] software-supply-chain            148 tracked files, no credentials, no tracked env file
-[PASS] docs-not-stale                   7 plan document(s), none asserting an unacted state
-[PASS] production-research-separation   4 research module(s), 37 production module(s), no production import of research
-[PASS] home-independence                42 production file(s) with no $HOME path construction; XDG_STATE_HOME=outside; XDG_DATA_HOME=outside
-[PASS] units-where-systemd-looks        every --user unit loads from a durable path, is enabled without a tmpfs link, and its ExecStart exists
-[SKIP] daemon-source-matches-worktree   no heartbeat; daemon not running
-[PASS] docs-no-deleted-commands         no document instructs a reader to run one of the 6 removed scripts
-[PASS] example-runs                     examples/minimal_cycle.py runs with no broker or credentials
-[PASS] tools-readme-accurate            tools/README.md names all 12 tools and invents none of them
-[PASS] no-loose-design-notes            every root markdown file is a documented entry point (AGENTS.md, README.md, STATUS.md) or declares itself historical
-[PASS] fresh-clone-evidence-real        log records 7 steps from commit 08c1420, regenerable by run-fresh-clone.sh
-[PASS] shell-scripts-well-formed        3 shell script(s) parse cleanly under bash -n
-[PASS] bespoke-list-matches-run         17 bespoke names, all appended by main() and all reported by --list
-[PASS] status-states-only-fixed-facts   STATUS.md states only fixed configuration (mode=paper, model=qwen3.8:27b, 5 symbols, 3 hard limits); live counters are queried rather than written dow
-[PASS] config-comment-figures-true      ruff.toml's measured figures hold: verify.py 3,284 lines, 62 BLE001 findings, 24 deferred imports
-[PASS] list-count-matches-run           --list says 49; the run produces 49 for the same set (syntax-import contributes the extra row)
-[PASS] fact-figures-match               prose agrees with the commands: audit 61/61, 823 tests collected; and no document claims a doctor warnings count (live value is 14, which is why none 
-[PASS] unit-templates-portable          4 unit template(s) carry no host path and every placeholder is substituted
-[PASS] pipeline-targets-exist           pipeline runs ['validate-data', 'test', 'evaluate', 'reproduce'] and every stage has a rule
-[PASS] type-checking-is-a-gate          `type:` runs mypy and blocks; `check:` runs lint, type and test
-[PASS] config-example-names             all 34 variable names in the example are read by config.py or the env file
-[PASS] config-example-complete          all 38 variable(s) the loader reads are documented in the example
-[PASS] no-unreachable-production-code   every function under src/min_agent is called, or is a pydantic hook or property
-[PASS] one-credentials-path             Makefile, minictrl and the config example all resolve $XDG_CONFIG_HOME/min-agent/env with a $HOME/.config fallback
-[PASS] unit-environment-files           2 EnvironmentFile reference(s) across the deployed units all resolve
-[SKIP] replay-audit                     no runtime/min_agent/journal.jsonl yet; nothing to replay
-[PASS] shadow-not-executed              no module treats SHADOWED as an executed order
-[SKIP] shadow-stage-exercised           no journal to inspect
-[SKIP] research-trial-ledger            research_trials.jsonl does not exist yet; no search has run, so there is nothing to omit
-[PASS] doctor-checks-reachable          all 22 doctor checks are called
-[PASS] syntax-import                    imported 36 modules
-[PASS] data-integrity                   runtime integrity: OK (0 cycles, 0 events, 0 strategies) |   no journal yet |   no strategy registry yet |   6 previously-missing strategies recorded 
-[PASS] shadow-live-consistency          live mode hard-blocked; probation gate enforced; shadow implemented, reachable by MIN_AGENT_SHADOW=1, off by default, strict boolean
-[PASS] syntax-import                    .................................................                        [100%] | 49 passed in 3.68s
-[PASS] unit-integration                 .............................................................s.......... [ 24%] | ....................................................................
-[PASS] point-in-time-no-leakage         ...........................................s............................ [ 92%] | ......                                                              
-[PASS] pnl-accounting                   ........................................................................ [ 59%] | .................................................                   
-[PASS] lifecycle-invariants             ........................................................................ [ 28%] | ....................................................................
-[PASS] guardian-bypass-prevention       ........................................................................ [ 67%] | ..................................                                  
-[PASS] replay-determinism               ........................................................................ [ 65%] | ....................................s.                              
-[PASS] crash-recovery                   ........................................................................ [ 50%] | ....................................................................
-[PASS] broker-reconciliation            .............................................................            [100%] | 61 passed in 1.64s
-[PASS] decision-outcome-counterfactual  ................................................................         [100%] | 64 passed in 0.49s
-[PASS] defect-regression-audit          D15  archived projects are out of the tree  PASS | D15  a plan document exists  PASS | 61/61 checks pass across 15 defects
-[PASS] doctor                           no broker credentials and no runtime state in this checkout; ran offline (ok=False exit=1 failures=[alpaca credentials,strategy library] warnings=[dae
-[PASS] gate-class-count-consistent      every document that states the count says '49 check classes'
-[SKIP] fact-docs-current                no broker credentials: this host runs 1270 executions against the 1274 the documents state for a configured host; skipped rather than failed, and the 
+[PASS] test-coverage-map                     all 65 test files are assigned, and each is assigned to at least one class that actually runs it
+[PASS] class-coverage                        all 12 behaviour classes have tests; 21 repository/system checks are exempt by name
+[PASS] software-supply-chain                 202 tracked files, no credentials, no tracked env file
+[PASS] docs-not-stale                        42 plan document(s), none asserting an unacted state
+[PASS] production-research-separation        5 research module(s), 38 production module(s), no production import of research
+[PASS] home-independence                     44 production file(s) with no $HOME path construction
+[PASS] units-where-systemd-looks             every --user unit loads from a durable path, is enabled without a tmpfs link, and its ExecStart exists
+[SKIP] daemon-source-matches-worktree        no heartbeat; daemon not running
+[PASS] docs-no-deleted-commands              no document instructs a reader to run one of the 6 removed scripts
+[PASS] example-runs                          examples/minimal_cycle.py runs with no broker or credentials
+[PASS] tools-readme-accurate                 tools/README.md names all 20 tools and invents none of them
+[PASS] no-loose-design-notes                 every root markdown file is a documented entry point (AGENTS.md, CHANGELOG.md, CODE_OF_CONDUCT.md, CONTRIBUTING.md, README.md, SECURITY.md) or declare
+[PASS] fresh-clone-evidence-real             log records 7 steps from commit 0331c6d, regenerable by run-fresh-clone.sh
+[PASS] shell-scripts-well-formed             3 shell script(s) parse cleanly under bash -n
+[PASS] bespoke-list-matches-run              19 bespoke names, all appended by main() and all reported by --list
+[PASS] status-states-only-fixed-facts        STATUS.md states only fixed configuration (mode=paper, model=qwen3.8:27b, 5 symbols, 3 hard limits); live counters are queried rather than written dow
+[PASS] config-comment-figures-true           ruff.toml's measured figures hold: verify.py 3,387 lines, 62 BLE001 findings, 24 deferred imports
+[PASS] list-count-matches-run                --list says 51; the run produces 51 for the same set (syntax-import contributes the extra row)
+[SKIP] fact-figures-match                    minictrl doctor produced no report (exit 2); nothing to compare against
+[PASS] unit-templates-portable               6 unit template(s) carry no host path and every placeholder is substituted
+[PASS] pipeline-targets-exist                pipeline runs ['validate-data', 'test', 'evaluate', 'reproduce'] and every stage has a rule
+[PASS] type-checking-is-a-gate               `type:` runs mypy and blocks; `check:` runs lint, type and test
+[PASS] config-example-names                  all 35 variable names in the example are read by config.py, by minictrl, or by the env file
+[PASS] config-example-complete               all 38 variable(s) the loader reads are documented in the example
+[PASS] no-unreachable-production-code        every function under src/min_agent is called, or is a pydantic hook or property
+[PASS] one-credentials-path                  Makefile, minictrl and the config example all resolve $XDG_CONFIG_HOME/min-agent/env with a $HOME/.config fallback
+[PASS] unit-environment-files                3 EnvironmentFile reference(s) across the deployed units all resolve
+[SKIP] replay-audit                          no runtime/min_agent/journal.jsonl yet; nothing to replay
+[PASS] shadow-not-executed                   no module treats SHADOWED as an executed order
+[SKIP] shadow-stage-exercised                no journal to inspect
+[SKIP] research-trial-ledger                 research_trials.jsonl does not exist yet; no search has run, so there is nothing to omit
+[PASS] doctor-checks-reachable               all 22 doctor checks are called
+[PASS] syntax-import                         imported 37 modules
+[PASS] data-integrity                        runtime integrity: OK (0 cycles, 0 events, 0 strategies) |   no journal yet |   no strategy registry yet |   6 previously-missing strategies recorded 
+[PASS] shadow-live-consistency               live mode hard-blocked; probation gate enforced; shadow implemented, reachable by MIN_AGENT_SHADOW=1, off by default, strict boolean
+[PASS] replay-cannot-reach-the-account       replay holds no broker client, reports REPLAYED with no order_id, and a journal of replayed fills evaluates to zero realized PnL
+[PASS] selection-pressure-reaches-the-rules  a REJECT verdict retires from the rule set carrying its ratio, while INCONCLUSIVE and absent evidence do not
+[SKIP] self-evolution-closes                 no runtime/ in this checkout; the replay needs real bars fetched with a paper account (tools/fetch_replay_bars.py)
+[PASS] syntax-import                         ..................................................                       [100%] | 50 passed in 3.39s
+[PASS] unit-integration                      .............................................................s.......... [ 22%] | ....................................................................
+[PASS] point-in-time-no-leakage              ................................................s....................... [ 63%] | ..........................................                          
+[PASS] pnl-accounting                        ........................................................................ [ 48%] | ....................................................................
+[PASS] lifecycle-invariants                  ........................................................................ [ 21%] | ....................................................................
+[PASS] guardian-bypass-prevention            ........................................................................ [ 60%] | ................................................                    
+[PASS] replay-determinism                    ........................................................................ [ 59%] | ...............................................s.                   
+[PASS] crash-recovery                        ........................................................................ [ 45%] | ....................................................................
+[PASS] broker-reconciliation                 ................................................................         [100%] | 64 passed in 1.31s
+[PASS] decision-outcome-counterfactual       ........................................................................ [ 81%] | ................                                                    
+[PASS] defect-regression-audit               D15  archived projects are out of the tree  PASS | D15  a plan document exists  PASS | 61/61 checks pass across 15 defects
+[PASS] doctor                                no broker credentials and no runtime state in this checkout; ran offline (ok=False exit=1 failures=[alpaca credentials,strategy library] warnings=[dae
+[PASS] gate-class-count-consistent           every document that states the count says '51 check classes'
 
-classes: 49   passed: 49   failed: 0   test executions: 1270 across 61 test files
+classes: 51   passed: 51   failed: 0   test executions: 1522 across 65 test files
 
 OK - all check classes pass
 RESULT: PASS

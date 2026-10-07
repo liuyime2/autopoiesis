@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Reproduce docs/evidence/fresh-clone.log.
 #
-# Clones the committed tree into a scratch directory, installs it, and runs the six
-# steps that must work before anyone touches a broker: lint, the full test suite, the
-# example cycle, the entry point, provenance, and the gate's own self-test.
+# Clones the committed tree into a scratch directory, installs it into a new venv, and runs
+# the seven steps that must work before anyone touches a broker: lint, the full test suite,
+# the example cycle, the entry point, provenance, the gate's own self-test, and the gate.
 #
 # No credentials are read and none are required. If a step fails, the log records
 # RESULT: FAIL and the script exits non-zero, so a failing clone cannot be mistaken for
@@ -19,7 +19,7 @@ LOG="$REPO/docs/evidence/fresh-clone.log"
 # Deliberately not the invoking shell's interpreter. A run that inherits the developer's
 # active environment proves less than one that has to discover its own, and proving that
 # is the point of this script.
-PYTHON="${PYTHON:-python3}"
+BASE_PYTHON="${PYTHON:-python3}"
 
 # Isolation is performed, not asserted. The log used to print
 #   "credentials: none present"
@@ -35,6 +35,11 @@ CLEAN_ENV=(env -u ALPACA_API_KEY -u ALPACA_SECRET_KEY -u APCA_API_KEY -u APCA_AP
 
 rm -rf "$DEST"
 git clone --quiet "$REPO" "$DEST"
+# A new venv, as the README tells a newcomer to make. Installing into whatever `python3` was
+# on PATH proved only that an environment which already had every dependency still had them
+# - the previous log's install section was a page of "Requirement already satisfied".
+"$BASE_PYTHON" -m venv "$DEST/.venv"
+PYTHON="$DEST/.venv/bin/python"
 
 {
   echo "# Fresh-clone verification log"
@@ -43,7 +48,8 @@ git clone --quiet "$REPO" "$DEST"
   echo "Reproduce with: docs/evidence/run-fresh-clone.sh"
   echo
   echo "\$ git clone <repo> fc && cd fc"
-  echo "\$ python -m pip install -e \".[dev]\""
+  echo "\$ python3 -m venv .venv"
+  echo "\$ .venv/bin/python -m pip install -e \".[dev]\""
   echo
   echo "## commit under test"
   git -C "$DEST" log --oneline -1
