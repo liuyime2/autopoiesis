@@ -60,3 +60,25 @@ def test_comparison_rows_are_comma_separated_inside_one_sentence():
 
 def test_a_detail_without_rows_is_not_measurable():
     assert _load_benchmark()._parse_comparison("no closed lots on record") is None
+
+
+def test_the_verdict_names_the_strategy_furthest_behind():
+    """`max` over negative excesses picked the least-bad strategy and called it the worst.
+
+    The verdict on 2026-10-06 read "worst tiny-fixed-size-001 by 1.47" while
+    fixed-size-probe-0001 was 4.29 behind.
+    """
+
+    class _Check:
+        name, status = "pnl vs holding", type("S", (), {"value": "warn"})()
+        detail = (
+            "2 of 2 strategy/ies behind the market: "
+            "a=+3.94% vs market +5.41% (-1.47), b=+1.11% vs market +5.41% (-4.29)"
+        )
+
+    class _Report:
+        checks = [_Check()]
+
+    verdict, code = _load_benchmark()._headline(_Report())
+    assert code == 1
+    assert "worst b by 4.29" in verdict

@@ -176,7 +176,7 @@ def _headline(report) -> tuple[str, int]:
         return f"NOT MEASURABLE: {detail}", EXIT_NOTHING_TO_MEASURE
     behind = [row for row in rows if row[3].startswith("-")]
     if behind:
-        worst = max(behind, key=lambda row: float(row[3]))
+        worst = min(behind, key=lambda row: float(row[3]))
         return (
             f"FAIL: {len(behind)} of {len(rows)} strateg"
             f"{'y is' if len(behind) == 1 else 'ies are'} behind buy-and-hold, "
