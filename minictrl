@@ -11,6 +11,7 @@
 #   minictrl stop                stop the daemon
 #   minictrl reconcile           match pending orders against the broker
 #   minictrl evidence ingest|report   refresh or show broker evidence
+#   minictrl owner-history       journal the account owner's fills (read-only), to price the 29 shares
 #   minictrl profit              verify the paper-profit target from broker evidence
 #   minictrl check-env           report configuration and connectivity only
 #   minictrl test|audit          unit tests; the recorded-defect audit
@@ -149,6 +150,7 @@ case "$cmd" in
   stop)            agent --stop ;;
   reconcile)       agent --reconcile ;;
   evidence)        agent --ingest-evidence ;;
+  owner-history)   agent --ingest-owner-history ;;
   report)          agent --evidence-report ;;
   profit)          agent --verify-profit-target ;;
   check-env)       agent --check-env ;;

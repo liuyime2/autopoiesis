@@ -461,6 +461,13 @@ class PnLEvidence(BaseModel):
     order_derived_fill_count: int = Field(default=0, ge=0)
     open_lot_quantity: dict[str, float] = Field(default_factory=dict)
     unmatched_sell_quantity: dict[str, float] = Field(default_factory=dict)
+    #: Shares the agent sold beyond its own lots that the account owner's recorded fills do
+    #: cover, priced FIFO against the owner's lots as of that sale. The owner's gain or loss,
+    #: realised by an agent order - reported so the 29-share sale has a price, and never part
+    #: of any strategy's PnL. Zero without an owner-history ingest (`--ingest-owner-history`).
+    owner_exit_quantity: float = 0.0
+    owner_exit_cost: float = 0.0
+    owner_exit_proceeds: float = 0.0
     #: Open agent lots and what they are worth right now. Only realized PnL was
     #: attributed before this, so a position the agent was holding contributed
     #: nothing to its own record - and the account figure and the agent figure could

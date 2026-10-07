@@ -119,6 +119,7 @@ class DeterministicEvaluator:
         fills: Mapping[str, float] | None = None,
         seeded_fills: Sequence[BrokerFillActivity] | None = None,
         cumulative_cycles: Mapping[str, int] | None = None,
+        owner_fills: Sequence[BrokerFillActivity] | None = None,
         cumulative_trade_attempts: Mapping[str, int] | None = None,
     ) -> EvaluationReport:
         buckets: dict[str, _StrategyBucket] = {}
@@ -202,7 +203,7 @@ class DeterministicEvaluator:
         if first_equity is not None and last_equity is not None:
             observed_delta = last_equity - first_equity
 
-        pnl = _pnl_evidence(records, evidence, seeded_fills or ())
+        pnl = _pnl_evidence(records, evidence, seeded_fills or (), owner_fills=owner_fills or ())
         for strategy_id, realized_pnl in pnl.strategy_realized_pnl.items():
             # Not `if strategy_id in buckets`. A strategy can close a lot without
             # appearing in the current cycle window, and the old guard dropped
@@ -371,6 +372,12 @@ class _LotLedger:
     #: Open short lots, keyed by symbol. Opened only by a SELL fill whose order was a SHORT
     #: decision; covered FIFO by later BUY fills.
     short_lots: dict[str, list[_Lot]] = field(default_factory=dict)
+    #: The account owner's lots, from fills no agent order made: [quantity, price] FIFO.
+    owner_lots: dict[str, list[list[float]]] = field(default_factory=dict)
+    #: What agent sales beyond the agent's own lots took out of the owner's lots.
+    owner_exit_quantity: float = 0.0
+    owner_exit_cost: float = 0.0
+    owner_exit_proceeds: float = 0.0
     per_strategy: dict[str, _StrategyPnl] = field(default_factory=dict)
 
     def tracker(self, strategy_id: str) -> _StrategyPnl:
@@ -400,6 +407,7 @@ def _pnl_evidence(
     evidence: BrokerEvidenceBatch | None,
     seeded_fills: Sequence[BrokerFillActivity] = (),
     assumed_round_trip_cost_pct: float = DEFAULT_ASSUMED_ROUND_TRIP_COST_PCT,
+    owner_fills: Sequence[BrokerFillActivity] = (),
 ) -> PnLEvidence:
     """Attribute broker fills to strategies and match closed lots FIFO.
 
@@ -470,7 +478,12 @@ def _pnl_evidence(
             }
         )
 
+    # The owner's fills are interleaved in time, so an agent sale sees the owner's book as it
+    # stood at that moment - not as it stands today.
+    owner_queue = sorted(owner_fills, key=lambda item: item.transaction_time)
     for activity in sorted(stream.values(), key=lambda item: item.transaction_time):
+        while owner_queue and owner_queue[0].transaction_time <= activity.transaction_time:
+            _apply_owner_fill(ledger, owner_queue.pop(0))
         strategy_id = _activity_strategy(activity, order_to_strategy)
         status: AttributionStatus = "LINKED" if strategy_id else "UNLINKED"
         in_window = any(_order_key(activity) == _order_key(item) for item in fill_candidates)
@@ -644,6 +657,9 @@ def _pnl_evidence(
         order_derived_fill_count=order_derived_fill_count,
         open_lot_quantity=open_lot_quantity,
         unmatched_sell_quantity=unmatched_sell,
+        owner_exit_quantity=round(ledger.owner_exit_quantity, 10),
+        owner_exit_cost=round(ledger.owner_exit_cost, 6),
+        owner_exit_proceeds=round(ledger.owner_exit_proceeds, 6),
         open_lots=open_lots,
         unrealized_pnl=None if unrealized is None else round(unrealized, 6),
         net_pnl=net,
@@ -1082,12 +1098,40 @@ def _apply_activity(
         )
         return
 
+    # Not a short: the order was not a SHORT decision, so these are shares the agent never
+    # owned - the 29-share case. Where the owner's recorded fills cover them, price them
+    # against the owner's lots and report them as the owner's exit; never as strategy PnL.
+    owner_book = ledger.owner_lots.get(activity.symbol, [])
+    while remaining > 1e-9 and owner_book:
+        matched = min(remaining, owner_book[0][0])
+        ledger.owner_exit_quantity += matched
+        ledger.owner_exit_cost += matched * owner_book[0][1]
+        ledger.owner_exit_proceeds += matched * activity.price
+        owner_book[0][0] -= matched
+        remaining -= matched
+        if owner_book[0][0] <= 1e-9:
+            owner_book.pop(0)
+
     # A SELL that matched nothing still cost money and is still a fact. Charge the
     # remainder to the closing strategy so it is visible rather than dropped, which
-    # is what the old code did with `unmatched_sell_quantity`. Not a short: the order was
-    # not a SHORT decision, so these are shares the agent never owned - the 29-share case.
+    # is what the old code did with `unmatched_sell_quantity`.
     closing.unmatched_sell_quantity += remaining
     closing.fees += sell_fee_remaining
+
+
+def _apply_owner_fill(ledger: _LotLedger, activity: BrokerFillActivity) -> None:
+    """Keep the account owner's lot book: a buy adds a lot, a sell reduces FIFO."""
+    lots = ledger.owner_lots.setdefault(activity.symbol, [])
+    if activity.side == "BUY":
+        lots.append([activity.quantity, activity.price])
+        return
+    remaining = activity.quantity
+    while remaining > 1e-9 and lots:
+        matched = min(remaining, lots[0][0])
+        lots[0][0] -= matched
+        remaining -= matched
+        if lots[0][0] <= 1e-9:
+            lots.pop(0)
 
 
 def _cover_shorts(ledger: _LotLedger, activity: BrokerFillActivity, *, strategy_id: str) -> float:
@@ -1235,3 +1279,28 @@ def _peak_exposure_by_strategy(
         if peak > 0:
             peaks[strategy_id] = round(peak, 6)
     return peaks
+
+
+#: The journal event `--ingest-owner-history` writes, identified by this payload key.
+OWNER_FILLS_KEY = "owner_fills"
+
+
+def owner_fill_activities(journal) -> list[BrokerFillActivity]:
+    """The account owner's fills from the latest owner-history ingest, or none.
+
+    Broker-reported fills of allowlisted symbols that no agent order made. Without an ingest
+    this is empty and the 29-share sale stays unmatched, which is what it was before.
+    """
+    latest = None
+    for event in journal.read_events("BROKER_EVIDENCE_INGESTED"):
+        if isinstance(event.payload.get(OWNER_FILLS_KEY), list):
+            latest = event
+    if latest is None:
+        return []
+    out = []
+    for row in latest.payload[OWNER_FILLS_KEY]:
+        try:
+            out.append(BrokerFillActivity.model_validate(row))
+        except ValueError:
+            continue
+    return out

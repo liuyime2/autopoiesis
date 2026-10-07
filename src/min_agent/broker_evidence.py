@@ -117,6 +117,32 @@ class BrokerEvidenceProvider:
         self.activities_truncated = len(raw_activities or []) >= self.ACTIVITY_PAGE_LIMIT
         return activities
 
+    def fetch_all_fills(self, *, max_pages: int = 1000) -> list[BrokerFillActivity]:
+        """Every FILL activity on the account, oldest first, paged by activity id.
+
+        `ingest` deliberately makes one request per window (see `activities_truncated`).
+        The owner history needs the whole account, which on 2026-10-07 was 7,103 fills, so
+        this pages: `direction=asc`, `page_size` at the broker's maximum, and the last id as
+        the next `page_token`, until a short page. Read-only.
+        """
+        out: list[BrokerFillActivity] = []
+        token = None
+        for _ in range(max_pages):
+            page = self.client.get_activities(
+                activity_types="FILL", direction="asc",
+                page_size=self.ACTIVITY_PAGE_LIMIT, page_token=token,
+            ) or []
+            for item in page:
+                normalized = self._normalize_activity(item)
+                if normalized is not None:
+                    out.append(normalized)
+            if len(page) < self.ACTIVITY_PAGE_LIMIT:
+                return out
+            token = _get(page[-1], "id", None)
+            if token is None:
+                return out
+        raise RuntimeError(f"fill history exceeded {max_pages} pages; refusing a partial history")
+
     def _fetch_portfolio_history(self, window_start: datetime, window_end: datetime) -> list[PortfolioHistoryPoint]:
         """Fetch portfolio history for exactly the requested window.
 
@@ -282,7 +308,12 @@ def latest_evidence_batch(journal) -> BrokerEvidenceBatch | None:
     """
     if journal is None:
         return None
-    events = journal.read_events("BROKER_EVIDENCE_INGESTED")
+    # The owner-history ingest shares the event type but is not a window batch; reading it
+    # as one returned None and blanked every PnL figure built on "the latest batch".
+    events = [
+        e for e in journal.read_events("BROKER_EVIDENCE_INGESTED")
+        if "owner_fills" not in (e.payload or {})
+    ]
     if not events:
         return None
     try:

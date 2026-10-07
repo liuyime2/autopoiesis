@@ -17,11 +17,13 @@ from min_agent.curriculum import StructuredCurriculumAgent, generate_curriculum_
 from min_agent.daemon import AgentDaemon
 from min_agent.data_gateway import AlpacaDataGateway
 from min_agent.evaluator import (
+    OWNER_FILLS_KEY,
     PNL_EVIDENCE_ACCOUNT_VERIFIED,
     PNL_EVIDENCE_MISSING,
     PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
     DeterministicEvaluator,
     confirmed_fill_activities,
+    owner_fill_activities,
 )
 from min_agent.executor import AlpacaPaperExecutor
 from min_agent.fill_reconciler import FillReconciler
@@ -57,6 +59,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stop", action="store_true", help="Send SIGTERM to the daemon pidfile process.")
     parser.add_argument("--reconcile", action="store_true", help="Compare recent journal orders with Alpaca open orders.")
     parser.add_argument("--ingest-evidence", action="store_true", help="Fetch broker paper evidence for the recent window.")
+    parser.add_argument(
+        "--ingest-owner-history", action="store_true",
+        help="Journal the account owner's fills of allowlisted symbols from the full fill history (read-only).",
+    )
     parser.add_argument("--evidence-report", action="store_true", help="Report broker-backed PnL evidence from journal and latest ingest.")
     parser.add_argument("--verify-profit-target", action="store_true", help="Verify the 10 percent daily paper-profit target using broker evidence only.")
     parser.add_argument("--max-cycles", type=int, default=None, help="Optional controlled daemon cycle limit for smoke tests.")
@@ -88,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
         return _reconcile(config)
     if args.ingest_evidence:
         return _ingest_evidence(config)
+    if args.ingest_owner_history:
+        return _ingest_owner_history(config)
     if args.evidence_report:
         return _evidence_report(config)
     if args.verify_profit_target:
@@ -527,6 +535,45 @@ def _ingest_evidence(config: AgentConfig) -> int:
     return 0 if batch.status != "FAILED" else 1
 
 
+def _ingest_owner_history(config: AgentConfig) -> int:
+    """Journal the account owner's fills of allowlisted symbols, from the whole history.
+
+    Read-only. Pages through every FILL activity the paper account has, keeps those of
+    allowlisted symbols whose order the agent never journalled, and records them so the
+    evaluator can price an agent sale that went beyond the agent's own lots - the 29 SPY
+    shares sold on 2026-09-28 - against the owner's lots as they stood at that moment.
+    """
+    client = _paper_client(config)
+    if client is None:
+        return 1
+    journal = JsonlJournal(config.journal_path)
+    agent_orders = {r.execution.order_id for r in journal.read_all() if r.execution.order_id}
+    agent_orders |= {
+        str(e.payload.get("order_id")) for e in journal.read_events("ORDER_FILL_CONFIRMED")
+        if e.payload.get("order_id")
+    }
+    fills = BrokerEvidenceProvider(client=client).fetch_all_fills()
+    owner = [
+        f for f in fills
+        if f.symbol in config.allowlist and f.order_id not in agent_orders
+    ]
+    now = datetime.now(tz=timezone.utc)
+    journal.append_event(
+        JournalEvent(
+            event_id=str(uuid4()), event_type="BROKER_EVIDENCE_INGESTED", timestamp=now,
+            status="SUCCESS",
+            message=f"owner history: {len(owner)} owner fill(s) of {len(fills)} account fill(s)",
+            payload={
+                OWNER_FILLS_KEY: [f.model_dump(mode="json") for f in owner],
+                "account_fills": len(fills),
+                "agent_order_ids": len(agent_orders),
+            },
+        )
+    )
+    print(f"{len(owner)} owner fill(s) of allowlisted symbols journalled, of {len(fills)} account fill(s)")
+    return 0
+
+
 def _agent_open_lots(journal: JsonlJournal) -> dict[str, dict[str, object]]:
     """Open lots the agent still holds, by symbol, from broker-confirmed fills.
 
@@ -601,7 +648,9 @@ def _evidence_report(config: AgentConfig) -> int:
     journal = JsonlJournal(config.journal_path)
     batch = _latest_evidence_batch(journal)
     report = DeterministicEvaluator().evaluate(
-        journal.read_all(), evidence=batch, seeded_fills=confirmed_fill_activities(journal, journal.read_all())
+        journal.read_all(), evidence=batch,
+        seeded_fills=confirmed_fill_activities(journal, journal.read_all()),
+        owner_fills=owner_fill_activities(journal),
     )
     event_status: JournalEventStatus = (
         "SUCCESS" if report.pnl_evidence != PNL_EVIDENCE_MISSING else "SKIPPED"
@@ -626,7 +675,8 @@ def _verify_profit_target(config: AgentConfig) -> int:
     journal = JsonlJournal(config.journal_path)
     batch = _latest_evidence_batch(journal)
     report = DeterministicEvaluator().evaluate(
-        journal.read_all(), evidence=batch, seeded_fills=confirmed_fill_activities(journal)
+        journal.read_all(), evidence=batch, seeded_fills=confirmed_fill_activities(journal),
+        owner_fills=owner_fill_activities(journal),
     )
     pnl = report.pnl
     result = {

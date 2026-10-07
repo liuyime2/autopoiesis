@@ -36,6 +36,7 @@ from min_agent.evaluator import (
     PNL_EVIDENCE_MISSING,
     DeterministicEvaluator,
     confirmed_fill_activities,
+    owner_fill_activities,
 )
 from min_agent.fill_reconciler import FILL_EVENT
 from min_agent.health import HealthMonitor
@@ -838,6 +839,16 @@ def _check_pnl_attribution(
         coerce.field_float_or(qty, f"pnl.unmatched_sell_quantity[{sid}]", 0.0)
         for sid, qty in unmatched_by_strategy.items()
     )
+    owner_shares = coerce.field_float_or(pnl.get("owner_exit_quantity"), "pnl.owner_exit_quantity", 0.0)
+    if owner_shares:
+        cost = coerce.field_float_or(pnl.get("owner_exit_cost"), "pnl.owner_exit_cost", 0.0)
+        proceeds = coerce.field_float_or(pnl.get("owner_exit_proceeds"), "pnl.owner_exit_proceeds", 0.0)
+        detail += (
+            f" | OWNER EXIT {owner_shares:g}: shares an agent order sold beyond the agent's own "
+            f"lots, priced FIFO against the account owner's recorded fills - cost "
+            f"{cost:.2f}, proceeds {proceeds:.2f}, owner gain {proceeds - cost:+.2f}. The owner's, "
+            "not any strategy's, and not in the total above"
+        )
     if unmatched_shares:
         detail += (
             f" | UNMATCHED SELLS {unmatched_shares:g}: shares were sold "
@@ -1397,6 +1408,7 @@ def _check_proof(report: DoctorReport, config: AgentConfig) -> None:
         evidence=evidence,
         fills=fills,
         seeded_fills=confirmed_fill_activities(journal, records),
+        owner_fills=owner_fill_activities(journal),
     )
 
     submitted = evaluation.submitted_orders

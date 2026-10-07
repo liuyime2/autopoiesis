@@ -21,6 +21,7 @@ from min_agent.evaluator import (
     PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
     DeterministicEvaluator,
     confirmed_fill_activities,
+    owner_fill_activities,
 )
 from min_agent.fill_reconciler import FILL_EVENT, FillReconciler
 from min_agent.health import HealthMonitor
@@ -922,6 +923,7 @@ class AgentDaemon:
             evidence=evidence,
             fills=self._confirmed_fills(),
             seeded_fills=self._confirmed_fill_activities(),
+            owner_fills=owner_fill_activities(self.journal),
         )
         success = report.pnl_evidence != PNL_EVIDENCE_MISSING
         self._append_event(
@@ -939,6 +941,7 @@ class AgentDaemon:
             evidence=evidence,
             fills=self._confirmed_fills(),
             seeded_fills=self._confirmed_fill_activities(),
+            owner_fills=owner_fill_activities(self.journal),
         )
         pnl = report.pnl
         status = "unproven"
