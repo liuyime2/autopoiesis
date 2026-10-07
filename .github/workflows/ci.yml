@@ -30,6 +30,11 @@ jobs:
       - name: lint
         run: ruff check src/ tools/ tests/ examples/
 
+      # `make check` runs mypy and blocks on it; CI did not, so a type regression passed CI
+      # and failed the first local `make check` afterwards.
+      - name: type check
+        run: mypy src/min_agent
+
       - name: unit and integration tests
         run: python -m pytest -q
 

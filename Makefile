@@ -31,12 +31,19 @@ ifeq ($(strip $(CONDA_BIN)),)
   CONDA_BIN := $(firstword $(wildcard /opt/conda/bin/conda                                       $(HOME)/miniconda3/bin/conda                                       $(HOME)/miniforge3/bin/conda                                       $(HOME)/anaconda3/bin/conda))
 endif
 
+# An active venv wins over conda: someone who created a venv and ran `make install` in it
+# has said which interpreter they mean, and `conda run -n llm` would silently ignore it - or
+# fail outright on a machine that has conda but no `llm` env.
+ifneq ($(strip $(VIRTUAL_ENV)),)
+  CONDA_BIN :=
+endif
+
 # When conda is unavailable entirely, fall back to the active environment's python rather than
 # failing every target. A clone on a machine with no conda at all can then still run the gate,
 # which is what docs/evidence/run-fresh-clone.sh relies on.
 ifeq ($(strip $(CONDA_BIN)),)
   CONDA_RUN :=
-  RUN_HINT := (no conda found; using the active environment's python)
+  RUN_HINT := (a venv is active or conda is absent; using the active environment's python)
 else
   CONDA_RUN := $(CONDA_BIN) run -n $(CONDA_ENV) --no-capture-output
   RUN_HINT :=

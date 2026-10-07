@@ -58,7 +58,7 @@ git clone <repo> && cd min-agent
 conda create -n llm python=3.10 -y && conda activate llm
 make install
 make smoke-offline     # import, config, CLI - no broker contacted
-make check             # lint + tests
+make check             # lint + mypy + tests
 ```
 
 That path is verified rather than asserted: cloning into a clean environment and running it
@@ -74,7 +74,7 @@ wrappers each duplicated a flag below.
 
 | Command | What it does | Cost |
 | --- | --- | --- |
-| `make check` | lint + test, no broker | ~15s |
+| `make check` | lint + mypy + test, no broker | ~15s |
 | `make smoke` | one real cycle end to end against the broker | ~8s |
 | `make smoke-offline` | config and CLI end to end with `--skip-broker`; no broker, no model | ~20s |
 | `make fast` | check + smoke + the full gate | ~90s |
@@ -251,7 +251,7 @@ become something you learn to ignore.
 
 ### Two gates, and why
 
-`make check` (lint + tests) answers "is this repository correct?" and is the gate that runs in
+`make check` (lint + mypy + tests) answers "is this repository correct?" and is the gate that runs in
 CI. `make verify` additionally runs `minictrl doctor` against the live deployment, so on a
 host where the agent is trading it also answers "is the agent doing well?".
 
@@ -262,7 +262,7 @@ failure, and `tests/min_agent/test_attribution.py` guards the severity deliberat
 earlier version used `== 0.0` instead of `<= 0.0` and reported OK while the model lost money.
 
 So when you read a red run, read which class failed before concluding anything is wrong with
-the code. `make check` (lint + tests) is the one that speaks only about the repository.
+the code. `make check` (lint + mypy + tests) is the one that speaks only about the repository.
 
 Findings that are limits on the *record* rather than outcomes - currently the 29 shares sold
 that no BUY accounts for, written up in `STATUS.md` - are WARN. They are stated prominently

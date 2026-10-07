@@ -37,12 +37,6 @@ cd "$ROOT_DIR" || exit 2
 # wrote the flag form and it never worked. Translating it is cheaper than editing
 # every caller.
 
-# Locate conda rather than assuming where it lives. The order is: an explicit
-# CONDA_BIN, then PATH, then this account's known install, then the usual suspects.
-# Previously the default was one hardcoded account's install path with no discovery, so
-# the documented fresh-clone path could not run anywhere but this host - which is the
-# portability problem the project was asked to remove, sitting in the operator's own
-# entry point.
 # The operator's configuration is loaded once, here, before anything is looked up - and it is
 # exported so subprocesses see the same values. It used to be read ~60 lines later, purely to
 # fill @ENVFILE@ into the unit templates, which meant every discovery below ran against a
@@ -61,21 +55,6 @@ elif [ -z "${ALPACA_API_KEY:-}" ] && [ "${MIN_AGENT_REQUIRE_CREDENTIALS:-0}" = "
   exit 2
 fi
 
-CONDA_BIN="${CONDA_BIN:-$(command -v conda 2>/dev/null || true)}"
-if [ -z "$CONDA_BIN" ]; then
-  for candidate in \
-      /opt/conda/bin/conda \
-      "$HOME/miniconda3/bin/conda" \
-      "$HOME/miniforge3/bin/conda" \
-      "$HOME/anaconda3/bin/conda"; do
-    if [ -x "$candidate" ]; then CONDA_BIN="$candidate"; break; fi
-  done
-fi
-if [ -z "$CONDA_BIN" ] || [ ! -x "$CONDA_BIN" ]; then
-  echo "FATAL: conda not found. Install it, put it on PATH, or set CONDA_BIN." >&2
-  exit 2
-fi
-
 export PYTHONPATH="$ROOT_DIR/src:${PYTHONPATH:-}"
 export MIN_AGENT_MODE="${MIN_AGENT_MODE:-paper}"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
@@ -89,12 +68,18 @@ export ALPACA_BASE_URL="${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}"
 export APCA_API_BASE_URL="${APCA_API_BASE_URL:-$ALPACA_BASE_URL}"
 
 SERVICE_NAME="min-agent.service"
-# Same for the environment's bin directory: an explicit override, then the active
-# environment if this shell is already inside it, then this account's known prefix.
+# The interpreter is found, never assumed: an explicit override, then the active environment
+# (a venv or a conda env), then conda's configured env roots. Every subcommand runs that one
+# python directly. conda is not required: it used to be, through conda's runner with a
+# hardcoded env name, which made a plain venv - the simplest install there is - unable to run
+# any subcommand.
 # `make install` puts the package in whatever environment is active, so an operator who
 # followed the README has one and does not need to name it.
 
 ENVBIN="${MIN_AGENT_ENVBIN:-}"
+if [ -z "$ENVBIN" ] && [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then
+  ENVBIN="$VIRTUAL_ENV/bin"
+fi
 if [ -z "$ENVBIN" ] && [ -n "${CONDA_PREFIX:-}" ] && [ -x "$CONDA_PREFIX/bin/python" ]; then
   ENVBIN="$CONDA_PREFIX/bin"
 fi
@@ -116,7 +101,7 @@ if [ -z "$ENVBIN" ]; then
 fi
 if [ -z "$ENVBIN" ] || [ ! -x "$ENVBIN/python" ]; then
   echo "FATAL: no python environment found. Any of:" >&2
-  echo "  * activate the environment, or run 'make install', so CONDA_PREFIX is set" >&2
+  echo "  * activate the venv or conda env you ran 'make install' in" >&2
   echo "  * set MIN_AGENT_ENVBIN to its bin directory" >&2
   echo "  * set CONDA_ENVS_PATH if conda keeps its envs outside the default root" >&2
   exit 2
@@ -124,7 +109,7 @@ fi
 PYTHON_BIN="$ENVBIN/python"
 # Credentials live outside the working tree so git can never see them.
 agent() {
-  timeout "${MIN_AGENT_TIMEOUT:-180}" "$CONDA_BIN" run --no-capture-output -n llm python -m min_agent.cli "$@"
+  timeout "${MIN_AGENT_TIMEOUT:-180}" "$PYTHON_BIN" -m min_agent.cli "$@"
 }
 
 # The comment block ends at the first non-comment line. `sed -n '2,20p'` ran past it, so
@@ -159,7 +144,7 @@ case "$cmd" in
       [0-9]*) _cycles="$1"; shift ;;
     esac
     agent --daemon --max-cycles "$_cycles" "$@" ;;
-  daemon)          exec "$CONDA_BIN" run --no-capture-output -n llm python -m min_agent.cli --daemon ;;
+  daemon)          exec "$PYTHON_BIN" -m min_agent.cli --daemon ;;
   status)          agent --status ;;
   stop)            agent --stop ;;
   reconcile)       agent --reconcile ;;
@@ -167,8 +152,8 @@ case "$cmd" in
   report)          agent --evidence-report ;;
   profit)          agent --verify-profit-target ;;
   check-env)       agent --check-env ;;
-  test)            "$CONDA_BIN" run --no-capture-output -n llm python -m pytest tests/min_agent -q "$@" ;;
-  audit)           "$CONDA_BIN" run --no-capture-output -n llm python tools/audit_defects.py ;;
+  test)            "$PYTHON_BIN" -m pytest tests/min_agent -q "$@" ;;
+  audit)           "$PYTHON_BIN" tools/audit_defects.py ;;
 
   install-service)
     # The systemd user manager resolves unit paths from ITS OWN start-time
