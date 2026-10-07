@@ -316,6 +316,7 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         reflection_memory=reflection_memory,
         knowledge_library=knowledge_library,
         served_provider=lambda: served_count["cycles"],
+        market_history=lambda: journal.last_n(300),
     )
     # The LLM proposes; the policy engine is the disclosed fallback. Guardian
     # reviews whatever comes out either way. Previously the daemon injected

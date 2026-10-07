@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -699,6 +700,11 @@ class StrategySelector:
                 return {"BUY", "SELL"}
             produced = _produced_action(strategy, last_price)
             return {produced} if produced else set()
+        if strategy.kind == "RULE":
+            # Which side fires depends on recent prices the probe does not have, so a RULE
+            # declares both of its mapped actions, like an unpriced TREND_FOLLOW.
+            mapped = {str(strategy.parameters.get(k, "")).upper() for k in ("when_above", "when_below")}
+            return mapped & {"BUY", "SELL"}
         action = str(strategy.parameters.get("action", "")).upper()
         return {action} if action in {"BUY", "SELL"} else set()
 
@@ -778,9 +784,20 @@ class StrategySelector:
 
 
 class StrategyExecutor:
-    def decide(self, strategy: StrategySpec, snapshot: DataSnapshot) -> TradeDecision:
+    def decide(
+        self,
+        strategy: StrategySpec,
+        snapshot: DataSnapshot,
+        prices: Sequence[float] | None = None,
+    ) -> TradeDecision:
+        """`prices` are earlier observed prices, oldest first, ending before `snapshot`.
+
+        Only a RULE reads them; the other kinds ignore them.
+        """
         if snapshot.symbol not in strategy.symbols:
             return self._hold(snapshot, strategy, "snapshot symbol is outside strategy universe")
+        if strategy.kind == "RULE":
+            return self._rule(strategy, snapshot, prices or ())
 
         if strategy.kind == "HOLD_BASELINE":
             return self._hold(snapshot, strategy, "hold baseline")
@@ -789,6 +806,36 @@ class StrategyExecutor:
         if strategy.kind == "TREND_FOLLOW":
             return self._trend_follow(strategy, snapshot)
         return self._hold(snapshot, strategy, "unsupported strategy kind")
+
+    def _rule(
+        self, strategy: StrategySpec, snapshot: DataSnapshot, prices: Sequence[float]
+    ) -> TradeDecision:
+        p = strategy.parameters
+        lookback = int(p["lookback"])
+        value = rule_signal([*prices, snapshot.last_price], str(p["signal"]), lookback)
+        if value is None:
+            return self._hold(snapshot, strategy, f"fewer than {lookback} bars of history")
+        threshold = float(p["threshold_pct"])
+        if value > threshold:
+            action = str(p["when_above"]).upper()
+        elif value < -threshold:
+            action = str(p["when_below"]).upper()
+        else:
+            return self._hold(snapshot, strategy, f"{p['signal']} {value:+.3f}% inside +/-{threshold}%")
+        if action == "HOLD":
+            return self._hold(snapshot, strategy, f"{p['signal']} {value:+.3f}% maps to HOLD")
+        quantity = int(p["quantity"])
+        if action in {"BUY", "SHORT"}:
+            # The same entry cap FIXED_SIZE applies: bounds opening risk, never an exit.
+            quantity = max(0, min(quantity, int(strategy.max_position_value // snapshot.last_price)))
+            if quantity <= 0:
+                return self._hold(snapshot, strategy, "position size is zero after risk cap")
+        return TradeDecision(
+            symbol=snapshot.symbol, action=cast("Action", action), quantity=quantity,
+            confidence=float(p["confidence"]),
+            rationale=f"strategy:{strategy.strategy_id} {p['signal']} {value:+.3f}% vs +/-{threshold}%",
+            strategy_id=strategy.strategy_id,
+        )
 
     def _fixed_size(self, strategy: StrategySpec, snapshot: DataSnapshot) -> TradeDecision:
         # `TradeDecision.action` is a Literal, so pydantic rejects an action this
@@ -871,6 +918,26 @@ def _probe_quantity(strategy: StrategySpec) -> int:
     return 1
 
 
+def rule_signal(prices: Sequence[float], signal: str, lookback: int) -> float | None:
+    """A RULE's signal, in percent, at the last price; None without `lookback` + 1 prices.
+
+    return_over_n: change from the price `lookback` bars ago. price_vs_sma: distance of the
+    last price from the mean of the `lookback` prices before it. Pure, so the live executor
+    and the research backtest compute the same number from the same prices.
+    """
+    if len(prices) < lookback + 1 or prices[-1] <= 0:
+        return None
+    last = prices[-1]
+    if signal == "return_over_n":
+        base = prices[-1 - lookback]
+    elif signal == "price_vs_sma":
+        window = prices[-1 - lookback:-1]
+        base = sum(window) / len(window)
+    else:
+        return None
+    return (last / base - 1.0) * 100.0 if base > 0 else None
+
+
 def _produced_action(strategy: StrategySpec, last_price: float) -> str | None:
     """The action this strategy would emit at `last_price`, or None if it holds.
 
@@ -937,8 +1004,21 @@ def behavioural_signature(strategy: StrategySpec) -> tuple | None:
             int(quantity),
             round(float(strategy.max_position_value), 2),
         )
+    if strategy.kind == "RULE":
+        p = strategy.parameters
+        return (
+            strategy.kind,
+            tuple(sorted(strategy.symbols)),
+            str(p.get("signal")),
+            int(p.get("lookback", 0) or 0),
+            round(float(p.get("threshold_pct", 0) or 0), 6),
+            str(p.get("when_above", "")).upper(),
+            str(p.get("when_below", "")).upper(),
+            int(p.get("quantity", 0) or 0),
+            round(float(strategy.max_position_value), 2),
+        )
     action = str(strategy.parameters.get("action", "")).upper()
-    if action not in {"BUY", "SELL", "HOLD"}:
+    if action not in {"BUY", "SELL", "SHORT", "COVER", "HOLD"}:
         return None
     return (
         strategy.kind,

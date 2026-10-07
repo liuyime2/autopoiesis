@@ -21,7 +21,9 @@ BrokerEvidenceStatus = Literal["SUCCESS", "PARTIAL", "FAILED"]
 DecisionSource = Literal["llm", "fallback_policy_engine", "policy_engine", "baseline"]
 HoldReason = Literal["no_signal", "risk_limit_near", "market_uncertain", "await_confirmation", "other"]
 AttributionStatus = Literal["LINKED", "UNLINKED"]
-StrategyKind = Literal["HOLD_BASELINE", "TREND_FOLLOW", "FIXED_SIZE"]
+StrategyKind = Literal["HOLD_BASELINE", "TREND_FOLLOW", "FIXED_SIZE", "RULE"]
+#: The signals a RULE strategy may read. Each is a percent figure over `lookback` bars.
+RULE_SIGNALS = ("return_over_n", "price_vs_sma")
 StrategyLifecycle = Literal["PROBATION", "ACTIVE", "PAUSED", "RETIRED", "BASELINE"]
 CurriculumTaskType = Literal["STRATEGY_SPEC", "OPTIMIZE", "EVALUATE"]
 CurriculumTaskSource = Literal["llm", "fallback"]
@@ -71,6 +73,25 @@ STRATEGY_PARAMETER_SCHEMAS: dict[str, dict[str, object]] = {
         "required": ("reference_price", "threshold_pct", "quantity", "confidence"),
         "allowed": ("reference_price", "threshold_pct", "quantity", "confidence"),
         "description": "reference_price > 0; 0 < threshold_pct <= 0.20; positive integer quantity; confidence in [0, 1].",
+    },
+    # The rule DSL. Parameters only - no code - so a proposed rule can be validated here,
+    # executed by `StrategyExecutor`, and backtested, and nothing the model writes is run.
+    "RULE": {
+        "required": (
+            "signal", "lookback", "threshold_pct", "when_above", "when_below", "quantity",
+            "confidence",
+        ),
+        "allowed": (
+            "signal", "lookback", "threshold_pct", "when_above", "when_below", "quantity",
+            "confidence",
+        ),
+        "description": (
+            "signal return_over_n|price_vs_sma, the percent change over `lookback` bars or the "
+            "percent distance from their mean; integer lookback 2-78; threshold_pct in "
+            "(0, 5]; when_above (signal > threshold) and when_below (signal < -threshold) each "
+            "BUY|SELL|SHORT|COVER|HOLD, inside the band it holds; positive integer quantity; "
+            "confidence in [0, 1]."
+        ),
     },
 }
 
@@ -586,6 +607,24 @@ class StrategySpec(BaseModel):
                 raise ValueError("TREND_FOLLOW quantity must be a positive integer")
             if not isinstance(confidence, int | float) or isinstance(confidence, bool) or not 0 <= float(confidence) <= 1:
                 raise ValueError("TREND_FOLLOW confidence must be in [0, 1]")
+
+        if self.kind == "RULE":
+            p = self.parameters
+            if p["signal"] not in RULE_SIGNALS:
+                raise ValueError(f"RULE signal must be one of {', '.join(RULE_SIGNALS)}")
+            if not _is_integer_like(p["lookback"]) or not 2 <= coerce.field_int(p["lookback"], "lookback") <= 78:
+                raise ValueError("RULE lookback must be an integer in [2, 78]")
+            t = p["threshold_pct"]
+            if not isinstance(t, int | float) or isinstance(t, bool) or not 0 < float(t) <= 5:
+                raise ValueError("RULE threshold_pct must be in (0, 5]")
+            for key in ("when_above", "when_below"):
+                if str(p[key]).strip().upper() not in ORDER_ACTIONS | {"HOLD"}:
+                    raise ValueError(f"RULE {key} must be BUY, SELL, SHORT, COVER or HOLD")
+            if not _is_integer_like(p["quantity"]) or coerce.field_int(p["quantity"], "quantity") <= 0:
+                raise ValueError("RULE quantity must be a positive integer")
+            c = p["confidence"]
+            if not isinstance(c, int | float) or isinstance(c, bool) or not 0 <= float(c) <= 1:
+                raise ValueError("RULE confidence must be in [0, 1]")
         return self
 
 

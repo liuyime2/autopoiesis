@@ -64,6 +64,7 @@ from datetime import datetime
 #: `regime.bars_from_records` returns, so a rule handed a real bar could fail an
 #: `isinstance` check on nominal grounds alone.
 from min_agent.regime import Bar, bars_from_records
+from min_agent.strategy_engine import rule_signal
 
 #: `bars_from_records` is re-exported on purpose: it is part of this module's
 #: public shape and callers reach it as `backtest.bars_from_records`. Naming it
@@ -82,7 +83,8 @@ DEFAULT_SLIPPAGE_PCT = 0.005
 KIND_FIXED_SIZE = "FIXED_SIZE"
 KIND_TREND_FOLLOW = "TREND_FOLLOW"
 KIND_HOLD_BASELINE = "HOLD_BASELINE"
-SUPPORTED_KINDS = frozenset({KIND_FIXED_SIZE, KIND_TREND_FOLLOW, KIND_HOLD_BASELINE})
+KIND_RULE = "RULE"
+SUPPORTED_KINDS = frozenset({KIND_FIXED_SIZE, KIND_TREND_FOLLOW, KIND_HOLD_BASELINE, KIND_RULE})
 
 
 @dataclass
@@ -188,6 +190,29 @@ def _rule(
                 "fixed size, fires every bar",
             )
         return fixed
+
+    if kind == KIND_RULE:
+        signal = str(parameters.get("signal", ""))
+        lookback = int(parameters.get("lookback", 0) or 0)
+        band = float(parameters.get("threshold_pct", 0) or 0)
+        quantity = int(parameters.get("quantity", 0) or 0)
+        above = str(parameters.get("when_above", "HOLD")).upper()
+        below = str(parameters.get("when_below", "HOLD")).upper()
+        if lookback < 2 or band <= 0 or quantity <= 0:
+            return "RULE lookback, threshold_pct and quantity must be positive"
+
+        def rule(bars: Sequence[Bar], i: int) -> RuleDecision:
+            # The production signal, on the bars up to and including i - nothing later.
+            value = rule_signal([bar.price for bar in bars[: i + 1]], signal, lookback)
+            if value is None or -band <= value <= band:
+                return RuleDecision(bars[i].timestamp, "HOLD", 0, bars[i].price, "inside band")
+            action = above if value > band else below
+            if action == "HOLD":
+                return RuleDecision(bars[i].timestamp, "HOLD", 0, bars[i].price, "mapped to HOLD")
+            return RuleDecision(
+                bars[i].timestamp, action, quantity, bars[i].price, f"{signal} {value:+.3f}%",
+            )
+        return rule
 
     # TREND_FOLLOW
     threshold = parameters.get("threshold_pct")

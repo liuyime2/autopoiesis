@@ -340,7 +340,9 @@ class HybridDecisionEngine:
         executor = getattr(self.policy_engine, "executor", None)  # no executor, no rule to run
         if selected_spec is not None and executor is not None:
             try:
-                self._rule_decision = executor.decide(selected_spec, snapshot)
+                self._rule_decision = executor.decide(
+                    selected_spec, snapshot, self._prices_before(snapshot)
+                )
             # A malformed parameter (KeyError), a value the decision schema refuses (pydantic's
             # ValidationError is a ValueError), or a wrong type - the ways a rule can fail.
             except (KeyError, ValueError, TypeError):
@@ -428,6 +430,15 @@ class HybridDecisionEngine:
         if market is not None:
             context["market"] = market
         return context
+
+    def _prices_before(self, snapshot: DataSnapshot) -> list[float]:
+        """Earlier prices for a RULE strategy; empty without history, never invented."""
+        if self.market_history is None:
+            return []
+        try:
+            return regime.prices_before(self.market_history(), snapshot.symbol, snapshot.timestamp)
+        except (OSError, ValueError):
+            return []
 
     def _market(self, snapshot: DataSnapshot) -> dict[str, Any] | None:
         """Recent price behaviour from the agent's own record, up to this snapshot only.

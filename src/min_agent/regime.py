@@ -239,3 +239,12 @@ def bars_from_records(records: Sequence[object], symbol: str = "SPY") -> list[Ba
             continue
         bars.append(Bar(timestamp, price))
     return bars
+
+
+def prices_before(records: Sequence[object], symbol: str, timestamp: datetime) -> list[float]:
+    """Observed prices of `symbol` strictly before `timestamp`, oldest first, repeats collapsed.
+
+    What a RULE strategy is allowed to read: the agent's own record up to now and nothing
+    after it, with the same collapse rule every other consumer of journal prices uses.
+    """
+    return [bar.price for bar in bars_from_records(records, symbol) if bar.timestamp < timestamp]

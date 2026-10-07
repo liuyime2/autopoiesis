@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from min_agent import regime
 from min_agent.knowledge_library import KnowledgeLibrary, lesson_key
 from min_agent.models import DataSnapshot, TradeDecision
 from min_agent.reflection_memory import ReflectionMemory
@@ -17,6 +18,7 @@ class PolicyEngine:
         executor: StrategyExecutor | None = None,
         max_lessons: int = 5,
         served_provider=None,
+        market_history=None,
     ):
         self.strategy_library = strategy_library
         self.reflection_memory = reflection_memory
@@ -29,6 +31,9 @@ class PolicyEngine:
         #: `reflection.json`, which is a 30-minute-old snapshot, so a cadence measured
         #: against it fires in whole-window batches rather than one cycle in five.
         self.served_provider = served_provider
+        #: Recent journal records, so a RULE strategy reads the same history on the fallback
+        #: path as on the LLM path.
+        self.market_history = market_history
 
     def served(self) -> int | None:
         """The daemon's current cycle count, or `None` to let the selector derive it."""
@@ -64,7 +69,13 @@ class PolicyEngine:
                 confidence=0.0,
                 rationale="policy engine found no enabled admitted strategy",
             )
-        decision = self.executor.decide(strategy, snapshot)
+        prices: list[float] = []
+        if self.market_history is not None:
+            try:
+                prices = regime.prices_before(self.market_history(), snapshot.symbol, snapshot.timestamp)
+            except (OSError, ValueError):
+                prices = []
+        decision = self.executor.decide(strategy, snapshot, prices)
         try:
             lessons = self.relevant_lessons(strategy.strategy_id)
         except Exception:
