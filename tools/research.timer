@@ -1,5 +1,5 @@
 [Unit]
-Description=Run the QuantVoyager strategy search daily on freshly fetched real bars
+Description=Run the min-agent strategy search daily on freshly fetched real bars
 
 [Timer]
 OnCalendar=*-*-* 06:30:00

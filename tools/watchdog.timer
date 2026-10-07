@@ -1,5 +1,5 @@
 [Unit]
-Description=Run the QuantVoyager health watchdog every 10 minutes
+Description=Run the min-agent health watchdog every 10 minutes
 
 [Timer]
 OnBootSec=3min
