@@ -326,10 +326,13 @@ class HybridDecisionEngine:
                 )
         except Exception:
             strategy_id = None
-        if selected_spec is not None:
+        executor = getattr(self.policy_engine, "executor", None)  # no executor, no rule to run
+        if selected_spec is not None and executor is not None:
             try:
-                self._rule_decision = self.policy_engine.executor.decide(selected_spec, snapshot)
-            except Exception:
+                self._rule_decision = executor.decide(selected_spec, snapshot)
+            # A malformed parameter (KeyError), a value the decision schema refuses (pydantic's
+            # ValidationError is a ValueError), or a wrong type - the ways a rule can fail.
+            except (KeyError, ValueError, TypeError):
                 # A rule that cannot be evaluated is no default; the model decides alone and
                 # the cycle carries no rule_action, which is what the journal will say.
                 self._rule_decision = None
@@ -420,7 +423,7 @@ class HybridDecisionEngine:
             return None
         try:
             bars = regime.bars_from_records(self.market_history(), snapshot.symbol)
-        except Exception:
+        except (OSError, ValueError):  # an unreadable journal, or a record that will not parse
             return None
         bars = [bar for bar in bars if bar.timestamp < snapshot.timestamp]
         if not bars or bars[-1].price != snapshot.last_price:
