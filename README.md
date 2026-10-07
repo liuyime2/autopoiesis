@@ -50,7 +50,8 @@ make smoke-offline     # import, config, CLI - no broker contacted
 make check             # lint + mypy + tests
 ```
 
-conda works too (`conda create -n llm python=3.10 && conda activate llm`, then the same
+On Debian or Ubuntu the system Python needs `sudo apt install python3-venv` first, or
+`python3 -m venv` creates an environment without pip. conda works too (`conda create -n llm python=3.10 && conda activate llm`, then the same
 `make` targets); an active venv takes precedence over conda, and neither `make` nor
 `minictrl` requires conda.
 

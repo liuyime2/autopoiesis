@@ -2486,6 +2486,18 @@ def check_self_evolution_closes() -> Result:
     retirement is not a real one. The first real PASS_SCREENED has to come from live paper
     cycles across trading days.
     """
+    # The probe replays cached real Alpaca bars, which live in gitignored runtime/ and need a
+    # broker account to fetch. A fresh clone has no runtime/ at all, so this check made
+    # `make verify` red on exactly the machine state the README promises it runs on - found by
+    # docs/evidence/run-fresh-clone.sh on 2026-10-07. Absence of the whole state directory is
+    # SKIP, as in `replay-audit`; a deployment whose runtime/ exists but lacks the bars is still
+    # FAIL, because there the loop is supposed to be provable.
+    if not (ROOT / "runtime").exists():
+        return Result(
+            "self-evolution-closes", SKIP,
+            "no runtime/ in this checkout; the replay needs real bars fetched with a paper "
+            "account (tools/fetch_replay_bars.py)",
+        )
     rc, out = _run([sys.executable, "tools/self_evolution_probe.py"])
     if rc != 0:
         return Result(
