@@ -170,9 +170,16 @@ def test_llm_receives_admitted_lessons(tmp_path):
     llm = ScriptedLLM(TradeDecision(symbol="SPY", action="HOLD", quantity=0, confidence=0.2, rationale="wait"))
     engine, _ = _engine(tmp_path, llm, knowledge=knowledge)
 
-    engine.decide_snapshot(_snapshot())
+    decision = engine.decide_snapshot(_snapshot())
 
-    assert llm.calls[0]["lessons"] == ["s1 stalls below 0.6 confidence"]
+    # Each lesson is shown on a deterministic half of cycles (see the ablation tests below),
+    # so this cycle either shows it or records it as withheld - never neither.
+    if decision.lesson_ids == ("k1",):
+        assert llm.calls[0]["lessons"] == ["s1 stalls below 0.6 confidence"]
+        assert decision.lessons_withheld == ()
+    else:
+        assert decision.lessons_withheld == ("k1",)
+        assert llm.calls[0]["lessons"] == []
 
 
 # --- the fallback is disclosed, never disguised -----------------------------
@@ -1299,3 +1306,17 @@ def test_without_history_there_is_no_market_block_rather_than_an_invented_one(tm
     engine, _ = _engine(tmp_path, llm)
     engine.decide_snapshot(_snapshot())
     assert "market" not in llm.calls[0]
+
+
+def test_each_lesson_is_shown_on_a_reproducible_half_of_cycles():
+    """Every decision used to see every lesson, so no lesson's effect could be measured."""
+    from datetime import timedelta
+
+    from min_agent.llm_decision import HybridDecisionEngine
+
+    snaps = [_snapshot().model_copy(update={"timestamp": NOW + timedelta(minutes=5 * i)}) for i in range(400)]
+    shown = [HybridDecisionEngine._show_lesson(s, "k1") for s in snaps]
+    assert 160 < sum(shown) < 240, "about half"
+    assert shown == [HybridDecisionEngine._show_lesson(s, "k1") for s in snaps], "reproducible"
+    other = [HybridDecisionEngine._show_lesson(s, "k2") for s in snaps]
+    assert shown != other, "independent across lessons"

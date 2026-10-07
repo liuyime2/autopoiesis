@@ -869,6 +869,14 @@ class TradeDecision(BaseModel):
     journalled before this field existed - they cannot be paired, and back-filling would
     claim a fact about the past that was never recorded.
     """
+    lesson_ids: tuple[str, ...] | None = None
+    """The admitted lessons this decision was shown, and those withheld from it this cycle.
+
+    Every decision used to see the same lessons, so no lesson's effect could be told apart
+    from the model's own behaviour. Each lesson is now shown on a deterministic half of
+    cycles, and these two fields make the ablation readable from the journal. None on cycles
+    before the split existed."""
+    lessons_withheld: tuple[str, ...] | None = None
     override_reason: str | None = None
     """Why the model departed from `rule_action`, in its own words.
 

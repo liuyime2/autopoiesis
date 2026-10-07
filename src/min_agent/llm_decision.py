@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from collections.abc import Callable, Mapping
@@ -233,6 +234,8 @@ class HybridDecisionEngine:
         self.market_history = market_history
         #: The selected strategy's own decision for the snapshot `_context` last built.
         self._rule_decision: TradeDecision | None = None
+        #: (shown, withheld) lesson ids for the snapshot `_context` last built.
+        self._lesson_split: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
 
     def decide_snapshot(self, snapshot: DataSnapshot) -> TradeDecision:
         context = self._context(snapshot)
@@ -262,13 +265,19 @@ class HybridDecisionEngine:
             return rule.model_copy(update={
                 "decision_source": "policy_engine",
                 "rule_action": rule.action,
+                "lesson_ids": self._lesson_split[0],
+                "lessons_withheld": self._lesson_split[1],
                 "model": decision.model,
                 "rationale": (
                     f"{rule.rationale} | llm proposed {decision.action} without an "
                     f"override_reason; rule taken"
                 ),
             })
-        update: dict[str, Any] = {"decision_source": "llm"}
+        update: dict[str, Any] = {
+            "decision_source": "llm",
+            "lesson_ids": self._lesson_split[0],
+            "lessons_withheld": self._lesson_split[1],
+        }
         if rule is not None:
             update["rule_action"] = rule.action
         if decision.action == (rule.action if rule is not None else decision.action):
@@ -406,7 +415,13 @@ class HybridDecisionEngine:
                 )
         if lots:
             context["open_lots"] = lots
-        context["lessons"] = [a.summary for a in self._lessons(strategy_id)]
+        offered = self._lessons(strategy_id)
+        shown = [a for a in offered if self._show_lesson(snapshot, a.artifact_id)]
+        self._lesson_split = (
+            tuple(a.artifact_id for a in shown),
+            tuple(a.artifact_id for a in offered if a not in shown),
+        )
+        context["lessons"] = [a.summary for a in shown]
         market = self._market(snapshot)
         if market is not None:
             context["market"] = market
@@ -548,6 +563,17 @@ class HybridDecisionEngine:
             # The largest order Guardian will approve: (held + q) * price <= cap.
             "shares_you_may_buy": max(0, int(headroom // one_share)) if one_share > 0 else 0,
         }
+
+    @staticmethod
+    def _show_lesson(snapshot: DataSnapshot, artifact_id: str) -> bool:
+        """Whether this cycle is in the half of cycles shown this lesson.
+
+        A stable hash of the snapshot time and the lesson, so the split is reproducible from
+        the journal and independent across lessons. With every lesson always shown, its effect
+        could not be separated from the model's; with half, the two halves are the comparison.
+        """
+        key = f"{snapshot.timestamp.isoformat()}|{artifact_id}".encode()
+        return hashlib.sha256(key).digest()[0] % 2 == 0
 
     def _lessons(self, strategy_id: str | None) -> list[KnowledgeArtifact]:
         if self.lessons is None or strategy_id is None:
