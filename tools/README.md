@@ -112,8 +112,9 @@ Exit codes are the contract, so a green run is never mistaken for a passed targe
 | 1 | the target is failed: at least one strategy is behind buy-and-hold |
 | 2 | nothing to measure — no journal, or no closed lots on record |
 
-It is failing today: all four strategies that closed a lot are behind the market by 1.47 to 4.29
-points. It also prints the record's own window and reports the target window as not met, because
+Each strategy is compared with SPY on the same capital (its peak exposure) over the same window
+(its first entry to its last exit, or to the last valuation while a lot is open). Run it for the
+current verdict; this file does not repeat a number that moves. It also prints the record's own window and reports the target window as not met, because
 the journal holds 16 trading days and a 60-day window over a 16-day record is a division that
 hides the denominator.
 

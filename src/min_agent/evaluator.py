@@ -553,25 +553,44 @@ def _pnl_evidence(
 
     # The holding benchmark, from the prices this evaluation already holds rather than
     # a second source that could disagree with the lots.
+    #
+    # Same capital and same calendar window on both legs. The strategy leg is realized plus
+    # unrealized PnL over its peak exposure; the market leg is the same instrument from the
+    # strategy's first entry to its last exit, or to the last quote while a lot is open.
+    # The market leg used to run over the whole journal, so a strategy whose first trade was
+    # on 2026-09-28 was compared with SPY from 2026-06-09. The whole-record figure is kept
+    # as `market_return_pct` for context only.
     peak_exposure = _peak_exposure_by_strategy(closed_lots, open_lots)
+    unrealized_by_strategy: dict[str, float] = {}
+    for open_lot in open_lots:
+        if open_lot.unrealized_pnl is not None:
+            unrealized_by_strategy[open_lot.strategy_id] = (
+                unrealized_by_strategy.get(open_lot.strategy_id, 0.0) + open_lot.unrealized_pnl
+            )
     strategy_return = {
-        strategy_id: round(strategy_realized[strategy_id] / exposure * 100.0, 6)
+        strategy_id: round(
+            (strategy_realized.get(strategy_id, 0.0) + unrealized_by_strategy.get(strategy_id, 0.0))
+            / exposure * 100.0,
+            6,
+        )
         for strategy_id, exposure in peak_exposure.items()
-        if exposure > 0 and strategy_id in strategy_realized
+        if exposure > 0 and (strategy_id in strategy_realized or strategy_id in unrealized_by_strategy)
     }
     market_return_pct = _market_return_pct(records)
-    if market_return_pct is None and peak_exposure:
+    strategy_market_return: dict[str, float] = {}
+    for strategy_id, (symbol, start, end) in _strategy_windows(closed_lots, open_lots).items():
+        leg = _market_return_over(records, symbol, start, end)
+        if leg is not None:
+            strategy_market_return[strategy_id] = leg
+    if strategy_return and not strategy_market_return:
         missing_reasons.append(
-            "no price series covers the closed-lot window, so no holding benchmark can be stated"
+            "no price series covers any strategy's holding window, so no holding benchmark can be stated"
         )
-    excess_vs_market = (
-        {}
-        if market_return_pct is None
-        else {
-            strategy_id: round(value - market_return_pct, 6)
-            for strategy_id, value in strategy_return.items()
-        }
-    )
+    excess_vs_market = {
+        strategy_id: round(value - strategy_market_return[strategy_id], 6)
+        for strategy_id, value in strategy_return.items()
+        if strategy_id in strategy_market_return
+    }
 
     # Named `evidence_status`, not `status`: this function also builds fill
     # attributions, whose `status` is a LINKED/UNLINKED flag. Two unrelated
@@ -596,6 +615,7 @@ def _pnl_evidence(
         strategy_peak_exposure=peak_exposure,
         strategy_return_pct=strategy_return,
         market_return_pct=market_return_pct,
+        strategy_market_return_pct=strategy_market_return,
         strategy_excess_vs_market_pct=excess_vs_market,
         unattributed_pnl=0.0 if unlinked_fill_count else None,
         window_start=evidence.window_start,
@@ -830,6 +850,47 @@ def _open_lots(
                 )
             )
     return tuple(out)
+
+
+def _strategy_windows(
+    closed_lots: Sequence[ClosedLotAttribution],
+    open_lots: Sequence[OpenLotAttribution],
+) -> dict[str, tuple[str, datetime, datetime]]:
+    """Per strategy: its symbol, its first entry, and its last exit - or, while a lot is still
+    open, the time that lot was last valued."""
+    windows: dict[str, tuple[str, datetime, datetime]] = {}
+
+    def widen(strategy_id: str, symbol: str, start: datetime, end: datetime | None) -> None:
+        end = end or start
+        if strategy_id in windows:
+            _, lo, hi = windows[strategy_id]
+            start, end = min(lo, start), max(hi, end)
+        windows[strategy_id] = (symbol, start, end)
+
+    for lot in closed_lots:
+        widen(lot.strategy_id, lot.symbol, lot.opened_at, lot.closed_at)
+    for open_lot in open_lots:
+        widen(open_lot.strategy_id, open_lot.symbol, open_lot.opened_at, open_lot.as_of)
+    return windows
+
+
+def _market_return_over(
+    records: Sequence[CycleRecord], symbol: str, start: datetime, end: datetime
+) -> float | None:
+    """The instrument's return from its first quote at or after `start` to its last at or
+    before `end`, from the same journal snapshots the lots are valued with. None when fewer
+    than two quotes fall in the window: one quote is not a holding period."""
+    prices = sorted(
+        (record.snapshot.timestamp, record.snapshot.last_price)
+        for record in records
+        if getattr(record, "snapshot", None) is not None
+        and getattr(record.snapshot, "symbol", symbol) == symbol
+        and record.snapshot.last_price > 0
+        and start <= record.snapshot.timestamp <= end
+    )
+    if len(prices) < 2 or prices[0][0] == prices[-1][0]:
+        return None
+    return round((prices[-1][1] / prices[0][1] - 1.0) * 100.0, 6)
 
 
 def _market_return_pct(records: list[CycleRecord]) -> float | None:

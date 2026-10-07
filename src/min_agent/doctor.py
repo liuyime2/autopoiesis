@@ -1398,11 +1398,11 @@ def _check_proof(report: DoctorReport, config: AgentConfig) -> None:
     # still lost to the market has not earned the capital it was given.
     pnl_evidence = evaluation.pnl
     excess = pnl_evidence.strategy_excess_vs_market_pct if pnl_evidence else {}
-    market_return = pnl_evidence.market_return_pct if pnl_evidence else None
-    if excess and market_return is not None and pnl_evidence is not None:
+    if excess and pnl_evidence is not None:
         behind = sorted(k for k, v in excess.items() if v < 0)
+        market = pnl_evidence.strategy_market_return_pct
         detail = ", ".join(
-            f"{k}={pnl_evidence.strategy_return_pct[k]:+.2f}% vs market {market_return:+.2f}%"
+            f"{k}={pnl_evidence.strategy_return_pct[k]:+.2f}% vs market {market[k]:+.2f}%"
             f" ({excess[k]:+.2f})"
             for k in sorted(excess, key=lambda x: -excess[x])[:6]
         )
@@ -1410,9 +1410,10 @@ def _check_proof(report: DoctorReport, config: AgentConfig) -> None:
             "pnl vs holding", WARN if behind else OK,
             f"{len(behind)} of {len(excess)} strategy/ies behind the market: {detail}"
             if behind else f"every strategy beat the market: {detail}",
-            "return is on the capital each strategy deployed; the promotion gate screens on "
-            "decision quality, which is a different question from this one"
-            if behind else "",
+            "both legs on the same capital and window: realized plus unrealized PnL over the "
+            "strategy's peak exposure, against the same instrument from its first entry to its "
+            "last exit (or last valuation while a lot is open). The promotion gate screens on "
+            "decision quality, which is a different question from this one",
         )
     risk_halts = evaluation.hold_reasons.get("risk_limit_near", 0)
     total_holds = evaluation.action_counts.get("HOLD", 0)

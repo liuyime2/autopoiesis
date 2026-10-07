@@ -385,14 +385,18 @@ class PnLEvidence(BaseModel):
     #: against a market return computed on capital held once. Two different
     #: denominators, so the "excess" was not an excess of anything.
     strategy_peak_exposure: dict[str, float] = Field(default_factory=dict)
-    #: Realized PnL over that peak exposure, per cent. A strategy with no closed lots is
-    #: absent rather than zero: "did not trade" is not "returned nothing".
+    #: Realized plus unrealized PnL over that peak exposure, per cent. A strategy that never
+    #: held a lot is absent rather than zero: "did not trade" is not "returned nothing".
     strategy_return_pct: dict[str, float] = Field(default_factory=dict)
-    #: The same instrument's return over the same window, from the prices this
-    #: evaluation already holds. Computed here rather than fetched so the benchmark
+    #: The instrument's return over the whole journal, for context only - no strategy held
+    #: capital for all of it. From the prices this evaluation already holds. Computed here rather than fetched so the benchmark
     #: and the lots cannot rest on two price sources that disagree.
     market_return_pct: float | None = None
-    #: Per strategy, `strategy_return_pct` minus `market_return_pct`. This is the
+    #: Per strategy, the same instrument over that strategy's own window - first entry to
+    #: last exit, or to the last valuation while a lot is open. This, not the whole-record
+    #: `market_return_pct` above, is what `strategy_excess_vs_market_pct` subtracts.
+    strategy_market_return_pct: dict[str, float] = Field(default_factory=dict)
+    #: Per strategy, `strategy_return_pct` minus `strategy_market_return_pct`. This is the
     #: project's success metric and nothing else reported it: the promotion gate
     #: screens on decision quality, which the counterfactual ledger measures, and
     #: that ledger cannot see this number by construction - a trade's return there

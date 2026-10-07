@@ -254,20 +254,15 @@ def main() -> int:
     if rows:
         print("vs SPY buy-and-hold")
         print("-" * 78)
-        print(f"  {'strategy':<26} {'return':>8} {'vs SPY':>9}")
+        print(f"  {'strategy':<26} {'return':>8} {'SPY, same window':>17} {'excess':>8}")
         for name, return_pct, market_pct, excess in rows:
-            print(f"  {name:<26} {return_pct:>8} {excess:>9}")
-        print(f"  {'buy-and-hold (SPY)':<26} {rows[0][2]:>8} {'---':>9}   <- the benchmark to beat")
+            print(f"  {name:<26} {return_pct:>8} {market_pct:>17} {excess:>8}")
         print()
-        print(
-            "  basis: return is on the capital each strategy deployed (its peak exposure) and"
-        )
-        print(
-            "  is gross of the assumed round-trip cost. The after-cost figure for the whole"
-        )
-        print(
-            "  account is in the increment block below; it is not broken out per strategy here."
-        )
+        print("  basis: each row puts both legs on the same capital and the same window -")
+        print("  realized plus unrealized PnL over the strategy's peak exposure, against SPY from")
+        print("  its first entry to its last exit (or last valuation while a lot is open). Gross")
+        print("  of the assumed round-trip cost; the after-cost figure for the whole account is")
+        print("  in the increment block below.")
         print()
 
     attribution, extras = _pick(report.checks, "pnl attribution")

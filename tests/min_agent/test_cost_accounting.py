@@ -183,3 +183,54 @@ def test_a_strategy_that_did_not_trade_is_absent_rather_than_zero():
     returns = {k: round(realized[k] / peak[k] * 100.0, 6) for k in peak if k in realized}
 
     assert "s2" not in returns
+
+
+class _SymRec:
+    def __init__(self, timestamp, last_price, symbol="SPY"):
+        self.snapshot = _Snap(timestamp, last_price)
+        self.snapshot.symbol = symbol
+
+
+def _day(d, h=15):
+    return datetime(2026, 9, d, h, tzinfo=timezone.utc)
+
+
+def test_the_market_leg_covers_only_the_strategy_s_own_window():
+    """A strategy that first traded on the 28th was compared with SPY from June.
+
+    The benchmark ran the market leg over the whole journal while each strategy's capital was
+    deployed for a fraction of it, so a strategy created late was charged for a move it was
+    never exposed to. The leg is now the same instrument over the strategy's own window:
+    first entry to last exit, or to the last quote while a lot is open.
+    """
+    from min_agent.evaluator import _market_return_over
+
+    records = [
+        _SymRec(_day(1), 100.0),     # long before the strategy existed
+        _SymRec(_day(28), 120.0),    # its first entry
+        _SymRec(_day(29), 123.0),
+        _SymRec(_day(30), 126.0),    # its last exit
+        _SymRec(_day(30, 20), 130.0),
+    ]
+    assert _market_return_over(records, "SPY", _day(28), _day(30)) == pytest.approx(5.0)
+    assert _market_return_over(records, "QQQ", _day(28), _day(30)) is None
+    assert _market_return_over(records, "SPY", _day(29), _day(29)) is None, "one quote is no window"
+
+
+def test_a_strategy_window_runs_to_the_last_quote_while_a_lot_is_open():
+    from min_agent.evaluator import _strategy_windows
+
+    class _Closed:
+        def __init__(self, sid, o, c):
+            self.strategy_id, self.symbol, self.opened_at, self.closed_at = sid, "SPY", o, c
+
+    class _Open:
+        def __init__(self, sid, o, as_of):
+            self.strategy_id, self.symbol, self.opened_at, self.as_of = sid, "SPY", o, as_of
+
+    windows = _strategy_windows(
+        [_Closed("a", _day(28), _day(29)), _Closed("b", _day(2), _day(3))],
+        [_Open("a", _day(29), _day(30))],
+    )
+    assert windows["a"] == ("SPY", _day(28), _day(30))
+    assert windows["b"] == ("SPY", _day(2), _day(3))
