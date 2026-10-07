@@ -4,7 +4,7 @@ import hashlib
 
 from min_agent.coerce import datetime_utc
 from min_agent.config import is_paper_endpoint
-from min_agent.models import ExecutionResult, GuardianResult, TradeDecision
+from min_agent.models import BROKER_SIDE, ExecutionResult, GuardianResult, TradeDecision
 
 
 class AlpacaPaperExecutor:
@@ -44,7 +44,9 @@ class AlpacaPaperExecutor:
             order = self.client.submit_order(
                 symbol=decision.symbol,
                 qty=decision.quantity,
-                side=decision.action.lower(),
+                # SHORT is submitted as a sell and COVER as a buy; the decision keeps the
+                # intent, which is what the journal and the ledger read.
+                side=BROKER_SIDE[decision.action],
                 type="market",
                 time_in_force="day",
                 client_order_id=client_order_id,

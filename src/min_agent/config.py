@@ -57,6 +57,10 @@ class AgentConfig:
     # that must stay sharp. With this on, the real loop runs and the final
     # broker call is replaced by a journalled intent.
     shadow: bool = False
+    #: Short selling: `off` (default) refuses SHORT and COVER at the Guardian; `shadow` lets
+    #: them through the Guardian and journals them as intents while long orders stay real;
+    #: `paper` submits them. A rollout switch, so shorts can be watched before they trade.
+    shorts: str = "off"
     max_daily_cycles: int = 288
     heartbeat_path: Path = Path("runtime/min_agent/heartbeat.json")
     pidfile_path: Path = Path("runtime/min_agent/daemon.pid")
@@ -108,6 +112,7 @@ class AgentConfig:
             counterfactual_horizon_hours=_positive_float(
                 "MIN_AGENT_COUNTERFACTUAL_HORIZON_HOURS", 24.0),
             shadow=_flag("MIN_AGENT_SHADOW", False),
+            shorts=_choice("MIN_AGENT_SHORTS", ("off", "shadow", "paper"), "off"),
             max_daily_cycles=_positive_int("MIN_AGENT_MAX_DAILY_CYCLES", 288),
             heartbeat_path=Path(os.getenv("MIN_AGENT_HEARTBEAT", "runtime/min_agent/heartbeat.json")),
             pidfile_path=Path(os.getenv("MIN_AGENT_PIDFILE", "runtime/min_agent/daemon.pid")),
@@ -162,6 +167,17 @@ def _positive_int(name: str, default: int) -> int:
     value = int(os.getenv(name, str(default)))
     if value <= 0:
         raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _choice(name: str, allowed: tuple[str, ...], default: str) -> str:
+    """One of a fixed set of values; anything else is a configuration error, not a default."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    value = raw.strip().lower()
+    if value not in allowed:
+        raise ValueError(f"{name} must be one of {', '.join(allowed)}; got {raw!r}")
     return value
 
 

@@ -7,7 +7,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from min_agent import coerce
 
-Action = Literal["BUY", "SELL", "HOLD"]
+Action = Literal["BUY", "SELL", "HOLD", "SHORT", "COVER"]
+#: Actions that place an order. SELL reduces a long; SHORT opens or adds to a short; COVER
+#: buys a short back. See docs/history/plans/2026-10-07-bounded-short-and-rule-dsl.md.
+ORDER_ACTIONS = frozenset({"BUY", "SELL", "SHORT", "COVER"})
+#: The broker side each order action is submitted as.
+BROKER_SIDE = {"BUY": "buy", "SELL": "sell", "SHORT": "sell", "COVER": "buy"}
 #: Spelled inline in five model fields before this alias existed, so "which way"
 #: had five independent spellings to keep in step.
 Side = Literal["BUY", "SELL"]
@@ -123,13 +128,23 @@ class PositionSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     symbol: str
+    #: Negative for a short, as Alpaca reports it.
     quantity: float
-    market_value: float = Field(ge=0)
+    #: Signed like `quantity`. It was constrained to >= 0, so the first short position the
+    #: broker reported would have failed validation and taken every later snapshot - and so
+    #: every trading cycle - down with it.
+    market_value: float
 
     @field_validator("symbol")
     @classmethod
     def normalize_symbol(cls, value: str) -> str:
         return value.strip().upper()
+
+    @model_validator(mode="after")
+    def value_has_the_sign_of_the_quantity(self) -> PositionSnapshot:
+        if self.quantity * self.market_value < 0:
+            raise ValueError("market_value must have the sign of quantity")
+        return self
 
 
 class OpenOrderSnapshot(BaseModel):
@@ -538,12 +553,12 @@ class StrategySpec(BaseModel):
             action = str(self.parameters["action"]).strip().upper()
             quantity = self.parameters["quantity"]
             confidence = self.parameters["confidence"]
-            if action not in {"BUY", "SELL", "HOLD"}:
-                raise ValueError("FIXED_SIZE action must be BUY, SELL, or HOLD")
+            if action not in ORDER_ACTIONS | {"HOLD"}:
+                raise ValueError("FIXED_SIZE action must be BUY, SELL, SHORT, COVER or HOLD")
             if not _is_integer_like(quantity) or coerce.field_int(quantity, "quantity") < 0:
                 raise ValueError("FIXED_SIZE quantity must be a non-negative integer")
             quantity_value = coerce.field_int(quantity, "quantity")
-            if action in {"BUY", "SELL"} and quantity_value <= 0:
+            if action in ORDER_ACTIONS and quantity_value <= 0:
                 raise ValueError("FIXED_SIZE BUY and SELL require positive quantity")
             if action == "HOLD" and quantity_value != 0:
                 raise ValueError("FIXED_SIZE HOLD requires zero quantity")
@@ -904,8 +919,8 @@ class TradeDecision(BaseModel):
 
     @model_validator(mode="after")
     def require_quantity_for_orders(self) -> TradeDecision:
-        if self.action in {"BUY", "SELL"} and self.quantity <= 0:
-            raise ValueError("BUY and SELL require positive quantity")
+        if self.action in ORDER_ACTIONS and self.quantity <= 0:
+            raise ValueError("BUY, SELL, SHORT and COVER require positive quantity")
         if self.action == "HOLD" and self.quantity != 0:
             raise ValueError("HOLD requires zero quantity")
         return self

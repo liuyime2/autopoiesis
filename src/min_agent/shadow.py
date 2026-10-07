@@ -172,3 +172,30 @@ class ShadowExecutor:
         """
         raw = f"{decision.symbol}|{decision.action}|{decision.quantity}|{cycle_id or ''}"
         return "shadow-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+
+class ShadowShorts:
+    """Real orders for everything except SHORT and COVER, which are shadowed.
+
+    The rollout step for short selling (`MIN_AGENT_SHORTS=shadow`): shorts go through the
+    same decision path and the same Guardian, and are journalled as intents, while the long
+    book keeps trading on paper. Switching to `paper` removes this wrapper and nothing else.
+    """
+
+    def __init__(self, *, real, shadow: ShadowExecutor):
+        self.real = real
+        self.shadow = shadow
+
+    def execute(
+        self,
+        decision: TradeDecision,
+        guardian_result: GuardianResult,
+        *,
+        cycle_id: str | None = None,
+    ) -> ExecutionResult:
+        target = self.shadow if decision.action in {"SHORT", "COVER"} else self.real
+        return target.execute(decision, guardian_result, cycle_id=cycle_id)
+
+    def __getattr__(self, name):
+        # Anything else the loop asks of an executor (client_order_id, ...) is the real one's.
+        return getattr(self.real, name)

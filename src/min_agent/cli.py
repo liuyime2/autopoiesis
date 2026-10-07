@@ -42,7 +42,7 @@ from min_agent.order_reconciler import OrderReconciler
 from min_agent.policy_engine import PolicyEngine
 from min_agent.reflection_memory import ReflectionMemory
 from min_agent.scheduler import MarketScheduler
-from min_agent.shadow import ShadowExecutor
+from min_agent.shadow import ShadowExecutor, ShadowShorts
 from min_agent.strategy_admission import StrategyAdmission
 from min_agent.strategy_engine import StrategyLibrary, StrategyLifecycleManager
 from min_agent.trade_counter import TradeCounter
@@ -212,7 +212,12 @@ def _execution_sink(config, client, journal):
     """
     if config.shadow:
         return ShadowExecutor(journal=journal)
-    return AlpacaPaperExecutor(client=client, base_url=config.alpaca_base_url)
+    real = AlpacaPaperExecutor(client=client, base_url=config.alpaca_base_url)
+    if config.shorts == "shadow":
+        # Shorts are watched before they trade: SHORT and COVER become journalled intents,
+        # every other order still reaches the paper broker.
+        return ShadowShorts(real=real, shadow=ShadowExecutor(journal=journal))
+    return real
 
 
 def _run_once(config: AgentConfig) -> int:
@@ -297,6 +302,7 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         min_confidence=config.min_confidence,
         max_account_value=config.max_account_value or None,
         max_snapshot_age_seconds=config.stale_after_seconds,
+        shorts=config.shorts,
     )
     # Declared before the daemon so the provider can read the daemon's own cycle count. The
     # incumbent cadence is defined over cycles, and the only cycle count the selector could
@@ -345,6 +351,7 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
             "min_confidence": config.min_confidence,
             "allowlist": sorted(config.allowlist),
             "max_account_value": config.max_account_value or None,
+            "shorts": config.shorts,
         },
         cost_basis=cost_basis,
         # ~300 five-minute cycles is a little over three trading days: enough for a 1-day

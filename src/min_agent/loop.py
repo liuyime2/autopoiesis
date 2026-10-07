@@ -169,6 +169,40 @@ class TradingLoop:
             return None
         return quantity if quantity > 1e-9 else 0.0
 
+    def _agent_short(self, symbol: str) -> float | None:
+        """Shares of `symbol` the agent itself has shorted and not covered.
+
+        Replayed from ORDER_FILL_CONFIRMED events whose side is the decision's own SHORT or
+        COVER - kept apart from the long book, so a cover can never be read as a buy of the
+        owner's position or a sell as a short. Clamped at zero in order, like the long side.
+        None when the journal cannot be read: the Guardian then refuses a COVER.
+        """
+        read = getattr(self.journal, "read_events", None)
+        if read is None:
+            return None
+        try:
+            events = sorted(
+                (
+                    e for e in read("ORDER_FILL_CONFIRMED")
+                    if (e.payload or {}).get("symbol") == symbol
+                    and (e.payload or {}).get("filled_quantity") is not None
+                ),
+                key=lambda e: e.timestamp,
+            )
+            short = 0.0
+            for event in events:
+                payload = event.payload or {}
+                side = str(payload.get("side", "")).upper()
+                filled = float(payload["filled_quantity"])
+                if side == "SHORT":
+                    short += filled
+                elif side == "COVER":
+                    short = max(0.0, short - filled)
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            self._agent_holding_errors.append(f"{type(exc).__name__}: {exc}")
+            return None
+        return short if short > 1e-9 else 0.0
+
     def run_once(self, symbol: str) -> CycleRecord | None:
         cycle_id = str(uuid4())
         try:
@@ -221,6 +255,8 @@ class TradingLoop:
             # snapshot is exactly the number that let 29 shares of someone else's
             # position be sold.
             agent_position_quantity=self._agent_holding(decision.symbol),
+            # And what it is short, from the same fills, for the same reason on the other side.
+            agent_short_quantity=self._agent_short(decision.symbol),
         )
         # Refuse to re-submit an order this agent already submitted and has not seen fill.
         # A lost broker response looks exactly like a decision that was never acted on, and
@@ -237,6 +273,7 @@ class TradingLoop:
                 now=self.now() if self.now else None,
                 trades_today=trades_today,
                 agent_position_quantity=self._agent_holding(decision.symbol),
+                agent_short_quantity=self._agent_short(decision.symbol),
             )
             # Deliberately NOT appended to `errors`.
             #

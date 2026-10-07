@@ -163,6 +163,7 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
         "guardian-bypass-prevention", "software-supply-chain", "crash-recovery",
     ),
     "test_guardian.py": ("guardian-bypass-prevention",),
+    "test_guardian_shorts.py": ("guardian-bypass-prevention",),
     "test_health.py": ("unit-integration", "broker-reconciliation"),
     "test_journal.py": ("data-integrity", "crash-recovery"),
     "test_knowledge_admission.py": ("lifecycle-invariants",),
@@ -1828,7 +1829,7 @@ def check_no_production_function_is_unreachable() -> Result:
     examples/ or the Makefile, and which is not a pydantic hook. The pydantic hooks are
     identified by name - `normalize_*`, `require_*`, `validate_*`, `model_*`, `parse_*` -
     plus anything declared as a property. That list is a heuristic, and the honest limit is
-    stated here: a hand-written validator with an unrelated name would still be flagged.
+    stated here: a hook registered some other way than a decorator would still be flagged.
 
     It also skips `research/`, which is deliberately reachable only from tests.
     """
@@ -1862,11 +1863,16 @@ def check_no_production_function_is_unreachable() -> Result:
         for node in ast.walk(tree):
             if not isinstance(node, ast.FunctionDef) or node.name.startswith("__"):
                 continue
+            # A decorator written as a call - `@model_validator(mode="after")` - is the call's
+            # function. Read as-is it had no name, so such validators survived only by the
+            # name-prefix heuristic below and any other name was reported as dead.
             decorators = {
-                d.attr if isinstance(d, ast.Attribute) else getattr(d, "id", "")
-                for d in node.decorator_list
+                (f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", ""))
+                for f in (d.func if isinstance(d, ast.Call) else d for d in node.decorator_list)
             }
-            if decorators & {"property", "cached_property", "validator", "field_validator"}:
+            if decorators & {
+                "property", "cached_property", "validator", "field_validator", "model_validator",
+            }:
                 continue
             if pydantic_hooks.match(node.name):
                 continue

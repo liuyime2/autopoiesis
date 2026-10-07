@@ -54,7 +54,9 @@ Transport = Callable[[str, Mapping[str, Any], int], Mapping[str, Any]]
 DECISION_INSTRUCTION = (
     "You are a paper-trading decision engine. Return exactly one JSON object with keys: "
     "symbol, action, quantity, confidence, rationale, hold_reason, override_reason. "
-    "action must be exactly one of BUY, SELL, HOLD. "
+    "action must be exactly one of BUY, SELL, HOLD, SHORT, COVER. "
+    "SELL only reduces a long you hold; SHORT opens or adds to a short and COVER buys one "
+    "back. Use SHORT or COVER only when risk_limits.shorts is not off. "
     "quantity must be the integer 0 when action is HOLD, and a positive integer otherwise. "
     "confidence must be a decimal number between 0 and 1 inclusive, written as a decimal "
     "like 0.65 and never as a percentage such as 65 and never above 1. "
@@ -490,11 +492,12 @@ class HybridDecisionEngine:
         symbol when that holding is unknown, which is the same fallback Guardian
         uses so the two cannot disagree about whether a buy fits.
         """
-        total = sum(pos.market_value for pos in snapshot.positions)
+        # Gross, as Guardian measures it: a short's negative value is exposure, not a credit.
+        total = sum(abs(pos.market_value) for pos in snapshot.positions)
         allowlist = self.risk_limits.get("allowlist")
         names = set(allowlist) if isinstance(allowlist, (list, tuple, set)) else None
         mandate = sum(
-            pos.market_value
+            abs(pos.market_value)
             for pos in snapshot.positions
             if names is None or pos.symbol in names
         )

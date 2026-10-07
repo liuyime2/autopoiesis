@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from min_agent.models import DataSnapshot, GuardianResult, StrategySpec, TradeDecision
+from min_agent.models import BROKER_SIDE, DataSnapshot, GuardianResult, StrategySpec, TradeDecision
 
 
 class Guardian:
@@ -22,6 +22,7 @@ class Guardian:
         max_account_value: float | None = None,
         min_confidence: float = 0.5,
         max_snapshot_age_seconds: int = 900,
+        shorts: str = "off",
     ):
         self.allowlist = frozenset(symbol.upper() for symbol in allowlist)
         self.max_position_value = max_position_value
@@ -31,6 +32,9 @@ class Guardian:
         self.max_account_value = max_account_value
         self.min_confidence = min_confidence
         self.max_snapshot_age_seconds = max_snapshot_age_seconds
+        #: `off` refuses SHORT and COVER; `shadow` and `paper` let them be reviewed (shadow is
+        #: enforced at the executor). See config.AgentConfig.shorts.
+        self.shorts = shorts
 
     def review(
         self,
@@ -40,6 +44,7 @@ class Guardian:
         trades_today: int = 0,
         now: datetime | None = None,
         agent_position_quantity: float | None = None,
+        agent_short_quantity: float | None = None,
     ) -> GuardianResult:
         if mode.strip().lower() != "paper":
             return GuardianResult(approved=False, reason="only paper mode is allowed")
@@ -81,6 +86,10 @@ class Guardian:
             return GuardianResult(approved=False, reason="decision confidence below minimum")
 
         order_value = decision.quantity * snapshot.last_price
+        if decision.action in {"SHORT", "COVER"}:
+            refusal = self._short_refusal(decision, snapshot, order_value, agent_short_quantity)
+            if refusal is not None:
+                return GuardianResult(approved=False, reason=refusal)
         if decision.action == "BUY":
             # The limit is named `max_position_value` and was read as bounding the
             # *position*. It did not: this test compared the order's own notional
@@ -176,11 +185,13 @@ class Guardian:
         #
         # The cap value is unchanged, and both numbers are reported so the
         # accounting stays auditable rather than merely convenient.
+        # Absolute values: a short position's market value is negative, and netting it against
+        # longs would let a short *raise* the room left for buying. Exposure is gross.
         mandate_value = sum(
-            pos.market_value for pos in snapshot.positions if pos.symbol in self.allowlist
+            abs(pos.market_value) for pos in snapshot.positions if pos.symbol in self.allowlist
         )
-        account_value = sum(pos.market_value for pos in snapshot.positions)
-        if self.max_total_exposure is not None and decision.action == "BUY":
+        account_value = sum(abs(pos.market_value) for pos in snapshot.positions)
+        if self.max_total_exposure is not None and decision.action in {"BUY", "SHORT"}:
             if mandate_value + order_value > self.max_total_exposure:
                 return GuardianResult(
                     approved=False,
@@ -190,7 +201,7 @@ class Guardian:
                         f"(allowlist symbols only; account total is {account_value:.2f})"
                     ),
                 )
-        if self.max_account_value is not None and decision.action == "BUY":
+        if self.max_account_value is not None and decision.action in {"BUY", "SHORT"}:
             if account_value + order_value > self.max_account_value:
                 return GuardianResult(
                     approved=False,
@@ -236,5 +247,56 @@ class Guardian:
             return False
         return sum(pos.quantity for pos in positions) >= quantity
 
+    def _short_refusal(
+        self,
+        decision: TradeDecision,
+        snapshot: DataSnapshot,
+        order_value: float,
+        agent_short_quantity: float | None,
+    ) -> str | None:
+        """The short-selling rule: its own limits, and nothing here relaxes another check.
+
+        A SHORT is refused while the account holds any long in the symbol. Alpaca nets long
+        and short in one account, so the sell would first liquidate that long - the owner's
+        shares, in the case that matters: the 29-share incident by another route.
+        """
+        if self.shorts not in {"shadow", "paper"}:
+            return "short selling is off (MIN_AGENT_SHORTS)"
+        held = sum(p.quantity for p in snapshot.positions if p.symbol == decision.symbol)
+        if decision.action == "SHORT":
+            if held > 0:
+                return (
+                    f"the account holds {held:g} {decision.symbol} long; a short would sell "
+                    "those shares first, so it is refused until the account is flat"
+                )
+            # Unknown agent short: the account's own short is an over-estimate, so the cap can
+            # only bind harder.
+            short_now = agent_short_quantity if agent_short_quantity is not None else max(0.0, -held)
+            resulting = (short_now + decision.quantity) * snapshot.last_price
+            if resulting > self.max_position_value:
+                return (
+                    f"this short would leave {resulting:.2f} {decision.symbol} short against a "
+                    f"max_position_value of {self.max_position_value:.2f}"
+                )
+            if snapshot.account.buying_power < order_value:
+                return "insufficient buying power to carry the short"
+            return None
+        # COVER: only what the agent itself shorted, and only if it is known.
+        if agent_short_quantity is None:
+            return (
+                f"the agent's own short in {decision.symbol} is unknown, so a COVER cannot be "
+                "bounded; refusing"
+            )
+        if decision.quantity > agent_short_quantity:
+            return (
+                f"cannot cover {decision.quantity} {decision.symbol}; the agent is short "
+                f"{agent_short_quantity:g}"
+            )
+        return None
+
     def _has_conflicting_open_order(self, snapshot: DataSnapshot, decision: TradeDecision) -> bool:
-        return any(order.symbol == decision.symbol and order.side == decision.action for order in snapshot.open_orders)
+        side = BROKER_SIDE.get(decision.action, decision.action).upper()
+        return any(
+            order.symbol == decision.symbol and order.side.upper() in {side, decision.action}
+            for order in snapshot.open_orders
+        )

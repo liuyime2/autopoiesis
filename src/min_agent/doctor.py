@@ -1195,7 +1195,7 @@ def _check_unmanaged_exposure(report: DoctorReport, config: AgentConfig, client,
     except Exception:
         equity = 0.0
     value = sum(
-        float(getattr(p, "market_value", 0.0) or 0.0) for p in unmanaged
+        abs(float(getattr(p, "market_value", 0.0) or 0.0)) for p in unmanaged
     )
     share = f" ({value / equity:.0%} of equity)" if equity else ""
     report.add(
