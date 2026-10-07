@@ -39,17 +39,35 @@ cd "$ROOT_DIR" || exit 2
 
 # Locate conda rather than assuming where it lives. The order is: an explicit
 # CONDA_BIN, then PATH, then this account's known install, then the usual suspects.
-# Previously the default was /home/liuyime2/miniconda3/bin/conda with no discovery, so
+# Previously the default was one hardcoded account's install path with no discovery, so
 # the documented fresh-clone path could not run anywhere but this host - which is the
 # portability problem the project was asked to remove, sitting in the operator's own
 # entry point.
+# The operator's configuration is loaded once, here, before anything is looked up - and it is
+# exported so subprocesses see the same values. It used to be read ~60 lines later, purely to
+# fill @ENVFILE@ into the unit templates, which meant every discovery below ran against a
+# process that had not yet seen the file: `MIN_AGENT_ENVBIN` named in the file was ignored, so a
+# host whose environment lives outside conda's default envs root could not be installed at all.
+# Values already present in the real environment win, because `set -a` re-exports an assignment
+# rather than replacing an inherited one.
+ENV_FILE="${MIN_AGENT_ENV_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env}"
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+elif [ -z "${ALPACA_API_KEY:-}" ] && [ "${MIN_AGENT_REQUIRE_CREDENTIALS:-0}" = "1" ]; then
+  echo "FATAL: no credentials at $ENV_FILE" >&2
+  exit 2
+fi
+
 CONDA_BIN="${CONDA_BIN:-$(command -v conda 2>/dev/null || true)}"
 if [ -z "$CONDA_BIN" ]; then
   for candidate in \
-      /home/liuyime2/miniconda3/bin/conda \
       /opt/conda/bin/conda \
       "$HOME/miniconda3/bin/conda" \
-      "$HOME/miniforge3/bin/conda"; do
+      "$HOME/miniforge3/bin/conda" \
+      "$HOME/anaconda3/bin/conda"; do
     if [ -x "$candidate" ]; then CONDA_BIN="$candidate"; break; fi
   done
 fi
@@ -75,43 +93,36 @@ SERVICE_NAME="min-agent.service"
 # environment if this shell is already inside it, then this account's known prefix.
 # `make install` puts the package in whatever environment is active, so an operator who
 # followed the README has one and does not need to name it.
+
 ENVBIN="${MIN_AGENT_ENVBIN:-}"
 if [ -z "$ENVBIN" ] && [ -n "${CONDA_PREFIX:-}" ] && [ -x "$CONDA_PREFIX/bin/python" ]; then
   ENVBIN="$CONDA_PREFIX/bin"
 fi
 if [ -z "$ENVBIN" ]; then
-  for candidate in /localscratch/liuyime2/conda_env/llm/bin "$HOME/miniconda3/envs/llm/bin"; do
+  # Env roots conda itself is configured to use, before the well-known install prefixes. A
+  # non-default envs directory is a normal configuration, not this account's peculiarity, and
+  # naming one account's layout here is what made a fresh clone un-runnable on any other host.
+  for root in "${CONDA_ENVS_PATH:-}" /opt/conda/envs; do
+    [ -n "$root" ] || continue
+    for name in llm base; do
+      if [ -x "$root/$name/bin/python" ]; then ENVBIN="$root/$name/bin"; break 2; fi
+    done
+  done
+fi
+if [ -z "$ENVBIN" ]; then
+  for candidate in "$HOME/miniconda3/envs/llm/bin" "$HOME/miniforge3/envs/llm/bin"; do
     if [ -x "$candidate/python" ]; then ENVBIN="$candidate"; break; fi
   done
 fi
 if [ -z "$ENVBIN" ] || [ ! -x "$ENVBIN/python" ]; then
-  echo "FATAL: no python environment found. Activate the 'llm' environment, run" >&2
-  echo "       'make install', or set MIN_AGENT_ENVBIN to its bin directory." >&2
+  echo "FATAL: no python environment found. Any of:" >&2
+  echo "  * activate the environment, or run 'make install', so CONDA_PREFIX is set" >&2
+  echo "  * set MIN_AGENT_ENVBIN to its bin directory" >&2
+  echo "  * set CONDA_ENVS_PATH if conda keeps its envs outside the default root" >&2
   exit 2
 fi
 PYTHON_BIN="$ENVBIN/python"
 # Credentials live outside the working tree so git can never see them.
-ENV_FILE="${MIN_AGENT_ENV_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env}"
-
-# And they are loaded here, not merely named. ENV_FILE was computed and then used only to
-# fill @ENVFILE@ into the unit templates, so an operator who followed the README - copy the
-# example to ~/.config/min-agent/env, fill in the keys, run ./minictrl - got "no alpaca
-# credentials" from every foreground command, and `minictrl doctor` could not report on the
-# deployment it was supposed to describe. `make` sources the same file via the Makefile's
-# ENVFILE, so the two entry points disagreed about what the configuration was.
-#
-# Sourced after the defaults above and before anything runs, so a file value wins over a
-# default, and an already-exported variable wins over both.
-if [ -f "$ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  . "$ENV_FILE"
-  set +a
-elif [ -z "${ALPACA_API_KEY:-}" ] && [ "${MIN_AGENT_REQUIRE_CREDENTIALS:-0}" = "1" ]; then
-  echo "FATAL: no credentials at $ENV_FILE" >&2
-  exit 2
-fi
-
 agent() {
   timeout "${MIN_AGENT_TIMEOUT:-180}" "$CONDA_BIN" run --no-capture-output -n llm python -m min_agent.cli "$@"
 }

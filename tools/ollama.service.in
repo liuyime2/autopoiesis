@@ -14,7 +14,7 @@ Type=exec
 ExecStart=@OLLAMA_BIN@ serve
 
 # @OLLAMA_BIN@ and @OLLAMA_MODELS@ are substituted by `minictrl install-service`. They were
-# hardcoded to /localscratch/liuyime2/ollama_local/..., and minictrl substituted only
+# hardcoded to one account's ollama_local directory, and minictrl substituted only
 # @ROOT@, @PYTHON@, @ENVBIN@ and @ENVFILE@ - so every installation on any other machine
 # received a unit pointing at a path that does not exist there, and systemd reported an
 # unstartable ollama.service. An override is honoured if set.
@@ -44,7 +44,7 @@ Environment=OLLAMA_MAX_LOADED_MODELS=1
 # device; parallel slots only split the same VRAM between contexts.
 Environment=OLLAMA_NUM_PARALLEL=1
 # Keep the model resident. Unloaded, the next call must first read ~16.3 GiB of
-# weights off /localscratch, measured at ~3 minutes of load against a 120s client
+# weights off the model store, measured at ~3 minutes of load against a 120s client
 # timeout - so an off-hours call reliably timed out, which is exactly the shape of
 # the recorded CURRICULUM_FAILED timeouts. Resident, the same call takes 10-30s.
 # -1 means "do not unload", which is what one dedicated model on a dedicated card

@@ -1058,7 +1058,7 @@ def check_type_checking_is_a_real_gate() -> Result:
 def check_unit_templates_have_no_host_paths() -> Result:
     """A `.service.in` template must not contain a path from the machine that wrote it.
 
-    `tools/ollama.service.in` carried `ExecStart=/localscratch/liuyime2/ollama_local/bin/ollama`
+    `tools/ollama.service.in` carried an `ExecStart` pointing at one account's local ollama binary
     and a matching OLLAMA_MODELS path, because that is where Ollama lives here. `minictrl`
     substituted @ROOT@, @PYTHON@, @ENVBIN@ and @ENVFILE@ but not those, so every install on
     any other machine produced a unit that systemd could not start - and the failure appears
@@ -1740,7 +1740,7 @@ def check_one_credentials_path_everywhere() -> Result:
     used `$(XDG_CONFIG_HOME)/min-agent/env`, which becomes `/min-agent/env` when
     `XDG_CONFIG_HOME` is unset; `minictrl` used `${XDG_CONFIG_HOME:-$HOME/.config}/...`;
     `configs/paper.env.example` and the operator runbook both hardcoded `~/.config/min-agent`.
-    Here `XDG_CONFIG_HOME` points at `/localscratch/liuyime2/ohome/.config` and
+    Here `XDG_CONFIG_HOME` points at a non-default directory and
     `~/.config/min-agent` does not exist - so following the example put the credentials
     somewhere nothing reads them, and the operator's first symptom would be "no credentials"
     with no indication where they had been written.
@@ -1926,6 +1926,15 @@ def check_config_example_names_are_real() -> Result:
     nothing reads is a setting they will change in the belief it took effect. The names
     are checked against config.py's own env reads plus the deployed env file's keys,
     which together are where a variable can legitimately come from.
+
+    `config.py` is not the only reader, and assuming it was made this check host-dependent
+    in the worst possible way. The env file is dual-purpose: `minictrl` sources the same file
+    before it ever calls `python -m min_agent.cli`, and reads MIN_AGENT_ENVBIN out of it to
+    find the environment's bin directory. `MIN_AGENT_ENVBIN` is set in the deployed env file
+    on this host and is absent from config.py, so documenting it made this check pass *only
+    because the env file happened to be present* - and a fresh clone, which is exactly where
+    someone reads the example, would have reported a live knob as dead and sent them to delete
+    the line that makes their install work. So `minictrl`'s executable code is a reader too.
     """
     example = ROOT / "configs" / "paper.env.example"
     if not example.exists():
@@ -1934,6 +1943,7 @@ def check_config_example_names_are_real() -> Result:
     if not names:
         return Result("config-example-names", FAIL, "no variable names found in the example")
     known = (ROOT / "src" / "min_agent" / "config.py").read_text(encoding="utf-8")
+    known += _entry_point_reads()
     env_file = Path(os.environ.get("XDG_CONFIG_HOME", "")) / "min-agent" / "env"
     if env_file.exists():
         known += env_file.read_text(encoding="utf-8")
@@ -1945,8 +1955,26 @@ def check_config_example_names_are_real() -> Result:
         )
     return Result(
         "config-example-names", PASS,
-        f"all {len(names)} variable names in the example are read by config.py or the env file",
+        f"all {len(names)} variable names in the example are read by config.py, by minictrl, "
+        "or by the env file",
     )
+
+
+def _entry_point_reads() -> str:
+    """`minictrl`'s executable code, whole-line comments dropped.
+
+    The same file documents in its header every shell knob it honours, so scanning it whole
+    would count a variable that is only described as having existed. The header is entirely
+    `#` comment lines, so dropping those is enough to make the scan mean "this code reads it".
+    Inline trailing comments are left in: minictrl's executable body is short, and excluding
+    them would need a shell tokenizer to do properly.
+    """
+    script = ROOT / "minictrl"
+    if not script.exists():
+        return ""
+    code = [line for line in script.read_text(encoding="utf-8").splitlines()
+            if not line.lstrip().startswith("#")]
+    return "\n".join(code)
 
 
 def check_docs_do_not_instruct_deleted_commands() -> Result:

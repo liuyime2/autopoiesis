@@ -237,9 +237,9 @@ back empty. Verified against the live API before changing anything.
    unit-location defect was found and fixed. The truth now:
 
    ```
-   min-agent.service       /home/liuyime2/.config/systemd/user/min-agent.service
-   ollama.service          /home/liuyime2/.config/systemd/user/ollama.service
-   quant-watchdog.timer    /home/liuyime2/.config/systemd/user/quant-watchdog.timer
+   min-agent.service       $XDG_CONFIG_HOME/systemd/user/min-agent.service
+   ollama.service          $XDG_CONFIG_HOME/systemd/user/ollama.service
+   quant-watchdog.timer    $XDG_CONFIG_HOME/systemd/user/quant-watchdog.timer
    links into tmpfs: 0
    ```
 
@@ -256,9 +256,9 @@ back empty. Verified against the live API before changing anything.
    real model. The `deepseek-r1:8b` text below predates the single-model change.
 
    ```bash
-   OLLAMA_MODELS=/localscratch/liuyime2/ollama_local/models \
+   OLLAMA_MODELS=<scratch>/ollama_local/models \
    OLLAMA_HOST=127.0.0.1:11434 CUDA_VISIBLE_DEVICES=0 \
-     /localscratch/liuyime2/ollama_local/bin/ollama serve
+     <scratch>/ollama_local/bin/ollama serve
    ```
 
 ## The only success criterion
@@ -305,7 +305,7 @@ rotation, not a bug, but it means a new capability takes roughly 90 minutes of
 5-minute cycles to be exercised.
 
 **The systemd units are now reboot-persistent.** They live in
-`/home/liuyime2/.config/systemd/user`, which exists and holds the enablement
+`$XDG_CONFIG_HOME/systemd/user`, which exists and holds the enablement
 symlinks; `min-agent.service`, `quant-watchdog.service` and `quant-watchdog.timer`
 are all `enabled` with FragmentPath under that durable directory. This paragraph used
 to say the opposite - that they were confined to `/run/user/$UID` and needed `$HOME`

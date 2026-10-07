@@ -17,7 +17,9 @@ import pytest
 from min_agent.config import AgentConfig
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "min_agent"
+REPO = Path(__file__).resolve().parents[2]
 CONFIG_PY = SRC / "config.py"
+OPERATOR_ENTRY_POINT = REPO / "minictrl"
 PRODUCTION = "\n".join(
     p.read_text() for p in sorted(SRC.glob("*.py")) if p.name != "config.py"
 )
@@ -26,9 +28,36 @@ CONFIG_SRC = CONFIG_PY.read_text()
 FIELDS = [f.name for f in dataclasses.fields(AgentConfig)]
 
 
+def _entry_point_reads() -> str:
+    """`minictrl`'s executable code, whole-line comments dropped.
+
+    The env file is dual-purpose: `minictrl` sources the same file the loader reads and then
+    does its own shell work before it ever invokes `python -m min_agent.cli`. MIN_AGENT_ENVBIN
+    is the live case - it names the environment's bin directory and nothing in Python reads it.
+
+    Scanning the file whole would be worthless, because its header documents every shell knob
+    it honours and a docstring is not a read; the header is entirely `#` lines, so dropping
+    those makes the scan mean "this code reads it".
+    """
+    code = [
+        line
+        for line in OPERATOR_ENTRY_POINT.read_text().splitlines()
+        if not line.lstrip().startswith("#")
+    ]
+    return "\n".join(code)
+
+
 def _env_vars_read() -> set[str]:
-    """Every MIN_AGENT_* variable the loader looks at."""
-    return set(re.findall(r"MIN_AGENT_[A-Z0-9_]+", CONFIG_SRC))
+    """Every MIN_AGENT_* variable an operator's env file can actually be consumed by.
+
+    Two readers, not one. Scanning only `config.py` reported MIN_AGENT_ENVBIN as a dead knob
+    on a host where it is the reason `minictrl install-service` finds the environment at all -
+    the same "looks configurable, does nothing" failure this file exists to catch, pointed the
+    other way, and the obvious response to a red gate of that kind is to delete the line from
+    the env file and break the install. The sibling gate `tools/verify.py::
+    check_config_example_names_are_real` had the same blind spot in the other direction.
+    """
+    return set(re.findall(r"MIN_AGENT_[A-Z0-9_]+", CONFIG_SRC + _entry_point_reads()))
 
 
 def _env_vars_in_the_shipped_config() -> set[str]:
@@ -79,7 +108,7 @@ def test_every_operator_knob_is_actually_read_by_the_loader():
     configured = _env_vars_in_the_shipped_config()
     unknown = sorted(configured - read)
     assert not unknown, (
-        f"set in the runtime env but never read by the loader: {unknown}. "
+        f"set in the runtime env but read by neither config.py nor minictrl: {unknown}. "
         "Either wire them up or remove them - an ignored setting is worse than "
         "an absent one, because it looks like it is working"
     )

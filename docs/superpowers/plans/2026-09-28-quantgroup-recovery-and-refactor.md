@@ -3,7 +3,7 @@
 Date: 2026-09-28
 Status: **SUPERSEDED — do not work from this document.**
 Baseline commit for rollback: `4092bc4`
-Scope: `/localscratch/liuyime2/QuantGroup`
+Scope: `<repo-root>`
 
 > **This plan is kept as a historical record only.** Its header said "Awaiting
 > approval - no source file has been modified yet", which stopped being true
@@ -240,7 +240,7 @@ Each phase ends with a **verification gate**. Phases 0–2 are the blockers.
 ### Phase 0 — Baseline & hygiene (done / trivial remainder)
 - [x] `git init` + `.gitignore` + baseline commit `4092bc4` *(rollback point)*
 - [ ] `pytest.ini`: add `testpaths = tests` so root `test_alpaca.py` stops being collected
-- [ ] Move `history_version/` → `/localscratch/liuyime2/_archive_QuantGroup/` (reversible `mv`)
+- [ ] Move `history_version/` → `<scratch>/_archive_QuantGroup/` (reversible `mv`)
 - [ ] Delete `screenlog.0` (8.8 MB of unrelated ANSI garbage)
 - [ ] Restore `skill_library/{knowledge,skills}.json` from `.bak`
 - [ ] Delete orphan `engine.pid` / `ollama.pid`; unlink the `engine.log` symlink
@@ -381,8 +381,8 @@ One full paper session must produce, verified from the journal:
 ## 7. Verification Commands
 
 ```bash
-export PATH=/home/liuyime2/miniconda3/bin:$PATH
-cd /localscratch/liuyime2/QuantGroup
+export PATH=$HOME/miniconda3/bin:$PATH
+cd <repo-root>
 export PYTHONPATH=src
 
 # unit + regression suite (must stay green throughout)
