@@ -426,10 +426,47 @@ class HybridDecisionEngine:
             tuple(a.artifact_id for a in offered if a not in shown),
         )
         context["lessons"] = [a.summary for a in shown]
+        self._fit_rule_to_limits(context)
         market = self._market(snapshot)
         if market is not None:
             context["market"] = market
         return context
+
+    def _fit_rule_to_limits(self, context: dict[str, Any]) -> None:
+        """Size the rule's BUY to what the Guardian would allow, before the model sees it.
+
+        The rule caps an entry by its own order notional and knows nothing of the position
+        already held, so on 2026-10-07 it proposed BUY on 39 of 43 paired cycles while the
+        position cap left no room - and the model, correctly, overrode every one. Scored as
+        pairs, those overrides credited the model with refusing orders that could never have
+        filled. The exposure block holds the Guardian's own arithmetic, so the rule is held
+        to it here: a BUY is cut to `shares_you_may_buy`, and with no room, or with an
+        exposure limit already binding, it becomes HOLD. The rule's action is then what it
+        could actually have done, which is the only fair thing to pair the model against.
+        """
+        rule = self._rule_decision
+        exposure = context.get("exposure") or {}
+        if rule is None or rule.action != "BUY" or not isinstance(exposure, Mapping):
+            return
+        room = exposure.get("shares_you_may_buy")
+        blocked = bool(exposure.get("buy_blocked_by_exposure_limit")) or bool(
+            exposure.get("buy_blocked_by_account_limit")
+        )
+        if not isinstance(room, int) or (room >= rule.quantity and not blocked):
+            return
+        if room > 0 and not blocked:
+            fitted = rule.model_copy(update={
+                "quantity": room,
+                "rationale": f"{rule.rationale} | cut to {room} by the position limit",
+            })
+        else:
+            fitted = TradeDecision(
+                symbol=rule.symbol, action="HOLD", quantity=0, confidence=rule.confidence,
+                rationale=f"{rule.rationale} | no room under the position or exposure limit",
+                strategy_id=rule.strategy_id, hold_reason="risk_limit_near",
+            )
+        self._rule_decision = fitted
+        context["rule_decision"] = {"action": fitted.action, "quantity": fitted.quantity}
 
     def _prices_before(self, snapshot: DataSnapshot) -> list[float]:
         """Earlier prices for a RULE strategy; empty without history, never invented."""
