@@ -367,3 +367,100 @@ def test_a_result_survives_the_journal_round_trip():
     back = OfflineValidationResult.from_payload("s", original.to_payload(), "evt")
     assert back == original
     assert back.correct_outcome_ratio == 0.5
+
+
+def _dr(i, action, verdict, day):
+    from min_agent.offline_validation import DecisionRecord
+
+    return DecisionRecord(cycle_id=f"c{i:03d}", action=action, verdict=verdict,
+                          net_return_pct=0.0, day=day)
+
+
+def test_day_direction_is_the_share_of_outcomes_that_went_up():
+    from min_agent.offline_validation import day_direction
+
+    class _E:
+        def __init__(self, rows):
+            self.payload = {"rows": rows}
+
+    rows = [
+        {"cycle_id": "a", "action": "BUY", "verdict": "GOOD_TRADE", "decided_at": "2026-09-29T14:00:00"},
+        {"cycle_id": "b", "action": "HOLD", "verdict": "MISSED_ALPHA", "decided_at": "2026-09-29T15:00:00"},
+        {"cycle_id": "c", "action": "SELL", "verdict": "GOOD_TRADE", "decided_at": "2026-09-30T15:00:00"},
+        {"cycle_id": "d", "action": "HOLD", "verdict": "NEUTRAL", "decided_at": "2026-09-30T16:00:00"},
+    ]
+    # a stale row for `a` earlier in the journal must be superseded, not double counted
+    stale = [{"cycle_id": "a", "action": "BUY", "verdict": "FALSE_TRADE", "decided_at": "2026-09-29T14:00:00"}]
+    assert day_direction([_E(stale), _E(rows)]) == {"2026-09-29": 1.0, "2026-09-30": 0.0}
+
+
+def test_a_seller_on_rising_days_is_not_rejected_for_the_market():
+    """0 of 15 sells right, all on days every seller lost: that is the days, not the rule.
+
+    fixed-size-sell-20260724-001 was rejected exactly so under the raw gate.
+    """
+    from min_agent.offline_validation import REJECT_POOR_DECISIONS, validate
+
+    days = ["2026-10-01"] * 8 + ["2026-10-05"] * 7
+    decisions = [_dr(i, "SELL", "FALSE_TRADE", d) for i, d in enumerate(days)]
+    raw = validate(decisions, strategy_id="s")
+    adjusted = validate(decisions, strategy_id="s", day_up={"2026-10-01": 0.9, "2026-10-05": 0.9})
+    assert raw.verdict == REJECT_POOR_DECISIONS
+    assert adjusted.verdict != REJECT_POOR_DECISIONS
+    assert adjusted.day_margin == -0.1
+
+
+def test_doing_much_worse_than_the_days_is_still_rejected():
+    from min_agent.offline_validation import REJECT_POOR_DECISIONS, validate
+
+    # mixed days: a direction-blind BUY is right half the time; this one is never right
+    days = ["2026-10-01"] * 10 + ["2026-10-02"] * 10
+    decisions = [_dr(i, "BUY", "FALSE_TRADE", d) for i, d in enumerate(days)]
+    result = validate(decisions, strategy_id="s", day_up={"2026-10-01": 0.5, "2026-10-02": 0.5})
+    assert result.verdict == REJECT_POOR_DECISIONS
+    assert result.day_margin == -0.5
+    assert result.day_margin < -2 * result.day_margin_se
+
+
+def test_slightly_below_the_days_is_noise_not_a_rejection():
+    from min_agent.offline_validation import INCONCLUSIVE, validate
+
+    days = ["2026-10-01"] * 10 + ["2026-10-02"] * 10
+    verdicts = ["GOOD_TRADE"] * 9 + ["FALSE_TRADE"] * 11
+    decisions = [_dr(i, "BUY", v, d) for i, (v, d) in enumerate(zip(verdicts, days, strict=True))]
+    result = validate(decisions, strategy_id="s", day_up={"2026-10-01": 0.5, "2026-10-02": 0.5})
+    assert result.verdict == INCONCLUSIVE
+    assert -2 * result.day_margin_se < result.day_margin < 0
+
+
+def test_a_decision_without_a_day_keeps_the_raw_gate():
+    """Rows journalled before they carried a decision time cannot be read against a day."""
+    from min_agent.offline_validation import validate
+
+    decisions = [_dr(i, "SELL", "FALSE_TRADE", None) for i in range(12)]
+    result = validate(decisions, strategy_id="s", day_up={"2026-10-01": 1.0})
+    assert result.verdict == "REJECT_POOR_DECISIONS"
+    assert result.day_margin is None
+
+
+def test_one_day_is_enough_because_the_base_rate_is_every_strategy_s():
+    from min_agent.offline_validation import PASS_SCREENED, validate
+
+    decisions = [_dr(i, "BUY", "GOOD_TRADE" if i % 2 else "FALSE_TRADE", "2026-10-02") for i in range(12)]
+    result = validate(decisions, strategy_id="s", day_up={"2026-10-02": 0.4})
+    assert result.verdict == PASS_SCREENED
+    assert result.day_margin > 0
+
+
+def test_days_that_decided_every_outcome_neither_pass_nor_reject():
+    """fixed-size-sell-20260724-001: 15 sells on 2026-10-05, a day every graded outcome was up.
+
+    The raw gate rejected it; a margin of zero with zero variance would pass it. Neither is
+    supported - the day decided all fifteen outcomes.
+    """
+    from min_agent.offline_validation import INCONCLUSIVE, validate
+
+    decisions = [_dr(i, "SELL", "FALSE_TRADE", "2026-10-05") for i in range(15)]
+    result = validate(decisions, strategy_id="s", day_up={"2026-10-05": 1.0})
+    assert result.verdict == INCONCLUSIVE
+    assert result.day_margin_se == 0.0

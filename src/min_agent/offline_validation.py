@@ -76,6 +76,9 @@ class DecisionRecord:
     action: str
     verdict: str
     net_return_pct: float | None
+    #: The trading day the decision was made on, ISO date. None for a row recorded before
+    #: rows carried a decision time.
+    day: str | None = None
 
 
 @dataclass
@@ -92,6 +95,14 @@ class OfflineValidationResult:
     neutral: int = 0
     good_hold_ratio: float | None = None
     mean_net_pct: float | None = None
+    #: What a decision of the same action on the same days would have scored on average,
+    #: from the day's direction alone - see `day_direction`. None when a scored decision has
+    #: no day or no base rate, which leaves the raw gate in force.
+    expected_ratio: float | None = None
+    #: `correct_outcome_ratio - expected_ratio`: skill beyond what the market handed out.
+    day_margin: float | None = None
+    #: Standard error of `day_margin` under "no skill", for the rejection threshold.
+    day_margin_se: float | None = None
     cycles: list[str] = field(default_factory=list)
 
     @property
@@ -128,6 +139,9 @@ class OfflineValidationResult:
             "neutral": self.neutral,
             "good_hold_ratio": self.good_hold_ratio,
             "mean_net_pct": self.mean_net_pct,
+            "expected_ratio": self.expected_ratio,
+            "day_margin": self.day_margin,
+            "day_margin_se": self.day_margin_se,
         }
 
     @classmethod
@@ -154,6 +168,9 @@ class OfflineValidationResult:
             neutral=count("neutral"),
             good_hold_ratio=coerce.field_float(payload.get("good_hold_ratio"), f"{where}.good_hold_ratio"),
             mean_net_pct=coerce.field_float(payload.get("mean_net_pct"), f"{where}.mean_net_pct"),
+            expected_ratio=coerce.field_float(payload.get("expected_ratio"), f"{where}.expected_ratio"),
+            day_margin=coerce.field_float(payload.get("day_margin"), f"{where}.day_margin"),
+            day_margin_se=coerce.field_float(payload.get("day_margin_se"), f"{where}.day_margin_se"),
         )
 
 
@@ -176,13 +193,59 @@ def collect_decisions(
             cycle_id = coerce.field_str(row.get("cycle_id"), "row.cycle_id")
             if not cycle_id:
                 continue
+            decided_at = row.get("decided_at")
             latest[cycle_id] = DecisionRecord(
                 cycle_id=cycle_id,
                 action=coerce.field_str(row.get("action"), "row.action"),
                 verdict=coerce.field_str(row.get("verdict"), "row.verdict"),
                 net_return_pct=coerce.field_float(row.get("net_return_pct"), "row.net_return_pct"),
+                day=str(decided_at)[:10] if decided_at else None,
             )
     return [latest[key] for key in sorted(latest)]
+
+
+#: (action, verdict) pairs that say the price went up after the decision, net of cost.
+_UP = frozenset({("BUY", GOOD_TRADE), ("SELL", FALSE_TRADE), ("HOLD", MISSED_ALPHA)})
+#: Pairs that say it went down.
+_DOWN = frozenset({("BUY", FALSE_TRADE), ("SELL", GOOD_TRADE), ("HOLD", GOOD_HOLD)})
+
+
+def day_direction(counterfactual_events: Iterable[object]) -> dict[str, float]:
+    """Per trading day, the share of graded outcomes - across every strategy - in which the
+    price rose after the decision.
+
+    Every verdict is a one-share probe over the next 24 hours, so on a day the market rose
+    every BUY is right and every HOLD and SELL wrong, whoever made it. Measured on the live
+    journal on 2026-10-07: on 9 of 13 days this share was 0.0-0.04 or 0.98-1.0, and each
+    strategy's raw ratio sat within about 0.12 of what its days alone predicted. A raw
+    ratio is therefore mostly a record of which days a strategy happened to trade on; this
+    is the base rate it has to be read against. Latest row per cycle, as in
+    `collect_decisions`.
+    """
+    latest: dict[str, tuple[str, str, str]] = {}
+    for event in counterfactual_events:
+        payload = coerce.field_dict(coerce.field_of(event, "payload"), "event.payload")
+        for row in coerce.field_dict_tuple(payload.get("rows"), "payload.rows"):
+            cycle_id = coerce.field_str(row.get("cycle_id"), "row.cycle_id")
+            decided_at = row.get("decided_at")
+            if cycle_id and decided_at:
+                latest[cycle_id] = (
+                    str(decided_at)[:10],
+                    coerce.field_str(row.get("action"), "row.action"),
+                    coerce.field_str(row.get("verdict"), "row.verdict"),
+                )
+    totals: dict[str, list[int]] = {}
+    for day, action, verdict in latest.values():
+        if (action, verdict) in _UP or (action, verdict) in _DOWN:
+            entry = totals.setdefault(day, [0, 0])
+            entry[0] += 1
+            entry[1] += 1 if (action, verdict) in _UP else 0
+    return {day: up / total for day, (total, up) in totals.items()}
+
+
+def _expected_correct(action: str, p_up: float) -> float:
+    """How often a decision with no skill is right on a day whose up-share is `p_up`."""
+    return p_up if action == "BUY" else 1.0 - p_up
 
 
 def validate(
@@ -191,8 +254,15 @@ def validate(
     strategy_id: str,
     min_scored: int = DEFAULT_MIN_SCORED_DECISIONS,
     min_good_hold_ratio: float = DEFAULT_MIN_GOOD_HOLD_RATIO,
+    day_up: dict[str, float] | None = None,
 ) -> OfflineValidationResult:
     """Screen a candidate on the decisions it has actually produced.
+
+    With `day_up` (see `day_direction`) covering every day the strategy was scored on, the
+    gate reads skill beyond the day rather than the raw ratio: PASS when the strategy did at
+    least as well as a decision of the same action on the same days would have by default,
+    REJECT only when it did worse by more than two standard errors, INCONCLUSIVE between.
+    Otherwise the raw-ratio gate applies, and the reason says so.
 
     Scored means the counterfactual reached a verdict: a hold before a fall, a hold
     before a rally, or a filled order that lost. PENDING and GAP rows are excluded
@@ -271,6 +341,13 @@ def validate(
     # exactly "correct-outcome ratio >= 0.5", which is the sentence the code already
     # claimed to implement.
     result.good_hold_ratio = round(result.good_holds / result.scored, 6)
+
+    # Every scored decision needs its day's base rate. One day is enough: the base rate is
+    # computed over every strategy's outcomes that day, not this strategy's alone, so it is
+    # not the strategy measured against itself.
+    if day_up is not None and all(d.day in day_up for d in scored):
+        return _day_adjusted_verdict(result, scored, day_up)
+
     if result.correct_outcome_ratio < min_good_hold_ratio:
         result.verdict = REJECT_POOR_DECISIONS
         lost = (
@@ -293,4 +370,39 @@ def validate(
         f"{result.correct_outcomes} of {result.scored} scored decisions went the right "
         f"way ({holds}{trades}) and none were losing trades; a screen, not a promotion"
     )
+    return result
+
+
+def _day_adjusted_verdict(
+    result: OfflineValidationResult,
+    scored: list[DecisionRecord],
+    day_up: dict[str, float],
+) -> OfflineValidationResult:
+    expectations = [_expected_correct(d.action, day_up[d.day or ""]) for d in scored]
+    n = len(scored)
+    expected = sum(expectations) / n
+    margin = result.correct_outcome_ratio - expected
+    se = (sum(p * (1.0 - p) for p in expectations) ** 0.5) / n
+    result.expected_ratio = round(expected, 6)
+    result.day_margin = round(margin, 6)
+    result.day_margin_se = round(se, 6)
+    summary = (
+        f"{result.correct_outcomes} of {result.scored} right against {expected * result.scored:.1f} "
+        f"expected from the days alone (margin {margin:+.3f}, se {se:.3f})"
+    )
+    if se == 0.0:
+        # Every decision fell on days that went entirely one way, so the days decided every
+        # outcome and the record says nothing about the rule. Not a pass: passing on this
+        # would promote a strategy for having traded on the right days.
+        result.reason = f"{summary}: the days decided every outcome, so this says nothing"
+    elif margin < -2.0 * se:
+        result.verdict = REJECT_POOR_DECISIONS
+        result.reason = f"{summary}: worse than its days by more than two standard errors"
+    elif margin >= 0:
+        result.verdict = PASS_SCREENED
+        result.reason = f"{summary}: no worse than its days; a screen, not a promotion"
+    else:
+        result.reason = (
+            f"{summary}: below its days but within noise, so neither a pass nor a rejection"
+        )
     return result

@@ -352,7 +352,9 @@ class AgentDaemon:
                 payload={"error_type": type(exc).__name__},
             )
 
-    def _screen_candidate(self, strategy_id: str, *, _events=None, _latest_payloads=None) -> None:
+    def _screen_candidate(
+        self, strategy_id: str, *, _events=None, _latest_payloads=None, _day_up=None
+    ) -> None:
         """Screen a candidate on the decisions it has actually produced.
 
         Read from the journalled counterfactual verdicts, so this cannot disagree
@@ -382,7 +384,9 @@ class AgentDaemon:
                 if _events is None else _events,
                 strategy_id,
             )
-            result = offline_validation.validate(decisions, strategy_id=strategy_id)
+            result = offline_validation.validate(
+                decisions, strategy_id=strategy_id, day_up=_day_up
+            )
         except Exception as exc:
             self._append_event(
                 "OFFLINE_VALIDATION_COMPLETED",
@@ -474,11 +478,14 @@ class AgentDaemon:
             if _validation is not None
             else None
         )
+        # Once per pass, over every strategy's rows: the base rate each screen is read against.
+        day_up = offline_validation.day_direction(events)
         for spec in self.strategy_library.list():
             if spec.lifecycle in {"RETIRED"}:
                 continue
             self._screen_candidate(
-                spec.strategy_id, _events=events, _latest_payloads=latest_payloads
+                spec.strategy_id, _events=events, _latest_payloads=latest_payloads,
+                _day_up=day_up,
             )
 
     def _recorded_counterfactual_verdicts(self, events) -> dict[str, str]:
