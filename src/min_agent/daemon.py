@@ -26,6 +26,7 @@ from min_agent.fill_reconciler import FILL_EVENT, FillReconciler
 from min_agent.health import HealthMonitor
 from min_agent.journal import JsonlJournal
 from min_agent.knowledge_admission import KnowledgeAdmission
+from min_agent.knowledge_library import lesson_effects
 from min_agent.models import (
     BrokerEvidenceBatch,
     DaemonStatus,
@@ -145,6 +146,8 @@ class AgentDaemon:
         #: Events appended by this process, cleared at the start of every maintenance pass so
         #: it holds one pass's worth; see `_appended_since`.
         self._appended: list[JournalEvent] = []
+        #: The counterfactual report this pass computed, reused rather than recomputed.
+        self._last_counterfactual_report: counterfactual.CounterfactualReport | None = None
         self.last_evidence_at: datetime | None = None
         self.last_reflection_at: datetime | None = None
         self.last_curriculum_at: datetime | None = None
@@ -547,6 +550,7 @@ class AgentDaemon:
                 payload={"status": "failed"},
             )
             return
+        self._last_counterfactual_report = report
         if not report.rows:
             return
         recorded = self._recorded_counterfactual_verdicts(_events)
@@ -805,6 +809,7 @@ class AgentDaemon:
                 *self._appended_since(mark, "COUNTERFACTUAL_EVALUATED"),
             ]
             self._record_calibration_lesson()
+            self._retire_lessons_without_effect()
             mark = len(self._appended)
             self._screen_all_strategies(
                 _events=counterfactual_events, _validation=validation_events
@@ -1286,6 +1291,38 @@ class AgentDaemon:
         decisions.extend(self._reconsider_paused(results, evidence))
         for decision in decisions:
             self._apply_lifecycle_decision(decision)
+
+    def _retire_lessons_without_effect(self) -> None:
+        """Take a lesson out of the prompt once the ablation shows it changes nothing.
+
+        Each lesson is shown on half of cycles (`HybridDecisionEngine._show_lesson`). After it
+        has been both shown and withheld on `LESSON_EFFECT_MIN_DAYS` trading days and enough
+        paired decisions in each arm, a lesson whose effect on the model's override value is
+        inside one standard error of zero is RETIRED: it costs prompt on every cycle and has
+        not been shown to buy anything. Retired, not deleted - its sources stay on disk.
+        Inert until that much ablated data exists.
+        """
+        report = self._last_counterfactual_report
+        if self.journal is None or self.knowledge_admission is None or report is None:
+            return
+        library = self.knowledge_admission.knowledge_library
+        effects = lesson_effects(self.journal.read_all(), report.rows)
+        for artifact in library.list(status="ACCEPTED"):
+            effect = effects.get(artifact.artifact_id)
+            if artifact.artifact_type != "LESSON" or effect is None or not effect.without_effect:
+                continue
+            reason = (
+                f"no measurable effect: shown {effect.shown}, withheld {effect.withheld} over "
+                f"{effect.days} trading days; effect {effect.effect:+.4f} within one se "
+                f"({effect.se:.4f}) of zero"
+            )
+            library.save(artifact.model_copy(update={"status": "RETIRED"}))
+            self._append_event(
+                "KNOWLEDGE_ARTIFACT_ADMISSION_REVIEWED", status="REJECTED", message=reason,
+                payload={"artifact_id": artifact.artifact_id, "phase": "retired_without_effect",
+                         "shown": effect.shown, "withheld": effect.withheld,
+                         "effect": effect.effect, "se": effect.se},
+            )
 
     def _apply_lifecycle_decision(self, decision) -> None:
         if self.strategy_library is None:

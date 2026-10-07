@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from min_agent.doctor import DoctorReport, _check_knowledge_value
 from min_agent.knowledge_library import KnowledgeLibrary
 from min_agent.models import KnowledgeArtifact
@@ -175,3 +177,50 @@ def test_admitting_a_newer_figure_retires_the_older_copy_without_deleting_it(tmp
     assert KnowledgeAdmission(knowledge_library=library).admit(fresh).accepted
     assert library.try_load("old").status == "RETIRED", "superseded, and kept with its refs"
     assert library.try_load("new").status == "ACCEPTED"
+
+
+def _ablated(n_days, shown_value, withheld_value, per_day=4, jitter=0.01):
+    """Paired LLM decisions over `n_days`, half showing lesson L and half withholding it."""
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+
+    records, rows = [], []
+    t0 = datetime(2026, 10, 1, 14, tzinfo=timezone.utc)
+    for d in range(n_days):
+        for k in range(per_day * 2):
+            shown = k % 2 == 0
+            cid = f"d{d}k{k}"
+            value = (shown_value if shown else withheld_value) + (jitter if k % 4 < 2 else -jitter)
+            records.append(SimpleNamespace(
+                cycle_id=cid,
+                snapshot=SimpleNamespace(timestamp=t0 + timedelta(days=d, minutes=5 * k)),
+                decision=SimpleNamespace(decision_source="llm",
+                                         lesson_ids=("L",) if shown else (),
+                                         lessons_withheld=() if shown else ("L",)),
+            ))
+            rows.append(SimpleNamespace(cycle_id=cid, override_value_pct=value))
+    return records, rows
+
+
+def test_a_lesson_s_effect_is_the_difference_between_its_two_arms():
+    from min_agent.knowledge_library import lesson_effects
+
+    effect = lesson_effects(*_ablated(10, 0.30, 0.10))["L"]
+    assert (effect.shown, effect.withheld, effect.days) == (40, 40, 10)
+    assert effect.effect == pytest.approx(0.20)
+    assert effect.judgeable and not effect.without_effect
+
+
+def test_no_difference_after_enough_days_is_without_effect():
+    from min_agent.knowledge_library import lesson_effects
+
+    effect = lesson_effects(*_ablated(10, 0.10, 0.10, jitter=0.2))["L"]
+    assert effect.without_effect
+
+
+def test_too_few_days_is_never_judged():
+    """Inert until the ablation has run its course: no lesson is retired on a week of data."""
+    from min_agent.knowledge_library import lesson_effects
+
+    effect = lesson_effects(*_ablated(5, 0.10, 0.10, per_day=10, jitter=0.2))["L"]
+    assert not effect.judgeable and not effect.without_effect
