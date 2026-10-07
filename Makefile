@@ -66,7 +66,7 @@ export
 endif
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install check lint type test smoke smoke-offline fast fast-no-broker \
+.PHONY: help setup install check lint type test smoke smoke-offline fast fast-no-broker daily-report benchmark \
         verify verify-self-test doctor audit integrity classes classes-list \
         run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc
 
@@ -124,6 +124,11 @@ doctor:
 # The falsifiable target the whole project is measured against. No credentials needed.
 benchmark:
 	@$(PY) tools/benchmark.py
+
+# One trading day's validation report: did it start at the open, who decided, where the model
+# overrode the rule and why, shorts, and the benchmark. Reads only. DATE=YYYY-MM-DD for another day.
+daily-report:
+	@$(PY) tools/daily_report.py $(if $(DATE),--date $(DATE),)
 
 audit:
 	@$(PY) tools/audit_defects.py

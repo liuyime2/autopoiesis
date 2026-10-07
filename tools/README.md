@@ -118,6 +118,24 @@ current verdict; this file does not repeat a number that moves. It also prints t
 the journal holds 16 trading days and a 60-day window over a 16-day record is a division that
 hides the denominator.
 
+## The daily validation report — `daily_report.py`
+
+```
+make daily-report            # today, New York time
+make daily-report DATE=2026-10-07
+```
+
+Run after every weekday close, at 16:30 New York time, by the timer installed from
+`report.timer` and `report.service.in`. It reads the journal and runs doctor without the broker - it places and
+reads no order - and writes `runtime/min_agent/reports/<date>.txt`:
+
+- the day's first and last cycle, which is how a missed open shows up;
+- decisions by source, action and execution result;
+- each departure from the strategy's rule, with the model's stated reason;
+- SHORT/COVER decisions and the Guardian's verdict on each (shorts run in shadow);
+- the validation lines from doctor (`llm vs rule`, `pnl vs holding`, `pnl attribution`,
+  `decision quality`) and the benchmark verdict.
+
 ## Runtime inspection
 
 **`check_runtime_integrity.py`** reconciles the journal against the strategy library and
