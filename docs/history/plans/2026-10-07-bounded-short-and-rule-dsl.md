@@ -1,7 +1,7 @@
 # Bounded short selling and a rule DSL
 
 Date: 2026-10-07
-Status: **IN PROGRESS** — written before any code, per `AGENTS.md` §4
+Status: **BUILT; rollout at step 1 (shadow)** — written before any code, per `AGENTS.md` §4; outcome below
 Baseline commit: `ad595fe` (HEAD before this work)
 Authorised: the operator chose short selling and the DSL on 2026-10-06 ("做空 / 策略 DSL").
 
@@ -74,3 +74,19 @@ symbols outside the allowlist, and live trading.
 ## Rollback
 
 `MIN_AGENT_SHORTS=off` (the default) restores today's behaviour without a code change.
+
+## Outcome (2026-10-07)
+
+| Step | Commit | Result |
+| --- | --- | --- |
+| Actions and the Guardian rule | `Add SHORT and COVER behind a Guardian rule…` | 18 tests, one per refusal path. Found and fixed on the way: `PositionSnapshot.market_value >= 0` would have failed every snapshot after the first real short |
+| Ledger | `Book short lots in the ledger…` | live record unchanged: +757.95 over 47 lots and 29 unmatched shares, before and after |
+| Counterfactual and backtest | `Grade and backtest shorts…` | falsifier refuted: on a 40-bar downtrend TREND_FOLLOW earns 0 long-only and a positive net with shorts |
+| Rule DSL | `Add a RULE strategy kind…` | 16 tests; one signal function shared by executor, selector probe and backtest |
+| Rollout | operator env file, not the repository | `MIN_AGENT_SHORTS=shadow` set and the daemon restarted on 2026-10-07 |
+
+**Not yet done, and why it cannot be done today.** The switch to `paper` is gated on a session
+with SHORT intents and no new doctor failures. No SHORT can be approved on this account until
+it is flat: it holds 6 SPY, and the Guardian refuses a short against any long. The switch is
+therefore an operator decision to be taken on evidence, by setting `MIN_AGENT_SHORTS=paper` in
+the env file once `minictrl doctor` and the journal show SHORT decisions reviewed in shadow.
