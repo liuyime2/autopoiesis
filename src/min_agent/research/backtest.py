@@ -39,10 +39,9 @@ Rules implemented, matching what the models actually validate:
 * ``HOLD_BASELINE`` - never trades. The control: if this cannot be beaten, the
   backtest is measuring noise.
 * ``FIXED_SIZE`` - trades `quantity` on `action`` whenever the bar is tradable.
-  The engine is **long-only**, matching the production executor: a SELL closes an
-  existing long and never opens a short. A SELL-only strategy therefore produces no
-  trades at all here, which is the honest reading - it is not a strategy this system
-  can hold, and pretending otherwise would flatter it with a short it cannot take.
+  Long-only unless ``allow_short``, matching production, where shorts are gated by
+  ``MIN_AGENT_SHORTS``: without it a SELL closes an existing long and never opens a short,
+  so a SELL-only strategy produces no trades, and with it SHORT opens and COVER closes.
   A BUY rule fires every bar, so its backtest is a buy-and-hold comparison, not
   evidence of skill.
 * ``TREND_FOLLOW`` - acts when the price has moved `threshold_pct` away from
@@ -160,7 +159,7 @@ class BacktestResult:
 
 
 def _rule(
-    kind: str, parameters: dict
+    kind: str, parameters: dict, allow_short: bool = False
 ) -> Callable[[Sequence[Bar], int], RuleDecision] | str:
     """Build a pure rule for `kind`, or return a reason it cannot be executed.
 
@@ -177,8 +176,8 @@ def _rule(
 
     if kind == KIND_FIXED_SIZE:
         action = str(parameters.get("action", "BUY")).upper()
-        if action not in {"BUY", "SELL"}:
-            return f"FIXED_SIZE action {action!r} is not BUY or SELL"
+        if action not in {"BUY", "SELL", "SHORT", "COVER"}:
+            return f"FIXED_SIZE action {action!r} is not BUY, SELL, SHORT or COVER"
         quantity = int(parameters.get("quantity", 0) or 0)
         if quantity <= 0:
             return "FIXED_SIZE quantity must be positive"
@@ -221,12 +220,25 @@ def _rule(
         # A rise above the threshold is the strategy's BUY condition; a fall is its
         # SELL condition. Mirroring that is what makes the rule directional rather
         # than a constant notional bet.
-        fired_action = "BUY" if move > 0 else "SELL"
+        # With shorts allowed, the down condition opens a short rather than only closing a
+        # long: the rule otherwise earns exactly 0 on a falling market by construction.
+        fired_action = "BUY" if move > 0 else ("SHORT" if allow_short else "SELL")
         return RuleDecision(
             bars[i].timestamp, fired_action, quantity, price,
             f"move {move:+.4f} cleared threshold {threshold:.4f}",
         )
     return trend
+
+
+def _close(
+    position: int, entry_price: float, price: float, slippage_pct: float, commission_pct: float
+) -> tuple[float, float]:
+    """Gross PnL and cost of closing `position` (signed) opened at `entry_price`."""
+    direction = 1 if position > 0 else -1
+    exit_price = price * (1 - direction * slippage_pct / 100.0)
+    quantity = abs(position)
+    cost = quantity * exit_price * commission_pct / 100.0
+    return direction * (exit_price - entry_price) * quantity, cost
 
 
 def _max_drawdown(equity: list[float]) -> float:
@@ -247,6 +259,7 @@ def run_backtest(
     parameters: dict,
     commission_pct: float = DEFAULT_COMMISSION_PCT,
     slippage_pct: float = DEFAULT_SLIPPAGE_PCT,
+    allow_short: bool = False,
 ) -> BacktestResult:
     """Run one rule over `bars`, charging cost on both sides of every round trip.
 
@@ -254,7 +267,7 @@ def run_backtest(
     not reorder them, because silently sorting a series is how a leakage bug hides.
     """
     result = BacktestResult(strategy_id=strategy_id, kind=kind, bars=len(bars))
-    rule = _rule(kind, parameters or {})
+    rule = _rule(kind, parameters or {}, allow_short)
     if isinstance(rule, str):
         result.unsupported = rule
         return result
@@ -278,43 +291,39 @@ def run_backtest(
         if (truncated.action, truncated.quantity) != (decision.action, decision.quantity):
             result.leakage_violations += 1
 
-        # Long-only by design, matching the production executor. A SELL with no
-        # position is a no-op, not a short. The first version of this engine
-        # advertised a SELL rule and then quietly did nothing with it, which would
-        # have made every short strategy backtest as flat rather than wrong.
-        if decision.action == "BUY" and position == 0:
-            position = decision.quantity
-            entry_price = bar.price * (1 + slippage_pct / 100.0)
-            notional = position * entry_price
+        # `position` is signed: positive long, negative short. Shorts exist only with
+        # `allow_short`, matching production, where MIN_AGENT_SHORTS gates them; without it a
+        # SELL with no position is a no-op, as it always was.
+        action = decision.action
+        if action == "BUY" and position < 0:
+            action = "COVER"
+        if action in {"BUY", "SHORT"} and position == 0 and (action == "BUY" or allow_short):
+            side = 1 if action == "BUY" else -1
+            entry_price = bar.price * (1 + side * slippage_pct / 100.0)
+            position = side * decision.quantity
+            notional = abs(position) * entry_price
             cost = notional * commission_pct / 100.0
             spent += notional + cost
             result.costs += cost
             result.trades += 1
-        elif decision.action == "SELL" and position > 0:
-            exit_price = bar.price * (1 - slippage_pct / 100.0)
-            notional = position * exit_price
-            cost = notional * commission_pct / 100.0
+        elif (action == "SELL" and position > 0) or (action == "COVER" and position < 0):
+            gross, cost = _close(position, entry_price, bar.price, slippage_pct, commission_pct)
             result.costs += cost
-            gross = notional - position * entry_price
             realized += gross - cost
-            equity *= 1 + (gross - cost) / (position * entry_price)
+            equity *= 1 + (gross - cost) / (abs(position) * entry_price)
             result.wins += 1 if gross - cost > 0 else 0
             result.losses += 1 if gross - cost <= 0 else 0
             position = 0
-        else:
+        elif position != 0:
             # Mark to market so drawdown reflects holding, not just closed trades.
-            if position > 0:
-                equity *= 1 + (bar.price - entry_price) / entry_price
+            direction = 1 if position > 0 else -1
+            equity *= 1 + direction * (bar.price - entry_price) / entry_price
 
-    if position > 0 and bars:
+    if position != 0 and bars:
         # Close the open position at the last bar so the result is complete. Left
         # open, a profitable run looks like no trades at all.
-        last = bars[-1]
-        exit_price = last.price * (1 - slippage_pct / 100.0)
-        notional = position * exit_price
-        cost = notional * commission_pct / 100.0
+        gross, cost = _close(position, entry_price, bars[-1].price, slippage_pct, commission_pct)
         result.costs += cost
-        gross = notional - position * entry_price
         realized += gross - cost
         result.wins += 1 if gross - cost > 0 else 0
         result.losses += 1 if gross - cost <= 0 else 0

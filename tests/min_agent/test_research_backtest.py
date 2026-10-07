@@ -170,7 +170,7 @@ def test_the_causality_guard_catches_a_rule_that_reads_the_future(monkeypatch):
         action = "BUY" if future > bars[i].price else "HOLD"
         return bt.RuleDecision(bars[i].timestamp, action, 1, bars[i].price, "cheat")
 
-    monkeypatch.setattr(bt, "_rule", lambda kind, params: leaky)
+    monkeypatch.setattr(bt, "_rule", lambda kind, params, allow_short=False: leaky)
     result = bt.run_backtest(
         _bars(RISING), strategy_id="cheat", kind=bt.KIND_FIXED_SIZE,
         parameters={"action": "BUY", "quantity": 1},
@@ -529,3 +529,29 @@ def test_the_in_sample_leg_precedes_the_out_of_sample_leg_with_no_gap():
     assert degraded < len(result.folds), (
         "every fold degraded on a length-matched comparison is a broken comparison"
     )
+
+
+def test_on_a_downtrend_shorts_lift_the_rule_off_the_long_only_ceiling():
+    """The plan's falsifier. Long-only, a TREND_FOLLOW rule on a pure downtrend earns exactly 0:
+    its SELL signal has nothing to sell. With shorts it must earn something."""
+    bars = _bars([100.0 - i for i in range(40)])
+    params = {"reference_price": 100.0, "threshold_pct": 0.02, "quantity": 1, "confidence": 0.6}
+    long_only = bt.run_backtest(bars, strategy_id="t", kind="TREND_FOLLOW", parameters=params)
+    with_shorts = bt.run_backtest(bars, strategy_id="t", kind="TREND_FOLLOW", parameters=params,
+                                  allow_short=True)
+    assert long_only.trades == 0 and long_only.net_pnl == 0
+    assert with_shorts.trades == 1 and with_shorts.net_pnl > 0
+
+
+def test_a_short_loses_when_the_price_rises():
+    bars = _bars([100.0 + i for i in range(10)])
+    result = bt.run_backtest(bars, strategy_id="s", kind="FIXED_SIZE", allow_short=True,
+                             parameters={"action": "SHORT", "quantity": 1, "confidence": 0.6})
+    assert result.trades == 1 and result.net_pnl < 0 and result.losses == 1
+
+
+def test_without_allow_short_a_short_rule_never_trades():
+    bars = _bars([100.0 - i for i in range(10)])
+    result = bt.run_backtest(bars, strategy_id="s", kind="FIXED_SIZE",
+                             parameters={"action": "SHORT", "quantity": 1, "confidence": 0.6})
+    assert result.trades == 0

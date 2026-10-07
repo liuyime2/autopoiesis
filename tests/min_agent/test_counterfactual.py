@@ -322,3 +322,13 @@ def test_a_cycle_without_a_rule_action_is_unpaired_not_zero():
     records = [_record("old", T0, 100.0, action="BUY"), _record("later", T0 + timedelta(hours=5), 103.0)]
     row = next(r for r in cf.evaluate(records, horizon_hours=4.0).rows if r.cycle_id == "old")
     assert row.rule_verdict is None and row.override_value_pct is None
+
+
+@pytest.mark.parametrize("action,later,verdict", [
+    ("SHORT", 95.0, cf.GOOD_TRADE), ("SHORT", 105.0, cf.FALSE_TRADE),
+    ("COVER", 105.0, cf.GOOD_TRADE), ("COVER", 95.0, cf.FALSE_TRADE),
+])
+def test_short_and_cover_are_graded_in_their_own_direction(action, later, verdict):
+    records = [_record("x", T0, 100.0, action=action), _record("later", T0 + timedelta(hours=5), later)]
+    row = next(r for r in cf.evaluate(records, horizon_hours=4.0).rows if r.cycle_id == "x")
+    assert row.verdict == verdict

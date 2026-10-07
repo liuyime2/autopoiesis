@@ -252,7 +252,8 @@ def day_direction(
 
 def _expected_correct(action: str, p_up: float) -> float:
     """How often a decision with no skill is right on a day whose up-share is `p_up`."""
-    return p_up if action == "BUY" else 1.0 - p_up
+    # A COVER is a buy and a SHORT a sell: each is right when the price goes its way.
+    return p_up if action in {"BUY", "COVER"} else 1.0 - p_up
 
 
 def validate(

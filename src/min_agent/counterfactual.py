@@ -238,7 +238,7 @@ def _horizon_quote(
 
 
 #: A one-share probe's position for each action: what it holds over the horizon.
-_DIRECTION = {"BUY": 1, "HOLD": 0, "SELL": -1}
+_DIRECTION = {"BUY": 1, "HOLD": 0, "SELL": -1, "SHORT": -1, "COVER": 1}
 
 
 def _grade(action: str, gross: float, cost: float, dead_band: float) -> tuple[str, float]:
@@ -284,7 +284,7 @@ def evaluate(
     report = CounterfactualReport()
     for index, (decided_at, price, record) in enumerate(series):
         action = record.decision.action
-        if action not in {"HOLD", "BUY", "SELL"}:
+        if action not in _DIRECTION:
             continue
         future_price, gap, status = _horizon_quote(
             series, index, decided_at, horizon_hours, max_gap_hours
