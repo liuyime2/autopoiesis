@@ -1220,3 +1220,26 @@ def test_the_lesson_that_is_published_quotes_the_day_adjusted_margin(tmp_path, m
     assert "runs backwards" not in answer, (
         "the claim that was measured to be a day effect must not come back"
     )
+
+
+def test_one_maintenance_pass_screens_on_the_scores_it_just_recorded(tmp_path):
+    """The screen ran on a read of the ledger taken before this pass recorded anything.
+
+    So a decision scored in pass N reached its strategy's screen in pass N+1, fifteen
+    minutes later, and the lifecycle saw that verdict a pass after that. The stages now hand
+    their appended events forward: one pass, from a journal with no counterfactuals at all,
+    must produce a screen that has scored every decision.
+    """
+    daemon, journal = _screening_daemon(tmp_path)
+    for i in range(3):
+        decision, quote = _scored_cycle(f"c{i}", price=100.0 + i, horizon_price=101.0 + i)
+        journal.append(decision)
+        journal.append(quote)
+    assert not journal.read_events("COUNTERFACTUAL_EVALUATED")
+
+    daemon._maintenance()
+
+    assert journal.read_events("COUNTERFACTUAL_EVALUATED"), "the pass recorded the ledger"
+    screen = _screen_payloads(journal).get("s1", {})
+    graded = screen.get("scored", 0) + screen.get("neutral", 0)
+    assert graded == 3, f"and screened on all three in the same pass, got {screen}"

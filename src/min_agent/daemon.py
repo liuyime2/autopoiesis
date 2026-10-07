@@ -135,6 +135,9 @@ class AgentDaemon:
         self.error_count = 0
         self.last_cycle_id: str | None = None
         self.last_maintenance_at: datetime | None = None
+        #: Events appended by this process, cleared at the start of every maintenance pass so
+        #: it holds one pass's worth; see `_appended_since`.
+        self._appended: list[JournalEvent] = []
         self.last_evidence_at: datetime | None = None
         self.last_reflection_at: datetime | None = None
         self.last_curriculum_at: datetime | None = None
@@ -760,6 +763,7 @@ class AgentDaemon:
         # takes the same read, and a name bound only inside the `if` would be undefined
         # on the path where there is no journal - which is the path the tests exercise.
         validation_events = None
+        self._appended = []
         if self.journal is not None:
             self._record_pnl_evidence(evidence)
             self._verify_profit_target(evidence)
@@ -772,11 +776,26 @@ class AgentDaemon:
             # event on every pass already, so this adds no scan - it removes one - and
             # the same read is what tells the screen whether a verdict actually moved.
             validation_events = self.journal.read_events("OFFLINE_VALIDATION_COMPLETED")
+            # Each stage hands what it appended to the next, so a pass acts on its own
+            # results. The screen used to run on the read taken before the counterfactuals
+            # were recorded, and the lifecycle on the read taken before the screen - so every
+            # newly scored decision reached a verdict one pass (15 minutes) late, and a new
+            # verdict reached the lifecycle one pass after that.
+            mark = len(self._appended)
             self._record_counterfactuals(_events=counterfactual_events)
+            counterfactual_events = [
+                *counterfactual_events,
+                *self._appended_since(mark, "COUNTERFACTUAL_EVALUATED"),
+            ]
             self._record_calibration_lesson()
+            mark = len(self._appended)
             self._screen_all_strategies(
                 _events=counterfactual_events, _validation=validation_events
             )
+            validation_events = [
+                *validation_events,
+                *self._appended_since(mark, "OFFLINE_VALIDATION_COMPLETED"),
+            ]
         if self.reflection_memory is not None and self._due(self.last_reflection_at, self.config.reflection_interval_seconds):
             self._reflect(evidence=evidence)
         if self.curriculum_agent is not None and self.reflection_memory is not None and self._due(self.last_curriculum_at, self.config.curriculum_interval_seconds):
@@ -1329,7 +1348,12 @@ class AgentDaemon:
             payload=payload or {},
         )
         self.journal.append_event(event)
+        self._appended.append(event)
         return event.event_id
+
+    def _appended_since(self, mark: int, event_type: str) -> list[JournalEvent]:
+        """Events of one type this process has appended since `mark` (a length of `_appended`)."""
+        return [e for e in self._appended[mark:] if e.event_type == event_type]
 
     def _heartbeat(self, status: DaemonStatus, message: str) -> None:
         payload = HeartbeatPayload(
