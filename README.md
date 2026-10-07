@@ -1,5 +1,7 @@
 # min-agent
 
+[![ci](https://github.com/liuyime2/autopoiesis/actions/workflows/ci.yml/badge.svg)](https://github.com/liuyime2/autopoiesis/actions/workflows/ci.yml)
+
 A paper-trading agent that decides for itself whether its own strategies are any good,
 using the broker's records as evidence, and retires the ones that are not.
 
@@ -43,7 +45,7 @@ Requires Python 3.10+. A broker account is needed only to trade; everything else
 without one.
 
 ```bash
-git clone <repo> && cd min-agent
+git clone https://github.com/liuyime2/autopoiesis.git min-agent && cd min-agent
 python3 -m venv .venv && . .venv/bin/activate
 make install           # pip install -e ".[dev]"
 make smoke-offline     # import, config, CLI - no broker contacted

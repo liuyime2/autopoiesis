@@ -52,8 +52,8 @@ the commit message; the long-form record is in [`docs/history/`](docs/history/RE
   failed every later snapshot.
 - An owner-history ingest was read as the latest evidence batch.
 
-### To do before the first public release
-- Settle the repository name and add `[project.urls]` to `pyproject.toml`.
+- `[project.urls]`, authors, keywords and classifiers in `pyproject.toml`; the README's clone
+  command names the repository and shows the CI badge.
 
 ## 0.1.0
 

@@ -39,7 +39,12 @@ git clone --quiet "$REPO" "$DEST"
 # on PATH proved only that an environment which already had every dependency still had them
 # - the previous log's install section was a page of "Requirement already satisfied".
 "$BASE_PYTHON" -m venv "$DEST/.venv"
-PYTHON="$DEST/.venv/bin/python"
+# Every step runs inside the clone, so the venv's python is named relative to it, and pip's
+# cache lives in the clone too. The log then records the run and not the operator's home
+# directory - it is committed to a public repository - while staying the unedited output of a
+# real run.
+PYTHON=".venv/bin/python"
+export PIP_CACHE_DIR="$DEST/.pip-cache"
 
 {
   echo "# Fresh-clone verification log"
@@ -55,8 +60,8 @@ PYTHON="$DEST/.venv/bin/python"
   git -C "$DEST" log --oneline -1
   echo
   echo "## environment"
-  echo "interpreter: $($PYTHON -c 'import sys; print(sys.executable)')"
-  echo "version: $($PYTHON -c 'import sys; print(sys.version.split()[0])')"
+  echo "interpreter: $(cd "$DEST" && $PYTHON -c 'import sys; print(sys.executable)')"
+  echo "version: $(cd "$DEST" && $PYTHON -c 'import sys; print(sys.version.split()[0])')"
   # Probed, not assumed. Every one of these is cleared above; if any survives, the log says
   # so rather than claiming a clean room that did not happen.
   leaked=""

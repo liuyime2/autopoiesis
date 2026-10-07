@@ -16,7 +16,11 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
+      # Full history: `fresh-clone-evidence-real` checks that the commit the committed
+      # fresh-clone log tested exists, and a shallow clone holds only the tip.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
