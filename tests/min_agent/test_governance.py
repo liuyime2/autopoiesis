@@ -218,3 +218,30 @@ def test_every_recorded_defect_is_still_fixed():
     )
     assert result.returncode == 0, f"defect audit failed:\n{result.stdout[-3000:]}"
     assert "checks pass across 15 defects" in result.stdout
+
+
+def test_the_readme_counts_match_the_tree():
+    """README's map of the tree states counts; they drifted to 40/21/62 against 41/23/65.
+
+    Every one was true once and went stale silently, because nothing compared them with the
+    tree. A reader's first impression of whether the documentation can be trusted is made
+    here.
+    """
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    src = ROOT / "src" / "min_agent"
+    modules = [p for p in [*src.glob("*.py"), *src.glob("research/*.py")] if p.name != "__init__.py"]
+    importers = [
+        p for p in [*src.glob("*.py"), *src.glob("research/*.py")]
+        if p.name != "models.py"
+        and re.search(r"from min_agent\.models import|from min_agent import models", p.read_text())
+    ]
+    tests = list((ROOT / "tests" / "min_agent").glob("test_*.py"))
+    claims = {
+        r"(\d+) modules, \d+ external": len(modules),
+        r"imported by (\d+) modules": len(importers),
+        r"(\d+) test files": len(tests),
+    }
+    for pattern, actual in claims.items():
+        match = re.search(pattern, text)
+        assert match, f"README no longer states {pattern!r}"
+        assert int(match.group(1)) == actual, f"README says {match.group(0)!r}; the tree has {actual}"

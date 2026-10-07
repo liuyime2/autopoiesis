@@ -218,9 +218,9 @@ fast: lint test smoke verify
 # ---------------------------------------------------------------------------
 
 setup:
-	@echo "Create the environment, then: make install"
-	@echo "  conda create -n llm python=3.10 -y"
-	@echo "  conda activate llm && make install"
+	@echo "Create an environment, then: make install"
+	@echo "  python3 -m venv .venv && . .venv/bin/activate && make install"
+	@echo "  (or: conda create -n llm python=3.10 -y && conda activate llm && make install)"
 	@echo "  export XDG_CONFIG_HOME=\$$HOME/.config"
 	@echo "  mkdir -p $$XDG_CONFIG_HOME/min-agent"
 	@echo "  # put ALPACA_API_KEY / ALPACA_SECRET_KEY / ALPACA_BASE_URL there"
