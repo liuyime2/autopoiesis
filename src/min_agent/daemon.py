@@ -1061,8 +1061,14 @@ class AgentDaemon:
             return
         verdicts = {
             row.cycle_id: row.verdict
+            # The same symbol and cost the ledger is scored with. Left at the defaults, this
+            # graded calibration at a hardcoded 0.05% on SPY whatever the operator configured,
+            # so the lesson and the screen could disagree about the same decision.
             for row in counterfactual.evaluate(
-                records, horizon_hours=self.config.counterfactual_horizon_hours
+                records,
+                symbol=self.config.symbols[0] if self.config.symbols else "SPY",
+                horizon_hours=self.config.counterfactual_horizon_hours,
+                assumed_cost_pct=self.config.assumed_round_trip_cost_pct,
             ).rows
         }
         rows = calibration.build_rows(records, verdicts, source="llm")

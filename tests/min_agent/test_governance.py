@@ -245,3 +245,30 @@ def test_the_readme_counts_match_the_tree():
         match = re.search(pattern, text)
         assert match, f"README no longer states {pattern!r}"
         assert int(match.group(1)) == actual, f"README says {match.group(0)!r}; the tree has {actual}"
+
+
+def test_every_production_counterfactual_uses_the_configured_cost_and_symbol():
+    """One decision must get one grade.
+
+    The daemon's calibration lesson called `counterfactual.evaluate` with the defaults while
+    the ledger and doctor passed the configured symbol and cost, so with any non-default
+    configuration the lesson graded the same decisions differently from the screen.
+    """
+    import ast
+
+    offenders = []
+    for path in sorted((ROOT / "src" / "min_agent").glob("*.py")):
+        if path.name == "counterfactual.py":
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "evaluate"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "counterfactual"
+            ):
+                given = {kw.arg for kw in node.keywords}
+                if not {"symbol", "assumed_cost_pct"} <= given:
+                    offenders.append(f"{path.name}:{node.lineno}")
+    assert not offenders, f"counterfactual.evaluate without the configured cost/symbol: {offenders}"
