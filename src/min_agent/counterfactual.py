@@ -73,10 +73,12 @@ GOOD_TRADE = "GOOD_TRADE"
 #: they had traded. Not informative, so it never counts for or against a strategy.
 NOT_EXECUTED = "NOT_EXECUTED"
 
-#: Execution outcomes after which a trade is graded as a trade. SHADOWED and REPLAYED are
-#: orders that would have gone out - grading them is what shadow mode and replay are for -
-#: and neither can reach the PnL ledger, which keys on broker fills, not on this.
-EXECUTED_STATUSES = frozenset({"SUBMITTED", "SHADOWED", "REPLAYED"})
+#: Execution outcomes that mean the order never left: refused by the Guardian, failed, or
+#: skipped. A trade with one of these is NOT_EXECUTED. Every other outcome is graded,
+#: including shadow and replay orders - grading a decision that would have gone out is what
+#: those modes exist for, and it was graded before this rule existed. Grading is not
+#: execution: the PnL ledger keys on broker fills and never reads this.
+NEVER_LEFT_STATUSES = frozenset({"REJECTED", "ERROR", "SKIPPED"})
 
 #: Verdicts that say the decision was right or wrong. NEUTRAL is excluded on purpose: a
 #: move that did not clear the cost is silence, not a failure.
@@ -280,7 +282,7 @@ def evaluate(
                 verdict = GOOD_HOLD
             else:
                 verdict = NEUTRAL
-        elif record.execution.status not in EXECUTED_STATUSES:
+        elif record.execution.status in NEVER_LEFT_STATUSES:
             verdict = NOT_EXECUTED
         else:
             # A real decision, signed for the side actually taken and charged the cost either
