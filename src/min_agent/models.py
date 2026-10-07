@@ -331,6 +331,10 @@ class OpenLotAttribution(BaseModel):
     """
     model_config = ConfigDict(frozen=True)
 
+    #: LONG: bought then sold. SHORT: sold short then covered, so for a closed SHORT lot
+    #: `sell_price` is the entry and `buy_price` the exit, and for an open one `entry_price`
+    #: is the short price.
+    direction: Literal["LONG", "SHORT"] = "LONG"
     strategy_id: str = Field(min_length=1)
     symbol: str
     quantity: float = Field(gt=0)
@@ -351,6 +355,10 @@ class OpenLotAttribution(BaseModel):
 class ClosedLotAttribution(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    #: LONG: bought then sold. SHORT: sold short then covered, so for a closed SHORT lot
+    #: `sell_price` is the entry and `buy_price` the exit, and for an open one `entry_price`
+    #: is the short price.
+    direction: Literal["LONG", "SHORT"] = "LONG"
     strategy_id: str = Field(min_length=1)
     symbol: str
     buy_fill_id: str = Field(min_length=1)

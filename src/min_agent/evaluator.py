@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import cast
 
 from min_agent.models import (
+    BROKER_SIDE,
     AttributionStatus,
     BrokerEvidenceBatch,
     BrokerFillActivity,
@@ -367,6 +368,9 @@ class _LotLedger:
     """
 
     lots: dict[str, list[_Lot]] = field(default_factory=dict)
+    #: Open short lots, keyed by symbol. Opened only by a SELL fill whose order was a SHORT
+    #: decision; covered FIFO by later BUY fills.
+    short_lots: dict[str, list[_Lot]] = field(default_factory=dict)
     per_strategy: dict[str, _StrategyPnl] = field(default_factory=dict)
 
     def tracker(self, strategy_id: str) -> _StrategyPnl:
@@ -411,6 +415,13 @@ def _pnl_evidence(
         return PnLEvidence(status=PNL_EVIDENCE_MISSING, missing_reasons=(PNL_EVIDENCE_MISSING,))
 
     order_to_strategy = _order_strategy_map(records)
+    # Orders that were SHORT decisions. Only these may open a short lot: a SELL beyond the
+    # agent's longs that was *not* a short is the account owner's shares, and stays unmatched.
+    short_orders = {
+        record.execution.client_order_id
+        for record in records
+        if record.decision.action == "SHORT" and record.execution.client_order_id
+    }
     ledger = _LotLedger()
     missing_reasons = list(evidence.missing_reasons)
     fill_candidates, order_derived_fill_count = _fill_candidates(evidence)
@@ -478,7 +489,10 @@ def _pnl_evidence(
             linked_buy_count += 1
         else:
             linked_sell_count += 1
-        _apply_activity(ledger, activity, strategy_id=strategy_id)
+        _apply_activity(
+            ledger, activity, strategy_id=strategy_id,
+            opens_short=activity.client_order_id in short_orders,
+        )
 
     strategy_pnl = ledger.per_strategy
     closed_lots = [lot for tracker in strategy_pnl.values() for lot in tracker.closed_lots]
@@ -733,7 +747,9 @@ def confirmed_fill_activities(journal, records: Sequence[CycleRecord] | None = N
                     order_id=payload.get("order_id") if isinstance(payload.get("order_id"), str) else None,
                     client_order_id=coid,
                     symbol=symbol,
-                    side=cast("Side", side.strip().upper()),
+                    # The journal keeps the decision's intent (SHORT, COVER); the broker side
+                    # is what the fill was, and the ledger reads intent from the order id.
+                    side=cast("Side", BROKER_SIDE.get(side.strip().upper(), side.strip().upper()).upper()),
                     quantity=float(quantity),
                     price=float(price),
                     transaction_time=anchor.get(coid, event.timestamp),
@@ -823,6 +839,26 @@ def _open_lots(
     fabricated number wearing the appearance of a measurement.
     """
     out: list[OpenLotAttribution] = []
+    for symbol, short_lots in ledger.short_lots.items():
+        price = prices.get(symbol)
+        for lot in short_lots:
+            if lot.quantity <= 1e-9:
+                continue
+            gain = None if price is None or not lot.price else (lot.price - price) * lot.quantity
+            out.append(
+                OpenLotAttribution(
+                    direction="SHORT",
+                    strategy_id=lot.strategy_id or "unattributed", symbol=symbol,
+                    quantity=lot.quantity, entry_price=lot.price, current_price=price,
+                    unrealized_pnl=None if gain is None else round(gain, 6),
+                    unrealized_pnl_pct=(
+                        None if price is None or not lot.price
+                        else round((lot.price - price) / lot.price, 6)
+                    ),
+                    opened_at=lot.opened_at, as_of=as_of,
+                    buy_order_id=lot.order_id, buy_fill_id=lot.fill_id,
+                )
+            )
     for symbol, lots in ledger.lots.items():
         price = prices.get(symbol)
         for lot in lots:
@@ -951,7 +987,9 @@ def _open_lot_quantity(ledger: _LotLedger) -> dict[str, float]:
     return quantities
 
 
-def _apply_activity(ledger: _LotLedger, activity: BrokerFillActivity, *, strategy_id: str) -> None:
+def _apply_activity(
+    ledger: _LotLedger, activity: BrokerFillActivity, *, strategy_id: str, opens_short: bool = False
+) -> None:
     """Apply one broker fill to the account-level lot ledger.
 
     A BUY opens a lot attributed to `strategy_id`. A SELL matches FIFO against
@@ -961,6 +999,17 @@ def _apply_activity(ledger: _LotLedger, activity: BrokerFillActivity, *, strateg
     one strategy can be closed by another.
     """
     if activity.side == "BUY":
+        # A buy covers the agent's open shorts first; only the remainder opens a long. Shorts
+        # only exist when a SHORT decision opened them, so on a long-only record this is the
+        # old path exactly.
+        remaining_buy = _cover_shorts(ledger, activity, strategy_id=strategy_id)
+        if remaining_buy <= 1e-9:
+            return
+        if remaining_buy < activity.quantity:
+            activity = activity.model_copy(update={
+                "quantity": remaining_buy,
+                "fees": activity.fees * remaining_buy / activity.quantity,
+            })
         ledger.tracker(strategy_id).fees += activity.fees
         ledger.lots.setdefault(activity.symbol, []).append(
             _Lot(
@@ -1020,11 +1069,64 @@ def _apply_activity(ledger: _LotLedger, activity: BrokerFillActivity, *, strateg
         if lot.quantity <= 1e-9:
             lots.pop(0)
 
+    # What a SHORT decision sold beyond the agent's longs is a short, opened at this price.
+    if opens_short and remaining > 1e-9:
+        closing.fees += sell_fee_remaining
+        ledger.short_lots.setdefault(activity.symbol, []).append(
+            _Lot(
+                quantity=remaining, price=activity.price, fees=sell_fee_remaining,
+                fill_id=activity.activity_id, order_id=activity.order_id,
+                client_order_id=activity.client_order_id, opened_at=activity.transaction_time,
+                source=activity.source, strategy_id=strategy_id,
+            )
+        )
+        return
+
     # A SELL that matched nothing still cost money and is still a fact. Charge the
     # remainder to the closing strategy so it is visible rather than dropped, which
-    # is what the old code did with `unmatched_sell_quantity`.
+    # is what the old code did with `unmatched_sell_quantity`. Not a short: the order was
+    # not a SHORT decision, so these are shares the agent never owned - the 29-share case.
     closing.unmatched_sell_quantity += remaining
     closing.fees += sell_fee_remaining
+
+
+def _cover_shorts(ledger: _LotLedger, activity: BrokerFillActivity, *, strategy_id: str) -> float:
+    """Close open short lots FIFO with a buy; return the quantity left over."""
+    remaining = activity.quantity
+    lots = ledger.short_lots.get(activity.symbol, [])
+    fee_remaining = activity.fees
+    while remaining > 1e-9 and lots:
+        lot = lots[0]
+        owner = lot.strategy_id or strategy_id
+        matched = min(remaining, lot.quantity)
+        open_fee = lot.fees * (matched / lot.quantity) if lot.quantity else 0.0
+        close_fee = fee_remaining * (matched / remaining) if remaining else 0.0
+        realized_pnl = (lot.price - activity.price) * matched - open_fee - close_fee
+        tracker = ledger.tracker(owner)
+        tracker.realized_pnl += realized_pnl
+        tracker.closed_quantity += matched
+        tracker.closed_lots.append(
+            ClosedLotAttribution(
+                direction="SHORT",
+                strategy_id=owner, symbol=activity.symbol,
+                buy_fill_id=activity.activity_id, sell_fill_id=lot.fill_id,
+                buy_order_id=activity.order_id, sell_order_id=lot.order_id,
+                buy_client_order_id=activity.client_order_id,
+                sell_client_order_id=lot.client_order_id,
+                quantity=matched, buy_price=activity.price, sell_price=lot.price,
+                buy_fees=close_fee, sell_fees=open_fee, realized_pnl=realized_pnl,
+                opened_at=lot.opened_at, closed_at=activity.transaction_time,
+                source=_combined_source(lot.source, activity.source),
+                closing_strategy_id=strategy_id if strategy_id != owner else None,
+            )
+        )
+        lot.quantity -= matched
+        lot.fees -= open_fee
+        remaining -= matched
+        fee_remaining -= close_fee
+        if lot.quantity <= 1e-9:
+            lots.pop(0)
+    return remaining
 
 
 def _combined_source(open_source: str, close_source: str) -> str:
@@ -1109,7 +1211,9 @@ def _peak_exposure_by_strategy(
     """
     events: dict[str, list[tuple[datetime, float]]] = {}
     for lot in closed_lots:
-        notional = lot.buy_price * lot.quantity
+        # The entry is what was at risk: the buy for a long, the short sale for a short.
+        entry = lot.sell_price if lot.direction == "SHORT" else lot.buy_price
+        notional = entry * lot.quantity
         bucket = events.setdefault(lot.strategy_id, [])
         bucket.append((lot.opened_at, notional))
         bucket.append((lot.closed_at, -notional))

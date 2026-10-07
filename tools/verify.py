@@ -124,6 +124,7 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_model_registry.py": ("data-integrity", "lifecycle-invariants"),
     "test_unrealized_pnl.py": ("pnl-accounting", "data-integrity"),
     "test_cost_accounting.py": ("pnl-accounting", "decision-outcome-counterfactual"),
+    "test_short_ledger.py": ("pnl-accounting",),
     "test_benchmark.py": ("pnl-accounting",),
     "test_screen_direction_check.py": ("decision-outcome-counterfactual",),
     "test_research_trials.py": (

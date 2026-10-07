@@ -115,7 +115,7 @@ src/min_agent/          the package. 41 modules, 3 external dependencies.
   research/             diagnosis only. production may not import it, and a gate enforces that
 tools/verify.py         the gate: 52 check classes
 tools/provenance.py     what `make reproduce` records
-tests/min_agent/        67 test files
+tests/min_agent/        68 test files
 examples/minimal_cycle.py   the smallest runnable example, no broker needed
 configs/paper.env.example   every environment variable, with its default
 .github/workflows/      CI: lint, mypy, tests, offline smoke, the gate and its self-test
