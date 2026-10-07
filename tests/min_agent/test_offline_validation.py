@@ -349,3 +349,21 @@ def test_a_hold_only_strategy_faces_the_same_bar_as_one_that_trades():
 
     assert from_holding.correct_outcome_ratio == from_trading.correct_outcome_ratio
     assert from_holding.verdict == from_trading.verdict == ov.PASS_SCREENED
+
+
+def test_a_result_survives_the_journal_round_trip():
+    """The daemon reads screens back from the journal; every count must come back.
+
+    It used to rebuild them by hand without `good_trades`, so a strategy right 7 times out of
+    14 by trading read back as 0 of 14 and was retired with a reason quoting 0.000.
+    """
+    from min_agent.offline_validation import OfflineValidationResult
+
+    original = OfflineValidationResult(
+        strategy_id="s", verdict="REJECT_POOR_DECISIONS", reason="r", decisions=20, scored=14,
+        good_holds=0, missed_alpha=2, false_trades=5, good_trades=7, neutral=3,
+        good_hold_ratio=0.0, mean_net_pct=0.12,
+    )
+    back = OfflineValidationResult.from_payload("s", original.to_payload(), "evt")
+    assert back == original
+    assert back.correct_outcome_ratio == 0.5

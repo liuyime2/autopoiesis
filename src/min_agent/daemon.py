@@ -441,22 +441,8 @@ class AgentDaemon:
         for event in events:
             if not event.strategy_id:
                 continue
-            latest[event.strategy_id] = offline_validation.OfflineValidationResult(
-                strategy_id=event.strategy_id,
-                verdict=str(event.payload.get("verdict", "")),
-                reason=str(event.payload.get("reason", "")),
-                decisions=coerce.field_int(event.payload.get("decisions"), f"{event.event_id}.decisions"),
-                scored=coerce.field_int(event.payload.get("scored"), f"{event.event_id}.scored"),
-                good_holds=coerce.field_int(event.payload.get("good_holds"), f"{event.event_id}.good_holds"),
-                missed_alpha=coerce.field_int(
-                    event.payload.get("missed_alpha"), f"{event.event_id}.missed_alpha"
-                ),
-                false_trades=coerce.field_int(
-                    event.payload.get("false_trades"), f"{event.event_id}.false_trades"
-                ),
-                good_hold_ratio=coerce.field_float(
-                    event.payload.get("good_hold_ratio"), f"{event.event_id}.good_hold_ratio"
-                ),
+            latest[event.strategy_id] = offline_validation.OfflineValidationResult.from_payload(
+                event.strategy_id, event.payload, event.event_id
             )
         return latest
 

@@ -130,6 +130,32 @@ class OfflineValidationResult:
             "mean_net_pct": self.mean_net_pct,
         }
 
+    @classmethod
+    def from_payload(cls, strategy_id: str, payload: dict, where: str) -> OfflineValidationResult:
+        """The inverse of `to_payload`, kept beside it so the two cannot drift.
+
+        The daemon used to rebuild this by hand and left out `good_trades`, `neutral` and
+        `mean_net_pct`, so on that path `correct_outcome_ratio` read as `good_holds / scored`
+        and a trading strategy's RETIRED reason understated how often it had been right.
+        """
+        def count(name: str) -> int:
+            return coerce.field_int(payload.get(name), f"{where}.{name}")
+
+        return cls(
+            strategy_id=strategy_id,
+            verdict=str(payload.get("verdict", "")),
+            reason=str(payload.get("reason", "")),
+            decisions=count("decisions"),
+            scored=count("scored"),
+            good_holds=count("good_holds"),
+            missed_alpha=count("missed_alpha"),
+            false_trades=count("false_trades"),
+            good_trades=count("good_trades"),
+            neutral=count("neutral"),
+            good_hold_ratio=coerce.field_float(payload.get("good_hold_ratio"), f"{where}.good_hold_ratio"),
+            mean_net_pct=coerce.field_float(payload.get("mean_net_pct"), f"{where}.mean_net_pct"),
+        )
+
 
 def collect_decisions(
     counterfactual_events: Iterable[object],
