@@ -11,6 +11,7 @@
 #   minictrl stop                stop the daemon
 #   minictrl reconcile           match pending orders against the broker
 #   minictrl evidence ingest|report   refresh or show broker evidence
+#   minictrl owner-history       journal the account owner's fills (read-only), to price the 29 shares
 #   minictrl profit              verify the paper-profit target from broker evidence
 #   minictrl check-env           report configuration and connectivity only
 #   minictrl test|audit          unit tests; the recorded-defect audit
@@ -37,24 +38,21 @@ cd "$ROOT_DIR" || exit 2
 # wrote the flag form and it never worked. Translating it is cheaper than editing
 # every caller.
 
-# Locate conda rather than assuming where it lives. The order is: an explicit
-# CONDA_BIN, then PATH, then this account's known install, then the usual suspects.
-# Previously the default was /home/liuyime2/miniconda3/bin/conda with no discovery, so
-# the documented fresh-clone path could not run anywhere but this host - which is the
-# portability problem the project was asked to remove, sitting in the operator's own
-# entry point.
-CONDA_BIN="${CONDA_BIN:-$(command -v conda 2>/dev/null || true)}"
-if [ -z "$CONDA_BIN" ]; then
-  for candidate in \
-      /home/liuyime2/miniconda3/bin/conda \
-      /opt/conda/bin/conda \
-      "$HOME/miniconda3/bin/conda" \
-      "$HOME/miniforge3/bin/conda"; do
-    if [ -x "$candidate" ]; then CONDA_BIN="$candidate"; break; fi
-  done
-fi
-if [ -z "$CONDA_BIN" ] || [ ! -x "$CONDA_BIN" ]; then
-  echo "FATAL: conda not found. Install it, put it on PATH, or set CONDA_BIN." >&2
+# The operator's configuration is loaded once, here, before anything is looked up - and it is
+# exported so subprocesses see the same values. It used to be read ~60 lines later, purely to
+# fill @ENVFILE@ into the unit templates, which meant every discovery below ran against a
+# process that had not yet seen the file: `MIN_AGENT_ENVBIN` named in the file was ignored, so a
+# host whose environment lives outside conda's default envs root could not be installed at all.
+# Values already present in the real environment win, because `set -a` re-exports an assignment
+# rather than replacing an inherited one.
+ENV_FILE="${MIN_AGENT_ENV_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env}"
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+elif [ -z "${ALPACA_API_KEY:-}" ] && [ "${MIN_AGENT_REQUIRE_CREDENTIALS:-0}" = "1" ]; then
+  echo "FATAL: no credentials at $ENV_FILE" >&2
   exit 2
 fi
 
@@ -71,49 +69,48 @@ export ALPACA_BASE_URL="${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}"
 export APCA_API_BASE_URL="${APCA_API_BASE_URL:-$ALPACA_BASE_URL}"
 
 SERVICE_NAME="min-agent.service"
-# Same for the environment's bin directory: an explicit override, then the active
-# environment if this shell is already inside it, then this account's known prefix.
+# The interpreter is found, never assumed: an explicit override, then the active environment
+# (a venv or a conda env), then conda's configured env roots. Every subcommand runs that one
+# python directly. conda is not required: it used to be, through conda's runner with a
+# hardcoded env name, which made a plain venv - the simplest install there is - unable to run
+# any subcommand.
 # `make install` puts the package in whatever environment is active, so an operator who
 # followed the README has one and does not need to name it.
+
 ENVBIN="${MIN_AGENT_ENVBIN:-}"
+if [ -z "$ENVBIN" ] && [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then
+  ENVBIN="$VIRTUAL_ENV/bin"
+fi
 if [ -z "$ENVBIN" ] && [ -n "${CONDA_PREFIX:-}" ] && [ -x "$CONDA_PREFIX/bin/python" ]; then
   ENVBIN="$CONDA_PREFIX/bin"
 fi
 if [ -z "$ENVBIN" ]; then
-  for candidate in /localscratch/liuyime2/conda_env/llm/bin "$HOME/miniconda3/envs/llm/bin"; do
+  # Env roots conda itself is configured to use, before the well-known install prefixes. A
+  # non-default envs directory is a normal configuration, not this account's peculiarity, and
+  # naming one account's layout here is what made a fresh clone un-runnable on any other host.
+  for root in "${CONDA_ENVS_PATH:-}" /opt/conda/envs; do
+    [ -n "$root" ] || continue
+    for name in llm base; do
+      if [ -x "$root/$name/bin/python" ]; then ENVBIN="$root/$name/bin"; break 2; fi
+    done
+  done
+fi
+if [ -z "$ENVBIN" ]; then
+  for candidate in "$HOME/miniconda3/envs/llm/bin" "$HOME/miniforge3/envs/llm/bin"; do
     if [ -x "$candidate/python" ]; then ENVBIN="$candidate"; break; fi
   done
 fi
 if [ -z "$ENVBIN" ] || [ ! -x "$ENVBIN/python" ]; then
-  echo "FATAL: no python environment found. Activate the 'llm' environment, run" >&2
-  echo "       'make install', or set MIN_AGENT_ENVBIN to its bin directory." >&2
+  echo "FATAL: no python environment found. Any of:" >&2
+  echo "  * activate the venv or conda env you ran 'make install' in" >&2
+  echo "  * set MIN_AGENT_ENVBIN to its bin directory" >&2
+  echo "  * set CONDA_ENVS_PATH if conda keeps its envs outside the default root" >&2
   exit 2
 fi
 PYTHON_BIN="$ENVBIN/python"
 # Credentials live outside the working tree so git can never see them.
-ENV_FILE="${MIN_AGENT_ENV_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env}"
-
-# And they are loaded here, not merely named. ENV_FILE was computed and then used only to
-# fill @ENVFILE@ into the unit templates, so an operator who followed the README - copy the
-# example to ~/.config/min-agent/env, fill in the keys, run ./minictrl - got "no alpaca
-# credentials" from every foreground command, and `minictrl doctor` could not report on the
-# deployment it was supposed to describe. `make` sources the same file via the Makefile's
-# ENVFILE, so the two entry points disagreed about what the configuration was.
-#
-# Sourced after the defaults above and before anything runs, so a file value wins over a
-# default, and an already-exported variable wins over both.
-if [ -f "$ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  . "$ENV_FILE"
-  set +a
-elif [ -z "${ALPACA_API_KEY:-}" ] && [ "${MIN_AGENT_REQUIRE_CREDENTIALS:-0}" = "1" ]; then
-  echo "FATAL: no credentials at $ENV_FILE" >&2
-  exit 2
-fi
-
 agent() {
-  timeout "${MIN_AGENT_TIMEOUT:-180}" "$CONDA_BIN" run --no-capture-output -n llm python -m min_agent.cli "$@"
+  timeout "${MIN_AGENT_TIMEOUT:-180}" "$PYTHON_BIN" -m min_agent.cli "$@"
 }
 
 # The comment block ends at the first non-comment line. `sed -n '2,20p'` ran past it, so
@@ -148,16 +145,17 @@ case "$cmd" in
       [0-9]*) _cycles="$1"; shift ;;
     esac
     agent --daemon --max-cycles "$_cycles" "$@" ;;
-  daemon)          exec "$CONDA_BIN" run --no-capture-output -n llm python -m min_agent.cli --daemon ;;
+  daemon)          exec "$PYTHON_BIN" -m min_agent.cli --daemon ;;
   status)          agent --status ;;
   stop)            agent --stop ;;
   reconcile)       agent --reconcile ;;
   evidence)        agent --ingest-evidence ;;
+  owner-history)   agent --ingest-owner-history ;;
   report)          agent --evidence-report ;;
   profit)          agent --verify-profit-target ;;
   check-env)       agent --check-env ;;
-  test)            "$CONDA_BIN" run --no-capture-output -n llm python -m pytest tests/min_agent -q "$@" ;;
-  audit)           "$CONDA_BIN" run --no-capture-output -n llm python tools/audit_defects.py ;;
+  test)            "$PYTHON_BIN" -m pytest tests/min_agent -q "$@" ;;
+  audit)           "$PYTHON_BIN" tools/audit_defects.py ;;
 
   install-service)
     # The systemd user manager resolves unit paths from ITS OWN start-time
@@ -218,10 +216,18 @@ case "$cmd" in
     render "$ROOT_DIR/tools/ollama.service.in"     "ollama.service"
     render "$ROOT_DIR/tools/watchdog.service.in"  "quant-watchdog.service"
     cp "$ROOT_DIR/tools/watchdog.timer" "$unit_dir/quant-watchdog.timer"
+    # The research search is a fourth unit rather than something the daemon invokes, because the
+    # separation in src/min_agent/research/__init__.py is enforced by a gate that fails when any
+    # production module imports the research package. Letting the daemon run it would break that
+    # gate for the sake of one scheduler, and a component that both searches and trades can grade
+    # itself on its own output.
+    render "$ROOT_DIR/tools/research.service.in"   "quant-research.service"
+    cp "$ROOT_DIR/tools/research.timer" "$unit_dir/quant-research.timer"
     systemd-analyze verify "$unit_dir/$SERVICE_NAME" "$unit_dir/ollama.service" \
-        "$unit_dir/quant-watchdog.service" 2>&1 | grep -viE "not found|canonical" | head -5
+        "$unit_dir/quant-watchdog.service" "$unit_dir/quant-research.service" 2>&1 \
+        | grep -viE "not found|canonical" | head -5
     systemctl --user daemon-reload
-    echo "wrote 4 unit files to $unit_dir"
+    echo "wrote 6 unit files to $unit_dir"
 
     # Verify the manager can actually SEE them before claiming success. The
     # manager resolves unit paths from its own start-time environment, so a
@@ -229,11 +235,33 @@ case "$cmd" in
     # a failed enable is the same false-success bug that let auto-fix.sh report a
     # dead strategy as healthy.
     failed=0
-    for u in "$SERVICE_NAME" ollama.service quant-watchdog.timer; do
+    for u in "$SERVICE_NAME" ollama.service; do
       if systemctl --user enable "$u" 2>/dev/null; then
         echo "  enabled $u"
       else
         echo "  NOT enabled $u - the manager did not pick it up" >&2
+        failed=$((failed + 1))
+      fi
+    done
+
+    # Timers are enabled *and started*, and the started state is checked rather than assumed.
+    # `enable` alone only arranges for the timer to run at next boot, so a fresh install reported
+    # "enabled quant-watchdog.timer" and "enabled quant-research.timer" while `list-timers` showed
+    # the research one with no next-run at all and `minictrl service start` - which starts only the
+    # daemon - could not start it. A timer that is enabled but not running is the same
+    # false-success as a unit in a directory the manager never opens: it looks configured and does
+    # nothing. This is why quant-research.timer sat `inactive (dead)` with `Trigger: n/a` while
+    # the watchdog next to it was `active (waiting)`.
+    for t in quant-watchdog.timer quant-research.timer; do
+      if systemctl --user enable --now "$t" 2>/dev/null; then
+        if systemctl --user is-active --quiet "$t"; then
+          echo "  enabled and running $t"
+        else
+          echo "  $t enabled but NOT running - it will not fire until started" >&2
+          failed=$((failed + 1))
+        fi
+      else
+        echo "  NOT enabled $t - the manager did not pick it up" >&2
         failed=$((failed + 1))
       fi
     done

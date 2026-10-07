@@ -429,3 +429,28 @@ def test_build_client_returns_none_without_credentials(tmp_path):
         max_total_exposure=20000,
     )
     assert build_client(config) is None
+
+
+def test_the_llm_is_reported_against_the_rule_on_paired_cycles_only():
+    from types import SimpleNamespace
+
+    from min_agent.doctor import DoctorReport, _report_llm_against_the_rule
+
+    def row(action, rule, value, source="llm"):
+        return SimpleNamespace(action=action, rule_action=rule, override_value_pct=value,
+                               decision_source=source)
+
+    report = DoctorReport()
+    _report_llm_against_the_rule(report, [
+        row("HOLD", "SELL", 1.05), row("HOLD", "BUY", -0.4), row("BUY", "BUY", 0.0),
+        row("BUY", None, None),                       # before rule_action existed: unpaired
+        row("SELL", "SELL", 0.0, source="fallback_policy_engine"),
+    ])
+    check = next(c for c in report.checks if c.name == "llm vs rule")
+    assert "3 paired LLM decision(s), 2 override(s)" in check.detail
+    assert "1 of them worth more than the rule" in check.detail
+    assert "+0.650%" in check.detail
+
+    empty = DoctorReport()
+    _report_llm_against_the_rule(empty, [row("BUY", None, None)])
+    assert next(c for c in empty.checks if c.name == "llm vs rule").status.value == "warn"

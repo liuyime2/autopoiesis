@@ -1,0 +1,41 @@
+name: Bug report
+description: Something the code does that it should not, or a number it cannot support
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste credentials.** Check any `make doctor` output for keys before pasting it.
+        A vulnerability goes through SECURITY.md, not here. "My strategy loses money" is not a bug.
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options: ["offline (no broker)", "paper", "shadow"]
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: "`git rev-parse --short HEAD`"
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command and its exit code
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`make doctor` output (credentials removed), if relevant"
+      render: text

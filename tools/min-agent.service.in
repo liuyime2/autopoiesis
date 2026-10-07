@@ -1,6 +1,6 @@
 [Unit]
-Description=QuantVoyager min_agent paper-trading daemon
-Documentation=file://@ROOT@/docs/superpowers/specs/2026-09-28-min-agent-runbook.md
+Description=min-agent paper-trading daemon
+Documentation=file://@ROOT@/docs/history/specs/2026-09-28-min-agent-runbook.md
 After=network-online.target
 Wants=network-online.target
 # Without these a permanently broken daemon restarts forever. run_forever.sh

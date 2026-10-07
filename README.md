@@ -1,16 +1,26 @@
 # min-agent
 
+[![ci](https://github.com/liuyime2/autopoiesis/actions/workflows/ci.yml/badge.svg)](https://github.com/liuyime2/autopoiesis/actions/workflows/ci.yml)
+
 A paper-trading agent that decides for itself whether its own strategies are any good,
 using the broker's records as evidence, and retires the ones that are not.
 
-It runs against Alpaca **paper** only. Live trading is refused in code, not by
-convention: `cli.py` rejects any base URL that is not a paper endpoint before a client is
-constructed.
+> **Paper trading only. Not investment advice. No performance claim.** Live trading is
+> refused in code: `cli.py` rejects any base URL that is not a paper endpoint before a client
+> is constructed. On the record so far the system **does not** beat holding SPY - run
+> `make benchmark` for the current verdict and its denominators, and see
+> [`docs/history/`](docs/history/README.md) for every number that was later retracted.
+
+**No credentials needed to start.** `make smoke-offline` and `make verify` run on a fresh
+clone with no broker account, no model and no secrets; CI runs the same way.
 
 For how the system is put together - the canonical execution path, the evolution loop,
 and which module owns which fact - start at [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 This file is the operator's guide: what to run, what to look at when it misbehaves, and
-what each hard limit is.
+what each hard limit is. To contribute, read [`CONTRIBUTING.md`](CONTRIBUTING.md); to report
+a vulnerability, [`SECURITY.md`](SECURITY.md). Changes are listed in
+[`CHANGELOG.md`](CHANGELOG.md); community standards are in
+[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 
 ## What it actually does
 
@@ -31,35 +41,27 @@ there.
 
 ## Install
 
-Requires Python 3.10+ and an Alpaca **paper** account.
+Requires Python 3.10+. A broker account is needed only to trade; everything else runs
+without one.
 
 ```bash
-conda create -n llm python=3.10 -y
-conda activate llm
-make install                       # pip install -e ".[dev]"
-
-export XDG_CONFIG_HOME="$HOME/.config"
-mkdir -p "$XDG_CONFIG_HOME/min-agent"
-# write ALPACA_API_KEY, ALPACA_SECRET_KEY and ALPACA_BASE_URL (paper) into
-# "$XDG_CONFIG_HOME/min-agent/env", then:
-make check
-```
-
-`make setup` prints the same steps. Credentials live outside the repository and are never
-read from a checked-in file.
-
-### Verifying the install before you have credentials
-
-Everything below runs on a fresh clone with no broker credentials and no `runtime/`
-directory, which is what `runtime/` being gitignored means in practice:
-
-```bash
-git clone <repo> && cd min-agent
-conda create -n llm python=3.10 -y && conda activate llm
-make install
+git clone https://github.com/liuyime2/autopoiesis.git min-agent && cd min-agent
+python3 -m venv .venv && . .venv/bin/activate
+make install           # pip install -e ".[dev]"
 make smoke-offline     # import, config, CLI - no broker contacted
-make check             # lint + tests
+make check             # lint + mypy + tests
 ```
+
+On Debian or Ubuntu the system Python needs `sudo apt install python3-venv` first, or
+`python3 -m venv` creates an environment without pip. conda works too (`conda create -n llm python=3.10 && conda activate llm`, then the same
+`make` targets); an active venv takes precedence over conda, and neither `make` nor
+`minictrl` requires conda.
+
+To trade on paper, put `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` and `ALPACA_BASE_URL` (the paper
+endpoint) into `${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env`, mode 600. Credentials live
+outside the repository and are never read from a checked-in file;
+`configs/paper.env.example` lists every variable with its default. `make setup` prints these
+steps.
 
 That path is verified rather than asserted: cloning into a clean environment and running it
 found three things that only fail off the live machine - `ruff` and `mypy` missing from
@@ -74,16 +76,18 @@ wrappers each duplicated a flag below.
 
 | Command | What it does | Cost |
 | --- | --- | --- |
-| `make check` | lint + test, no broker | ~15s |
+| `make check` | lint + mypy + test, no broker | ~15s |
 | `make smoke` | one real cycle end to end against the broker | ~8s |
 | `make smoke-offline` | config and CLI end to end with `--skip-broker`; no broker, no model | ~20s |
 | `make fast` | check + smoke + the full gate | ~90s |
-| `make verify` | 51 check classes, non-zero on any failure | ~100s |
+| `make verify` | 52 check classes, non-zero on any failure | ~100s |
 | `make test` | the whole suite | ~5min |
 | `make doctor` | health of the running system, non-zero on any fault | ~20s |
 | `make status` | is the daemon alive and what is it doing | ~1s |
 | `make run` / `make stop` / `make restart` | control the daemon via systemd | ~2s |
 | `make reproduce` | record commit, config, versions, broker clock, metrics for this run | ~5s |
+| `make benchmark` | does the system beat SPY buy-and-hold on the same capital and window; exit 0 met / 1 behind / 2 nothing to measure | ~30s |
+| `./minictrl owner-history` | journal the account owner's fills (read-only) so an agent sale beyond its own lots can be priced | ~60s |
 
 `make type` runs mypy and blocks. It is part of `make check`, so a type
 regression fails the fast loop rather than waiting for review.
@@ -103,22 +107,22 @@ One failing check class can be re-run alone: `make verify CLASS=pnl-accounting`.
 ## Where things are
 
 ```
-src/min_agent/          the package. 40 modules, 3 external dependencies.
+src/min_agent/          the package. 41 modules, 3 external dependencies.
   cli.py                the single entry point
   daemon.py             the cycle loop and the maintenance loop
   guardian.py           hard risk limits. not bypassable
   loop.py               one cycle: snapshot -> decision -> guardian -> execute
   journal.py            append-only record. the source of truth
-  models.py             shared schema, imported by 21 modules
+  models.py             shared schema, imported by 23 modules
   strategy_engine.py    strategy library, selection, lifecycle
   evaluator.py          scoring from broker-confirmed evidence
   research/             diagnosis only. production may not import it, and a gate enforces that
-tools/verify.py         the gate: 51 check classes
+tools/verify.py         the gate: 52 check classes
 tools/provenance.py     what `make reproduce` records
-tests/min_agent/        61 test files
+tests/min_agent/        70 test files
 examples/minimal_cycle.py   the smallest runnable example, no broker needed
 configs/paper.env.example   every environment variable, with its default
-.github/workflows/      CI: lint, tests, offline smoke, and the gate's self-test
+.github/workflows/      CI: lint, mypy, tests, offline smoke, the gate and its self-test
 runtime/min_agent/      all state. gitignored, regenerable except journal.jsonl
 docs/ARCHITECTURE.md    the current architecture, then the pre-refactor map behind a dated marker
 docs/MIGRATION.md       what changed and what replaced it
@@ -160,7 +164,7 @@ far from the market to be a real price, or so close that its own trigger band al
 contains the current price, which would leave it permanently `HOLD`. A trigger the market
 has not reached yet is fine - that is a resting order, and the rule follows the price
 rather than purging once. See
-[`docs/superpowers/plans/2026-10-03-refuse-untradeable-strategy.md`](docs/superpowers/plans/2026-10-03-refuse-untradeable-strategy.md)
+[`docs/history/plans/2026-10-03-refuse-untradeable-strategy.md`](docs/history/plans/2026-10-03-refuse-untradeable-strategy.md)
 for the measurement behind it.
 
 ## Verifying a change did not break something
@@ -185,6 +189,11 @@ has no bypass - it is called on the single path that can submit an order.
 | max daily loss | `MIN_AGENT_MAX_DAILY_LOSS` | $500 |
 | max trades per day | `MIN_AGENT_MAX_TRADES_PER_DAY` | 10 |
 | min confidence | `MIN_AGENT_MIN_CONFIDENCE` | 0.5 |
+| short selling | `MIN_AGENT_SHORTS` | `off` (`shadow` journals SHORT/COVER as intents; `paper` submits them) |
+
+A short is a separate rule, not a relaxation of these: it is refused while the account holds
+any long in the symbol, capped by the same position and exposure limits (measured gross), and
+a COVER may only buy back what the agent itself shorted.
 
 They are environment-overridable, so a *lower* limit is a legitimate tightening and a
 *higher* one is a risk decision that belongs to whoever operates the account, not to the
@@ -225,8 +234,9 @@ They were fixed at the boundaries rather than silenced: one canonical
 and the offending value when a record is unreadable, instead of raising a bare
 `invalid literal for int()`.
 
-`docs/superpowers/SYSTEM_AUDIT.md` is a historical defect log, kept because it records
-why specific decisions were made. It is not documentation of how the system works - this
+[`docs/history/`](docs/history/README.md) is the historical record - the running log
+(`STATUS.md`), the defect audit, and one plan per change - kept because it records why
+specific decisions were made, including the claims that were later retracted. It is not documentation of how the system works - this
 file and `docs/ARCHITECTURE.md` are.
 
 ## The pipeline
@@ -251,7 +261,7 @@ become something you learn to ignore.
 
 ### Two gates, and why
 
-`make check` (lint + tests) answers "is this repository correct?" and is the gate that runs in
+`make check` (lint + mypy + tests) answers "is this repository correct?" and is the gate that runs in
 CI. `make verify` additionally runs `minictrl doctor` against the live deployment, so on a
 host where the agent is trading it also answers "is the agent doing well?".
 
@@ -262,10 +272,10 @@ failure, and `tests/min_agent/test_attribution.py` guards the severity deliberat
 earlier version used `== 0.0` instead of `<= 0.0` and reported OK while the model lost money.
 
 So when you read a red run, read which class failed before concluding anything is wrong with
-the code. `make check` (lint + tests) is the one that speaks only about the repository.
+the code. `make check` (lint + mypy + tests) is the one that speaks only about the repository.
 
 Findings that are limits on the *record* rather than outcomes - currently the 29 shares sold
-that no BUY accounts for, written up in `STATUS.md` - are WARN. They are stated prominently
+that no BUY accounts for, written up in `docs/history/STATUS.md` - are WARN. They are stated prominently
 but do not redden the gate, because a four-month-old accounting gap that is permanent red is
 how a gate gets ignored.
 

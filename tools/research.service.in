@@ -1,0 +1,59 @@
+[Unit]
+Description=min-agent unattended strategy research: fetch real bars, then search
+Documentation=file://@ROOT@/docs/history/specs/2026-09-28-min-agent-runbook.md
+After=network-online.target min-agent.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+Environment=PYTHONPATH=@ROOT@/src
+Environment=PATH=@ENVBIN@:/usr/local/bin:/usr/bin:/bin
+# Paper credentials, same as the daemon: the bars are historical, but the endpoint is the paper
+# one because this project does not hold a live key and does not trade history.
+Environment=MIN_AGENT_MODE=paper
+Environment=ALPACA_BASE_URL=https://paper-api.alpaca.markets
+Environment=APCA_API_BASE_URL=https://paper-api.alpaca.markets
+
+# Rendered from the same variable as min-agent.service, and no leading `-` for the same reason as
+# the watchdog: a missing credentials file must stop this unit with the actual cause named, rather
+# than starting it and producing a research run with no bars.
+EnvironmentFile=@ENVFILE@
+
+# Fetch first, search second. Type=oneshot permits several ExecStart= lines and runs them in
+# order, which is what makes this a pipeline rather than two racing commands.
+#
+# The fetch is followed by `|| echo ...` so its failure is tolerated rather than fatal: it is
+# expected on any day the broker has no new bars to give, and the search must still run and say
+# so. Coupling the two would mean a broker outage silently stops research. The fetch itself
+# refuses to invent bars - it returns non-zero and writes nothing - so a failure here cannot turn
+# into a verdict on invented prices.
+#
+# The search is *not* tolerant. If the driver exits non-zero the cache was missing or unusable,
+# which is a real failure and should fail the unit.
+# The window ends 20 minutes ago, not yesterday and not now.
+#
+# Measured 2026-10-05, sweeping the end time across the session while the cache sat at
+# 2026-10-02T23:55Z:
+#
+#   end=2026-10-05T16:30Z  24265 bars  newest 16:30Z
+#   end=2026-10-05T16:55Z  24270 bars  newest 16:55Z
+#   end=2026-10-05T17:00Z  REFUSED: subscription does not permit querying recent SIP data
+#   end=now - 20 min       24269 bars  newest 16:50Z
+#   end=now - 60 min       24261 bars  newest 16:10Z
+#
+# The paper account's data trails real time by roughly 15 minutes, so the refusal is about how
+# recent the request is, not about the calendar. Two consequences, both of which were bugs:
+#
+# - ending at "yesterday 20:00Z" cannot ever ask for today's bars, so the dataset could not
+#   grow at all while this unit ran. It was stale by construction, not merely restricted.
+# - ending at "now" is refused outright whenever the run lands inside the trailing window,
+#   which is exactly what happened on the 06:42 unattended run.
+#
+# Twenty minutes clears the measured ~15 minute lag with a margin, and the fetcher skips
+# entirely when the cache already holds a bar inside the last interval.
+ExecStart=/bin/sh -c '@PYTHON@ tools/fetch_replay_bars.py SPY "$(date -u -d "-6 months" +%%Y-%%m-%%dT13:30:00Z)" "$(date -u -d "-20 minutes" +%%Y-%%m-%%dT%%H:%%M:00Z)" 5Min ROLLING || echo "bar fetch returned $?; searching the existing cache anyway"'
+ExecStart=@PYTHON@ -m min_agent.research.driver
+
+StandardOutput=append:@ROOT@/runtime/min_agent/research.log
+StandardError=append:@ROOT@/runtime/min_agent/research.log

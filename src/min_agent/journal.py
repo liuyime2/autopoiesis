@@ -6,6 +6,7 @@ import os
 from collections import deque
 from datetime import datetime
 from pathlib import Path
+from typing import TypedDict
 
 from min_agent.atomicio import file_lock
 from min_agent.models import CycleRecord, JournalEvent
@@ -17,6 +18,23 @@ from min_agent.models import CycleRecord, JournalEvent
 # events rather than cycles.
 _CYCLE_MARKER = '"execution":'
 _EVENT_MARKER = '"event_id":'
+
+
+class RetainedWindow(TypedDict):
+    """What `retained_window` returns, spelled out rather than left as `object`.
+
+    It was `dict[str, object]`, which pushed the cost of the missing type onto the reader:
+    the doctor had to `str()` and slice values it already knew were strings, and mypy
+    reported `Value of type "object" is not indexable` on the one line that indexes. The
+    shape is fixed at five keys, so it is declared here once and both readers are checked
+    against it.
+    """
+
+    cycles: int
+    oldest: str | None
+    newest: str | None
+    generations: int
+    truncated: bool | None
 
 
 class JsonlJournal:
@@ -103,7 +121,7 @@ class JsonlJournal:
                 count += 1
         return count
 
-    def retained_window(self, *, known_since: datetime | None = None) -> dict[str, object]:
+    def retained_window(self, *, known_since: datetime | None = None) -> RetainedWindow:
         """The span of history still on disk, and whether it is the whole story.
 
         Rotation deletes the oldest generation, so the journal stops being the record of
@@ -126,7 +144,7 @@ class JsonlJournal:
         """
         records = self.read_all()
         stamps = sorted(r.snapshot.timestamp for r in records if getattr(r.snapshot, "timestamp", None))
-        window: dict[str, object] = {
+        window: RetainedWindow = {
             "cycles": len(records),
             "oldest": stamps[0].isoformat() if stamps else None,
             "newest": stamps[-1].isoformat() if stamps else None,

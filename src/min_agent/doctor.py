@@ -36,6 +36,7 @@ from min_agent.evaluator import (
     PNL_EVIDENCE_MISSING,
     DeterministicEvaluator,
     confirmed_fill_activities,
+    owner_fill_activities,
 )
 from min_agent.fill_reconciler import FILL_EVENT
 from min_agent.health import HealthMonitor
@@ -545,6 +546,38 @@ def _check_decision_quality(
         )
     else:
         report.add("decision quality", OK, detail)
+    _report_llm_against_the_rule(report, result.rows)
+
+
+def _report_llm_against_the_rule(report: DoctorReport, rows: list) -> None:
+    """What the model's departures from the strategy's rule were worth, paired per cycle.
+
+    Every LLM decision since rule_action was recorded carries the rule's action on the same
+    snapshot, and its counterfactual row the probe value of the action taken minus the
+    rule's. Their sum is the model's increment over the rule on identical inputs - the
+    number the PnL-lot attribution could only approximate. Cycles before that have no pair
+    and are not counted, rather than estimated.
+    """
+    paired = [
+        row for row in rows
+        if row.decision_source == "llm" and row.override_value_pct is not None
+    ]
+    if not paired:
+        report.add(
+            "llm vs rule", WARN,
+            "no scored LLM decision carries the rule's action yet; the paired comparison "
+            "starts with the first cycle recorded with rule_action and needs 24h to score",
+        )
+        return
+    overrides = [row for row in paired if row.action != row.rule_action]
+    total = sum(row.override_value_pct for row in overrides)
+    helped = sum(1 for row in overrides if row.override_value_pct > 0)
+    report.add(
+        "llm vs rule", OK,
+        f"{len(paired)} paired LLM decision(s), {len(overrides)} override(s) of the rule, "
+        f"{helped} of them worth more than the rule; overrides net {total:+.3f}% of probe "
+        f"value (one share, 24h, after the assumed cost)",
+    )
 
 
 def _check_experiment_chain(
@@ -709,16 +742,21 @@ def _check_model_calibration(
     # The verdict is reported whole, not truncated to its label.
     #
     # `verdict.split(":")[0]` printed "MIS-CALIBRATED" and discarded the rest, which is
-    # where the actionable half lives: `calibration.calibrate` had already computed that
-    # the most confident bucket was right 5.6% of the time against a 46.2% base rate - a
-    # margin of -40.6% - and stated it in the sentence that was thrown away.
+    # where the actionable half lives: `calibration.calibrate` had already computed the
+    # bucket accuracies and their margins and stated them in the sentence that was thrown
+    # away.
     #
     # That is the same defect this file already records twice, in a new place. A label
     # saying "miscalibrated" invites the reading "the model is overconfident, raise
-    # `min_confidence`". The measured direction says the opposite: the confident
-    # decisions are the *worst* ones, so tightening the gate rejects the decisions that
-    # were right and admits the ones that lose. A reader given only the label cannot tell
-    # those two situations apart, and the wrong response here degrades a risk gate.
+    # `min_confidence`" - and the earlier version of this comment argued the opposite
+    # from the raw figures, that the confident decisions were the worst ones.
+    #
+    # **That argument was itself the bug, and it has been removed rather than reversed.**
+    # Correctness is mostly the trading day's: on this account the per-day base rate runs
+    # 96.9% / 26.6% / 85.1% / 12.3%, so the bucket that looked 90.6% accurate was one
+    # day's rate and the confident bucket looked terrible because it landed on the other
+    # days. `calibrate` now reads every bucket against its own days and the verdict
+    # carries that margin, so neither reading has to be inferred here.
     detail = (
         f"{result.total_decisions} llm decision(s), {result.scored} scored, "
         f"{result.pending} still awaiting an outcome; {result.verdict}"
@@ -801,11 +839,22 @@ def _check_pnl_attribution(
         coerce.field_float_or(qty, f"pnl.unmatched_sell_quantity[{sid}]", 0.0)
         for sid, qty in unmatched_by_strategy.items()
     )
+    owner_shares = coerce.field_float_or(pnl.get("owner_exit_quantity"), "pnl.owner_exit_quantity", 0.0)
+    if owner_shares:
+        cost = coerce.field_float_or(pnl.get("owner_exit_cost"), "pnl.owner_exit_cost", 0.0)
+        proceeds = coerce.field_float_or(pnl.get("owner_exit_proceeds"), "pnl.owner_exit_proceeds", 0.0)
+        detail += (
+            f" | OWNER EXIT {owner_shares:g}: shares an agent order sold beyond the agent's own "
+            f"lots, priced FIFO against the account owner's recorded fills - cost "
+            f"{cost:.2f}, proceeds {proceeds:.2f}, owner gain {proceeds - cost:+.2f}. The owner's, "
+            "not any strategy's, and not in the total above"
+        )
     if unmatched_shares:
         detail += (
             f" | UNMATCHED SELLS {unmatched_shares:g}: shares were sold "
             f"that no linked BUY could account for ({unmatched_by_strategy}), "
-            "so that PnL is unproven"
+            "and their PnL is absent from the total above rather than merely "
+            "unproven"
         )
 
     # Severity follows a distinction that has to be stated, because it decides
@@ -831,10 +880,14 @@ def _check_pnl_attribution(
     # Two different findings, and only one of them decides severity.
     #
     # * Shares sold that no BUY accounts for are a limit on what the *record* can support.
-    #   The headline PnL is then an upper bound rather than an exact result. That is a
-    #   property of the data, so it is reported prominently and recorded as an open finding in
-    #   STATUS.md, but it does not make the health report FAIL - otherwise a four-month-old
-    #   accounting gap keeps `make verify` red permanently and teaches everyone to ignore it.
+    #   `_apply_activity` books no PnL for them - only the quantity and the fee - so the
+    #   headline total is *incomplete*, not an upper bound: the omitted term is those shares'
+    #   gain or loss, and the record does not say which. An earlier version of this message
+    #   called the figure "an upper bound", which is wrong in the direction that flatters the
+    #   run and is the reason the sentence now states the mechanism instead. That is a
+    #   property of the data, so it is reported prominently and recorded in STATUS.md, but it
+    #   does not make the health report FAIL - otherwise a four-month-old accounting gap
+    #   keeps `make verify` red permanently and teaches everyone to ignore it.
     #
     # * A model that opened lots and subtracted from a positive total IS a FAIL, and stays
     #   one. `tests/min_agent/test_attribution.py` guards that with a deliberate message: the
@@ -849,10 +902,12 @@ def _check_pnl_attribution(
     if unmatched_shares:
         report.add(
             "pnl attribution", WARN,
-            detail + "; shares were sold that no BUY accounts for, so part of this PnL "
-            "cannot be attributed to a strategy and the headline figure is an upper bound "
-            "rather than an exact result. This is an open finding, not a fault in the "
-            "trading path - see STATUS.md",
+            detail + f"; {unmatched_shares:g} share(s) were sold that no BUY accounts "
+            "for, so the PnL of those exits is not in the total above at all - their "
+            "proceeds are real and their cost basis is not on the record, so the omitted "
+            "term can be positive or negative and the figure is incomplete rather than "
+            "exact. This is a property of the account, not a fault in the trading path - "
+            "see docs/history/STATUS.md",
         )
     if result.closed_lots and model_lots > 0 and result.model_pnl <= 0.0:
         report.add(
@@ -1151,7 +1206,7 @@ def _check_unmanaged_exposure(report: DoctorReport, config: AgentConfig, client,
     except Exception:
         equity = 0.0
     value = sum(
-        float(getattr(p, "market_value", 0.0) or 0.0) for p in unmanaged
+        abs(float(getattr(p, "market_value", 0.0) or 0.0)) for p in unmanaged
     )
     share = f" ({value / equity:.0%} of equity)" if equity else ""
     report.add(
@@ -1243,7 +1298,7 @@ def _check_journal(report: DoctorReport, config: AgentConfig) -> None:
     window = journal.retained_window(known_since=known_since)
     if window["oldest"]:
         window_detail = (
-            f"retained {window['oldest'][:19]} .. {str(window['newest'])[:19]} "
+            f"retained {window['oldest'][:19]} .. {(window['newest'] or '')[:19]} "
             f"across {window['generations']} generation(s)"
         )
         if window["truncated"]:
@@ -1353,6 +1408,7 @@ def _check_proof(report: DoctorReport, config: AgentConfig) -> None:
         evidence=evidence,
         fills=fills,
         seeded_fills=confirmed_fill_activities(journal, records),
+        owner_fills=owner_fill_activities(journal),
     )
 
     submitted = evaluation.submitted_orders
@@ -1378,6 +1434,30 @@ def _check_proof(report: DoctorReport, config: AgentConfig) -> None:
             "proof: per-strategy pnl", WARN,
             f"empty (pnl_evidence={evaluation.pnl_evidence})",
             "needs broker closed-lot evidence; a fill alone is not PnL",
+        )
+    # The project's success metric, per strategy, against the same instrument over the
+    # same window. Reported rather than folded into the PnL line above because it is a
+    # different question: that line says what was made, this says what holding would
+    # have returned instead. WARN below zero, because a strategy that made money and
+    # still lost to the market has not earned the capital it was given.
+    pnl_evidence = evaluation.pnl
+    excess = pnl_evidence.strategy_excess_vs_market_pct if pnl_evidence else {}
+    if excess and pnl_evidence is not None:
+        behind = sorted(k for k, v in excess.items() if v < 0)
+        market = pnl_evidence.strategy_market_return_pct
+        detail = ", ".join(
+            f"{k}={pnl_evidence.strategy_return_pct[k]:+.2f}% vs market {market[k]:+.2f}%"
+            f" ({excess[k]:+.2f})"
+            for k in sorted(excess, key=lambda x: -excess[x])[:6]
+        )
+        report.add(
+            "pnl vs holding", WARN if behind else OK,
+            f"{len(behind)} of {len(excess)} strategy/ies behind the market: {detail}"
+            if behind else f"every strategy beat the market: {detail}",
+            "both legs on the same capital and window: realized plus unrealized PnL over the "
+            "strategy's peak exposure, against the same instrument from its first entry to its "
+            "last exit (or last valuation while a lot is open). The promotion gate screens on "
+            "decision quality, which is a different question from this one",
         )
     risk_halts = evaluation.hold_reasons.get("risk_limit_near", 0)
     total_holds = evaluation.action_counts.get("HOLD", 0)

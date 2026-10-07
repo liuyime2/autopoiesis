@@ -246,31 +246,43 @@ def test_the_calibration_check_reports_the_verdict_and_not_only_its_label(tmp_pa
     """The whole verdict, because the actionable half is after the colon.
 
     `doctor` used to print `verdict.split(":")[0]`, which reduced a finding to the single
-    word MIS-CALIBRATED and threw away the sentence stating that the most confident bucket
-    was right 5.6% of the time against a 46.2% base rate - a margin of -40.6%.
+    word MIS-CALIBRATED and threw away every figure in the sentence that followed.
 
     That matters because the label alone invites "the model is overconfident, raise
-    `min_confidence`", while the measured direction says the confident decisions are the
-    worst ones. This stubs `calibrate` because the property under test is what `doctor`
-    does with the verdict it is handed, not how `calibrate` derives it.
+    `min_confidence`" - and an earlier version of this docstring drew the opposite
+    conclusion from the raw figures, that the confident decisions were the worst ones.
+    That conclusion was itself wrong: the buckets have to be read against the days they
+    were taken on, because correctness on this account is mostly the market's direction.
+    The verdict now carries that margin and it has to reach the reader too, so this
+    asserts the day-adjusted figure is not truncated away with the rest.
+
+    `calibrate` is stubbed because the property under test is what `doctor` does with the
+    verdict it is handed, not how `calibrate` derives it.
     """
     from min_agent import calibration
     from min_agent.doctor import _check_model_calibration
 
     verdict = (
-        "MIS-CALIBRATED: Brier 0.433 against the 0.25 a constant 0.5 claim scores, so "
-        "the stated confidence is worse than useless. Accuracy is 46.2% and the most "
-        "confident bucket is 5.6% (margin -40.6% if positive)"
+        "MIS-CALIBRATED: Brier 0.396 against the 0.25 a constant 0.5 claim scores, so the "
+        "stated confidence adds no usable information. Brier 0.271 against the 4 day(s) "
+        "those decisions were taken on, so 0.126 of it is the market's direction rather "
+        "than the model's. Measured against the whole record rather than the days, "
+        "accuracy is 53.1% and the most confident bucket is 13.9% (margin -39.2% if "
+        "positive). The worst bucket against its own days is -19.0%"
     )
     report_stub = calibration.CalibrationReport(
         source="llm",
         total_decisions=314,
-        scored=210,
+        scored=241,
         pending=71,
-        brier=0.433,
-        base_rate=0.462,
-        top_bucket_accuracy=0.056,
-        passed_gate_n=178,
+        brier=0.396,
+        day_brier=0.271,
+        days=4,
+        base_rate=0.531,
+        top_bucket_accuracy=0.139,
+        top_bucket_day_margin=-0.190,
+        worst_bucket_day_margin=-0.190,
+        passed_gate_n=209,
         verdict=verdict,
     )
     monkeypatch.setattr(calibration, "calibrate", lambda rows, min_confidence: report_stub)
@@ -281,12 +293,14 @@ def test_the_calibration_check_reports_the_verdict_and_not_only_its_label(tmp_pa
     detail = _lines(report)["model calibration"].detail
 
     assert detail != "MIS-CALIBRATED", "the label alone is the defect"
-    assert "5.6%" in detail, f"the confident-bucket accuracy must reach the reader: {detail}"
-    assert "-40.6%" in detail, f"the direction must reach the reader: {detail}"
-    assert "46.2%" in detail, f"the base rate it is compared against must be there: {detail}"
+    assert "13.9%" in detail, f"the confident-bucket accuracy must reach the reader: {detail}"
+    assert "-39.2%" in detail, f"the raw direction must reach the reader: {detail}"
+    assert "53.1%" in detail, f"the base rate it is compared against must be there: {detail}"
+    assert "0.271" in detail, f"the day-adjusted score must reach the reader: {detail}"
+    assert "-19.0%" in detail, f"the day-adjusted margin must reach the reader: {detail}"
     # The figures appear once each, not twice.
-    assert detail.count("Brier") == 1, detail
-    assert detail.count("46.2%") == 1, f"base rate printed twice: {detail}"
+    assert detail.count("Brier") == 2, detail
+    assert detail.count("53.1%") == 1, f"base rate printed twice: {detail}"
 
 
 def test_an_insufficient_calibration_still_says_so(tmp_path, monkeypatch):

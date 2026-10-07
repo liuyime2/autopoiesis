@@ -195,3 +195,105 @@ def test_an_unhonourable_window_is_disclosed_not_substituted():
 
     assert provider.window_fallback is not None
     assert "unparameterised" in provider.window_fallback
+
+
+def _fill(index: int) -> dict:
+    return {
+        "id": f"activity-{index}",
+        "activity_type": "FILL",
+        "order_id": f"order-{index}",
+        "client_order_id": f"client-{index}",
+        "symbol": "SPY",
+        "side": "buy",
+        "qty": "1",
+        "price": "100",
+        "fee": "0",
+        "transaction_time": "2026-06-10T13:31:00Z",
+    }
+
+
+#: A window wide enough that the broker's page limit could bind, so the tests below are
+#: about the limit and not about the shape of the fixture.
+WIDE = dict(
+    window_start=datetime(2026, 6, 10, tzinfo=timezone.utc),
+    window_end=datetime(2026, 10, 4, tzinfo=timezone.utc),
+)
+
+
+def test_a_full_page_of_activities_is_reported_as_the_fragment_it_is():
+    """The broker caps a page at 100 and says nothing about the rest.
+
+    Measured on this account by paging with `page_token` until the API stopped: a
+    nine-month window holds 279 fills, and a single request returned 100 of them with
+    `missing_reasons` empty. So any figure computed from a window that wide was a
+    fragment reported as a total - which is the same failure the journal's own rotation
+    had, and the same response: say so rather than fetch a wider buffer in anticipation.
+
+    Paging is deliberately not done. Every window this repository asks for is well under
+    the limit - the daemon's 24 hours returns 0-20, `minictrl evidence ingest`'s 30 days
+    returns 43, four months returns 66 - so a second page would be built for a window
+    nobody requests.
+    """
+    limit = BrokerEvidenceProvider.ACTIVITY_PAGE_LIMIT
+
+    class PagedClient(Client):
+        def get_activities(self, **kwargs):
+            return [_fill(i) for i in range(limit)]
+
+    batch = BrokerEvidenceProvider(client=PagedClient()).ingest(**WIDE)
+
+    assert len(batch.activities) == limit
+    assert batch.status == "PARTIAL"
+    assert any("full page" in reason for reason in batch.missing_reasons), (
+        f"a fragment must not be presented as the whole window: {batch.missing_reasons}"
+    )
+    assert any("fragment" in reason for reason in batch.missing_reasons), (
+        f"the reason must say what it is, not merely that something is missing: "
+        f"{batch.missing_reasons}"
+    )
+
+
+def test_a_window_under_the_page_limit_is_not_questioned():
+    """The check must not fire on the windows the code actually requests.
+
+    A warning that fires on every ordinary cycle is a warning nobody reads, and this one
+    would print inside the PnL evidence of every single pass.
+    """
+
+    class SmallClient(Client):
+        def get_activities(self, **kwargs):
+            return [_fill(i) for i in range(BrokerEvidenceProvider.ACTIVITY_PAGE_LIMIT - 1)]
+
+    batch = BrokerEvidenceProvider(client=SmallClient()).ingest(**WIDE)
+
+    assert batch.status == "SUCCESS"
+    assert batch.missing_reasons == ()
+
+
+def test_a_truncation_on_one_ingest_does_not_follow_the_next():
+    """The flag is per-ingest, not per-provider.
+
+    `BrokerEvidenceProvider` is a long-lived object on the daemon, so a flag that
+    latched would report a truncation for every window after the first wide one - which
+    is the same class of bug as the unparameterised `get_portfolio_history` fallback this
+    file already pins.
+    """
+    limit = BrokerEvidenceProvider.ACTIVITY_PAGE_LIMIT
+
+    class SometimesPaged(Client):
+        def __init__(self):
+            self.wide = True
+
+        def get_activities(self, **kwargs):
+            return [_fill(i) for i in range(limit if self.wide else 1)]
+
+    client = SometimesPaged()
+    provider = BrokerEvidenceProvider(client=client)
+
+    first = provider.ingest(**WIDE)
+    client.wide = False
+    second = provider.ingest(**WIDE)
+
+    assert first.status == "PARTIAL"
+    assert second.status == "SUCCESS"
+    assert second.missing_reasons == ()

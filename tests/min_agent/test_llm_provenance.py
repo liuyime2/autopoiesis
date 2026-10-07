@@ -170,9 +170,16 @@ def test_llm_receives_admitted_lessons(tmp_path):
     llm = ScriptedLLM(TradeDecision(symbol="SPY", action="HOLD", quantity=0, confidence=0.2, rationale="wait"))
     engine, _ = _engine(tmp_path, llm, knowledge=knowledge)
 
-    engine.decide_snapshot(_snapshot())
+    decision = engine.decide_snapshot(_snapshot())
 
-    assert llm.calls[0]["lessons"] == ["s1 stalls below 0.6 confidence"]
+    # Each lesson is shown on a deterministic half of cycles (see the ablation tests below),
+    # so this cycle either shows it or records it as withheld - never neither.
+    if decision.lesson_ids == ("k1",):
+        assert llm.calls[0]["lessons"] == ["s1 stalls below 0.6 confidence"]
+        assert decision.lessons_withheld == ()
+    else:
+        assert decision.lessons_withheld == ("k1",)
+        assert llm.calls[0]["lessons"] == []
 
 
 # --- the fallback is disclosed, never disguised -----------------------------
@@ -1202,3 +1209,114 @@ def test_an_unknown_agent_holding_falls_back_to_the_account_the_same_way_guardia
         agent_position_quantity=None,
     ).approved
     assert refused == state["buy_blocked_by_position_limit"]
+
+
+# --- the rule is the default; the model overrides it only with a reason --------
+
+
+def _llm_says(action, reason=None):
+    from min_agent.models import TradeDecision
+
+    return ScriptedLLM(TradeDecision(
+        symbol="SPY", action=action, quantity=0 if action == "HOLD" else 1, confidence=0.6,
+        rationale="r", override_reason=reason,
+    ))
+
+
+def test_the_model_is_shown_the_rule_s_decision(tmp_path):
+    llm = _llm_says("BUY")
+    engine, _ = _engine(tmp_path, llm)  # s1 is a FIXED_SIZE BUY of 1
+    engine.decide_snapshot(_snapshot())
+    assert llm.calls[0]["rule_decision"] == {"action": "BUY", "quantity": 1}
+
+
+def test_agreeing_with_the_rule_is_recorded_as_a_pair(tmp_path):
+    engine, _ = _engine(tmp_path, _llm_says("BUY"))
+    decision = engine.decide_snapshot(_snapshot())
+    assert (decision.action, decision.rule_action, decision.decision_source) == ("BUY", "BUY", "llm")
+    assert decision.override_reason is None
+
+
+def test_an_override_with_a_reason_is_taken_and_both_actions_are_recorded(tmp_path):
+    engine, _ = _engine(tmp_path, _llm_says("HOLD", "the position cap leaves no room to buy"))
+    decision = engine.decide_snapshot(_snapshot())
+    assert (decision.action, decision.rule_action, decision.decision_source) == ("HOLD", "BUY", "llm")
+    assert decision.override_reason == "the position cap leaves no room to buy"
+
+
+def test_an_override_without_a_reason_is_discarded_for_the_rule(tmp_path):
+    """112 of 113 recorded disagreements were the model declining the rule's trade, unexplained."""
+    engine, _ = _engine(tmp_path, _llm_says("HOLD", "  "))
+    decision = engine.decide_snapshot(_snapshot())
+    assert (decision.action, decision.quantity, decision.rule_action) == ("BUY", 1, "BUY")
+    assert decision.decision_source == "policy_engine"
+    assert "without an override_reason" in decision.rationale
+
+
+def test_the_fallback_records_its_own_rule_as_the_rule_action(tmp_path):
+    engine, _ = _engine(tmp_path, ScriptedLLM(error=TimeoutError("slow")))
+    decision = engine.decide_snapshot(_snapshot())
+    assert decision.decision_source == "fallback_policy_engine"
+    assert decision.rule_action == decision.action == "BUY"
+
+
+# --- the model sees how the price got here, and nothing after now -------------
+
+
+def _history(prices_by_minutes_ago):
+    from datetime import timedelta
+
+    from min_agent.models import CycleRecord, ExecutionResult, GuardianResult, TradeDecision
+
+    out = []
+    for i, (minutes, price) in enumerate(prices_by_minutes_ago):
+        snap = _snapshot(price=price).model_copy(update={"timestamp": NOW - timedelta(minutes=minutes)})
+        out.append(CycleRecord(
+            cycle_id=f"h{i}", snapshot=snap,
+            decision=TradeDecision(symbol="SPY", action="HOLD", quantity=0, confidence=0.5, rationale="r"),
+            guardian=GuardianResult(approved=True, reason="ok"),
+            execution=ExecutionResult(status="SKIPPED", order_id=None, message="m", filled_quantity=0),
+        ))
+    return out
+
+
+def test_the_model_is_given_returns_from_its_own_record(tmp_path):
+    llm = _llm_says("BUY")
+    engine, _ = _engine(tmp_path, llm)
+    engine.market_history = lambda: _history([(1500, 700.0), (70, 740.0), (30, 745.0)])
+    engine.decide_snapshot(_snapshot(price=REAL_SPY_PRICE))
+    market = llm.calls[0]["market"]
+    assert market["return_1h_pct"] == round((REAL_SPY_PRICE / 740.0 - 1) * 100, 3)
+    assert market["return_1d_pct"] == round((REAL_SPY_PRICE / 700.0 - 1) * 100, 3)
+
+
+def test_the_market_block_never_sees_a_price_after_the_snapshot(tmp_path):
+    """Point-in-time: a record stamped after this snapshot must not shape what the model sees."""
+    llm = _llm_says("BUY")
+    engine, _ = _engine(tmp_path, llm)
+    engine.market_history = lambda: _history([(90, 740.0), (-30, 9999.0)])  # -30 = the future
+    engine.decide_snapshot(_snapshot(price=REAL_SPY_PRICE))
+    market = llm.calls[0]["market"]
+    assert market["observations"] == 2, "the past quote and this snapshot, not the future one"
+    assert market["return_1h_pct"] == round((REAL_SPY_PRICE / 740.0 - 1) * 100, 3)
+
+
+def test_without_history_there_is_no_market_block_rather_than_an_invented_one(tmp_path):
+    llm = _llm_says("BUY")
+    engine, _ = _engine(tmp_path, llm)
+    engine.decide_snapshot(_snapshot())
+    assert "market" not in llm.calls[0]
+
+
+def test_each_lesson_is_shown_on_a_reproducible_half_of_cycles():
+    """Every decision used to see every lesson, so no lesson's effect could be measured."""
+    from datetime import timedelta
+
+    from min_agent.llm_decision import HybridDecisionEngine
+
+    snaps = [_snapshot().model_copy(update={"timestamp": NOW + timedelta(minutes=5 * i)}) for i in range(400)]
+    shown = [HybridDecisionEngine._show_lesson(s, "k1") for s in snaps]
+    assert 160 < sum(shown) < 240, "about half"
+    assert shown == [HybridDecisionEngine._show_lesson(s, "k1") for s in snaps], "reproducible"
+    other = [HybridDecisionEngine._show_lesson(s, "k2") for s in snaps]
+    assert shown != other, "independent across lessons"

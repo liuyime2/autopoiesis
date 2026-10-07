@@ -24,7 +24,7 @@ relaxed:
 newline). Every entrypoint uses the absolute path:
 
 ```bash
-export CONDA_BIN=/home/liuyime2/miniconda3/bin/conda   # or let the scripts default
+export CONDA_BIN="$(command -v conda)"   # or let the scripts discover it
 ```
 
 ### Credentials

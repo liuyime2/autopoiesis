@@ -302,7 +302,7 @@ are two sources of truth about the same thing, and for these six they disagree.
 
 `runtime/` is gitignored, so there is no commit history from which to reconstruct
 when or why the files were removed. The cause is recorded as **UNKNOWN** in
-`docs/superpowers/known_state_findings.json` rather than guessed, and no synthetic
+`docs/history/known_state_findings.json` rather than guessed, and no synthetic
 retirement event was written — inventing one would put a false claim into the audit
 trail that the whole system is meant to rest on.
 
@@ -513,7 +513,7 @@ documents.
 
 ### 11.3 A plan document that contradicted the tree
 
-`docs/superpowers/plans/2026-09-28-quantgroup-recovery-and-refactor.md` still
+`docs/history/plans/2026-09-28-quantgroup-recovery-and-refactor.md` still
 carried the header "Awaiting approval — no source file has been modified yet" 51
 commits in, and instructed the reader to **restore `skill_library/` from its `.bak`
 file** — a directory deleted on purpose after being found to hold only
@@ -533,7 +533,7 @@ SUPERSEDED and asserts PASS.
 | actively used | `data_gateway`, `loop`, `guardian`, `executor`, `fill_reconciler`, `order_reconciler`, `evaluator`, `broker_evidence`, `reflection_memory`, `curriculum`, `strategy_admission`, `knowledge_admission`, `knowledge_library`, `policy_engine`, `llm_decision`, `strategy_engine`, `scheduler`, `health`, `doctor`, `journal`, `atomicio`, `config`, `models`, `counterfactual`, `offline_validation`, `experiment_registry`, `daemon`, `cli` |
 | partially wired | `offline_validation` (screens and can pause, but promotion stays manual and live — by design); `max_account_value` (implemented, deliberately off) |
 | implemented but unused | `auto_reviewer.py` (operator tool, unscheduled); `tools/alpaca_smoke.py` (manual smoke test) |
-| obsolete | `docs/superpowers/plans/2026-09-28-…` (superseded, retained as history) |
+| obsolete | `docs/history/plans/2026-09-28-…` (superseded, retained as history) |
 | duplicated | none remaining — the three evidence readers were merged into `latest_evidence_batch()`; the experiment registry is a view rather than a second store |
 | broken | none open; six wiring defects found and fixed this session (`strategy_library.get`, `JournalEvent` vs dict, missing verdict guard, `INFORMATIVE` ordering, `relative_to` crash, NEUTRAL-as-failure) |
 | missing | nothing in the chain. Shadow trading is **merged into probation** (10.1) rather than added, and prospective live evidence is time, not code |
@@ -1121,7 +1121,7 @@ a 30-bar window rather than expecting the classifier to see through its own wind
 
 ## 26. The binding constraint, and deliverables ⑤⑦⑧
 
-`docs/superpowers/PHASES.md` is the per-phase document the objective asks for:
+`docs/history/PHASES.md` is the per-phase document the objective asks for:
 implementation tasks, dependencies, test methods, exit criteria and verification
 results; what is proven versus what is only a design target; and the next one to
 three changes.
@@ -1406,7 +1406,7 @@ historical window of one symbol is not a track record.
 
 The objective requires every step of the loop to have an explicit **input**,
 **output**, **responsibility boundary**, **failure behaviour**, **log**,
-**provenance** and **automated test**. `docs/superpowers/STEP_CONTRACT.md` is that
+**provenance** and **automated test**. `docs/history/STEP_CONTRACT.md` is that
 table, derived from the code rather than from intent: the signatures are the real
 ones, the event types are the ones the journal actually receives, and the test files
 are the ones that exist.
@@ -1678,7 +1678,7 @@ first was wrong, and the correction matters more than the cleanup.
 
 I had written that the units could not be installed because `/home` was at quota.
 That was wrong. `XDG_CONFIG_HOME` on this host is
-`/localscratch/liuyime2/ohome/.config`, which is **not under $HOME**, and
+`<config-home>`, which is **not under $HOME**, and
 `tools/systemd_unit_dir.sh` searches that first. `install-service` would have
 succeeded with a full quota.
 
@@ -1708,13 +1708,13 @@ because a timer that is not installed does not fire.
 
 Two things were **not** touched, deliberately:
 
-- `~/miniconda3` is a **symlink** to `/localscratch/liuyime2/miniconda3`, so the
+- `~/miniconda3` is a **symlink** to `<scratch>/miniconda3`, so the
   environment never consumed $HOME quota at all. It is 0 bytes of $HOME.
 - `~/.config` is the desktop environment's (chrome, xfce4, pulse), not the trading
   system's. An empty `~/.config/systemd/user` that I had created during this
   cleanup was removed again - 0 files, unused, and mine.
 
-Ollama's model weights were already at `/localscratch/liuyime2/ollama_local/models`.
+Ollama's model weights were already at `<scratch>/ollama_local/models`.
 
 ### 34.3 The property is now a check, not a promise
 
@@ -1769,7 +1769,7 @@ CUDA layer, not by ollama's own parser. Absence of the string was not evidence.
 ### 35.2 The 120s timeouts were a cold-load problem, not a slow model
 
 Warm, the model answers a real decision in 10-24s. Unloaded, the next call must
-first read 16.33 GiB of weights off `/localscratch` - about three minutes, against
+first read 16.33 GiB of weights off the model store - about three minutes, against
 a 120s client timeout. So the recorded `CURRICULUM_FAILED` timeouts have the
 signature of a cold model, not a slow one, and they appear off-hours. Fix:
 
@@ -1806,9 +1806,9 @@ latency ever becomes the binding constraint.
 The single worst find, and it invalidates two of my own claims from earlier today.
 
 `minictrl install-service` wrote units to `$XDG_CONFIG_HOME/systemd/user`
-(`/localscratch/liuyime2/ohome/.config/...`). The systemd **user manager** resolves
+(`<config-home>/...`). The systemd **user manager** resolves
 unit paths from its own start-time environment, which has no `XDG_CONFIG_HOME` -
-`systemctl --user show-environment` returns only `HOME=/home/liuyime2`. So the
+`systemctl --user show-environment` returns only `HOME=$HOME`. So the
 manager searches `$HOME/.config/systemd/user` and the tmpfs runtime dir, and never
 opens the files minictrl had just written. Consequences, all of which reported
 success:
@@ -2720,7 +2720,7 @@ Section 45 concluded that shadow was wired as a mode rather than a stage, and ca
 it a design decision for the operator. Checking it against the objective's own phase
 gate rather than against my own opinion turned up something worse than the wiring.
 
-**`docs/superpowers/PHASES.md` recorded Phase 5 as MET**, citing two things:
+**`docs/history/PHASES.md` recorded Phase 5 as MET**, citing two things:
 
 | claimed verification | reality |
 | --- | --- |
@@ -2852,8 +2852,8 @@ first written when the system was waiting for an open; it has since traded a ful
 session, so the claim moved from "waiting" to "trading" rather than being left to
 expire as a stale positive.
 
-**Reviewed and confirmed.** `make verify`: 51 classes, 0 failed, 1380 test executions
-across 61 files, exit 0.
+**Reviewed and confirmed.** `make verify`: 52 classes, 0 failed, 1519 test executions
+across 64 files, exit 0.
 
 This line previously read `1 failed ... exit 1`, and the failure was `doctor`'s
 `pnl attribution`: of +563.41 realized across 27 closed lots the model had
@@ -3026,7 +3026,7 @@ EnvironmentFile=-%h/.config/min-agent/env
 ```
 
 `%h` expands to `$HOME`, and this account's credentials are not under `$HOME` - they
-are at `/localscratch/liuyime2/ohome/.config/min-agent/env`, which is where
+are at `<config-home>/min-agent/env`, which is where
 `XDG_CONFIG_HOME` points. `min-agent.service` had it right, because its template uses
 `@ENVFILE@` and `minictrl` substitutes the resolved path. The watchdog template was
 rendered by the same function and simply never contained the placeholder, so the
@@ -3127,7 +3127,7 @@ history rather than from the finding:
 - `STATUS.md` stated in one paragraph that the units were not reboot-persistent and
   needed `$HOME` freed, while a numbered entry 70 lines earlier recorded that exact
   item as RESOLVED. The units are enabled from
-  `/home/liuyime2/.config/systemd/user` at 75% usage. Corrected in place, in the
+  `$XDG_CONFIG_HOME/systemd/user` at 75% usage. Corrected in place, in the
   document making the claim, so the two cannot continue to disagree.
 - `PHASES.md` still listed freeing `$HOME` quota as outstanding user action. Same
   correction; only elapsed market time remains.
@@ -3308,7 +3308,7 @@ link verified against current state:
 
 - `ollama.service`, `min-agent.service` and `quant-watchdog.timer` all `enabled` and
   `active`, `quant-watchdog.service` `static` and correctly `inactive` between timer
-  firings. FragmentPaths under `/home/liuyime2/.config/systemd/user`.
+  firings. FragmentPaths under `$XDG_CONFIG_HOME/systemd/user`.
 - `qwen3.8:27b` already resident in Ollama, so the first open decision is not a cold
   start.
 - Last three unattended watchdog runs `ok=True exit=0 failures=[none]`.

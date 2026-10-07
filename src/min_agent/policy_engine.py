@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from min_agent.knowledge_library import KnowledgeLibrary
+from min_agent import regime
+from min_agent.knowledge_library import KnowledgeLibrary, lesson_key
 from min_agent.models import DataSnapshot, TradeDecision
 from min_agent.reflection_memory import ReflectionMemory
 from min_agent.strategy_engine import StrategyExecutor, StrategyLibrary, StrategySelector
@@ -16,6 +17,8 @@ class PolicyEngine:
         selector: StrategySelector | None = None,
         executor: StrategyExecutor | None = None,
         max_lessons: int = 5,
+        served_provider=None,
+        market_history=None,
     ):
         self.strategy_library = strategy_library
         self.reflection_memory = reflection_memory
@@ -23,6 +26,23 @@ class PolicyEngine:
         self.selector = selector or StrategySelector()
         self.executor = executor or StrategyExecutor()
         self.max_lessons = max_lessons
+        #: The daemon's own monotone cycle count, used for the incumbent cadence.
+        #: `select()` cannot derive it: the only count it can see is the one in
+        #: `reflection.json`, which is a 30-minute-old snapshot, so a cadence measured
+        #: against it fires in whole-window batches rather than one cycle in five.
+        self.served_provider = served_provider
+        #: Recent journal records, so a RULE strategy reads the same history on the fallback
+        #: path as on the LLM path.
+        self.market_history = market_history
+
+    def served(self) -> int | None:
+        """The daemon's current cycle count, or `None` to let the selector derive it."""
+        if self.served_provider is None:
+            return None
+        try:
+            return int(self.served_provider())
+        except (TypeError, ValueError):
+            return None
 
     def decide_snapshot(self, snapshot: DataSnapshot) -> TradeDecision:
         strategies = self.strategy_library.list()
@@ -32,7 +52,12 @@ class PolicyEngine:
             if reflection is not None:
                 results = self.reflection_memory.strategy_results(reflection)
 
-        strategy = self.selector.select(strategies, results)
+        # The same arguments the LLM path selects with, so the fallback cannot serve a
+        # different strategy than the model would have been asked about. It omitted the
+        # price, so coverage was judged on paper here and at the real price there.
+        strategy = self.selector.select(
+            strategies, results, last_price=snapshot.last_price, served=self.served()
+        )
         if strategy is None:
             return TradeDecision(
                 # Named so a fallback decision is never confused with a model
@@ -44,7 +69,13 @@ class PolicyEngine:
                 confidence=0.0,
                 rationale="policy engine found no enabled admitted strategy",
             )
-        decision = self.executor.decide(strategy, snapshot)
+        prices: list[float] = []
+        if self.market_history is not None:
+            try:
+                prices = regime.prices_before(self.market_history(), snapshot.symbol, snapshot.timestamp)
+            except (OSError, ValueError):
+                prices = []
+        decision = self.executor.decide(strategy, snapshot, prices)
         try:
             lessons = self.relevant_lessons(strategy.strategy_id)
         except Exception:
@@ -103,12 +134,12 @@ class PolicyEngine:
         # five-slot budget. 10 of the 11 accepted artifacts share a single answer.
         # The slot is meant to buy distinct context; filling it with copies buys
         # nothing and costs prompt budget on every cycle.
-        seen: set[str] = set()
-        distinct: list = []
-        for artifact in lessons:
-            key = " ".join((artifact.answer or artifact.summary or "").lower().split())
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            distinct.append(artifact)
-        return distinct[: self.max_lessons]
+        #
+        # Keyed with the figures masked (`lesson_key`), keeping the newest copy, so a lesson
+        # re-derived with fresh numbers is one lesson showing its current numbers.
+        newest: dict[str, object] = {}
+        for artifact in sorted(lessons, key=lambda a: a.created_at, reverse=True):
+            key = lesson_key(artifact)
+            if key and key not in newest:
+                newest[key] = artifact
+        return list(newest.values())[: self.max_lessons]

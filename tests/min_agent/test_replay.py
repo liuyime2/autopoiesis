@@ -259,3 +259,22 @@ def test_the_simulated_account_moves_with_the_bars():
     marked = gateway.bars[-1].close
     assert book.equity(marked) != 100_000
     assert book.snapshot(marked)[0].equity == pytest.approx(book.equity(marked))
+
+
+def test_the_gateway_tolerates_being_advanced_past_the_last_bar():
+    """A caller may legitimately over-advance; asking for the time must still work.
+
+    The daemon's sleep hook advances between cycles and it runs maintenance before it
+    checks whether it has finished, so `current` was reached with the cursor one past the
+    end. `snapshot` already clamped, which is why the same over-advance produced a valid
+    last-bar snapshot and then raised IndexError the moment anything asked for the time.
+    """
+    book = ReplayBook()
+    gateway = ReplayDataGateway(bars=bars(3), book=book)
+
+    for _ in range(10):
+        gateway.advance()
+
+    assert gateway.exhausted
+    assert gateway.current is gateway.bars[-1]
+    assert gateway.snapshot("SPY").last_price == bars(3)[-1].close

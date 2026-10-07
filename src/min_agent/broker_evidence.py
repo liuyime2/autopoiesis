@@ -16,14 +16,32 @@ from min_agent.models import (
 
 
 class BrokerEvidenceProvider:
+    #: The broker's own maximum page size. Measured, not assumed: asking for 1000 raises
+    #: `tried to set the page size to 1000, but the maximum is 100`.
+    ACTIVITY_PAGE_LIMIT = 100
+
     def __init__(self, *, client):
         self.client = client
         self.window_fallback: str | None = None
         """Set when a requested window could not be honoured, so the batch can
         say so instead of advertising a window it did not fetch."""
+        self.activities_truncated: bool = False
+        """Set when the broker returned a full page of activities, which is how it says
+        "there may be more". One request is made and its page limit is the whole fetch,
+        so a window holding more than `ACTIVITY_PAGE_LIMIT` fills is silently a
+        fragment. Measured on this account: a nine-month window holds 279 fills and
+        returned 100, with no missing reason recorded anywhere.
+
+        Not paging is deliberate. Every window this code asks for is far under the
+        limit - the daemon's 24 hours returns 0-20, `minictrl evidence ingest`'s 30 days
+        returns 43, four months returns 66 - so fetching more pages would be building
+        for a window nobody requests. The truncation is stated instead, so a caller that
+        does ask for a wider window is told its evidence is partial rather than being
+        handed a confident fragment."""
 
     def ingest(self, *, window_start: datetime, window_end: datetime) -> BrokerEvidenceBatch:
         missing_reasons: list[str] = []
+        self.activities_truncated = False
         orders = self._safe_fetch("orders", missing_reasons, lambda: self._fetch_orders(window_start, window_end))
         activities = self._safe_fetch(
             "activities", missing_reasons, lambda: self._fetch_activities(window_start, window_end)
@@ -31,6 +49,13 @@ class BrokerEvidenceProvider:
         portfolio_history = self._safe_fetch(
             "portfolio_history", missing_reasons, lambda: self._fetch_portfolio_history(window_start, window_end)
         )
+        if self.activities_truncated:
+            missing_reasons.append(
+                f"the broker returned a full page of {len(activities)} activities, which is "
+                f"its maximum, so this window holds more fills than were fetched and the "
+                "figures computed from them are a fragment of the window rather than the "
+                "whole of it"
+            )
         failed = len(missing_reasons)
         status = "SUCCESS"
         if failed == 3:
@@ -86,7 +111,37 @@ class BrokerEvidenceProvider:
             normalized = self._normalize_activity(item)
             if normalized is not None:
                 activities.append(normalized)
+        # Measured before the filters, not after: a page that came back full is the
+        # broker's way of saying "there is more", and filtering non-FILL rows out of it
+        # does not mean the rest exists.
+        self.activities_truncated = len(raw_activities or []) >= self.ACTIVITY_PAGE_LIMIT
         return activities
+
+    def fetch_all_fills(self, *, max_pages: int = 1000) -> list[BrokerFillActivity]:
+        """Every FILL activity on the account, oldest first, paged by activity id.
+
+        `ingest` deliberately makes one request per window (see `activities_truncated`).
+        The owner history needs the whole account, which on 2026-10-07 was 7,103 fills, so
+        this pages: `direction=asc`, `page_size` at the broker's maximum, and the last id as
+        the next `page_token`, until a short page. Read-only.
+        """
+        out: list[BrokerFillActivity] = []
+        token = None
+        for _ in range(max_pages):
+            page = self.client.get_activities(
+                activity_types="FILL", direction="asc",
+                page_size=self.ACTIVITY_PAGE_LIMIT, page_token=token,
+            ) or []
+            for item in page:
+                normalized = self._normalize_activity(item)
+                if normalized is not None:
+                    out.append(normalized)
+            if len(page) < self.ACTIVITY_PAGE_LIMIT:
+                return out
+            token = _get(page[-1], "id", None)
+            if token is None:
+                return out
+        raise RuntimeError(f"fill history exceeded {max_pages} pages; refusing a partial history")
 
     def _fetch_portfolio_history(self, window_start: datetime, window_end: datetime) -> list[PortfolioHistoryPoint]:
         """Fetch portfolio history for exactly the requested window.
@@ -253,7 +308,12 @@ def latest_evidence_batch(journal) -> BrokerEvidenceBatch | None:
     """
     if journal is None:
         return None
-    events = journal.read_events("BROKER_EVIDENCE_INGESTED")
+    # The owner-history ingest shares the event type but is not a window batch; reading it
+    # as one returned None and blanked every PnL figure built on "the latest batch".
+    events = [
+        e for e in journal.read_events("BROKER_EVIDENCE_INGESTED")
+        if "owner_fills" not in (e.payload or {})
+    ]
     if not events:
         return None
     try:

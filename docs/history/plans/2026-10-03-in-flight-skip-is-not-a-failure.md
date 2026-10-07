@@ -84,6 +84,13 @@ strategies carry `PASS_SCREENED` with 10-44 scored decisions and have never been
 because they emitted zero BUY and zero SELL - they held, correctly, and the counterfactual
 ledger scored those holds positively.
 
+> **Corrected later the same day.** "Have never been promoted" was measured from
+> `journal.jsonl` alone, and the journal is rotated. Across both files there are eight
+> `-> ACTIVE` transitions, one applied in the current format: `tiny-fixed-size-001` on
+> 2026-09-30, on broker-verified realized PnL. The guard's reasoning below is unaffected by
+> that — a promotion on *closed-lot PnL* is a different path from promotion on decision
+> quality, and none of the eight was earned by holding well. See STATUS.md.
+
 That looked like the bug. It is not. The guard's stated purpose is to stop promotion "by
 inaction", the defect this repository already fixed once, and `ARCHITECTURE.md` names that
 fix. Removing the guard would promote "holds well" to ACTIVE, which is evidence of not

@@ -7,7 +7,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from min_agent import coerce
 
-Action = Literal["BUY", "SELL", "HOLD"]
+Action = Literal["BUY", "SELL", "HOLD", "SHORT", "COVER"]
+#: Actions that place an order. SELL reduces a long; SHORT opens or adds to a short; COVER
+#: buys a short back. See docs/history/plans/2026-10-07-bounded-short-and-rule-dsl.md.
+ORDER_ACTIONS = frozenset({"BUY", "SELL", "SHORT", "COVER"})
+#: The broker side each order action is submitted as.
+BROKER_SIDE = {"BUY": "buy", "SELL": "sell", "SHORT": "sell", "COVER": "buy"}
 #: Spelled inline in five model fields before this alias existed, so "which way"
 #: had five independent spellings to keep in step.
 Side = Literal["BUY", "SELL"]
@@ -16,7 +21,9 @@ BrokerEvidenceStatus = Literal["SUCCESS", "PARTIAL", "FAILED"]
 DecisionSource = Literal["llm", "fallback_policy_engine", "policy_engine", "baseline"]
 HoldReason = Literal["no_signal", "risk_limit_near", "market_uncertain", "await_confirmation", "other"]
 AttributionStatus = Literal["LINKED", "UNLINKED"]
-StrategyKind = Literal["HOLD_BASELINE", "TREND_FOLLOW", "FIXED_SIZE"]
+StrategyKind = Literal["HOLD_BASELINE", "TREND_FOLLOW", "FIXED_SIZE", "RULE"]
+#: The signals a RULE strategy may read. Each is a percent figure over `lookback` bars.
+RULE_SIGNALS = ("return_over_n", "price_vs_sma")
 StrategyLifecycle = Literal["PROBATION", "ACTIVE", "PAUSED", "RETIRED", "BASELINE"]
 CurriculumTaskType = Literal["STRATEGY_SPEC", "OPTIMIZE", "EVALUATE"]
 CurriculumTaskSource = Literal["llm", "fallback"]
@@ -66,6 +73,25 @@ STRATEGY_PARAMETER_SCHEMAS: dict[str, dict[str, object]] = {
         "required": ("reference_price", "threshold_pct", "quantity", "confidence"),
         "allowed": ("reference_price", "threshold_pct", "quantity", "confidence"),
         "description": "reference_price > 0; 0 < threshold_pct <= 0.20; positive integer quantity; confidence in [0, 1].",
+    },
+    # The rule DSL. Parameters only - no code - so a proposed rule can be validated here,
+    # executed by `StrategyExecutor`, and backtested, and nothing the model writes is run.
+    "RULE": {
+        "required": (
+            "signal", "lookback", "threshold_pct", "when_above", "when_below", "quantity",
+            "confidence",
+        ),
+        "allowed": (
+            "signal", "lookback", "threshold_pct", "when_above", "when_below", "quantity",
+            "confidence",
+        ),
+        "description": (
+            "signal return_over_n|price_vs_sma, the percent change over `lookback` bars or the "
+            "percent distance from their mean; integer lookback 2-78; threshold_pct in "
+            "(0, 5]; when_above (signal > threshold) and when_below (signal < -threshold) each "
+            "BUY|SELL|SHORT|COVER|HOLD, inside the band it holds; positive integer quantity; "
+            "confidence in [0, 1]."
+        ),
     },
 }
 
@@ -123,13 +149,23 @@ class PositionSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     symbol: str
+    #: Negative for a short, as Alpaca reports it.
     quantity: float
-    market_value: float = Field(ge=0)
+    #: Signed like `quantity`. It was constrained to >= 0, so the first short position the
+    #: broker reported would have failed validation and taken every later snapshot - and so
+    #: every trading cycle - down with it.
+    market_value: float
 
     @field_validator("symbol")
     @classmethod
     def normalize_symbol(cls, value: str) -> str:
         return value.strip().upper()
+
+    @model_validator(mode="after")
+    def value_has_the_sign_of_the_quantity(self) -> PositionSnapshot:
+        if self.quantity * self.market_value < 0:
+            raise ValueError("market_value must have the sign of quantity")
+        return self
 
 
 class OpenOrderSnapshot(BaseModel):
@@ -316,6 +352,10 @@ class OpenLotAttribution(BaseModel):
     """
     model_config = ConfigDict(frozen=True)
 
+    #: LONG: bought then sold. SHORT: sold short then covered, so for a closed SHORT lot
+    #: `sell_price` is the entry and `buy_price` the exit, and for an open one `entry_price`
+    #: is the short price.
+    direction: Literal["LONG", "SHORT"] = "LONG"
     strategy_id: str = Field(min_length=1)
     symbol: str
     quantity: float = Field(gt=0)
@@ -336,6 +376,10 @@ class OpenLotAttribution(BaseModel):
 class ClosedLotAttribution(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    #: LONG: bought then sold. SHORT: sold short then covered, so for a closed SHORT lot
+    #: `sell_price` is the entry and `buy_price` the exit, and for an open one `entry_price`
+    #: is the short price.
+    direction: Literal["LONG", "SHORT"] = "LONG"
     strategy_id: str = Field(min_length=1)
     symbol: str
     buy_fill_id: str = Field(min_length=1)
@@ -374,6 +418,36 @@ class PnLEvidence(BaseModel):
     account_return_pct: float | None = None
     strategy_realized_pnl: dict[str, float] = Field(default_factory=dict)
     strategy_fees: dict[str, float] = Field(default_factory=dict)
+    #: Peak capital each strategy held at risk at one time: the cost basis of its open
+    #: position at its largest, across closed and still-open lots.
+    #:
+    #: Named for what it is rather than "deployed capital", because that phrase was
+    #: read as cumulative turnover and produced a benchmark that was wrong by
+    #: construction. A strategy that cycles one share fifteen times turns over 15x the
+    #: capital it ever risked, so dividing realized PnL by turnover understates its
+    #: return — here by 0.5 points on the largest strategy — and then compares it
+    #: against a market return computed on capital held once. Two different
+    #: denominators, so the "excess" was not an excess of anything.
+    strategy_peak_exposure: dict[str, float] = Field(default_factory=dict)
+    #: Realized plus unrealized PnL over that peak exposure, per cent. A strategy that never
+    #: held a lot is absent rather than zero: "did not trade" is not "returned nothing".
+    strategy_return_pct: dict[str, float] = Field(default_factory=dict)
+    #: The instrument's return over the whole journal, for context only - no strategy held
+    #: capital for all of it. From the prices this evaluation already holds. Computed here rather than fetched so the benchmark
+    #: and the lots cannot rest on two price sources that disagree.
+    market_return_pct: float | None = None
+    #: Per strategy, the same instrument over that strategy's own window - first entry to
+    #: last exit, or to the last valuation while a lot is open. This, not the whole-record
+    #: `market_return_pct` above, is what `strategy_excess_vs_market_pct` subtracts.
+    strategy_market_return_pct: dict[str, float] = Field(default_factory=dict)
+    #: Per strategy, `strategy_return_pct` minus `strategy_market_return_pct`. This is the
+    #: project's success metric and nothing else reported it: the promotion gate
+    #: screens on decision quality, which the counterfactual ledger measures, and
+    #: that ledger cannot see this number by construction - a trade's return there
+    #: is holding from the same instant less cost, so every decision shows an excess
+    #: of exactly the assumed cost over holding. See
+    #: `docs/history/plans/2026-10-04-report-the-holding-benchmark.md`.
+    strategy_excess_vs_market_pct: dict[str, float] = Field(default_factory=dict)
     unattributed_pnl: float | None = None
     window_start: datetime | None = None
     window_end: datetime | None = None
@@ -387,6 +461,13 @@ class PnLEvidence(BaseModel):
     order_derived_fill_count: int = Field(default=0, ge=0)
     open_lot_quantity: dict[str, float] = Field(default_factory=dict)
     unmatched_sell_quantity: dict[str, float] = Field(default_factory=dict)
+    #: Shares the agent sold beyond its own lots that the account owner's recorded fills do
+    #: cover, priced FIFO against the owner's lots as of that sale. The owner's gain or loss,
+    #: realised by an agent order - reported so the 29-share sale has a price, and never part
+    #: of any strategy's PnL. Zero without an owner-history ingest (`--ingest-owner-history`).
+    owner_exit_quantity: float = 0.0
+    owner_exit_cost: float = 0.0
+    owner_exit_proceeds: float = 0.0
     #: Open agent lots and what they are worth right now. Only realized PnL was
     #: attributed before this, so a position the agent was holding contributed
     #: nothing to its own record - and the account figure and the agent figure could
@@ -444,6 +525,19 @@ class StrategySpec(BaseModel):
     #: still holds when the reason was not kept. Defaults to empty so every strategy
     #: written before this still loads.
     lifecycle_reason: str = ""
+    #: How many times this strategy has been sent back to probation for want of evidence.
+    #:
+    #: `cumulative_cycles` is derived from the journal and is therefore monotone: it cannot
+    #: be reset by a lifecycle transition, so returning a strategy to PROBATION on its own
+    #: does not make it servable again. Measured 2026-10-06: `fixed-size-sell-20260724-001`
+    #: was returned to probation with 15 cumulative cycles against a 13 budget, and
+    #: `_needs_probation` still read false - it had been "fixed" into a state the selector
+    #: still would not serve.
+    #:
+    #: Each restart grants one further budget, counted against this field. It is a count of
+    #: retries, not an attempt limit: nothing here decides that a strategy has had enough
+    #: chances. That stays with the screen and the promotion gate, which judge outcomes.
+    probation_restarts: int = Field(default=0, ge=0)
     created_at: datetime
     rationale: str = Field(min_length=1)
 
@@ -495,12 +589,12 @@ class StrategySpec(BaseModel):
             action = str(self.parameters["action"]).strip().upper()
             quantity = self.parameters["quantity"]
             confidence = self.parameters["confidence"]
-            if action not in {"BUY", "SELL", "HOLD"}:
-                raise ValueError("FIXED_SIZE action must be BUY, SELL, or HOLD")
+            if action not in ORDER_ACTIONS | {"HOLD"}:
+                raise ValueError("FIXED_SIZE action must be BUY, SELL, SHORT, COVER or HOLD")
             if not _is_integer_like(quantity) or coerce.field_int(quantity, "quantity") < 0:
                 raise ValueError("FIXED_SIZE quantity must be a non-negative integer")
             quantity_value = coerce.field_int(quantity, "quantity")
-            if action in {"BUY", "SELL"} and quantity_value <= 0:
+            if action in ORDER_ACTIONS and quantity_value <= 0:
                 raise ValueError("FIXED_SIZE BUY and SELL require positive quantity")
             if action == "HOLD" and quantity_value != 0:
                 raise ValueError("FIXED_SIZE HOLD requires zero quantity")
@@ -520,6 +614,24 @@ class StrategySpec(BaseModel):
                 raise ValueError("TREND_FOLLOW quantity must be a positive integer")
             if not isinstance(confidence, int | float) or isinstance(confidence, bool) or not 0 <= float(confidence) <= 1:
                 raise ValueError("TREND_FOLLOW confidence must be in [0, 1]")
+
+        if self.kind == "RULE":
+            p = self.parameters
+            if p["signal"] not in RULE_SIGNALS:
+                raise ValueError(f"RULE signal must be one of {', '.join(RULE_SIGNALS)}")
+            if not _is_integer_like(p["lookback"]) or not 2 <= coerce.field_int(p["lookback"], "lookback") <= 78:
+                raise ValueError("RULE lookback must be an integer in [2, 78]")
+            t = p["threshold_pct"]
+            if not isinstance(t, int | float) or isinstance(t, bool) or not 0 < float(t) <= 5:
+                raise ValueError("RULE threshold_pct must be in (0, 5]")
+            for key in ("when_above", "when_below"):
+                if str(p[key]).strip().upper() not in ORDER_ACTIONS | {"HOLD"}:
+                    raise ValueError(f"RULE {key} must be BUY, SELL, SHORT, COVER or HOLD")
+            if not _is_integer_like(p["quantity"]) or coerce.field_int(p["quantity"], "quantity") <= 0:
+                raise ValueError("RULE quantity must be a positive integer")
+            c = p["confidence"]
+            if not isinstance(c, int | float) or isinstance(c, bool) or not 0 <= float(c) <= 1:
+                raise ValueError("RULE confidence must be in [0, 1]")
         return self
 
 
@@ -584,6 +696,11 @@ class StrategyEvaluation(BaseModel):
 
     strategy_id: str = Field(min_length=1)
     cycles: int = Field(ge=0)
+    #: Cycles this strategy was selected for across the whole journal, as opposed to
+    #: `cycles`, which counts only the reflection window. See `StrategyResult` for why
+    #: the probation rules cannot use the windowed number.
+    cumulative_cycles: int = Field(default=0, ge=0)
+    cumulative_trade_attempts: int = Field(default=0, ge=0)
     submitted_orders: int = Field(ge=0)
     rejected_orders: int = Field(ge=0)
     skipped_orders: int = Field(ge=0)
@@ -658,7 +775,29 @@ class StrategyResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     strategy_id: str = Field(min_length=1)
+    #: Cycles this strategy was selected for, **within the reflection window**.
+    #: This is a freshness measure: error and rejection rates, the score and the
+    #: exploration floor are all recent-behaviour judgements and belong here.
     cycles: int = Field(ge=0)
+    #: Cycles this strategy has been selected for across the whole journal.
+    #:
+    #: A different quantity from `cycles`, and the only correct one for "has this
+    #: candidate had its probation budget". The window is 50 cycle records shared by
+    #: every strategy that traded in it, so it currently tops out at 7 cycles for any
+    #: one strategy - which made a 13-cycle probation budget, and the verdict that
+    #: checks it, unreachable. Probation then never ended, the queue never emptied,
+    #: and because the queue has absolute priority the one ACTIVE strategy was
+    #: selected 0 times in the 146 cycles after its promotion.
+    #:
+    #: Defaults to 0 so a result built without it behaves exactly as before.
+    cumulative_cycles: int = Field(default=0, ge=0)
+    #: Lifetime BUY/SELL decisions this strategy produced. Paired with
+    #: `cumulative_cycles` because both answer the same question - how much has this
+    #: candidate been given, and what did it do with it - so they are counted together
+    #: and carried together. The windowed `trade_attempts` cannot answer it:
+    #: `trend-follow-buy-010` was paused for "no exploration evidence" on 2026-10-04
+    #: with a windowed count of 0 and a lifetime count of 1.
+    cumulative_trade_attempts: int = Field(default=0, ge=0)
     submitted_orders: int = Field(ge=0)
     rejected_orders: int = Field(ge=0)
     errors: int = Field(ge=0)
@@ -790,6 +929,28 @@ class TradeDecision(BaseModel):
     It is a reason, not a permission: Guardian still reviews every decision, and
     this never widens or narrows what is allowed.
     """
+    rule_action: Action | None = None
+    """What the selected strategy's own rule decided on the same snapshot.
+
+    Recorded on every LLM-path decision, so each cycle carries both the rule's action and the
+    action taken, and the model's contribution is a paired comparison on identical inputs
+    rather than an attribution over whichever lots it happened to open. None on cycles
+    journalled before this field existed - they cannot be paired, and back-filling would
+    claim a fact about the past that was never recorded.
+    """
+    lesson_ids: tuple[str, ...] | None = None
+    """The admitted lessons this decision was shown, and those withheld from it this cycle.
+
+    Every decision used to see the same lessons, so no lesson's effect could be told apart
+    from the model's own behaviour. Each lesson is now shown on a deterministic half of
+    cycles, and these two fields make the ablation readable from the journal. None on cycles
+    before the split existed."""
+    lessons_withheld: tuple[str, ...] | None = None
+    override_reason: str | None = None
+    """Why the model departed from `rule_action`, in its own words.
+
+    The rule is the default; the model may override it, but only by saying why. An override
+    with no reason is not taken."""
     decision_source: DecisionSource = "baseline"
     """Who produced this decision.
 
@@ -812,8 +973,8 @@ class TradeDecision(BaseModel):
 
     @model_validator(mode="after")
     def require_quantity_for_orders(self) -> TradeDecision:
-        if self.action in {"BUY", "SELL"} and self.quantity <= 0:
-            raise ValueError("BUY and SELL require positive quantity")
+        if self.action in ORDER_ACTIONS and self.quantity <= 0:
+            raise ValueError("BUY, SELL, SHORT and COVER require positive quantity")
         if self.action == "HOLD" and self.quantity != 0:
             raise ValueError("HOLD requires zero quantity")
         return self

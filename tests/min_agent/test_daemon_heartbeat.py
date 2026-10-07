@@ -79,3 +79,38 @@ def test_heartbeat_payload_accepts_the_new_message():
         cycle_count=0, error_count=0, message="maintenance in progress",
     )
     assert payload.message == "maintenance in progress"
+
+
+def test_the_heartbeat_fingerprint_is_the_code_loaded_not_the_code_on_disk(tmp_path):
+    """`daemon-source-matches-worktree` exists to catch a daemon running superseded code.
+
+    The heartbeat used to call `source_fingerprint()` on every beat, which re-reads the
+    files on disk - so after an edit the running process reported the *new* fingerprint and
+    the check passed while the old code kept trading. Measured on 2026-10-06: PID 1581752,
+    started 11:25, reported the fingerprint of an edit made at 21:20. The value must be taken
+    once, at import, and an edit afterwards must not change it.
+    """
+    import inspect
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from min_agent.daemon import AgentDaemon
+
+    assert "LOADED_SOURCE_FINGERPRINT" in inspect.getsource(AgentDaemon._heartbeat)
+
+    package = Path(__file__).resolve().parents[2] / "src" / "min_agent"
+    shutil.copytree(package, tmp_path / "min_agent", ignore=shutil.ignore_patterns("__pycache__"))
+    script = (
+        "import min_agent.daemon as d, pathlib\n"
+        "p = pathlib.Path(d.__file__).with_name('journal.py')\n"
+        "p.write_text(p.read_text() + '\\n# edited after import\\n')\n"
+        "print(d.LOADED_SOURCE_FINGERPRINT, d.source_fingerprint())\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", script], cwd=tmp_path, env={"PYTHONPATH": str(tmp_path)},
+        capture_output=True, text=True, timeout=120, check=True,
+    ).stdout.split()
+    loaded, on_disk = out
+    assert loaded != on_disk, "an edit after import must not move the loaded fingerprint"

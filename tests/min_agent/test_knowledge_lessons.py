@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from min_agent.doctor import DoctorReport, _check_knowledge_value
 from min_agent.knowledge_library import KnowledgeLibrary
 from min_agent.models import KnowledgeArtifact
@@ -83,7 +85,9 @@ def test_distinct_lessons_each_get_a_slot(tmp_path):
 
 
 def test_the_slot_cap_still_applies_to_distinct_lessons(tmp_path):
-    artifacts = [_artifact(chr(97 + i), f"distinct answer {i}") for i in range(9)]
+    # Distinct in words: lessons differing only in a figure are one lesson (`lesson_key`).
+    words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india"]
+    artifacts = [_artifact(chr(97 + i), f"distinct answer {w}") for i, w in enumerate(words)]
     engine = PolicyEngine(
         strategy_library=StrategyLibrary(tmp_path / "empty"),
         knowledge_library=_library(tmp_path, artifacts),
@@ -137,3 +141,86 @@ def test_a_genuinely_informative_library_passes(tmp_path):
 
 def test_an_empty_library_is_not_a_finding(tmp_path):
     assert _value_check(tmp_path, []).status.value == "ok"
+
+
+def test_a_lesson_re_derived_with_new_figures_is_one_lesson_showing_the_newest(tmp_path):
+    """18 of 20 accepted lessons on 2026-10-07 were one calibration sentence with new numbers.
+
+    Exact-text dedup kept all of them, so the five prompt slots held five copies and the
+    other lessons never reached the model.
+    """
+    from datetime import datetime, timezone
+
+    older = _artifact("a", "the worst bucket is -16%, Brier 0.392 over 292 scored decisions").model_copy(
+        update={"created_at": datetime(2026, 10, 1, tzinfo=timezone.utc)})
+    newer = _artifact("b", "the worst bucket is -14%, Brier 0.394 over 303 scored decisions").model_copy(
+        update={"created_at": datetime(2026, 10, 5, tzinfo=timezone.utc)})
+    other = _artifact("c", "no exploration window detected from real journal cycles")
+    engine = PolicyEngine(
+        strategy_library=StrategyLibrary(tmp_path / "empty"),
+        knowledge_library=_library(tmp_path, [older, other, newer]),
+        max_lessons=5,
+    )
+    lessons = engine.relevant_lessons("any")
+    assert [a.artifact_id for a in lessons if "bucket" in a.answer] == ["b"]
+    assert {a.artifact_id for a in lessons} == {"b", "c"}
+
+
+def test_admitting_a_newer_figure_retires_the_older_copy_without_deleting_it(tmp_path):
+    from datetime import datetime, timezone
+
+    from min_agent.knowledge_admission import KnowledgeAdmission
+
+    library = _library(tmp_path, [_artifact("old", "Brier 0.392 over 292 scored decisions")])
+    fresh = _artifact("new", "Brier 0.394 over 303 scored decisions").model_copy(
+        update={"status": "PROPOSED", "created_at": datetime(2026, 10, 5, tzinfo=timezone.utc)})
+    assert KnowledgeAdmission(knowledge_library=library).admit(fresh).accepted
+    assert library.try_load("old").status == "RETIRED", "superseded, and kept with its refs"
+    assert library.try_load("new").status == "ACCEPTED"
+
+
+def _ablated(n_days, shown_value, withheld_value, per_day=4, jitter=0.01):
+    """Paired LLM decisions over `n_days`, half showing lesson L and half withholding it."""
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+
+    records, rows = [], []
+    t0 = datetime(2026, 10, 1, 14, tzinfo=timezone.utc)
+    for d in range(n_days):
+        for k in range(per_day * 2):
+            shown = k % 2 == 0
+            cid = f"d{d}k{k}"
+            value = (shown_value if shown else withheld_value) + (jitter if k % 4 < 2 else -jitter)
+            records.append(SimpleNamespace(
+                cycle_id=cid,
+                snapshot=SimpleNamespace(timestamp=t0 + timedelta(days=d, minutes=5 * k)),
+                decision=SimpleNamespace(decision_source="llm",
+                                         lesson_ids=("L",) if shown else (),
+                                         lessons_withheld=() if shown else ("L",)),
+            ))
+            rows.append(SimpleNamespace(cycle_id=cid, override_value_pct=value))
+    return records, rows
+
+
+def test_a_lesson_s_effect_is_the_difference_between_its_two_arms():
+    from min_agent.knowledge_library import lesson_effects
+
+    effect = lesson_effects(*_ablated(10, 0.30, 0.10))["L"]
+    assert (effect.shown, effect.withheld, effect.days) == (40, 40, 10)
+    assert effect.effect == pytest.approx(0.20)
+    assert effect.judgeable and not effect.without_effect
+
+
+def test_no_difference_after_enough_days_is_without_effect():
+    from min_agent.knowledge_library import lesson_effects
+
+    effect = lesson_effects(*_ablated(10, 0.10, 0.10, jitter=0.2))["L"]
+    assert effect.without_effect
+
+
+def test_too_few_days_is_never_judged():
+    """Inert until the ablation has run its course: no lesson is retired on a week of data."""
+    from min_agent.knowledge_library import lesson_effects
+
+    effect = lesson_effects(*_ablated(5, 0.10, 0.10, per_day=10, jitter=0.2))["L"]
+    assert not effect.judgeable and not effect.without_effect

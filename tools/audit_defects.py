@@ -6,7 +6,7 @@ Exit: 0 when every check passes, 1 otherwise.
 
 Each check is a property of the source, not a claim in a document. The
 originals and their reproduction evidence are in
-docs/superpowers/plans/2026-09-28-quantgroup-recovery-and-refactor.md.
+docs/history/plans/2026-09-28-quantgroup-recovery-and-refactor.md.
 """
 from __future__ import annotations
 
@@ -77,7 +77,17 @@ def main() -> int:
           re.search(r"return score \* \(1\.0 - PNL_BONUS\)", ev) is not None)
     guard = function_body(se, "_is_degenerate_no_exploration")
     check("D4", "degenerate guard is not kind-gated", 'kind != "FIXED_SIZE"' not in guard)
-    check("D4", "degenerate guard is not PROBATION-only", '"PROBATION"' not in guard)
+    # The recorded defect was an early `return False` that let any non-probation
+    # strategy escape the guard, so a promoted strategy that stopped acting was
+    # never caught. This check used to forbid the literal "PROBATION" anywhere in
+    # the guard, which also forbore naming the lifecycle to choose how many cycles
+    # a strategy must be given before it can be called degenerate - and a candidate
+    # on probation was then judged at min_active_cycles instead of the budget it was
+    # guaranteed, which is how 24 of 24 admissions ended PAUSED without ever
+    # reaching the screen's evidence gate. Forbid the escape, not the word.
+    # Behaviour is pinned by the lifecycle tests, not by this text.
+    check("D4", "degenerate guard does not exempt non-probation strategies",
+          'lifecycle != "PROBATION"' not in guard)
     check("D4", "exploration floor exists", "_exploration_floor_engaged" in se)
     check("D4", "a probe is never a short", '== "BUY"' in se)
 
@@ -163,7 +173,7 @@ def main() -> int:
     check("D15", "repo is under version control", inside == "true")
     check("D15", "archived projects are out of the tree", not (ROOT / "history_version").exists())
     check("D15", "a plan document exists",
-          (ROOT / "docs/superpowers/plans/2026-09-28-quantgroup-recovery-and-refactor.md").exists())
+          (ROOT / "docs/history/plans/2026-09-28-quantgroup-recovery-and-refactor.md").exists())
 
     width = max(len(d) for d, _, _ in results)
     for defect, description, passed in results:

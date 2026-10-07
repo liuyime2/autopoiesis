@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import cast
@@ -63,6 +64,39 @@ class StrategyLifecycleDecision:
     strategy: StrategySpec
     new_lifecycle: str
     reason: str
+    #: Fields to write alongside the lifecycle, for transitions that carry state rather than
+    #: only a label. Returning a strategy to probation needs `probation_restarts` bumped,
+    #: because `cumulative_cycles` is journal-derived and monotone: without this the
+    #: candidate is transitioned back and still reads as budget-spent, so it is "fixed" into
+    #: a state the selector still will not serve. Measured 2026-10-06.
+    update: dict[str, object] = field(default_factory=dict)
+
+
+#: Selected cycles a candidate is guaranteed before the probation queue moves on.
+#: One number, because it is one concept: `StrategySelector` guarantees a candidate
+#: this many cycles, and `StrategyLifecycleManager` may not judge it degenerate before
+#: then. They were separate literals in separate classes - 13 and 5 - so every candidate
+#: that had not attempted a trade was paused at cycle 5 and never reached either the
+#: budget it was guaranteed or the ten informative decisions needed to be screened. On
+#: the live record that ended 0 promotions out of 24 admissions.
+#:
+#: 13 is what the evidence gate needs, not a round number: the offline screen refuses to
+#: judge below ten informative decisions, and a FIXED_SIZE produces them at an observed
+#: 0.75-0.91 per selected cycle.
+PROBATION_CYCLES = 13
+
+#: Selected cycles between which an actionable ACTIVE strategy is served.
+#:
+#: Probation has absolute priority in `StrategySelector.select`, and admission holds the
+#: probation backlog at `PROBATION_CYCLES`, so the queue is effectively never empty and a
+#: promoted strategy is unreachable - measured at 5.6e-05 of cycles. One promotion in the
+#: current era had been selected 0 times in the 146 cycles after it.
+#:
+#: Five, rather than a reordering, because the split between discovery and use is a real
+#: trade with no obviously correct answer, and the loop cannot learn the answer without
+#: running it. Twenty per cent is enough for the incumbent to open and close lots and leaves
+#: discovery four fifths of the throughput.
+INCUMBENT_SHARE = 5
 
 
 class StrategyLifecycleManager:
@@ -70,6 +104,7 @@ class StrategyLifecycleManager:
         self,
         *,
         min_active_cycles: int = 5,
+        probation_cycles: int = PROBATION_CYCLES,
         max_error_rate: float = 0.25,
         max_rejection_rate: float = 0.5,
         severe_failure_rate: float = 0.75,
@@ -79,6 +114,7 @@ class StrategyLifecycleManager:
         min_promotion_scored_decisions: int = 10,
     ):
         self.min_active_cycles = min_active_cycles
+        self.probation_cycles = probation_cycles
         self.max_error_rate = max_error_rate
         self.max_rejection_rate = max_rejection_rate
         self.severe_failure_rate = severe_failure_rate
@@ -247,7 +283,14 @@ class StrategyLifecycleManager:
         if rejection_rate > self.max_rejection_rate:
             return StrategyLifecycleDecision(strategy, "PAUSED", "Guardian rejection rate above lifecycle threshold")
 
-        if strategy.lifecycle == "PROBATION" and result.cycles >= self.min_active_cycles:
+        # Service, not freshness: every rule inside this block asks how much the
+        # candidate has been given, which is `cumulative_cycles`. Left on the windowed
+        # count, a candidate that has served its whole probation budget but has few
+        # cycles in the current 50-record window received no verdict at all - not a
+        # refusal, an absence - and waited for a coincidence. `min_active_cycles` is
+        # still the bar for a *promoted* strategy in
+        # `_is_degenerate_no_exploration`, which has no probation budget left to serve.
+        if strategy.lifecycle == "PROBATION" and result.cumulative_cycles >= self.probation_cycles:
             if self._is_degenerate_no_exploration(strategy, result):
                 return StrategyLifecycleDecision(strategy, "PAUSED", "probation produced no exploration evidence")
             # PnL has to be able to *promote* as well as retire, or it is only a
@@ -287,8 +330,36 @@ class StrategyLifecycleManager:
             # produced. That is a real bar rather than an infinite probation - a
             # long-only strategy may never close a lot, but its decisions are still
             # scored against the market.
+            # **Returning to probation, not `None`.** A candidate that has spent its whole
+            # budget without ever submitting an order is not judged - it is untried, and it
+            # cannot be tried, because `_needs_probation` is now false so the selector no
+            # longer serves it. `None` left it budget-spent, evidence-less and unreviewable:
+            # out of the queue, not ACTIVE, not PAUSED, not RETIRED.
+            #
+            # Measured on the live library 2026-10-06: `fixed-size-sell-20260724-001`, the
+            # only servable SELL route, cumulative_cycles 15 against a 13 budget,
+            # submitted_orders 0, trade_attempts 8 - all of them shadow intents or
+            # position-cap refusals. It was therefore never served, could never trade, and
+            # so the 17-share over-cap position could never be reduced by the system at all.
+            # The trap is self-sealing: the service that would have produced evidence is the
+            # service the stranding removed.
+            #
+            # Not promotion - a strategy that never opened a lot has no evidence of any
+            # kind, and the fallback that promoted on "it did not crash" is what this branch
+            # replaced. Not retirement - it has not failed, it has not been tried. Returning
+            # it to probation is the only outcome that is true and that lets it become
+            # judgeable.
             if result.submitted_orders <= 0:
-                return None
+                return StrategyLifecycleDecision(
+                    strategy,
+                    "PROBATION",
+                    (
+                        f"served its full {result.cumulative_cycles}-cycle probation "
+                        f"budget without submitting an order, so it has no outcome to "
+                        f"judge; returns to probation to be served again"
+                    ),
+                    update={"probation_restarts": strategy.probation_restarts + 1},
+                )
             gate = self._promotion_evidence_gate(evidence)
             if gate is not None:
                 return None
@@ -382,11 +453,34 @@ class StrategyLifecycleManager:
         `lifecycle == "PROBATION"` requirement that is permanently false once
         the strategy is promoted. The strategy holding the top score in the
         recorded run was a promoted TREND_FOLLOW, so both guards missed it.
+
+        A candidate on probation is required to clear the *probation* budget, not
+        `min_active_cycles`. Those were the same rule at two numbers - 13 guaranteed,
+        5 judged - so a candidate with no signal on a quiet stretch was called degenerate
+        at cycle 5, having had less than half the cycles it was promised and none of the
+        chance to produce the ten informative decisions the screen needs. Twelve of the
+        seventeen strategies ever paused here had attempted no trade at all.
+
+        The budget is counted in `cumulative_cycles` rather than the windowed `cycles`,
+        for the same reason `_needs_probation` counts it that way: `cycles` is the
+        reflection window and tops out at 7 for any single strategy, so both thresholds
+        were unreachable against it.
+
+        A candidate's *attempts* are counted the same way. `trade_attempts` is also
+        windowed, and on 2026-10-04 that misfired on the promotion path:
+        `trend-follow-buy-010`, which had served 15 cycles, made one BUY in its lifetime
+        and passed the screen on 10 scored decisions, was paused for "no exploration
+        evidence" because its single BUY fell outside the last 50 records.
         """
         if strategy.kind == "HOLD_BASELINE" or strategy.lifecycle == "BASELINE":
             return False
         if result is None:
             return False
+        if strategy.lifecycle == "PROBATION":
+            return (
+                result.cumulative_cycles >= self.probation_cycles
+                and result.cumulative_trade_attempts == 0
+            )
         return result.cycles >= self.min_active_cycles and result.trade_attempts == 0
 
 
@@ -419,18 +513,37 @@ class StrategySelector:
     def __init__(
         self,
         *,
-        min_probation_cycles: int = 13,
+        min_probation_cycles: int = PROBATION_CYCLES,
         exploration_floor_cycles: int = 5,
+        incumbent_share: int = INCUMBENT_SHARE,
     ):
         self.min_probation_cycles = min_probation_cycles
         self.exploration_floor_cycles = exploration_floor_cycles
+        self.incumbent_share = incumbent_share
 
     def select(
         self,
         strategies: list[StrategySpec],
         results: list[StrategyResult] | None = None,
         last_price: float | None = None,
+        served: int | None = None,
     ) -> StrategySpec | None:
+        """Pick the strategy to serve this cycle.
+
+        `served` is the monotone count of service already served, and it is what the
+        incumbent cadence is measured against. `None` derives it from `results`, which is
+        what the first version did unconditionally - and that is the defect this parameter
+        exists to fix. `cumulative_cycles` reaches the selector out of
+        `reflection.json`, which is rewritten only on the reflection interval, so the sum
+        was frozen for the whole 30-minute window and `served % incumbent_share == 0` was a
+        constant condition across the ~6 cycles it covered. The rule stopped being a cadence
+        and became a batch gate: every cycle in a qualifying window, or none. Measured live
+        on 2026-10-05, `served` was 146, `146 % 5 == 1`, and the incumbent was selected 0
+        times in 8 cycles.
+
+        The caller that knows the per-cycle count passes it. The default keeps the old
+        derivation so every existing caller and test means exactly what it meant before.
+        """
         eligible = [
             strategy
             for strategy in strategies
@@ -441,6 +554,40 @@ class StrategySelector:
 
         result_by_id = {result.strategy_id: result for result in results or []}
         tradable = [strategy for strategy in eligible if strategy.kind != "HOLD_BASELINE" and strategy.lifecycle != "BASELINE"]
+        # A promoted strategy that never trades has not been promoted.
+        #
+        # Measured on the live library: the probation queue is non-empty on 5.6e-05 of
+        # cycles at a steady-state backlog of 13 with a 53% actionable fraction, and the
+        # queue cannot be drained because serving a candidate is what lowers the backlog,
+        # which is what reopens admission. So the one ACTIVE strategy was selected 0 times
+        # in the 146 cycles after it was promoted, and promotion had no consequence.
+        #
+        # Reserved rather than reordered. Serving the incumbent first would fund
+        # exploitation entirely from discovery; the share leaves four fifths of throughput
+        # with probation, which is enough for the incumbent to open and close lots (35
+        # lots came from 62 orders over 1179 cycles) while the admission cap added for
+        # the opposite reason keeps doing its job.
+        #
+        # Counted on `cumulative_cycles`, which is the journal's own monotone count of
+        # service served, so the cadence is stateless: nothing to persist, nothing to
+        # reset, and it cannot drift from the record. It is deliberately *not* the
+        # windowed count - that is the instrument that made probation unfinishable twice.
+        if served is None:
+            served = sum(r.cumulative_cycles for r in results or [])
+        if (
+            self.incumbent_share > 0
+            and served % self.incumbent_share == 0
+            and last_price is not None
+        ):
+            actionable_incumbents = [
+                strategy
+                for strategy in tradable
+                if strategy.lifecycle == "ACTIVE" and self._declared_actions(strategy, last_price)
+            ]
+            if actionable_incumbents:
+                return sorted(
+                    actionable_incumbents, key=lambda s: (s.created_at, s.strategy_id)
+                )[0]
         probation = [strategy for strategy in tradable if self._needs_probation(strategy, result_by_id.get(strategy.strategy_id))]
         # A candidate that cannot trade at this price would spend the cycle on a HOLD.
         #
@@ -553,6 +700,11 @@ class StrategySelector:
                 return {"BUY", "SELL"}
             produced = _produced_action(strategy, last_price)
             return {produced} if produced else set()
+        if strategy.kind == "RULE":
+            # Which side fires depends on recent prices the probe does not have, so a RULE
+            # declares both of its mapped actions, like an unpriced TREND_FOLLOW.
+            mapped = {str(strategy.parameters.get(k, "")).upper() for k in ("when_above", "when_below")}
+            return mapped & {"BUY", "SELL"}
         action = str(strategy.parameters.get("action", "")).upper()
         return {action} if action in {"BUY", "SELL"} else set()
 
@@ -565,9 +717,36 @@ class StrategySelector:
         A capability with several routes has other chances to be tried. One with a
         single route - or none - does not, and that is the strategy the queue was
         about to keep deferring.
+
+        **Counted over strategies that can actually be served.** It used to count the
+        whole library, so `PAUSED` and `RETIRED` strategies counted as routes for
+        actions the system cannot currently express. Measured on 2026-10-06, the first
+        live session after execution was enabled: `SELL` counted 5 routes, of which
+        four were unservable -
+
+            fixed-size-sell-001           RETIRED
+            fixed-size-sell-005           PAUSED   (2026-10-02, error rate)
+            fixed-size-sell-006           PAUSED   (2026-10-02, error rate)
+            trend-follow-sell-002         PAUSED   (2026-09-29, no exploration evidence)
+            fixed-size-sell-20260724-001  PROBATION   <- the only real route
+
+        so `SELL` did not read as uncovered, the single real route was never preferred
+        over older HOLD-only candidates, and the position could not be reduced at all -
+        the agent could not buy because the cap forbids it and would not serve the only
+        thing it could sell. Same shape as `probation_backlog` in `b86990b`: one
+        predicate applied to a different population on each side.
+
+        `enabled` is honoured too, for the same reason - a disabled strategy is not a
+        route.
+
+        Deliberately *not* filtered by `_needs_probation`: a candidate past its budget is
+        on its way to ACTIVE and remains a genuine route. The defect was about lifecycles
+        that cannot be served at all.
         """
         counts: dict[str, int] = {"BUY": 0, "SELL": 0}
         for strategy in strategies:
+            if not strategy.enabled or strategy.lifecycle in {"PAUSED", "RETIRED"}:
+                continue
             for action in cls._declared_actions(strategy, last_price):
                 counts[action] = counts.get(action, 0) + 1
         return {action for action, count in counts.items() if count <= 1}
@@ -579,17 +758,46 @@ class StrategySelector:
         return bool(cls._declared_actions(strategy, last_price) & uncovered)
 
     def _needs_probation(self, strategy: StrategySpec, result: StrategyResult | None) -> bool:
+        """Has this candidate had its probation budget yet?
+
+        Measured against `cumulative_cycles` - cycles this strategy has been selected
+        for across the whole journal - and not `cycles`, which counts only the
+        reflection window. The window is 50 records shared by everything that traded in
+        it and currently tops out at 7 for any one strategy, so a 13-cycle budget
+        compared against it can never be met. That made probation endless: candidates
+        never left the queue, the queue never emptied, and because the queue has
+        absolute priority the one ACTIVE strategy was selected 0 times in the 146
+        cycles after its promotion.
+        """
         if strategy.lifecycle != "PROBATION":
             return False
         if result is None:
             return True
-        return result.cycles < self.min_probation_cycles
+        # Each return to probation grants one further budget, because `cumulative_cycles`
+        # is journal-derived and monotone - it cannot be reset by the transition, so a
+        # returned strategy would read as budget-spent forever. That was measured
+        # immediately after the return was introduced (2026-10-06): the strategy was
+        # correctly transitioned back to PROBATION and `_needs_probation` still answered
+        # false, so the selector still would not serve it.
+        granted = self.min_probation_cycles * (1 + strategy.probation_restarts)
+        return result.cumulative_cycles < granted
 
 
 class StrategyExecutor:
-    def decide(self, strategy: StrategySpec, snapshot: DataSnapshot) -> TradeDecision:
+    def decide(
+        self,
+        strategy: StrategySpec,
+        snapshot: DataSnapshot,
+        prices: Sequence[float] | None = None,
+    ) -> TradeDecision:
+        """`prices` are earlier observed prices, oldest first, ending before `snapshot`.
+
+        Only a RULE reads them; the other kinds ignore them.
+        """
         if snapshot.symbol not in strategy.symbols:
             return self._hold(snapshot, strategy, "snapshot symbol is outside strategy universe")
+        if strategy.kind == "RULE":
+            return self._rule(strategy, snapshot, prices or ())
 
         if strategy.kind == "HOLD_BASELINE":
             return self._hold(snapshot, strategy, "hold baseline")
@@ -598,6 +806,36 @@ class StrategyExecutor:
         if strategy.kind == "TREND_FOLLOW":
             return self._trend_follow(strategy, snapshot)
         return self._hold(snapshot, strategy, "unsupported strategy kind")
+
+    def _rule(
+        self, strategy: StrategySpec, snapshot: DataSnapshot, prices: Sequence[float]
+    ) -> TradeDecision:
+        p = strategy.parameters
+        lookback = int(p["lookback"])
+        value = rule_signal([*prices, snapshot.last_price], str(p["signal"]), lookback)
+        if value is None:
+            return self._hold(snapshot, strategy, f"fewer than {lookback} bars of history")
+        threshold = float(p["threshold_pct"])
+        if value > threshold:
+            action = str(p["when_above"]).upper()
+        elif value < -threshold:
+            action = str(p["when_below"]).upper()
+        else:
+            return self._hold(snapshot, strategy, f"{p['signal']} {value:+.3f}% inside +/-{threshold}%")
+        if action == "HOLD":
+            return self._hold(snapshot, strategy, f"{p['signal']} {value:+.3f}% maps to HOLD")
+        quantity = int(p["quantity"])
+        if action in {"BUY", "SHORT"}:
+            # The same entry cap FIXED_SIZE applies: bounds opening risk, never an exit.
+            quantity = max(0, min(quantity, int(strategy.max_position_value // snapshot.last_price)))
+            if quantity <= 0:
+                return self._hold(snapshot, strategy, "position size is zero after risk cap")
+        return TradeDecision(
+            symbol=snapshot.symbol, action=cast("Action", action), quantity=quantity,
+            confidence=float(p["confidence"]),
+            rationale=f"strategy:{strategy.strategy_id} {p['signal']} {value:+.3f}% vs +/-{threshold}%",
+            strategy_id=strategy.strategy_id,
+        )
 
     def _fixed_size(self, strategy: StrategySpec, snapshot: DataSnapshot) -> TradeDecision:
         # `TradeDecision.action` is a Literal, so pydantic rejects an action this
@@ -680,6 +918,26 @@ def _probe_quantity(strategy: StrategySpec) -> int:
     return 1
 
 
+def rule_signal(prices: Sequence[float], signal: str, lookback: int) -> float | None:
+    """A RULE's signal, in percent, at the last price; None without `lookback` + 1 prices.
+
+    return_over_n: change from the price `lookback` bars ago. price_vs_sma: distance of the
+    last price from the mean of the `lookback` prices before it. Pure, so the live executor
+    and the research backtest compute the same number from the same prices.
+    """
+    if len(prices) < lookback + 1 or prices[-1] <= 0:
+        return None
+    last = prices[-1]
+    if signal == "return_over_n":
+        base = prices[-1 - lookback]
+    elif signal == "price_vs_sma":
+        window = prices[-1 - lookback:-1]
+        base = sum(window) / len(window)
+    else:
+        return None
+    return (last / base - 1.0) * 100.0 if base > 0 else None
+
+
 def _produced_action(strategy: StrategySpec, last_price: float) -> str | None:
     """The action this strategy would emit at `last_price`, or None if it holds.
 
@@ -746,8 +1004,21 @@ def behavioural_signature(strategy: StrategySpec) -> tuple | None:
             int(quantity),
             round(float(strategy.max_position_value), 2),
         )
+    if strategy.kind == "RULE":
+        p = strategy.parameters
+        return (
+            strategy.kind,
+            tuple(sorted(strategy.symbols)),
+            str(p.get("signal")),
+            int(p.get("lookback", 0) or 0),
+            round(float(p.get("threshold_pct", 0) or 0), 6),
+            str(p.get("when_above", "")).upper(),
+            str(p.get("when_below", "")).upper(),
+            int(p.get("quantity", 0) or 0),
+            round(float(strategy.max_position_value), 2),
+        )
     action = str(strategy.parameters.get("action", "")).upper()
-    if action not in {"BUY", "SELL", "HOLD"}:
+    if action not in {"BUY", "SELL", "SHORT", "COVER", "HOLD"}:
         return None
     return (
         strategy.kind,

@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 
 from min_agent.models import AccountSnapshot, DataSnapshot, StrategyResult, StrategySpec
 from min_agent.strategy_engine import (
+    INCUMBENT_SHARE,
+    PROBATION_CYCLES,
     StrategyExecutor,
     StrategyLibrary,
     StrategyLifecycleManager,
@@ -201,7 +203,9 @@ def test_strategy_selector_does_not_force_orders_for_mature_probation():
         created_at=datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc),
     )
     results = [
-        StrategyResult(strategy_id="old", cycles=3, submitted_orders=0, rejected_orders=0, errors=0, score=0.9, evaluated_at=datetime.now(tz=timezone.utc)),
+        # cumulative_cycles, not cycles: the budget counts cycles served across the
+        # journal, and this strategy has served its full budget of 3.
+        StrategyResult(strategy_id="old", cycles=3, cumulative_cycles=3, submitted_orders=0, rejected_orders=0, errors=0, score=0.9, evaluated_at=datetime.now(tz=timezone.utc)),
     ]
 
     chosen = selector.select([old, new], results)
@@ -224,9 +228,9 @@ def test_strategy_selector_prefers_tradable_over_baseline_after_probation():
 
 
 def test_lifecycle_manager_promotes_probation_after_successful_exposure():
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     strategy = make_spec(strategy_id="trial", kind="FIXED_SIZE", lifecycle="PROBATION", action="BUY", quantity=1)
-    result = StrategyResult(strategy_id="trial", cycles=3, submitted_orders=3, rejected_orders=0, errors=0, score=1.0, evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=3)
+    result = StrategyResult(strategy_id="trial", cycles=3, cumulative_cycles=3, cumulative_trade_attempts=3, submitted_orders=3, rejected_orders=0, errors=0, score=1.0, evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=3)
 
     # Phase 6: this strategy has acted and has clean operational metrics, but it has
     # no verifiable outcome yet. It is not promoted - the contract requires evidence,
@@ -253,11 +257,12 @@ def test_lifecycle_manager_pauses_hold_only_trend_after_evidence_cycles():
     twice: once because it returned False for any kind != "FIXED_SIZE", and
     once because it required lifecycle == "PROBATION".
     """
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     strategy = make_spec(strategy_id="trend", kind="TREND_FOLLOW", lifecycle="PROBATION")
     result = StrategyResult(
         strategy_id="trend",
         cycles=3,
+        cumulative_cycles=3,
         submitted_orders=0,
         rejected_orders=0,
         errors=0,
@@ -275,11 +280,12 @@ def test_lifecycle_manager_pauses_hold_only_trend_after_evidence_cycles():
 
 
 def test_lifecycle_manager_pauses_degenerate_fixed_size_no_exploration():
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     strategy = make_spec(strategy_id="hold-fixed", kind="FIXED_SIZE", lifecycle="PROBATION", action="HOLD", quantity=0)
     result = StrategyResult(
         strategy_id="hold-fixed",
         cycles=3,
+        cumulative_cycles=3,
         submitted_orders=0,
         rejected_orders=0,
         errors=0,
@@ -288,6 +294,275 @@ def test_lifecycle_manager_pauses_degenerate_fixed_size_no_exploration():
         skipped_orders=3,
         action_counts={"HOLD": 3},
         intended_notional=0,
+    )
+
+    [decision] = manager.review([strategy], [result])
+
+    assert decision.new_lifecycle == "PAUSED"
+    assert "no exploration" in decision.reason
+
+
+def test_probation_candidate_is_not_degenerate_before_its_budget():
+    """A candidate must be given the cycles it was guaranteed before being judged.
+
+    `StrategySelector` keeps a candidate on probation for `PROBATION_CYCLES` selected
+    cycles, and the offline screen refuses to judge below ten informative decisions - so
+    the probation-stage verdict has to use the same budget. It used `min_active_cycles`,
+    so a candidate that had attempted no trade was paused at cycle 5 of 13 and never
+    reached either. Twelve of the seventeen strategies ever paused this way had attempted
+    no trade, and nothing was ever promoted.
+    """
+    manager = StrategyLifecycleManager(probation_cycles=13)
+    strategy = make_spec(strategy_id="quiet", kind="FIXED_SIZE", lifecycle="PROBATION", action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="quiet",
+        cycles=12,
+        submitted_orders=0,
+        rejected_orders=0,
+        errors=0,
+        score=0.0,
+        evaluated_at=datetime.now(tz=timezone.utc),
+        skipped_orders=12,
+        action_counts={"HOLD": 12},
+        intended_notional=0,
+        trade_attempts=0,
+    )
+
+    assert manager.review([strategy], [result]) == []
+
+
+def test_probation_candidate_is_degenerate_once_its_budget_is_spent():
+    """The same candidate, one cycle later, is paused - the budget bounds probation too.
+
+    Without this the fix would be an open-ended probation, which is the failure mode the
+    cycle budget exists to prevent.
+    """
+    manager = StrategyLifecycleManager(probation_cycles=13)
+    strategy = make_spec(strategy_id="quiet", kind="FIXED_SIZE", lifecycle="PROBATION", action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="quiet",
+        cycles=13,
+        cumulative_cycles=13,
+        submitted_orders=0,
+        rejected_orders=0,
+        errors=0,
+        score=0.0,
+        evaluated_at=datetime.now(tz=timezone.utc),
+        skipped_orders=13,
+        action_counts={"HOLD": 13},
+        intended_notional=0,
+        trade_attempts=0,
+    )
+
+    [decision] = manager.review([strategy], [result])
+
+    assert decision.new_lifecycle == "PAUSED"
+    assert "no exploration" in decision.reason
+
+
+def test_promoted_strategy_that_stops_acting_is_still_paused_at_min_active_cycles():
+    """A promoted strategy has no probation budget left to spend, so it is judged sooner.
+
+    This is the defect the guard was written for - a promoted strategy that holds forever
+    must not be exempt - and it is why the probation budget cannot simply be raised
+    everywhere. Recorded as D4; `tools/audit_defects.py` checks the source no longer
+    exempts non-probation strategies, and this pins the behaviour it was protecting.
+    """
+    manager = StrategyLifecycleManager(min_active_cycles=5)
+    strategy = make_spec(strategy_id="stalled", kind="FIXED_SIZE", lifecycle="ACTIVE", action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="stalled",
+        cycles=5,
+        submitted_orders=0,
+        rejected_orders=0,
+        errors=0,
+        score=1.0,
+        evaluated_at=datetime.now(tz=timezone.utc),
+        skipped_orders=5,
+        action_counts={"HOLD": 5},
+        intended_notional=0,
+        trade_attempts=0,
+    )
+
+    [decision] = manager.review([strategy], [result])
+
+    assert decision.new_lifecycle == "PAUSED"
+    assert "no exploration" in decision.reason
+
+
+def test_a_served_candidate_leaves_probation_even_with_an_empty_window():
+    """The budget is cumulative service, so an empty window cannot restart it.
+
+    This is the case that made probation endless. `cycles` is the reflection window -
+    50 records shared by everything that traded in it, which tops out at 7 for any one
+    strategy - and the budget is 13, so a candidate measured against the window could
+    never be released no matter how long it had served. With 18 candidates in the queue
+    the probation branch of `select` therefore always won, and the one ACTIVE strategy
+    was selected 0 times in the 146 cycles after its promotion.
+    """
+    selector = StrategySelector()
+    budget = selector.min_probation_cycles
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION")
+    incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE")
+
+    served = [
+        # Served its whole budget, but has traded nothing in the current window.
+        StrategyResult(
+            strategy_id="candidate", cycles=0, cumulative_cycles=budget,
+            submitted_orders=0, rejected_orders=0, errors=0, score=0.1,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+        StrategyResult(
+            strategy_id="incumbent", cycles=4, cumulative_cycles=40, submitted_orders=8,
+            trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+    ]
+
+    assert selector.select([candidate, incumbent], served).strategy_id == "incumbent"
+
+
+def test_a_candidate_with_service_left_stays_in_probation_whatever_the_window_says():
+    """The converse, so the first test cannot pass by ignoring the count entirely."""
+    selector = StrategySelector()
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION")
+    incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE")
+
+    results = [
+        StrategyResult(
+            strategy_id="candidate", cycles=selector.min_probation_cycles,
+            cumulative_cycles=selector.min_probation_cycles - 1,
+            submitted_orders=0, rejected_orders=0, errors=0, score=0.1,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+        StrategyResult(
+            strategy_id="incumbent", cycles=4, cumulative_cycles=40, submitted_orders=8,
+            trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+    ]
+
+    assert selector.select([candidate, incumbent], results).strategy_id == "candidate"
+
+
+def test_probation_rates_stay_windowed_so_a_lifetime_count_cannot_become_a_rate():
+    """Cumulative service feeds the budget, never the failure rate.
+
+    `cumulative_cycles` is new and it would be easy to reach for it everywhere. These are
+    the rules that must keep the windowed number: an error rate is a statement about
+    recent reliability, and dividing one error by 44 lifetime cycles would report 2%
+    failure for a strategy that failed on a third of the cycles that actually ran.
+    """
+    manager = StrategyLifecycleManager(max_error_rate=0.25)
+    strategy = make_spec(strategy_id="noisy", kind="FIXED_SIZE", lifecycle="ACTIVE",
+                         action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="noisy", cycles=3, cumulative_cycles=44,
+        submitted_orders=1, rejected_orders=0, errors=1, score=0.1,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+
+    assert manager._is_degenerate_no_exploration(strategy, result) is False
+    [decision] = manager.review([strategy], [result])
+
+    assert decision.new_lifecycle == "PAUSED"
+    assert "error rate" in decision.reason
+
+
+def test_a_strategy_result_built_without_the_new_count_behaves_exactly_as_before():
+    """The default must be inert, which is what makes the other 892 tests evidence.
+
+    A result with no `cumulative_cycles` reads as zero served, so a PROBATION candidate
+    is still inside its budget and is not paused - the same answer the windowed code gave
+    before the field existed.
+    """
+    manager = StrategyLifecycleManager(probation_cycles=13)
+    strategy = make_spec(strategy_id="legacy", kind="FIXED_SIZE", lifecycle="PROBATION",
+                         action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="legacy", cycles=13, submitted_orders=0, rejected_orders=0, errors=0,
+        score=0.0, evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=0,
+    )
+
+    assert result.cumulative_cycles == 0
+    assert manager._is_degenerate_no_exploration(strategy, result) is False
+
+
+def test_a_served_candidate_is_judged_on_a_thin_window():
+    """The probation verdict gate is a service question, not a freshness one.
+
+    Left on the windowed count, a candidate that has served its whole probation budget
+    but holds only a few cycles in the current 50-record window got *no verdict at all* -
+    not a refusal, an absence - and waited for a coincidence. Measured on the live
+    library, `trend-follow-buy-010` was exactly that case: 15 cumulative cycles, 10
+    scored decisions, PASS_SCREENED, and 4 window cycles against a bar of 5.
+
+    The window still has to be non-empty: `cycles <= 0` returns early a few lines above,
+    because the rate rules divide by it and a strategy with no activity in the window has
+    nothing fresh to judge on. Two window cycles is the case that was broken; zero is not.
+    """
+    manager = StrategyLifecycleManager(probation_cycles=13)
+    strategy = make_spec(strategy_id="served", kind="FIXED_SIZE", lifecycle="PROBATION",
+                         action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="served", cycles=2, cumulative_cycles=13, cumulative_trade_attempts=5,
+        submitted_orders=5, rejected_orders=0, errors=0, score=0.9,
+        evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=5,
+    )
+
+    [decision] = manager.review([strategy], [result], {"served": _evidence(scored=12)})
+
+    assert decision.new_lifecycle == "ACTIVE"
+
+
+def test_a_candidate_short_of_its_budget_is_not_judged_on_a_thin_window_either():
+    """The converse, so the first cannot pass by ignoring the count."""
+    manager = StrategyLifecycleManager(probation_cycles=13)
+    strategy = make_spec(strategy_id="unserved", kind="FIXED_SIZE", lifecycle="PROBATION",
+                         action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="unserved", cycles=2, cumulative_cycles=12, cumulative_trade_attempts=5,
+        submitted_orders=5, rejected_orders=0, errors=0, score=0.9,
+        evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=5,
+    )
+
+    assert manager.review([strategy], [result], {"unserved": _evidence(scored=12)}) == []
+
+
+def test_a_candidate_that_traded_in_its_lifetime_is_not_called_degenerate():
+    """The daemon paused this exact case on 2026-10-04, minutes after the fix that
+    let the candidate reach a ruling at all.
+
+    `trend-follow-buy-010` had served 15 cycles, made one BUY across its whole life,
+    and passed the offline screen on 10 scored decisions. It was paused for "no
+    exploration evidence" because `trade_attempts` is windowed and its single BUY fell
+    outside the last 50 records. "Did this candidate ever try to trade?" is a lifetime
+    question and the window answered it for five hours.
+    """
+    manager = StrategyLifecycleManager(probation_cycles=13)
+    strategy = make_spec(strategy_id="traded-once", kind="FIXED_SIZE", lifecycle="PROBATION",
+                         action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="traded-once", cycles=4, cumulative_cycles=15,
+        cumulative_trade_attempts=1,          # lifetime: one BUY, outside the window
+        trade_attempts=0,                     # windowed: nothing recent
+        submitted_orders=1, rejected_orders=0, errors=0, score=0.225,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+
+    assert manager._is_degenerate_no_exploration(strategy, result) is False
+
+
+def test_a_candidate_that_never_traded_is_still_paused_on_its_lifetime_count():
+    """So the fix is not a licence to keep anything: zero lifetime attempts still pauses."""
+    manager = StrategyLifecycleManager(probation_cycles=13)
+    strategy = make_spec(strategy_id="never-traded", kind="FIXED_SIZE", lifecycle="PROBATION",
+                         action="BUY", quantity=1)
+    result = StrategyResult(
+        strategy_id="never-traded", cycles=4, cumulative_cycles=15,
+        cumulative_trade_attempts=0, trade_attempts=0,
+        submitted_orders=0, rejected_orders=0, errors=0, score=0.0,
+        evaluated_at=datetime.now(tz=timezone.utc),
     )
 
     [decision] = manager.review([strategy], [result])
@@ -663,7 +938,9 @@ def test_verified_positive_pnl_drives_the_promotion_and_is_recorded_as_the_reaso
     result = StrategyResult(
         strategy_id="winner",
         evaluated_at=datetime.now(tz=timezone.utc),
-        cycles=5,                       # probation bar met
+        cycles=5,
+        cumulative_cycles=PROBATION_CYCLES,   # probation bar met at the default budget
+        cumulative_trade_attempts=5,
         submitted_orders=5,
         rejected_orders=0,
         skipped_orders=0,
@@ -740,6 +1017,8 @@ def test_no_closed_lot_needs_decision_evidence_not_operational_metrics():
         strategy_id="no-lots",
         evaluated_at=datetime.now(tz=timezone.utc),
         cycles=5,
+        cumulative_cycles=PROBATION_CYCLES,
+        cumulative_trade_attempts=5,
         submitted_orders=5,
         rejected_orders=0,
         skipped_orders=0,
@@ -982,7 +1261,8 @@ def _probation_spec(strategy_id="p1", action="BUY"):
 def _clean_result(strategy_id="p1", **over):
     from min_agent.models import StrategyResult
     base = dict(
-        strategy_id=strategy_id, cycles=5, submitted_orders=5, rejected_orders=0,
+        strategy_id=strategy_id, cycles=5, cumulative_cycles=5, cumulative_trade_attempts=5,
+        submitted_orders=5, rejected_orders=0,
         skipped_orders=0, errors=0, score=1.0, trade_attempts=5,
         strategy_fault_rejections=0,
         evaluated_at=datetime.now(tz=timezone.utc),
@@ -1004,7 +1284,7 @@ def test_a_strategy_that_never_traded_is_not_promoted_however_clean_it_looked():
     """Five cycles, zero errors, zero rejections - and it never did anything. A
     strategy with no orders has produced no evidence of value, and the absence of
     trouble is not evidence."""
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     result = _clean_result(submitted_orders=0, trade_attempts=0)
 
     decisions = manager.review([_probation_spec()], [result], {"p1": _evidence()})
@@ -1018,7 +1298,7 @@ def test_a_strategy_that_never_traded_is_not_promoted_however_clean_it_looked():
 def test_absent_evidence_blocks_promotion_rather_than_defaulting_to_it():
     """The direction that matters. No verdict yet reads as 'not yet', never as
     'assumed fine' - which is precisely what the version this replaced did."""
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     for kwargs in ({}, {"p1": _evidence(verdict="")}):
         decisions = manager.review([_probation_spec()], [_clean_result()], kwargs or None)
         assert all(d.new_lifecycle != "ACTIVE" for d in decisions), (kwargs, decisions)
@@ -1027,7 +1307,7 @@ def test_absent_evidence_blocks_promotion_rather_than_defaulting_to_it():
 def test_an_inconclusive_verdict_does_not_promote():
     """INCONCLUSIVE means the screen could not tell. Promoting on it would read
     ignorance as a pass, which is the error this whole gate exists to prevent."""
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     verdict = "INCONCLUSIVE_INSUFFICIENT_EVIDENCE"
     decisions = manager.review(
         [_probation_spec()], [_clean_result()], {"p1": _evidence(verdict=verdict)}
@@ -1036,7 +1316,7 @@ def test_an_inconclusive_verdict_does_not_promote():
 
 
 def test_a_rejected_verdict_does_not_promote():
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     decisions = manager.review(
         [_probation_spec()], [_clean_result()],
         {"p1": _evidence(verdict="REJECT_POOR_DECISIONS")},
@@ -1047,7 +1327,7 @@ def test_a_rejected_verdict_does_not_promote():
 def test_too_few_scored_decisions_does_not_promote():
     """A handful of decisions is not enough to judge, even when none of them was
     wrong."""
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     decisions = manager.review(
         [_probation_spec()], [_clean_result()], {"p1": _evidence(scored=3)}
     )
@@ -1057,7 +1337,7 @@ def test_too_few_scored_decisions_does_not_promote():
 def test_a_clean_strategy_with_evidence_is_promoted():
     """The gate must be satisfiable. A gate that nothing can pass is a freeze, and
     would silently stop the lifecycle from ever advancing."""
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     [decision] = manager.review(
         [_probation_spec()], [_clean_result()], {"p1": _evidence()}
     )
@@ -1069,7 +1349,7 @@ def test_a_clean_strategy_with_evidence_is_promoted():
 def test_the_gate_states_what_is_missing():
     """A gate that can only say no leaves the journal unable to explain why a
     strategy is stuck."""
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     reason = manager._promotion_evidence_gate(None)
     assert reason and "no offline validation evidence" in reason
 
@@ -1087,13 +1367,13 @@ def test_broker_verified_pnl_still_promotes_without_offline_evidence():
     from min_agent.models import StrategyResult
 
     result = StrategyResult(
-        strategy_id="p1", cycles=5, submitted_orders=5, rejected_orders=0,
+        strategy_id="p1", cycles=5, cumulative_cycles=5, cumulative_trade_attempts=5, submitted_orders=5, rejected_orders=0,
         skipped_orders=0, errors=0, score=1.0, trade_attempts=5,
         strategy_fault_rejections=0, realized_pnl=120.0,
         pnl_evidence=PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
         evaluated_at=datetime.now(tz=timezone.utc),
     )
-    manager = StrategyLifecycleManager(min_active_cycles=3)
+    manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     [decision] = manager.review([_probation_spec()], [result])
 
     assert decision.new_lifecycle == "ACTIVE"
@@ -1240,9 +1520,13 @@ def test_a_candidate_leaves_probation_only_once_it_could_be_screened():
     incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE")
 
     def with_cycles(n):
+        # `cumulative_cycles` is the quantity the budget is measured against: cycles
+        # served across the whole journal. `cycles` is the reflection window, which
+        # tops out at 7 for any one strategy and so can never express a budget of 13.
         return [
             StrategyResult(
-                strategy_id="candidate", cycles=n, submitted_orders=0, rejected_orders=0,
+                strategy_id="candidate", cycles=3, cumulative_cycles=n,
+                submitted_orders=0, rejected_orders=0,
                 errors=0, score=0.5, evaluated_at=datetime.now(tz=timezone.utc),
             ),
             # The incumbent outscores the candidate, so once the candidate leaves
@@ -1380,3 +1664,399 @@ def test_an_already_retired_strategy_is_not_re_judged():
     )
 
     assert decisions == []
+
+
+def _service(strategy_id, cumulative, *, cycles=0, trade_attempts=0, score=0.5):
+    return StrategyResult(
+        strategy_id=strategy_id, cycles=cycles, cumulative_cycles=cumulative,
+        submitted_orders=trade_attempts, rejected_orders=0, errors=0, score=score,
+        evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=trade_attempts,
+    )
+
+
+def test_a_promoted_strategy_is_served_on_its_cadence_turn():
+    """A strategy that is promoted and then never trades has not been promoted.
+
+    Probation has absolute priority and admission holds the backlog at the cap, so the
+    queue is effectively never empty - 5.6e-05 of cycles on the live library - and the one
+    ACTIVE strategy was selected 0 times in the 146 cycles after its promotion.
+    """
+    selector = StrategySelector(incumbent_share=INCUMBENT_SHARE)
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION",
+                          action="BUY", quantity=1)
+    incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE",
+                          action="BUY", quantity=1)
+
+    # total cumulative service 9, share 5 -> not a cadence turn
+    between = [_service("candidate", 8), _service("incumbent", 1, score=0.9)]
+    on_turn = [_service("candidate", 9), _service("incumbent", 1, score=0.9)]
+
+    assert selector.select([candidate, incumbent], between, last_price=100.0).strategy_id == "candidate"
+    assert selector.select([candidate, incumbent], on_turn, last_price=100.0).strategy_id == "incumbent"
+
+
+def test_the_incumbent_cadence_advances_on_cumulative_service_not_the_window():
+    """The distinction this session has been about, and the one that broke probation twice.
+
+    Both results carry zero windowed cycles - the incumbent has not traded recently - and
+    differ only in cumulative service. If the cadence were read from the windowed count it
+    would sit at zero and never advance, which is the bug that made probation unfinishable.
+    """
+    selector = StrategySelector(incumbent_share=INCUMBENT_SHARE)
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION",
+                          action="BUY", quantity=1)
+    incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE",
+                          action="BUY", quantity=1)
+    results = [_service("candidate", 4, cycles=0), _service("incumbent", 1, cycles=0, score=0.9)]
+
+    assert selector.select([candidate, incumbent], results, last_price=100.0).strategy_id == "incumbent"
+
+
+def test_with_no_promoted_strategy_selection_is_unchanged():
+    """The reserved share must cost nothing when there is nothing to reserve for."""
+    selector = StrategySelector(incumbent_share=INCUMBENT_SHARE)
+    only = make_spec(strategy_id="only", kind="FIXED_SIZE", lifecycle="PROBATION",
+                     action="BUY", quantity=1)
+
+    for cumulative in (0, 5, 10, 25):
+        results = [_service("only", cumulative, cycles=1)]
+        assert selector.select([only], results, last_price=100.0).strategy_id == "only"
+
+
+def test_an_incumbent_that_cannot_act_leaves_every_turn_to_probation():
+    """A reserved turn is not a wasted turn: the share is for cycles that can do something.
+
+    A FIXED_SIZE always declares, so this uses a TREND_FOLLOW anchored so its band contains
+    the price - it is ACTIVE, on a cadence turn, and cannot fire.
+    """
+    selector = StrategySelector(incumbent_share=INCUMBENT_SHARE)
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION",
+                          action="BUY", quantity=1)
+    dormant = make_spec(strategy_id="incumbent", kind="TREND_FOLLOW", lifecycle="ACTIVE",
+                        reference_price=100.0, threshold_pct=0.05)
+    results = [_service("candidate", 5), _service("incumbent", 0, score=0.9)]
+
+    assert selector.select([candidate, dormant], results, last_price=100.0).strategy_id == "candidate"
+
+
+def test_the_incumbent_cadence_advances_per_cycle_not_per_reflection_window():
+    """The property the live run was missing, and the reason it was missing.
+
+    The cadence is defined over cycles. It used to be measured against
+    `sum(cumulative_cycles)`, which reaches the selector only through `reflection.json` -
+    rewritten every 30 minutes - so the sum was frozen for a whole window and
+    `served % 5 == 0` was one constant across the ~6 cycles it covered. The rule became a
+    batch gate: every cycle in a qualifying window, or none.
+
+    Measured live on 2026-10-05: `served` was 146, `146 % 5 == 1`, and the incumbent was
+    selected 0 times in 8 cycles. Stepping `served` by one per cycle is what the caller now
+    does, and this asserts the share is both correct and unclustered.
+    """
+    selector = StrategySelector()
+    incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE")
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION")
+
+    picks = [
+        (selector.select([candidate, incumbent], [], last_price=100.0, served=n).strategy_id)
+        for n in range(1, 21)
+    ]
+    served_incumbent = sum(1 for p in picks if p == "incumbent")
+
+    assert served_incumbent == 4, f"1 in 5 over 20 cycles, got {served_incumbent}"
+    # Unclustered: the incumbent's turns are 5 apart, not 6 in a row then 24 idle.
+    positions = [i for i, p in enumerate(picks) if p == "incumbent"]
+    from itertools import pairwise
+
+    gaps = [b - a for a, b in pairwise(positions)]
+    assert gaps == [selector.incumbent_share] * (len(positions) - 1), (
+        f"incumbent turns bunched instead of spaced: positions={positions} gaps={gaps}"
+    )
+
+
+def test_the_cadence_ignores_a_frozen_reflection_count_when_served_is_given():
+    """A stale reflection snapshot must not be able to starve the incumbent again.
+
+    `146 % 5 == 1` held for the whole window on the live run, so the incumbent was refused
+    on every cycle of it. Passing the live count has to override that, or the fix is only
+    cosmetic.
+    """
+    selector = StrategySelector()
+    incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE")
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION")
+    # The candidate keeps budget left, so it is a genuine fallback rather than an
+    # already-served one: `1 + 145 = 146`, the exact frozen total from the live run.
+    frozen = [
+        StrategyResult(
+            strategy_id="candidate", cycles=0, cumulative_cycles=1,
+            submitted_orders=0, rejected_orders=0, errors=0, score=0.1,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+        StrategyResult(
+            strategy_id="incumbent", cycles=4, cumulative_cycles=145,
+            submitted_orders=8, trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+    ]
+
+    # The frozen snapshot alone starves it: 146 % 5 == 1.
+    assert selector.select([candidate, incumbent], frozen, last_price=100.0).strategy_id == "candidate"
+    # The live count rescues it on the fifth cycle.
+    assert (
+        selector.select([candidate, incumbent], frozen, last_price=100.0, served=5).strategy_id
+        == "incumbent"
+    )
+
+
+def test_omitting_served_keeps_the_previous_derivation_exactly():
+    """So the default path stays pinned and no existing caller changes meaning.
+
+    `served=None` must still derive the count from `results`, because that is what every
+    other caller and test in this file relies on.
+    """
+    selector = StrategySelector()
+    candidate = make_spec(strategy_id="candidate", kind="FIXED_SIZE", lifecycle="PROBATION")
+    incumbent = make_spec(strategy_id="incumbent", kind="FIXED_SIZE", lifecycle="ACTIVE")
+    budget = selector.min_probation_cycles
+    results = [
+        StrategyResult(
+            strategy_id="candidate", cycles=0, cumulative_cycles=budget,
+            submitted_orders=0, rejected_orders=0, errors=0, score=0.1,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+        StrategyResult(
+            strategy_id="incumbent", cycles=4, cumulative_cycles=40,
+            submitted_orders=8, trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        ),
+    ]
+
+    assert selector.select([candidate, incumbent], results).strategy_id == "incumbent"
+    assert (
+        selector.select([candidate, incumbent], results, served=None).strategy_id == "incumbent"
+    )
+
+
+def test_a_paused_strategy_is_not_a_route_for_a_capability():
+    """Four unservable SELLs must not make SELL look like a covered capability.
+
+    `_uncovered_capabilities` exists so a capability the library cannot otherwise express gets
+    served first instead of being deferred behind older candidates. It used to count every
+    strategy on disk, so PAUSED and RETIRED strategies counted as routes for actions the
+    system cannot currently emit.
+
+    Measured on the first live session after execution was enabled: `SELL` counted 5 routes
+    of which four were unservable - two PAUSED for error rate, one PAUSED for no exploration
+    evidence, one RETIRED - leaving `fixed-size-sell-20260724-001` as the only real route.
+    Because `SELL` read as covered, that strategy was never preferred, and the position
+    could not be reduced at all: the agent could not buy (the position cap forbids it) and
+    would not serve the only thing it could sell.
+    """
+    sel = StrategySelector()
+    price = 100.0
+    only_route = make_spec(strategy_id="sell-probation", kind="FIXED_SIZE", lifecycle="PROBATION")
+    only_route = only_route.model_copy(
+        update={"parameters": {"action": "SELL", "quantity": 1, "confidence": 0.6}}
+    )
+    dead = []
+    for i, lifecycle in enumerate(("PAUSED", "PAUSED", "RETIRED")):
+        spec = make_spec(strategy_id=f"dead-{i}", kind="FIXED_SIZE", lifecycle=lifecycle)
+        spec = spec.model_copy(
+            update={"parameters": {"action": "SELL", "quantity": 1, "confidence": 0.6}}
+        )
+        dead.append(spec)
+    buyers = [make_spec(strategy_id=f"buy-{i}", kind="FIXED_SIZE", lifecycle="PROBATION") for i in range(3)]
+
+    specs = [only_route, *dead, *buyers]
+
+    assert "SELL" in sel._uncovered_capabilities(specs, price), (
+        "a capability with one servable route is uncovered"
+    )
+    assert sel._supplies_capability(only_route, sel._uncovered_capabilities(specs, price), price)
+    assert "BUY" not in sel._uncovered_capabilities(specs, price), (
+        "three BUY routes is not uncovered"
+    )
+
+
+def test_a_disabled_strategy_is_not_a_route_either():
+    """Same reasoning: the selector skips disabled strategies, so they express nothing."""
+    sel = StrategySelector()
+    price = 100.0
+    off = make_spec(strategy_id="disabled-sell", kind="FIXED_SIZE", lifecycle="PROBATION")
+    off = off.model_copy(update={"enabled": False})
+    off = off.model_copy(
+        update={"parameters": {"action": "SELL", "quantity": 1, "confidence": 0.6}}
+    )
+    buyer = make_spec(strategy_id="buyer", kind="FIXED_SIZE", lifecycle="PROBATION")
+
+    assert "SELL" in sel._uncovered_capabilities([off, buyer], price)
+
+
+def test_a_strategy_past_its_probation_budget_is_still_a_route():
+    """Deliberately not filtered by `_needs_probation`.
+
+    A candidate that has served its budget is on its way to ACTIVE, and it remains a real
+    route to the capability. The defect this fixes was about lifecycles that cannot be
+    served at all, not about candidates that have graduated.
+    """
+    sel = StrategySelector()
+    price = 100.0
+    spec = make_spec(strategy_id="sell-finished", kind="FIXED_SIZE", lifecycle="PROBATION")
+    spec = spec.model_copy(
+        update={"parameters": {"action": "SELL", "quantity": 1, "confidence": 0.6}}
+    )
+    result = StrategyResult(
+        strategy_id="sell-finished", cycles=13, cumulative_cycles=sel.min_probation_cycles,
+        submitted_orders=1, rejected_orders=0, errors=0, score=0.9,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+    assert not sel._needs_probation(spec, result), "precondition: budget is spent"
+
+    # Two graduated SELL routes. With two, SELL is covered, which is only true if both
+    # counted - a graduated candidate must not be filtered out the way a PAUSED one is.
+    other = make_spec(strategy_id="sell-finished-2", kind="FIXED_SIZE", lifecycle="PROBATION")
+    other = other.model_copy(
+        update={"parameters": {"action": "SELL", "quantity": 1, "confidence": 0.6}}
+    )
+    assert "SELL" not in sel._uncovered_capabilities([spec, other], price), (
+        "a graduated candidate still counts as a route to the capability"
+    )
+
+
+def test_the_single_route_is_served_before_an_older_candidate_that_cannot_act():
+    """The rule's actual purpose, asserted end to end through `select`.
+
+    `e7bb23f` added this for exactly the case measured on 2026-10-06: a SELL strategy the
+    curriculum built because the library could not sell, deferred forever behind older
+    HOLD-only candidates.
+    """
+    sel = StrategySelector()
+    price = 100.0
+    older_hold = make_spec(
+        strategy_id="older-hold", kind="TREND_FOLLOW", lifecycle="PROBATION",
+        reference_price=100.0, threshold_pct=0.02,
+    )
+    sell = make_spec(strategy_id="only-sell", kind="FIXED_SIZE", lifecycle="PROBATION")
+    sell = sell.model_copy(
+        update={"parameters": {"action": "SELL", "quantity": 1, "confidence": 0.6}}
+    )
+    specs = [older_hold, sell]
+
+    picked = sel.select(specs, [], last_price=price, served=4)
+    assert picked is not None and picked.strategy_id == "only-sell"
+    # And nothing was resurrected: both are still what they were.
+    assert {s.lifecycle for s in specs} == {"PROBATION"}
+
+
+def test_a_candidate_that_spent_its_budget_without_trading_returns_to_probation():
+    """It has not failed, it has not been tried, and it cannot be tried.
+
+    Measured on the live library 2026-10-06: `fixed-size-sell-20260724-001` had
+    cumulative_cycles 15 against a 13 budget, submitted_orders 0 and trade_attempts 8 - all
+    of them shadow intents or position-cap refusals. `_needs_probation` is false so the
+    selector stopped serving it; `submitted_orders <= 0` made `review` return `None` so it
+    was never promoted, paused or retired. Stranded, and it was the only servable SELL
+    route, so the over-cap position could never be reduced by the system at all.
+
+    Returning it to probation is the only outcome that is both true and judgeable.
+    """
+    mgr = StrategyLifecycleManager(probation_cycles=13)
+    spec = make_spec(strategy_id="sell", kind="FIXED_SIZE", lifecycle="PROBATION")
+    # The live shape, including the attempts that make it non-degenerate: it tried 15 times,
+    # so `_is_degenerate_no_exploration` does not pause it. It simply never got an order out.
+    spent = StrategyResult(
+        strategy_id="sell", cycles=15, cumulative_cycles=15, cumulative_trade_attempts=15,
+        submitted_orders=0, trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+
+    decisions = mgr.review([spec], [spent])
+
+    assert len(decisions) == 1, "a stranded candidate must produce a decision, not silence"
+    assert decisions[0].new_lifecycle == "PROBATION"
+    assert "without submitting an order" in decisions[0].reason
+    # And the point of it: it is back in the population the selector serves.
+    selector = StrategySelector(min_probation_cycles=13)
+    assert not selector._needs_probation(spec, spent), "precondition: budget spent"
+    assert selector._needs_probation(spec, None), (
+        "after returning to probation the candidate must be servable again"
+    )
+
+
+def test_the_stranding_fix_does_not_promote_a_strategy_with_no_orders():
+    """The evidence bar must not move. No orders means no evidence of any kind."""
+    mgr = StrategyLifecycleManager(probation_cycles=13)
+    spec = make_spec(strategy_id="quiet", kind="FIXED_SIZE", lifecycle="PROBATION")
+    spent = StrategyResult(
+        strategy_id="quiet", cycles=15, cumulative_cycles=15, cumulative_trade_attempts=15,
+        submitted_orders=0, trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+
+    assert mgr.review([spec], [spent])[0].new_lifecycle != "ACTIVE"
+
+
+def test_a_spent_budget_candidate_with_orders_keeps_its_existing_outcome():
+    """Only the no-orders case changes; promotion and the gates are untouched."""
+    mgr = StrategyLifecycleManager(probation_cycles=13)
+    spec = make_spec(strategy_id="trader", kind="FIXED_SIZE", lifecycle="PROBATION")
+    with_orders = StrategyResult(
+        strategy_id="trader", cycles=15, cumulative_cycles=15, cumulative_trade_attempts=15,
+        submitted_orders=4, trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+
+    decisions = mgr.review([spec], [with_orders])
+
+    # No verified PnL and no scored decisions, so it waits - the pre-existing behaviour.
+    assert decisions == [], "a candidate with orders is not automatically returned"
+
+
+def test_returning_to_probation_actually_restarts_the_budget():
+    """The first version of this fix was incomplete, and the gap was measured.
+
+    Returning the candidate to PROBATION is not enough on its own: `cumulative_cycles` is
+    derived from the journal and is monotone, so a candidate with 15 cycles against a 13
+    budget read as budget-spent *after* the transition too - correctly transitioned and
+    still unserved. Each return therefore grants one further budget via
+    `probation_restarts`, which is carried on the decision and written with it.
+    """
+    selector = StrategySelector(min_probation_cycles=13)
+    spec = make_spec(strategy_id="sell", kind="FIXED_SIZE", lifecycle="PROBATION")
+    spent = StrategyResult(
+        strategy_id="sell", cycles=15, cumulative_cycles=15, cumulative_trade_attempts=15,
+        submitted_orders=0, trade_attempts=8, rejected_orders=0, errors=0, score=0.9,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+    assert not selector._needs_probation(spec, spent), "precondition: budget spent"
+
+    mgr = StrategyLifecycleManager(probation_cycles=13)
+    decision = mgr.review([spec], [spent])[0]
+    assert decision.update == {"probation_restarts": 1}, (
+        "the transition must carry the restart, not only the lifecycle label"
+    )
+
+    returned = spec.model_copy(
+        update={"lifecycle": decision.new_lifecycle, **decision.update}
+    )
+    assert selector._needs_probation(returned, spent), (
+        "after one restart the candidate must be servable again"
+    )
+
+    # And it is not unlimited: a second restart is required, and grants another budget.
+    still_spent = spent.model_copy(update={"cumulative_cycles": 26})
+    assert not selector._needs_probation(returned, still_spent)
+    twice = returned.model_copy(update={"probation_restarts": 2})
+    assert selector._needs_probation(twice, still_spent)
+
+
+def test_the_daemon_writes_a_transition_update_alongside_the_lifecycle():
+    """A lifecycle label without its state is the failure this plan exists to prevent."""
+    import inspect
+
+    from min_agent.daemon import AgentDaemon
+
+    source = inspect.getsource(AgentDaemon)
+    assert "decision.update" in source, (
+        "the apply path must write the decision's update dict, or a probation restart "
+        "changes the lifecycle and leaves the state behind"
+    )

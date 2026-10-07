@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from min_agent.knowledge_library import KnowledgeLibrary
+from min_agent.knowledge_library import KnowledgeLibrary, lesson_key
 from min_agent.models import KnowledgeArtifact
 
 
@@ -75,11 +75,34 @@ class KnowledgeAdmission:
 
         self.knowledge_library.save(artifact.model_copy(update={"status": "ACCEPTED"}))
         self._content_hashes.add(c_hash)
+        self._retire_earlier_versions(artifact)
         return KnowledgeAdmissionResult(
             accepted=True,
             reason="approved",
             artifact_id=artifact.artifact_id,
         )
+
+    def _retire_earlier_versions(self, artifact: KnowledgeArtifact) -> None:
+        """A newly accepted lesson supersedes accepted copies of itself with older figures.
+
+        They are RETIRED, not deleted: each cites its own journal cycles, and those references
+        are evidence nothing else records. Best-effort, like the on-disk dedup above.
+        """
+        if artifact.artifact_type != "LESSON":
+            return
+        key = lesson_key(artifact)
+        try:
+            existing = self.knowledge_library.list(status="ACCEPTED")
+        except OSError:  # `list` already skips unparseable files; only I/O is left to fail
+            return
+        for other in existing:
+            if (
+                other.artifact_id != artifact.artifact_id
+                and other.artifact_type == "LESSON"
+                and lesson_key(other) == key
+                and other.created_at <= artifact.created_at
+            ):
+                self.knowledge_library.save(other.model_copy(update={"status": "RETIRED"}))
 
     def _rejection_reason(self, artifact: KnowledgeArtifact) -> str | None:
         if artifact.source_kind == "external_stub":

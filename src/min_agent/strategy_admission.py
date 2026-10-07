@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from min_agent.guardian import Guardian
-from min_agent.models import StrategySpec
-from min_agent.strategy_engine import StrategyLibrary, behavioural_signature
+from min_agent.models import StrategyResult, StrategySpec
+from min_agent.strategy_engine import (
+    PROBATION_CYCLES,
+    StrategyLibrary,
+    StrategySelector,
+    behavioural_signature,
+)
 
 
 @dataclass(frozen=True)
@@ -28,20 +33,144 @@ class StrategyAdmission:
         strategy_library: StrategyLibrary,
         market_prices: Mapping[str, float] | None = None,
         max_reference_price_deviation: float = 0.5,
+        probation_selector: StrategySelector | None = None,
+        max_probation_queue: int = PROBATION_CYCLES,
     ):
         self.guardian = guardian
         self.strategy_library = strategy_library
         self.market_prices = dict(market_prices or {})
         self.max_reference_price_deviation = max_reference_price_deviation
+        self.probation_selector = probation_selector or StrategySelector()
+        self.max_probation_queue = max_probation_queue
 
     def set_market_prices(self, prices: Mapping[str, float]) -> None:
         self.market_prices = dict(prices)
 
-    def admit(self, strategy: StrategySpec) -> StrategyAdmissionResult:
+    def probation_backlog(self, results: Sequence[StrategyResult] | None = None) -> int:
+        """How many strategies are in probation, short of budget, AND servable.
+
+        This is the population the queue actually has to serve, and it is not the
+        count of `PROBATION` files: a candidate that has served its
+        `PROBATION_CYCLES` leaves the queue even while its lifecycle still says
+        PROBATION, so counting files would hold the backlog at every candidate ever
+        admitted and the gate could never reopen.
+
+        Nor is it every candidate short of budget. `StrategySelector` filters
+        non-actionable strategies *before* serving them, so a candidate that cannot
+        emit an order at the current price is never served and can never spend the 13
+        cycles it is holding. Measured on the live library: 14 candidates are in
+        probation and short of budget, of which **6 cannot act** at SPY 769.72 -
+        TREND_FOLLOW strategies whose trigger band brackets the market, all admitted
+        2026-10-02, the day before `26c341d` began refusing that shape. They are a
+        standing claim on 78 cycles of budget that will never be spent, and since this
+        number gates admission, they also help refuse new candidates:
+
+            24  17 candidate(s) are in probation and still short of the 13-c[ycle]
+             4  13 candidate(s) are in probation and still short of the 13-c[ycle]
+
+        They are not retired here, and deliberately: `_declared_actions` is
+        price-dependent and reversible, so a market move out of the band makes a
+        candidate servable again, and throwing it away would destroy something a
+        later regime can use.
+
+        `_declared_actions` is called rather than reimplemented, because that predicate
+        is already shared with the selector and with `_reference_price_rejection_reason`;
+        three rules agreeing by construction beats three implementations agreeing by
+        review. With no market price on hand every candidate is counted, matching the
+        rule already used in this class: the checks are skipped rather than guessed,
+        because refusing admission on missing data would be a worse failure than
+        counting too many.
+        """
+        by_id = {result.strategy_id: result for result in results or []}
+        price = next(iter(self.market_prices.values()), None)
+        selector = self.probation_selector
+        return sum(
+            1
+            for strategy in self.strategy_library.list()
+            if selector._needs_probation(strategy, by_id.get(strategy.strategy_id))
+            and (price is None or selector._declared_actions(strategy, price))
+        )
+
+    def dormant_probation(self, results: Sequence[StrategyResult] | None = None) -> int:
+        """Probation candidates short of budget that cannot act at the current price.
+
+        Reported alongside the backlog so the capacity message can name both figures.
+        Without it an operator comparing "14 candidates in probation" against a backlog
+        of 8 has no way to tell whether the difference is a bug or the dormancy above.
+        """
+        by_id = {result.strategy_id: result for result in results or []}
+        price = next(iter(self.market_prices.values()), None)
+        if price is None:
+            return 0
+        selector = self.probation_selector
+        return sum(
+            1
+            for strategy in self.strategy_library.list()
+            if selector._needs_probation(strategy, by_id.get(strategy.strategy_id))
+            and not selector._declared_actions(strategy, price)
+        )
+
+    def _capacity_rejection_reason(
+        self, backlog: int, dormant: int = 0, total: int | None = None
+    ) -> str | None:
+        """Refuse a candidate the loop has no cycles to evaluate.
+
+        Every other refusal here is candidate-intrinsic: is this id a duplicate, is
+        this price anchored sensibly, does this progression make sense, is it a
+        behavioural twin. None of them asks whether the loop can *use* the result,
+        and the measured answer was that it cannot. Over the whole record 716
+        market-open cycles could serve about 51 candidates and 68 were admitted, so
+        the queue grew by 17 - including 7 admitted across a weekend, when there is
+        no market and therefore no capacity at all.
+
+        The cost is not merely a longer queue. `StrategySelector.select` serves the
+        probation queue first and only considers the incumbent otherwise, so a
+        candidate that cannot be served is a claim on the cycles the one ACTIVE
+        strategy needs. That strategy has been selected 0 times in the 146 cycles
+        since its promotion.
+
+        The cap is in candidates rather than in cycles-per-day so it does not encode
+        this machine's interval into what is otherwise a capacity rule.
+        """
+        if backlog < self.max_probation_queue:
+            return None
+        # Both figures, because "N candidates are in probation" and a backlog smaller than
+        # N is otherwise unexplainable from the outside. The dormant count is the
+        # difference: candidates short of budget that the selector will not serve at this
+        # price, and which therefore release their budget when the market leaves the band.
+        held = (
+            f" {total - backlog} further candidate(s) in probation cannot act at the "
+            f"current price and are not counted, so they are not waiting for cycles."
+            if dormant and total is not None
+            else ""
+        )
+        return (
+            f"{backlog} candidate(s) are in probation, still short of the "
+            f"{self.probation_selector.min_probation_cycles}-cycle budget and able to "
+            f"act at the current price, which is the cap; admitting another cannot be "
+            f"evaluated and would further delay the strategies already waiting. Let the "
+            f"queue drain first.{held}"
+        )
+
+    def admit(
+        self, strategy: StrategySpec, results: Sequence[StrategyResult] | None = None
+    ) -> StrategyAdmissionResult:
         if self.strategy_library.exists(strategy.strategy_id):
             return StrategyAdmissionResult(
                 accepted=False,
                 reason="strategy_id already exists; duplicate admission rejected",
+                strategy_id=strategy.strategy_id,
+            )
+
+        backlog = self.probation_backlog(results)
+        dormant = self.dormant_probation(results)
+        capacity_reason = self._capacity_rejection_reason(
+            backlog, dormant=dormant, total=backlog + dormant
+        )
+        if capacity_reason is not None:
+            return StrategyAdmissionResult(
+                accepted=False,
+                reason=capacity_reason,
                 strategy_id=strategy.strategy_id,
             )
 

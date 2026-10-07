@@ -10,7 +10,7 @@ live journal all 67 LLM decisions are PENDING, so the module's job today is to s
 "unmeasured" clearly rather than to produce a number.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -275,8 +275,14 @@ def test_a_brier_worse_than_a_constant_claim_is_reported_as_mis_calibrated():
     The first non-INSUFFICIENT verdict this system ever produced was "SIGNAL": the
     most confident bucket was 97.1% against a 96.8% base rate, and the test passed
     because the bucket was higher. The Brier was 0.589 - 2.4x worse than always
-    claiming 0.5 - which says the stated confidence is worse than useless. Accuracy
-    said nothing because the base rate was that high; the Brier said everything.
+    claiming 0.5 - which says the stated confidence carries no usable information.
+    Accuracy said nothing because the base rate was that high; the Brier said
+    everything.
+
+    The wording is "adds no usable information" rather than the older "worse than
+    useless": the day-adjusted score on the live record is 0.271 against the same
+    0.25, so confidence is worth slightly less than nothing, and a report that
+    overstates its own case is the defect this whole change is about.
     """
     rows = [
         calibration.CalibrationRow(
@@ -294,7 +300,7 @@ def test_a_brier_worse_than_a_constant_claim_is_reported_as_mis_calibrated():
     assert report.base_rate > 0.95
     assert report.brier > calibration.BRIER_UNINFORMATIVE
     assert report.verdict.startswith("MIS-CALIBRATED")
-    assert "worse than useless" in report.verdict
+    assert "no usable information" in report.verdict
 
 
 def test_a_margin_below_noise_is_not_a_signal():
@@ -376,3 +382,90 @@ def test_the_three_verdict_sets_cannot_drift_apart_again():
     for name in ("GOOD_HOLD", "MISSED_ALPHA", "FALSE_TRADE", "GOOD_TRADE", "NEUTRAL"):
         assert getattr(calibration, name) is getattr(counterfactual, name)
         assert getattr(offline_validation, name) is getattr(counterfactual, name)
+
+
+# --------------------------------------------------------------------------
+# The day control.
+#
+# Measured on the live journal: the per-day base rate of scored decisions runs 96.9% /
+# 26.6% / 85.1% / 12.3% across four consecutive days, because on a down day a HOLD is
+# right and on an up day the same HOLD is a MISSED_ALPHA. The report compared buckets
+# against the overall base rate and read the result as a property of the model: the
+# 0.0-0.2 bucket came out "90.6% accurate" and the 0.6-0.8 bucket "13.9%", and the daemon
+# published "confidence is inverted" to the model as a lesson. Within a day the two strata
+# are the same (2026-09-28: 29/29 and 33/33; 2026-09-29: 0/3 and 1/44). The three tests
+# below pin that distinction so it cannot be read the other way again.
+# --------------------------------------------------------------------------
+
+def _day_rows(specs):
+    """specs: (cycle_id, confidence, verdict, day) -> rows carrying their trading day."""
+    return [
+        calibration.CalibrationRow(
+            cycle_id=cid, confidence=conf, action="HOLD", verdict=v,
+            decision_source="llm", day=day,
+        )
+        for cid, conf, v, day in specs
+    ]
+
+
+def test_a_bucket_that_is_only_right_on_one_day_has_no_margin():
+    """The live inversion, rebuilt: 90.6% accurate and worth nothing.
+
+    Every decision on day one is right and every decision on day two is wrong, and the
+    confident bucket is entirely day one. The raw comparison says the unconfident bucket
+    beats the base rate by 37 points. Against its own days it is 3 points out - noise.
+    """
+    rows = _day_rows(
+        [(f"a{i}", 0.1, calibration.GOOD_HOLD, date(2026, 9, 28)) for i in range(30)]
+        + [(f"b{i}", 0.7, calibration.MISSED_ALPHA, date(2026, 9, 29)) for i in range(30)]
+    )
+    report = calibration.calibrate(rows)
+
+    assert report.days == 2
+    assert report.base_rate == pytest.approx(0.5)
+    # The raw reading that was published as a lesson.
+    top = next(b for b in report.buckets if b.low == pytest.approx(0.0))
+    assert top.accuracy == pytest.approx(1.0)
+    assert top.accuracy - report.base_rate > 0.3
+    # What is left once the day is accounted for.
+    assert top.day_margin == pytest.approx(0.0, abs=0.02)
+    assert report.top_bucket_day_margin is not None
+    assert abs(report.top_bucket_day_margin) < calibration.MIN_MATERIAL_MARGIN
+
+
+def test_a_bucket_that_underperforms_its_own_days_is_still_reported():
+    """The control must not become a way to dismiss every finding.
+
+    Same day, same base rate, and the confident bucket is materially worse inside it.
+    That is the one claim worth making, and it is the one the live record still
+    supports for trades: the 0.6-0.8 bucket runs 19 points under the days it appears on.
+    """
+    rows = _day_rows(
+        [(f"a{i}", 0.5, calibration.GOOD_HOLD, date(2026, 9, 28)) for i in range(40)]
+        + [(f"b{i}", 0.7, calibration.MISSED_ALPHA, date(2026, 9, 28)) for i in range(20)]
+        + [(f"c{i}", 0.7, calibration.MISSED_ALPHA, date(2026, 9, 29)) for i in range(20)]
+    )
+    report = calibration.calibrate(rows)
+
+    assert report.worst_bucket_day_margin is not None
+    assert report.worst_bucket_day_margin < -calibration.MIN_MATERIAL_MARGIN
+    # And it is stated as the day's contribution, not as the model's accuracy.
+    assert f"{report.worst_bucket_day_margin:+.1%}" in report.verdict
+
+
+def test_one_day_of_evidence_cannot_produce_a_day_adjusted_figure():
+    """The control needs something to control for, and says so when it has none.
+
+    With a single day the adjusted figures would equal the raw ones exactly, which would
+    read as "the day explains nothing" rather than "there is nothing to explain". The
+    report leaves them `None` and records why.
+    """
+    rows = _day_rows(
+        [(f"a{i}", 0.5, calibration.GOOD_HOLD, date(2026, 9, 28)) for i in range(60)]
+    )
+    report = calibration.calibrate(rows)
+
+    assert report.days == 0
+    assert report.day_brier is None
+    assert all(bucket.day_margin is None for bucket in report.buckets)
+    assert any("single trading day" in note for note in report.notes)

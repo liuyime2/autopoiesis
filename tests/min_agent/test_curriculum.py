@@ -517,7 +517,7 @@ def test_generation_requires_complete_objects_by_schema_not_by_prose():
 
     select = kind_selection_schema()
     assert select["required"] == ["kind", "why"]
-    assert select["properties"]["kind"]["enum"] == ["HOLD_BASELINE", "FIXED_SIZE", "TREND_FOLLOW"]
+    assert select["properties"]["kind"]["enum"] == ["HOLD_BASELINE", "FIXED_SIZE", "TREND_FOLLOW", "RULE"]
 
 
 def test_curriculum_context_carries_an_explicit_strategy_spec_shape():

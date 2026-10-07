@@ -196,7 +196,7 @@ class StructuredCurriculumAgent:
                 "field_notes": {
                     "strategy_id": "a unique id not already present in strategies[].strategy_id",
                     "name": "human readable label",
-                    "kind": "one of HOLD_BASELINE, FIXED_SIZE, TREND_FOLLOW",
+                    "kind": "one of HOLD_BASELINE, FIXED_SIZE, TREND_FOLLOW, RULE",
                     "symbols": "array of symbols, e.g. [\"SPY\"]",
                     "parameters": "must match supported_strategy_schemas[kind] exactly",
                     "max_position_value": "a number at or below guardian_max_position_value",
@@ -578,13 +578,23 @@ _KIND_PARAM_SCHEMA: dict[str, dict[str, object]] = {
         "quantity": {"type": "integer", "minimum": 1},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
     },
+    # Parameters only: the model fills in a constrained rule, never code (AGENTS.md 17).
+    "RULE": {
+        "signal": {"type": "string", "enum": ["return_over_n", "price_vs_sma"]},
+        "lookback": {"type": "integer", "minimum": 2, "maximum": 78},
+        "threshold_pct": {"type": "number", "exclusiveMinimum": 0, "maximum": 5},
+        "when_above": {"type": "string", "enum": ["BUY", "SELL", "SHORT", "COVER", "HOLD"]},
+        "when_below": {"type": "string", "enum": ["BUY", "SELL", "SHORT", "COVER", "HOLD"]},
+        "quantity": {"type": "integer", "minimum": 1},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    },
 }
 
 _KIND_SELECT_SCHEMA = {
     "type": "object",
     "required": ["kind", "why"],
     "properties": {
-        "kind": {"type": "string", "enum": ["HOLD_BASELINE", "FIXED_SIZE", "TREND_FOLLOW"]},
+        "kind": {"type": "string", "enum": ["HOLD_BASELINE", "FIXED_SIZE", "TREND_FOLLOW", "RULE"]},
         "why": {"type": "string"},
     },
 }
@@ -605,6 +615,14 @@ _FIELD_GUIDE = {
         "is a whole number of shares."
     ),
     "HOLD_BASELINE": "",
+    "RULE": (
+        " Units: threshold_pct is a PERCENT here, not a fraction - 0.3 means 0.3 percent - "
+        "and lookback counts the agent's own observed price changes, about five minutes "
+        "each while the market is open. return_over_n is the percent change over lookback; "
+        "price_vs_sma is the percent distance from the mean of the last lookback prices. "
+        "when_above fires above +threshold_pct, when_below below -threshold_pct. SHORT and "
+        "COVER are refused unless short selling is enabled."
+    ),
 }
 
 

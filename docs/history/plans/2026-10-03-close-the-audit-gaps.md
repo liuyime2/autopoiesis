@@ -1,6 +1,7 @@
 # Close the audit gaps, starting with the measurement layer
 
 Date: 2026-10-03
+Status: **DONE for all four buildable items; two deliberately not built, which the plan itself predicted. Status line added 2026-10-05 - it had been empty for two days**
 Baseline commit for rollback: `886c948`
 Scope: five gaps from the 7x24/autonomy audit, ordered by dependency. Two of the five come
 out as **do not build yet**, and that is a result, not a deferral.
@@ -240,3 +241,58 @@ P2 prove an edge           -> real time only
 
 Each item is one commit touching one layer. Reverting a commit returns the tree to the
 measured baseline; `886c948` is the pre-plan state.
+---
+
+## Status settled (2026-10-05)
+
+This plan's `Status:` line was empty, which a sweep for unfinished plans flagged. Checking each
+item against the commits rather than against memory:
+
+| Item | Outcome |
+| --- | --- |
+| §2 P0 merge three drifted verdict copies, stop discarding winning trades | `e26b098` |
+| §3 P0 the decision instruction is inline code and omits the confidence range | Done and verified |
+| §4 P1 PAUSED re-adjudication | **Not built, as the plan itself concluded** - `c7ab775` |
+| §5 P1 rotation silently truncates recomputation | Fixed in `b17ea05` |
+| §6 P2 off-hours learning loop | **Not built, as the plan itself concluded** |
+| §7 P2 proving an edge | **Not a code problem**, as the plan itself concluded |
+
+So all four buildable items landed, and the two "do not build yet" items are still not built -
+which is the plan working, not the plan stalling.
+
+§3 is worth stating precisely because it was the plan's largest measured win and its verification
+was never recorded here. The instruction is now `DECISION_INSTRUCTION` at module level in
+`llm_decision.py:53`, it states the confidence bound in words
+(`llm_decision.py:58`: "a decimal number between 0 and 1 inclusive"), and
+`tests/min_agent/test_llm_decision.py` carries both halves of the demanded guard:
+`test_the_decision_instruction_lives_outside_the_method_body` (the literal is not duplicated back
+inside `decide`) and `test_the_instruction_states_every_constraint_the_validator_enforces`, which
+is a correspondence test against `TradeDecision.model_json_schema()` so a schema change without
+an instruction line now fails the build.
+
+**Measured, 2026-10-05.** The rate is recoverable after all, from the untyped cycle records rather
+than from an event type — 1,232 of them carry the full `snapshot`/`decision`/`guardian` shape, and
+the malformed cases are visible in the decision itself:
+
+```
+LLM-authored cycles : 277   (2026-09-29 .. 2026-10-05)
+  malformed confidence : 0  (0.00%)
+  HOLD with quantity   : 0  (0.00%)
+  combined             : 0  (0.00%)
+```
+
+against the plan's recorded baseline of 12.5% (92 malformed `confidence` values plus 135
+fail-closed HOLDs). Every one of those cycles would appear in this count, so the 12.5% -> 0.00%
+drop is a measurement and not an absence of evidence.
+
+**One caveat that matters for reading it.** The 277 LLM cycles span only 2026-09-29 onward, so the
+malformed era is *not* in this population — the journal's earlier cycles were authored by a
+different model field or none at all. So this measures "no malformed output since the fix" and
+cannot by itself show the rate *before* it. The 12.5% baseline came from the plan's own
+contemporaneous reading of the same journal, so the comparison is like-for-like in time but not in
+population. Stated rather than rounded up to "fixed".
+
+The second reason this plan's status was empty: like the research-gate plan, it was written,
+executed, and never revisited. Two plans in a row whose Status line outlived their work is
+enough to justify the sweep that found them — reading `Status:` against the commit log, which is
+what this session did.

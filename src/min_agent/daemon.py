@@ -21,11 +21,13 @@ from min_agent.evaluator import (
     PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
     DeterministicEvaluator,
     confirmed_fill_activities,
+    owner_fill_activities,
 )
 from min_agent.fill_reconciler import FILL_EVENT, FillReconciler
 from min_agent.health import HealthMonitor
 from min_agent.journal import JsonlJournal
 from min_agent.knowledge_admission import KnowledgeAdmission
+from min_agent.knowledge_library import lesson_effects
 from min_agent.models import (
     BrokerEvidenceBatch,
     DaemonStatus,
@@ -34,10 +36,18 @@ from min_agent.models import (
     JournalEventStatus,
     JournalEventType,
     KnowledgeArtifact,
+    StrategyResult,
 )
 from min_agent.reflection_memory import ReflectionMemory
 from min_agent.strategy_admission import StrategyAdmission
-from min_agent.strategy_engine import StrategyLibrary, StrategyLifecycleManager
+from min_agent.strategy_engine import (
+    StrategyLibrary,
+    StrategyLifecycleDecision,
+    StrategyLifecycleManager,
+)
+
+#: Calendar days a strategy stays PAUSED before it may be re-examined at all.
+PAUSED_REVIEW_DAYS = 3
 
 
 def source_fingerprint() -> str:
@@ -46,8 +56,8 @@ def source_fingerprint() -> str:
     Hashed from the source files rather than a git revision, because the question being
     asked is not "which commit is checked out" but "is the process running the same code
     that is on disk" - and the two differ constantly while a daemon is left running
-    across an edit. Reading the imported module's own file is what makes it a statement
-    about the running code rather than about the worktree.
+    across an edit. On its own this reads the worktree; it describes the running code only
+    when taken at import, which is what `LOADED_SOURCE_FINGERPRINT` is for.
 
     Falls back to hashing the module's bytecode if the source is unavailable, so an
     installed package without .py files still produces a stable value.
@@ -65,6 +75,14 @@ def source_fingerprint() -> str:
             except OSError:
                 continue
     return digest.hexdigest()[:16]
+
+
+#: The fingerprint of the code this process imported, taken once. The heartbeat used to call
+#: `source_fingerprint()` on every beat, which re-reads the files on disk - so after an edit a
+#: daemon still running the old code reported the new fingerprint, and the check built to catch
+#: exactly that passed. Python does not re-import on a file change, so the value at import time
+#: is the one that describes what is running.
+LOADED_SOURCE_FINGERPRINT = source_fingerprint()
 
 
 class DaemonAlreadyRunningError(RuntimeError):
@@ -86,6 +104,12 @@ class AgentDaemon:
         strategy_library: StrategyLibrary | None = None,
         reflection_memory: ReflectionMemory | None = None,
         curriculum_agent: StructuredCurriculumAgent | None = None,
+        #: Called with the running cycle count after each cycle, so a caller that needs a
+        #: per-cycle number can hold it. The incumbent cadence is defined over cycles but
+        #: reads `reflection.json`, which is a 30-minute-old snapshot, so without this the
+        #: cadence advances once per reflection window and fires in whole-window batches
+        #: rather than one cycle in five.
+        on_cycle_count=None,
         strategy_admission: StrategyAdmission | None = None,
         journal: JsonlJournal | None = None,
         broker_evidence_provider=None,
@@ -109,6 +133,7 @@ class AgentDaemon:
         self.journal = journal
         self.broker_evidence_provider = broker_evidence_provider
         self.lifecycle_manager = lifecycle_manager
+        self.on_cycle_count = on_cycle_count
         self.knowledge_admission = knowledge_admission
         self.reflect_every = reflect_every
         self.curriculum_every = curriculum_every
@@ -119,6 +144,11 @@ class AgentDaemon:
         self.error_count = 0
         self.last_cycle_id: str | None = None
         self.last_maintenance_at: datetime | None = None
+        #: Events appended by this process, cleared at the start of every maintenance pass so
+        #: it holds one pass's worth; see `_appended_since`.
+        self._appended: list[JournalEvent] = []
+        #: The counterfactual report this pass computed, reused rather than recomputed.
+        self._last_counterfactual_report: counterfactual.CounterfactualReport | None = None
         self.last_evidence_at: datetime | None = None
         self.last_reflection_at: datetime | None = None
         self.last_curriculum_at: datetime | None = None
@@ -197,6 +227,11 @@ class AgentDaemon:
             record = self.loop.run_once(symbol)
             self.cycle_count += 1
             self.daily_cycle_count += 1
+            if self.on_cycle_count is not None:
+                # Reported even when the cycle failed, so the number stays monotone and never
+                # skips. A cadence measured against a counter that jumped would be a cadence
+                # against something other than the cycle count.
+                self.on_cycle_count(self.cycle_count)
             if record is None:
                 # run_once already journaled CYCLE_FAILED; there is no snapshot
                 # to report on, so do not invent a last_cycle_id.
@@ -257,16 +292,48 @@ class AgentDaemon:
         if self.cycle_count % self.curriculum_every == 0 and self.curriculum_agent is not None:
             self._curriculum_proposal()
 
+    def _cumulative_cycles_by_strategy(self) -> tuple[dict[str, int], dict[str, int]]:
+        """Lifetime service per strategy: cycles served, and BUY/SELL decisions made.
+
+        The reflection window is `reflection_window` records - 50 by default, about
+        five hours - shared by every strategy that traded in it, so it currently
+        holds at most 7 cycles for any one strategy. Probation is budgeted at 13 and
+        was being compared against that number, which made the budget unreachable:
+        candidates never left probation, the queue never emptied, and because the
+        queue has absolute priority in the selector the one ACTIVE strategy was
+        selected 0 times in the 146 cycles after its promotion.
+
+        The journal is the single source of truth for how often a strategy has run,
+        and this cycle already reads it in full several times over, so the counts
+        cost nothing that is not already being paid.
+        """
+        cycles: dict[str, int] = {}
+        attempts: dict[str, int] = {}
+        if self.journal is None:
+            return cycles, attempts
+        for record in self.journal.read_all():
+            strategy_id = record.decision.strategy_id
+            if not strategy_id:
+                continue
+            key = str(strategy_id)
+            cycles[key] = cycles.get(key, 0) + 1
+            if record.decision.action in {"BUY", "SELL"}:
+                attempts[key] = attempts.get(key, 0) + 1
+        return cycles, attempts
+
     def _reflect(self, *, evidence: BrokerEvidenceBatch | None = None) -> None:
         if self.journal is None or self.reflection_memory is None:
             return
         try:
             recent = self.journal.last_n(self.config.reflection_window)
+            cumulative_cycles, cumulative_trade_attempts = self._cumulative_cycles_by_strategy()
             reflection = self.reflection_memory.reflect(
                 recent,
                 evidence=evidence,
                 fills=self._confirmed_fills(),
                 seeded_fills=self._confirmed_fill_activities(),
+                cumulative_cycles=cumulative_cycles,
+                cumulative_trade_attempts=cumulative_trade_attempts,
             )
             self.reflection_memory.save(reflection)
             self._append_event(
@@ -296,7 +363,9 @@ class AgentDaemon:
                 payload={"error_type": type(exc).__name__},
             )
 
-    def _screen_candidate(self, strategy_id: str, *, _events=None, _latest_payloads=None) -> None:
+    def _screen_candidate(
+        self, strategy_id: str, *, _events=None, _latest_payloads=None, _day_up=None
+    ) -> None:
         """Screen a candidate on the decisions it has actually produced.
 
         Read from the journalled counterfactual verdicts, so this cannot disagree
@@ -326,7 +395,9 @@ class AgentDaemon:
                 if _events is None else _events,
                 strategy_id,
             )
-            result = offline_validation.validate(decisions, strategy_id=strategy_id)
+            result = offline_validation.validate(
+                decisions, strategy_id=strategy_id, day_up=_day_up
+            )
         except Exception as exc:
             self._append_event(
                 "OFFLINE_VALIDATION_COMPLETED",
@@ -388,22 +459,8 @@ class AgentDaemon:
         for event in events:
             if not event.strategy_id:
                 continue
-            latest[event.strategy_id] = offline_validation.OfflineValidationResult(
-                strategy_id=event.strategy_id,
-                verdict=str(event.payload.get("verdict", "")),
-                reason=str(event.payload.get("reason", "")),
-                decisions=coerce.field_int(event.payload.get("decisions"), f"{event.event_id}.decisions"),
-                scored=coerce.field_int(event.payload.get("scored"), f"{event.event_id}.scored"),
-                good_holds=coerce.field_int(event.payload.get("good_holds"), f"{event.event_id}.good_holds"),
-                missed_alpha=coerce.field_int(
-                    event.payload.get("missed_alpha"), f"{event.event_id}.missed_alpha"
-                ),
-                false_trades=coerce.field_int(
-                    event.payload.get("false_trades"), f"{event.event_id}.false_trades"
-                ),
-                good_hold_ratio=coerce.field_float(
-                    event.payload.get("good_hold_ratio"), f"{event.event_id}.good_hold_ratio"
-                ),
+            latest[event.strategy_id] = offline_validation.OfflineValidationResult.from_payload(
+                event.strategy_id, event.payload, event.event_id
             )
         return latest
 
@@ -432,11 +489,14 @@ class AgentDaemon:
             if _validation is not None
             else None
         )
+        # Once per pass, over every strategy's rows: the base rate each screen is read against.
+        day_up = offline_validation.day_direction(events)
         for spec in self.strategy_library.list():
             if spec.lifecycle in {"RETIRED"}:
                 continue
             self._screen_candidate(
-                spec.strategy_id, _events=events, _latest_payloads=latest_payloads
+                spec.strategy_id, _events=events, _latest_payloads=latest_payloads,
+                _day_up=day_up,
             )
 
     def _recorded_counterfactual_verdicts(self, events) -> dict[str, str]:
@@ -491,6 +551,7 @@ class AgentDaemon:
                 payload={"status": "failed"},
             )
             return
+        self._last_counterfactual_report = report
         if not report.rows:
             return
         recorded = self._recorded_counterfactual_verdicts(_events)
@@ -536,6 +597,9 @@ class AgentDaemon:
                         "gross_return_pct": row.gross_return_pct,
                         "net_return_pct": row.net_return_pct,
                         "verdict": row.verdict,
+                        "rule_action": row.rule_action,
+                        "rule_verdict": row.rule_verdict,
+                        "override_value_pct": row.override_value_pct,
                     }
                     for row in fresh
                 ],
@@ -664,7 +728,9 @@ class AgentDaemon:
                 # Give admission the real prices so a TREND_FOLLOW anchored to
                 # a fabricated level is rejected instead of entering the library.
                 self.strategy_admission.set_market_prices(self._last_known_prices())
-                result = self.strategy_admission.admit(task.strategy_spec)
+                result = self.strategy_admission.admit(
+                    task.strategy_spec, self._strategy_results()
+                )
                 self._append_event(
                     "STRATEGY_ADMISSION_REVIEWED",
                     status="ACCEPTED" if result.accepted else "REJECTED",
@@ -719,6 +785,7 @@ class AgentDaemon:
         # takes the same read, and a name bound only inside the `if` would be undefined
         # on the path where there is no journal - which is the path the tests exercise.
         validation_events = None
+        self._appended = []
         if self.journal is not None:
             self._record_pnl_evidence(evidence)
             self._verify_profit_target(evidence)
@@ -731,11 +798,27 @@ class AgentDaemon:
             # event on every pass already, so this adds no scan - it removes one - and
             # the same read is what tells the screen whether a verdict actually moved.
             validation_events = self.journal.read_events("OFFLINE_VALIDATION_COMPLETED")
+            # Each stage hands what it appended to the next, so a pass acts on its own
+            # results. The screen used to run on the read taken before the counterfactuals
+            # were recorded, and the lifecycle on the read taken before the screen - so every
+            # newly scored decision reached a verdict one pass (15 minutes) late, and a new
+            # verdict reached the lifecycle one pass after that.
+            mark = len(self._appended)
             self._record_counterfactuals(_events=counterfactual_events)
+            counterfactual_events = [
+                *counterfactual_events,
+                *self._appended_since(mark, "COUNTERFACTUAL_EVALUATED"),
+            ]
             self._record_calibration_lesson()
+            self._retire_lessons_without_effect()
+            mark = len(self._appended)
             self._screen_all_strategies(
                 _events=counterfactual_events, _validation=validation_events
             )
+            validation_events = [
+                *validation_events,
+                *self._appended_since(mark, "OFFLINE_VALIDATION_COMPLETED"),
+            ]
         if self.reflection_memory is not None and self._due(self.last_reflection_at, self.config.reflection_interval_seconds):
             self._reflect(evidence=evidence)
         if self.curriculum_agent is not None and self.reflection_memory is not None and self._due(self.last_curriculum_at, self.config.curriculum_interval_seconds):
@@ -840,6 +923,7 @@ class AgentDaemon:
             evidence=evidence,
             fills=self._confirmed_fills(),
             seeded_fills=self._confirmed_fill_activities(),
+            owner_fills=owner_fill_activities(self.journal),
         )
         success = report.pnl_evidence != PNL_EVIDENCE_MISSING
         self._append_event(
@@ -857,6 +941,7 @@ class AgentDaemon:
             evidence=evidence,
             fills=self._confirmed_fills(),
             seeded_fills=self._confirmed_fill_activities(),
+            owner_fills=owner_fill_activities(self.journal),
         )
         pnl = report.pnl
         status = "unproven"
@@ -975,18 +1060,21 @@ class AgentDaemon:
 
         The system has been measuring whether the model's stated confidence predicts
         its decisions turning out right, and reporting the answer - and nothing acted
-        on it. On this account the answer is that confidence is *inverted*: the
-        0.6-0.8 bucket was right 5.6% of the time while the 0.0-0.2 bucket was right
-        90.6%. So `min_confidence`, which uses exactly that number as a proxy for
-        decision quality, admitted 178 decisions that were 38.2% right and blocked 32
-        that would have been 90.6% right.
-
-        `doctor` has said `MIS-CALIBRATED` about this for days. A measurement no
+        on it. `doctor` has said `MIS-CALIBRATED` about this for days. A measurement no
         component reads is not self-evolution, it is a log line. The knowledge library
         already carries journal measurements to the model through `context["lessons"]`,
         so this uses that path rather than adding a second one, and the artifact says
         what was measured rather than what to conclude - the risk limits stay where
         they are and the model is the one being told.
+
+        **The first version of this lesson was wrong and said so to the model every
+        maintenance pass.** It read "confidence is inverted" off a comparison against the
+        overall base rate, which on this account is the market's direction: the per-day
+        rate of scored decisions runs 96.9% / 26.6% / 85.1% / 12.3%, so the 0.0-0.2
+        bucket that looked 90.6% correct was one day's base rate and nothing else. Read
+        against its own days, the HOLD buckets sit within a point of zero margin. The
+        lesson is now gated on the day-adjusted margin being materially negative, so a
+        day effect cannot be taught to the model as a character trait.
 
         Cheap enough for every maintenance pass: 0.34s over 1179 cycles, dominated by
         reading the journal rather than by the evaluation.
@@ -998,8 +1086,14 @@ class AgentDaemon:
             return
         verdicts = {
             row.cycle_id: row.verdict
+            # The same symbol and cost the ledger is scored with. Left at the defaults, this
+            # graded calibration at a hardcoded 0.05% on SPY whatever the operator configured,
+            # so the lesson and the screen could disagree about the same decision.
             for row in counterfactual.evaluate(
-                records, horizon_hours=self.config.counterfactual_horizon_hours
+                records,
+                symbol=self.config.symbols[0] if self.config.symbols else "SPY",
+                horizon_hours=self.config.counterfactual_horizon_hours,
+                assumed_cost_pct=self.config.assumed_round_trip_cost_pct,
             ).rows
         }
         rows = calibration.build_rows(records, verdicts, source="llm")
@@ -1020,17 +1114,45 @@ class AgentDaemon:
         scored_refs = [row.cycle_id for row in rows if row.informative][-200:]
         if not scored_refs:
             return
-        best = max(buckets, key=lambda b: b.accuracy or 0.0)
-        worst = min(buckets, key=lambda b: b.accuracy or 1.0)
+        # Refuse to teach an inversion that the day-adjusted figures do not support.
+        #
+        # The raw comparison said confidence "runs backwards", and that reading survived
+        # in this lesson for weeks - but the per-day base rate on this account runs
+        # 96.9% / 26.6% / 85.1% / 12.3%, so the bucket that looked 90.6% accurate was the
+        # one day it came from. Once each bucket is read against its own days, the HOLD
+        # buckets land within one point of zero margin. Telling a model that its
+        # confidence is inverted, when what the record shows is that holding is right on
+        # down days, is a lesson that changes behaviour and is not true.
+        #
+        # So the lesson is only published when the day-adjusted margin is materially
+        # negative, and it quotes that margin rather than the raw accuracy spread.
+        if report.top_bucket_day_margin is None:
+            return
+        if report.top_bucket_day_margin >= -calibration.MIN_MATERIAL_MARGIN:
+            return
+        # Only buckets the control could judge are eligible to be called the worst; a
+        # bucket with no day expectation carries no margin and sorting it first would
+        # report a number the report does not have.
+        judged = [(b.day_margin, b) for b in buckets if b.day_margin is not None]
+        if not judged:
+            return
+        worst = min(judged, key=lambda pair: pair[0])[1]
+        day_clause = (
+            f" Against the {report.days} day(s) those decisions were taken on, its Brier "
+            f"is {report.day_brier:.3f}, so {(report.brier - report.day_brier):.3f} of "
+            "the gap is the market's direction rather than yours."
+            if report.day_brier is not None else ""
+        )
         answer = (
             f"On this account your stated confidence does not predict whether you are "
-            f"right, and the relationship runs backwards. Across {report.scored} scored "
-            f"decisions (base rate {report.base_rate:.0%}), a {worst.low:.1f}-"
+            f"right. Across {report.scored} scored decisions on {report.days} trading "
+            f"days (base rate {report.base_rate:.0%}), a {worst.low:.1f}-"
             f"{worst.high:.1f} confidence bucket was right {worst.accuracy:.0%} of the "
-            f"time while a {best.low:.1f}-{best.high:.1f} bucket was right "
-            f"{best.accuracy:.0%}. Brier {report.brier:.3f} against the 0.25 that "
-            f"always answering 0.5 would score. Judge your own past decisions by what "
-            f"followed them, not by how sure you felt."
+            f"time while the days it was taken on were right "
+            f"{worst.day_expected_accuracy:.0%} - a margin of "
+            f"{worst.day_margin:+.0%}. Brier {report.brier:.3f} against the 0.25 that "
+            f"always answering 0.5 would score.{day_clause} Judge your own past "
+            f"decisions by what followed them, not by how sure you felt."
         )
         digest = hashlib.sha1(f"calibration|{answer}".encode()).hexdigest()[:12]
         artifact = KnowledgeArtifact(
@@ -1038,8 +1160,9 @@ class AgentDaemon:
             artifact_type="LESSON",
             answer=answer,
             summary=(
-                f"Confidence is inversely related to correctness on this account: "
-                f"Brier {report.brier:.3f} over {report.scored} scored decisions."
+                f"Confidence does not predict correctness on this account: the worst "
+                f"bucket is {worst.day_margin:+.0%} against its own days, Brier "
+                f"{report.brier:.3f} over {report.scored} scored decisions."
             ),
             tags=("calibration", "model", "counterfactual"),
             source_kind="journal",
@@ -1142,6 +1265,19 @@ class AgentDaemon:
             "No trade is not failure; no exploration is failure. Probation must not require submitted orders, and degenerate non-baseline strategies should be paused so distinct safe alternatives can be explored.",
         )
 
+    def _strategy_results(self) -> list[StrategyResult]:
+        """The current reflection's per-strategy results, or none before the first one.
+
+        Read rather than recomputed: the lifecycle review and the selector are handed
+        the same list, so admission is being asked the same question they are.
+        """
+        if self.reflection_memory is None:
+            return []
+        reflection = self.reflection_memory.load()
+        if reflection is None:
+            return []
+        return self.reflection_memory.strategy_results(reflection)
+
     def _manage_strategy_lifecycle(self, *, _validation=None) -> None:
         if self.lifecycle_manager is None or self.strategy_library is None or self.reflection_memory is None:
             return
@@ -1154,45 +1290,163 @@ class AgentDaemon:
         # see "no evidence" for everyone and block every promotion permanently -
         # a gate that cannot be satisfied is not a gate, it is a freeze.
         evidence = self._offline_evidence_by_strategy(_validation=_validation)
-        for decision in self.lifecycle_manager.review(
-            self.strategy_library.list(), results, evidence
-        ):
-            old_lifecycle = decision.strategy.lifecycle
-            payload = {
-                "old_lifecycle": old_lifecycle,
-                "new_lifecycle": decision.new_lifecycle,
-                "reason": decision.reason,
-            }
-            # Journal the intent, write the file, then journal the outcome.
-            #
-            # Saving first meant a crash between the save and the event left a
-            # strategy in a terminal state with no recorded decision - and that is
-            # exactly what happened here: eight duplicate retirements landed on
-            # disk while nothing was journalled, which the provenance check could
-            # not even see, let alone report. Writing the event first means the
-            # worst case is an event for a transition that did not happen, which
-            # is visible and harmless; the reverse is a silent state change.
-            event_id = self._append_event(
-                "STRATEGY_LIFECYCLE_UPDATED",
-                status="SUCCESS",
-                message=decision.reason,
-                strategy_id=decision.strategy.strategy_id,
-                payload={**payload, "phase": "decided"},
+        decisions = self.lifecycle_manager.review(self.strategy_library.list(), results, evidence)
+        decisions.extend(self._reconsider_paused(results, evidence))
+        for decision in decisions:
+            self._apply_lifecycle_decision(decision)
+
+    def _retire_lessons_without_effect(self) -> None:
+        """Take a lesson out of the prompt once the ablation shows it changes nothing.
+
+        Each lesson is shown on half of cycles (`HybridDecisionEngine._show_lesson`). After it
+        has been both shown and withheld on `LESSON_EFFECT_MIN_DAYS` trading days and enough
+        paired decisions in each arm, a lesson whose effect on the model's override value is
+        inside one standard error of zero is RETIRED: it costs prompt on every cycle and has
+        not been shown to buy anything. Retired, not deleted - its sources stay on disk.
+        Inert until that much ablated data exists.
+        """
+        report = self._last_counterfactual_report
+        if self.journal is None or self.knowledge_admission is None or report is None:
+            return
+        library = self.knowledge_admission.knowledge_library
+        effects = lesson_effects(self.journal.read_all(), report.rows)
+        for artifact in library.list(status="ACCEPTED"):
+            effect = effects.get(artifact.artifact_id)
+            if artifact.artifact_type != "LESSON" or effect is None or not effect.without_effect:
+                continue
+            reason = (
+                f"no measurable effect: shown {effect.shown}, withheld {effect.withheld} over "
+                f"{effect.days} trading days; effect {effect.effect:+.4f} within one se "
+                f"({effect.se:.4f}) of zero"
             )
-            updated = decision.strategy.model_copy(
-                update={
-                    "lifecycle": decision.new_lifecycle,
-                    "lifecycle_reason": decision.reason,
-                }
-            )
-            self.strategy_library.save(updated)
+            library.save(artifact.model_copy(update={"status": "RETIRED"}))
             self._append_event(
-                "STRATEGY_LIFECYCLE_UPDATED",
-                status="SUCCESS",
-                message=decision.reason,
-                strategy_id=decision.strategy.strategy_id,
-                payload={**payload, "phase": "applied", "decided_event_id": event_id},
+                "KNOWLEDGE_ARTIFACT_ADMISSION_REVIEWED", status="REJECTED", message=reason,
+                payload={"artifact_id": artifact.artifact_id, "phase": "retired_without_effect",
+                         "shown": effect.shown, "withheld": effect.withheld,
+                         "effect": effect.effect, "se": effect.se},
             )
+
+    def _apply_lifecycle_decision(self, decision) -> None:
+        if self.strategy_library is None:
+            return
+        old_lifecycle = decision.strategy.lifecycle
+        payload = {
+            "old_lifecycle": old_lifecycle,
+            "new_lifecycle": decision.new_lifecycle,
+            "reason": decision.reason,
+        }
+        # Journal the intent, write the file, then journal the outcome.
+        #
+        # Saving first meant a crash between the save and the event left a
+        # strategy in a terminal state with no recorded decision - and that is
+        # exactly what happened here: eight duplicate retirements landed on
+        # disk while nothing was journalled, which the provenance check could
+        # not even see, let alone report. Writing the event first means the
+        # worst case is an event for a transition that did not happen, which
+        # is visible and harmless; the reverse is a silent state change.
+        event_id = self._append_event(
+            "STRATEGY_LIFECYCLE_UPDATED",
+            status="SUCCESS",
+            message=decision.reason,
+            strategy_id=decision.strategy.strategy_id,
+            payload={**payload, "phase": "decided"},
+        )
+        updated = decision.strategy.model_copy(
+            update={
+                "lifecycle": decision.new_lifecycle,
+                "lifecycle_reason": decision.reason,
+                # A transition that carries state (e.g. a probation restart bumping
+                # `probation_restarts`) writes it here too; without it the lifecycle
+                # label changes and the state does not, which is the "fixed into a state
+                # nothing will serve" failure measured on 2026-10-06.
+                **(decision.update or {}),
+            }
+        )
+        self.strategy_library.save(updated)
+        self._append_event(
+            "STRATEGY_LIFECYCLE_UPDATED",
+            status="SUCCESS",
+            message=decision.reason,
+            strategy_id=decision.strategy.strategy_id,
+            payload={**payload, "phase": "applied", "decided_event_id": event_id},
+        )
+
+    def _reconsider_paused(self, results, evidence) -> list:
+        """Return at most one PAUSED strategy to probation per pass, and only on evidence.
+
+        PAUSED used to be terminal by construction - `_review_one` returns early for it -
+        so 37 of 75 strategies could never be looked at again, including some paused under
+        rules that have since been replaced. Reopening them all was measured and rejected in
+        STATUS.md: it lengthens the serial probation queue and produces no promotion. So the
+        bar is every one of:
+
+        - paused for at least `PAUSED_REVIEW_DAYS`, read from the journalled transition -
+          a strategy whose pause time is not on the record is not reopened, since its age
+          would be invented;
+        - its latest screen is PASS_SCREENED under the day-adjusted gate (`day_margin`
+          present): no worse than its days, which is evidence, not a raw ratio;
+        - the probation queue has room, by the same count admission uses;
+        - the lifecycle rules, run on the reopened copy, would not immediately pause or
+          retire it again - otherwise this is churn, and a HOLD-only strategy would be
+          re-paused for "no exploration" on the very next pass.
+
+        The best margin goes first; one per pass so the queue is never flooded.
+        """
+        if (
+            self.journal is None
+            or self.strategy_library is None
+            or self.strategy_admission is None
+            or self.lifecycle_manager is None
+        ):
+            return []
+        admission = self.strategy_admission
+        if admission.probation_backlog(results) >= admission.max_probation_queue:
+            return []
+        paused_at: dict[str, datetime] = {}
+        for event in self.journal.read_events("STRATEGY_LIFECYCLE_UPDATED"):
+            if event.strategy_id and event.payload.get("phase") == "applied":
+                if event.payload.get("new_lifecycle") == "PAUSED":
+                    paused_at[event.strategy_id] = event.timestamp
+                else:
+                    paused_at.pop(event.strategy_id, None)
+        budget = admission.probation_selector.min_probation_cycles
+        by_id = {result.strategy_id: result for result in results}
+        candidates = []
+        for spec in self.strategy_library.list():
+            if spec.lifecycle != "PAUSED" or not spec.enabled:
+                continue
+            since = paused_at.get(spec.strategy_id)
+            screen = evidence.get(spec.strategy_id)
+            if since is None or (self.now() - since).days < PAUSED_REVIEW_DAYS:
+                continue
+            if screen is None or screen.verdict != offline_validation.PASS_SCREENED:
+                continue
+            if screen.day_margin is None:
+                continue
+            served = by_id[spec.strategy_id].cumulative_cycles if spec.strategy_id in by_id else 0
+            reopened = spec.model_copy(update={
+                "lifecycle": "PROBATION",
+                # A fresh budget on top of what it has already been served, so it is not
+                # read as budget-spent the moment it returns.
+                "probation_restarts": served // max(budget, 1) + 1,
+            })
+            if any(
+                d.new_lifecycle in {"PAUSED", "RETIRED"}
+                for d in self.lifecycle_manager.review([reopened], results, evidence)
+            ):
+                continue
+            candidates.append((screen.day_margin, spec, reopened))
+        if not candidates:
+            return []
+        margin, spec, reopened = max(candidates, key=lambda item: item[0])
+        return [StrategyLifecycleDecision(
+            spec, "PROBATION",
+            f"re-examined after {(self.now() - paused_at[spec.strategy_id]).days} day(s) "
+            f"paused: screened PASS against its days (margin {margin:+.3f}), the probation "
+            f"queue has room, and the lifecycle rules would not pause it again",
+            update={"probation_restarts": reopened.probation_restarts},
+        )]
 
     def _due(self, last_at: datetime | None, interval_seconds: int) -> bool:
         if last_at is None:
@@ -1238,7 +1492,12 @@ class AgentDaemon:
             payload=payload or {},
         )
         self.journal.append_event(event)
+        self._appended.append(event)
         return event.event_id
+
+    def _appended_since(self, mark: int, event_type: str) -> list[JournalEvent]:
+        """Events of one type this process has appended since `mark` (a length of `_appended`)."""
+        return [e for e in self._appended[mark:] if e.event_type == event_type]
 
     def _heartbeat(self, status: DaemonStatus, message: str) -> None:
         payload = HeartbeatPayload(
@@ -1249,7 +1508,7 @@ class AgentDaemon:
             error_count=self.error_count,
             last_cycle_id=self.last_cycle_id,
             message=message,
-            source_fingerprint=source_fingerprint(),
+            source_fingerprint=LOADED_SOURCE_FINGERPRINT,
         )
         self.health.write(payload)
 

@@ -194,6 +194,12 @@ def test_risk_systems_own_refusals_are_not_counted_as_strategy_faults(reason):
         "refusing rather than risk selling the account owner's shares",
         "agent exposure 900.00 + 2500.00 exceeds the 3000.00 limit "
         "(allowlist symbols only; account total is 400.00)",
+        # Measured against the position the agent already holds, not the strategy's
+        # own specification. tiny-fixed-size-001 declares max_position_value=1000 and
+        # orders one share at $769.72; the 17 shares that breached the $5,000 limit
+        # predated its promotion. Measured live 2026-10-05, charging this to the
+        # strategy retired the library's only ACTIVE strategy at failure_rate 1.00.
+        "this buy would leave 13854.96 SPY held against a max_position_value of 5000.00",
     ],
 )
 def test_rejections_caused_by_system_state_are_not_strategy_faults(reason):
@@ -244,6 +250,29 @@ def test_a_genuine_strategy_fault_is_still_charged(reason):
     )
 
     assert report.strategy_metrics["s"].strategy_fault_rejections == 1
+
+
+def test_being_refused_on_the_position_cap_does_not_retire_the_incumbent():
+    """The live consequence, so the reclassification cannot be quietly undone.
+
+    tiny-fixed-size-001 is the only ACTIVE strategy and it is a BUY. Every BUY it proposes is
+    refused because the account already holds 17 SPY against a $5,000 cap. If that refusal
+    counted as its fault then every cycle would contribute, `failure_rate` would be 1.00
+    against a 0.75 threshold, and the strategy would be retired - leaving the library with no
+    ACTIVE strategy at all, which is the state 3407ebc was committed to end.
+    """
+    manager = StrategyLifecycleManager(severe_failure_rate=0.75, max_rejection_rate=0.5)
+    strategy = make_spec(
+        strategy_id="tiny-fixed-size-001", kind="FIXED_SIZE", lifecycle="ACTIVE",
+        action="BUY", quantity=1,
+    )
+    result = _result(
+        cycles=13, rejected_orders=13, strategy_fault_rejections=0, trade_attempts=13,
+    )
+
+    assert manager.review([strategy], [result]) == [], (
+        "a strategy refused by a cap it can neither see nor change must not be retired for it"
+    )
 
 
 def test_closed_market_cycles_are_not_trade_attempts():

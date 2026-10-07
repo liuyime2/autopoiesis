@@ -77,7 +77,7 @@ adding it surfaced an assertion about a `DRIFT` marker that only ever applied to
 | Kept | Why it was tempting to remove it |
 | --- | --- |
 | `src/min_agent/research/` | 848 lines imported by tests only, and `check_production_research_separation` fails the build if production imports it. That is a correct separation of diagnosis from execution. Wiring it into production to "reduce duplication" would destroy the property |
-| `tools/verify.py`'s 51 check classes | Not bloat. Real invariants: production may not import `research/`, every deployed unit's `EnvironmentFile` must resolve, the running daemon's fingerprint must match the worktree, replayed FIFO accounting must reproduce the reported PnL |
+| `tools/verify.py`'s 52 check classes | Not bloat. Real invariants: production may not import `research/`, every deployed unit's `EnvironmentFile` must resolve, the running daemon's fingerprint must match the worktree, replayed FIFO accounting must reproduce the reported PnL |
 | `runtime/min_agent/journal.jsonl` as source of truth | Everything else is derived from it and regenerable |
 
 ## If you are following along from the old version
@@ -101,7 +101,7 @@ next began, and what was actually run to establish it.
 
 - Recorded the pre-refactor baseline so "still green" means something:
   all six targets passing, 759 tests, 29 verify classes, 1191 executions.
-- `docs/ARCHITECTURE.md` written from the working tree, not from `docs/superpowers/plans/`,
+- `docs/ARCHITECTURE.md` written from the working tree, not from `docs/history/plans/`,
   which this refactor is explicitly told to ignore.
 - Two first readings found wrong and corrected in place: "11 modules are unimported" (they
   are imported, by a `from X import Y` form the scan missed) and "the journal has no
@@ -159,12 +159,12 @@ runs the documented commands.
 | --- | --- |
 | Clones | `git clone` to an empty directory; `runtime/` absent, as gitignore intends |
 | Installs | New `conda create -n freshclone-test python=3.10`, then `pip install -e ".[dev]"` |
-| Runs | `min-agent --help` works; 880 tests pass; lint clean |
+| Runs | `min-agent --help` works; the whole suite passes and lint is clean - `docs/evidence/fresh-clone.log` holds the run and its count |
 | Works without credentials | All of the above with zero Alpaca variables set |
 
 **Three defects found only here**, none of which reproduces on the live machine: `ruff` and
 `mypy` missing from `[dev]`; a test reading the gitignored strategy library; and
 `smoke-offline` passing `--skip-broker` to a flag that only applies to `--doctor`.
-| `tools/adjudicate_unadmitted.py`, `tools/readmit_misattributed.py` | removed | One-shot repairs for two incidents that were real and are closed: five strategies written past the admission gate, and one strategy retired by a lifecycle rule reading bad position data. Each was a dated operator action with a verdict recorded at the time, not a reusable tool - nothing called them but `tools/README.md`, which is not a justification. The defects they repaired are covered by `tests/min_agent/test_strategy_admission.py` and the `loop._agent_holding` fix, and the incidents are recorded in `docs/superpowers/SYSTEM_AUDIT.md`. |
+| `tools/adjudicate_unadmitted.py`, `tools/readmit_misattributed.py` | removed | One-shot repairs for two incidents that were real and are closed: five strategies written past the admission gate, and one strategy retired by a lifecycle rule reading bad position data. Each was a dated operator action with a verdict recorded at the time, not a reusable tool - nothing called them but `tools/README.md`, which is not a justification. The defects they repaired are covered by `tests/min_agent/test_strategy_admission.py` and the `loop._agent_holding` fix, and the incidents are recorded in `docs/history/SYSTEM_AUDIT.md`. |
 | `.env.optimized`, `runtime/min_agent/daemon.log`, `runtime/min_agent/market-state.json` | removed | Three artifacts of earlier arrangements. `.env.optimized` sat beside `configs/paper.env.example` pinning `MIN_AGENT_MODEL=deepseek-r1:8b` and a 240 s interval, contradicting the configuration the agent actually reads. `daemon.log` had not been written since June and README told the reader to tail it. `market-state.json` had not been written since June either and no code reads or writes it. Keeping any of the three meant two sources of truth for the same settings. |
 | `react_agent_design.md` | removed | A June 2026 design note for a `ReactAgent` with `Reasoner`, `ToolSelector` and `ActionExecutor`. None of the five components it names exists in `src/min_agent/`, nothing referenced the file, and it predates the refactor. It described an architecture that was never built, so keeping it meant the root directory documented a system this repository does not contain. |

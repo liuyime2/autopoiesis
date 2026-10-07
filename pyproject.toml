@@ -28,6 +28,24 @@ dependencies = [
     "requests>=2.31,<3",
 ]
 
+authors = [{ name = "QuantGroup contributors" }]
+keywords = ["trading", "paper-trading", "llm", "agent", "self-improving", "alpaca", "backtest"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+
+[project.urls]
+Homepage = "https://github.com/liuyime2/autopoiesis"
+Repository = "https://github.com/liuyime2/autopoiesis"
+Issues = "https://github.com/liuyime2/autopoiesis/issues"
+Changelog = "https://github.com/liuyime2/autopoiesis/blob/main/CHANGELOG.md"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8,<9",

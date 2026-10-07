@@ -349,3 +349,146 @@ def test_a_hold_only_strategy_faces_the_same_bar_as_one_that_trades():
 
     assert from_holding.correct_outcome_ratio == from_trading.correct_outcome_ratio
     assert from_holding.verdict == from_trading.verdict == ov.PASS_SCREENED
+
+
+def test_a_result_survives_the_journal_round_trip():
+    """The daemon reads screens back from the journal; every count must come back.
+
+    It used to rebuild them by hand without `good_trades`, so a strategy right 7 times out of
+    14 by trading read back as 0 of 14 and was retired with a reason quoting 0.000.
+    """
+    from min_agent.offline_validation import OfflineValidationResult
+
+    original = OfflineValidationResult(
+        strategy_id="s", verdict="REJECT_POOR_DECISIONS", reason="r", decisions=20, scored=14,
+        good_holds=0, missed_alpha=2, false_trades=5, good_trades=7, neutral=3,
+        good_hold_ratio=0.0, mean_net_pct=0.12,
+    )
+    back = OfflineValidationResult.from_payload("s", original.to_payload(), "evt")
+    assert back == original
+    assert back.correct_outcome_ratio == 0.5
+
+
+def _dr(i, action, verdict, day):
+    from min_agent.offline_validation import DecisionRecord
+
+    return DecisionRecord(cycle_id=f"c{i:03d}", action=action, verdict=verdict,
+                          net_return_pct=0.0, day=day)
+
+
+def test_day_direction_is_the_market_s_move_not_the_decisions_grade():
+    """The base rate comes from the price, so a strategy is not measured against itself.
+
+    The first version read it from verdicts; with one strategy trading a day, its margin was
+    zero by construction. Here every row on the 29th is a losing SELL, yet the day is up -
+    because the price rose - and that is what the SELLs have to be read against.
+    """
+    from min_agent.offline_validation import day_direction
+
+    class _E:
+        def __init__(self, rows):
+            self.payload = {"rows": rows}
+
+    def row(cid, action, verdict, day, net):
+        return {"cycle_id": cid, "action": action, "verdict": verdict,
+                "decided_at": f"2026-09-{day}T14:00:00", "net_return_pct": net}
+
+    rows = [
+        row("a", "SELL", "FALSE_TRADE", 29, 0.8),
+        row("b", "SELL", "FALSE_TRADE", 29, 0.6),
+        row("c", "HOLD", "GOOD_HOLD", 30, -0.4),
+        row("d", "BUY", "GOOD_TRADE", 30, 0.3),
+        row("e", "HOLD", "NEUTRAL", 30, 0.01),   # inside the band: no direction
+    ]
+    stale = [row("a", "SELL", "GOOD_TRADE", 29, -0.8)]  # superseded by the later row
+    assert day_direction([_E(stale), _E(rows)]) == {"2026-09-29": 1.0, "2026-09-30": 0.5}
+
+
+def test_a_seller_on_rising_days_is_not_rejected_for_the_market():
+    """0 of 15 sells right, all on days every seller lost: that is the days, not the rule.
+
+    fixed-size-sell-20260724-001 was rejected exactly so under the raw gate.
+    """
+    from min_agent.offline_validation import REJECT_POOR_DECISIONS, validate
+
+    days = ["2026-10-01"] * 8 + ["2026-10-05"] * 7
+    decisions = [_dr(i, "SELL", "FALSE_TRADE", d) for i, d in enumerate(days)]
+    raw = validate(decisions, strategy_id="s")
+    adjusted = validate(decisions, strategy_id="s", day_up={"2026-10-01": 0.9, "2026-10-05": 0.9})
+    assert raw.verdict == REJECT_POOR_DECISIONS
+    assert adjusted.verdict != REJECT_POOR_DECISIONS
+    assert adjusted.day_margin == -0.1
+
+
+def test_doing_much_worse_than_the_days_is_still_rejected():
+    from min_agent.offline_validation import REJECT_POOR_DECISIONS, validate
+
+    # mixed days: a direction-blind BUY is right half the time; this one is never right
+    days = ["2026-10-01"] * 10 + ["2026-10-02"] * 10
+    decisions = [_dr(i, "BUY", "FALSE_TRADE", d) for i, d in enumerate(days)]
+    result = validate(decisions, strategy_id="s", day_up={"2026-10-01": 0.5, "2026-10-02": 0.5})
+    assert result.verdict == REJECT_POOR_DECISIONS
+    assert result.day_margin == -0.5
+    assert result.day_margin < -2 * result.day_margin_se
+
+
+def test_slightly_below_the_days_is_noise_not_a_rejection():
+    from min_agent.offline_validation import INCONCLUSIVE, validate
+
+    days = ["2026-10-01"] * 10 + ["2026-10-02"] * 10
+    verdicts = ["GOOD_TRADE"] * 9 + ["FALSE_TRADE"] * 11
+    decisions = [_dr(i, "BUY", v, d) for i, (v, d) in enumerate(zip(verdicts, days, strict=True))]
+    result = validate(decisions, strategy_id="s", day_up={"2026-10-01": 0.5, "2026-10-02": 0.5})
+    assert result.verdict == INCONCLUSIVE
+    assert -2 * result.day_margin_se < result.day_margin < 0
+
+
+def test_a_decision_without_a_day_keeps_the_raw_gate():
+    """Rows journalled before they carried a decision time cannot be read against a day."""
+    from min_agent.offline_validation import validate
+
+    decisions = [_dr(i, "SELL", "FALSE_TRADE", None) for i in range(12)]
+    result = validate(decisions, strategy_id="s", day_up={"2026-10-01": 1.0})
+    assert result.verdict == "REJECT_POOR_DECISIONS"
+    assert result.day_margin is None
+
+
+def test_one_day_is_enough_because_the_base_rate_is_every_strategy_s():
+    from min_agent.offline_validation import PASS_SCREENED, validate
+
+    decisions = [_dr(i, "BUY", "GOOD_TRADE" if i % 2 else "FALSE_TRADE", "2026-10-02") for i in range(12)]
+    result = validate(decisions, strategy_id="s", day_up={"2026-10-02": 0.4})
+    assert result.verdict == PASS_SCREENED
+    assert result.day_margin > 0
+
+
+def test_days_that_decided_every_outcome_neither_pass_nor_reject():
+    """fixed-size-sell-20260724-001: 15 sells on 2026-10-05, a day every graded outcome was up.
+
+    The raw gate rejected it; a margin of zero with zero variance would pass it. Neither is
+    supported - the day decided all fifteen outcomes.
+    """
+    from min_agent.offline_validation import INCONCLUSIVE, validate
+
+    decisions = [_dr(i, "SELL", "FALSE_TRADE", "2026-10-05") for i in range(15)]
+    result = validate(decisions, strategy_id="s", day_up={"2026-10-05": 1.0})
+    assert result.verdict == INCONCLUSIVE
+    assert result.day_margin_se == 0.0
+
+
+def test_a_strategy_is_screened_on_its_rule_not_on_the_model_s_override():
+    """The model vetoed the strategy's SELL; the strategy is graded on the SELL it decided."""
+    from min_agent.offline_validation import collect_decisions
+
+    class _E:
+        payload = {"rows": [
+            {"cycle_id": "c1", "strategy_id": "s", "action": "HOLD", "verdict": "MISSED_ALPHA",
+             "rule_action": "SELL", "rule_verdict": "FALSE_TRADE", "net_return_pct": 1.0,
+             "decided_at": "2026-10-07T15:00:00"},
+            {"cycle_id": "c2", "strategy_id": "s", "action": "HOLD", "verdict": "GOOD_HOLD",
+             "net_return_pct": -1.0, "decided_at": "2026-10-07T16:00:00"},
+        ]}
+
+    first, second = collect_decisions([_E()], "s")
+    assert (first.action, first.verdict) == ("SELL", "FALSE_TRADE")
+    assert (second.action, second.verdict) == ("HOLD", "GOOD_HOLD"), "unpaired rows are unchanged"

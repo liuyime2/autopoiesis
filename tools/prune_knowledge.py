@@ -30,12 +30,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from min_agent.config import AgentConfig
-from min_agent.knowledge_library import KnowledgeLibrary
+from min_agent.knowledge_library import KnowledgeLibrary, lesson_key
 from min_agent.models import KnowledgeArtifact
 
 
 def key_of(artifact: KnowledgeArtifact) -> str:
-    return " ".join((artifact.answer or artifact.summary or "").lower().split())
+    # The same key the prompt and admission use: one lesson re-derived with new figures is
+    # one statement, not eighteen.
+    return lesson_key(artifact)
 
 
 def main() -> int:
@@ -65,9 +67,9 @@ def main() -> int:
     for key, group in groups.items():
         if len(group) == 1:
             continue
-        # Deterministic survivor: the lexicographically first id, so repeated runs
-        # converge instead of oscillating between candidates.
-        group.sort(key=lambda a: a.artifact_id)
+        # Deterministic survivor: the newest copy, so the figures it carries are current, then
+        # the lexicographically first id, so repeated runs converge instead of oscillating.
+        group.sort(key=lambda a: (-a.created_at.timestamp(), a.artifact_id))
         survivor = group[0]
         merged: list[str] = []
         seen: set[str] = set()

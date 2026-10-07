@@ -46,9 +46,10 @@ and `tools/verify.py` asserts the four properties above rather than trusting thi
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from min_agent.atomicio import write_json_atomic
 from min_agent.models import (
@@ -64,7 +65,9 @@ from min_agent.models import (
 REPLAY_SOURCE = "alpaca_replay"
 
 #: The one value that must never be mistaken for a fill. See the module docstring.
-REPLAYED = "REPLAYED"
+#: Annotated as the literal `ExecutionResult.status` requires, so a rename or a typo here
+#: is a type error rather than a value that reaches the journal and cannot be read back.
+REPLAYED: Literal["REPLAYED"] = "REPLAYED"
 
 
 @dataclass(frozen=True)
@@ -224,7 +227,12 @@ class ReplayDataGateway:
 
     @property
     def current(self) -> ReplayBar:
-        return self.bars[self.cursor]
+        # Clamped, because a caller can legitimately advance past the end - the daemon's
+        # sleep hook advances between cycles and it does maintenance before it checks
+        # whether it is done. `snapshot` already clamped; this did not, so the same
+        # over-advance that produced a valid last-bar snapshot raised IndexError the moment
+        # anything asked for the current time.
+        return self.bars[min(self.cursor, len(self.bars) - 1)]
 
     def snapshot(self, symbol: str) -> DataSnapshot:
         symbol = symbol.upper()
@@ -270,6 +278,10 @@ class ReplayExecutor:
         self.clock = clock or (lambda: gateway.current.timestamp)
 
     def execute(self, decision: TradeDecision, guardian_result, *, cycle_id: str) -> ExecutionResult:
+        # The canonical call passes cycle_id by keyword and the real executor correlates the
+        # order with it. A replay places no order and has nothing to correlate, so the name is
+        # kept for the interface and dropped here rather than renamed out of the signature.
+        del cycle_id
         if not getattr(guardian_result, "approved", False):
             return ExecutionResult(
                 status="SKIPPED",

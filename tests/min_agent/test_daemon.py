@@ -100,7 +100,8 @@ class FailingLoop:
 
 
 class FailingReflectionMemory(ReflectionMemory):
-    def reflect(self, records, evidence=None, fills=None, seeded_fills=None):
+    def reflect(self, records, evidence=None, fills=None, seeded_fills=None,
+                cumulative_cycles=None, cumulative_trade_attempts=None):
         raise RuntimeError("reflection boom")
 
 
@@ -794,7 +795,7 @@ def test_daemon_persists_lifecycle_updates(tmp_path):
         journal=journal,
         reflection_memory=reflection_memory,
         strategy_library=strategy_library,
-        lifecycle_manager=StrategyLifecycleManager(min_active_cycles=1),
+        lifecycle_manager=StrategyLifecycleManager(min_active_cycles=1, probation_cycles=1),
         reflect_every=1,
     )
 
@@ -902,9 +903,10 @@ def test_a_rejected_strategy_is_retired_by_the_rule_set(tmp_path):
 
 def test_offline_screening_never_promotes_a_strategy(tmp_path):
     """A strategy that screened well must still be waiting for live evidence."""
+    from datetime import datetime, timezone
+
     from min_agent import offline_validation
     from min_agent.strategy_engine import StrategyLifecycleManager
-    from datetime import datetime, timezone
 
     decisions_in = [
         type("D", (), {"cycle_id": f"c{i}", "action": "HOLD", "verdict": "GOOD_HOLD",
@@ -916,7 +918,8 @@ def test_offline_screening_never_promotes_a_strategy(tmp_path):
 
     decisions = StrategyLifecycleManager().review(
         [_spec("sound", lifecycle="PROBATION")],
-        [type("R", (), {"strategy_id": "sound", "cycles": 0, "submitted_orders": 0,
+        [type("R", (), {"strategy_id": "sound", "cycles": 0, "cumulative_cycles": 0,
+                        "submitted_orders": 0,
                         "rejected_orders": 0, "errors": 0, "score": 0.5,
                         "trade_attempts": 0, "pnl_evidence": "", "realized_pnl": None,
                         "strategy_fault_rejections": None, "subbed_orders": 0,
@@ -942,7 +945,8 @@ def test_a_first_cycle_candidate_is_never_touched(tmp_path):
 
     decisions = StrategyLifecycleManager().review(
         [_spec("fresh", lifecycle="PROBATION")],
-        [type("R", (), {"strategy_id": "fresh", "cycles": 1, "submitted_orders": 0,
+        [type("R", (), {"strategy_id": "fresh", "cycles": 1, "cumulative_cycles": 1,
+                        "submitted_orders": 0,
                         "rejected_orders": 0, "errors": 0, "score": 0.5,
                         "trade_attempts": 0, "pnl_evidence": "", "realized_pnl": None,
                         "strategy_fault_rejections": None,
@@ -1108,3 +1112,218 @@ def test_a_calibration_claim_is_published_only_with_records_to_attribute_it_to(
         "cycles to cite - a claim with nothing behind it must not be published"
     )
     assert journal.read_events("KNOWLEDGE_ARTIFACT_PROPOSED") == []
+
+
+def _calibration_daemon(tmp_path):
+    """A daemon with the pieces `_record_calibration_lesson` needs, over one real cycle."""
+    from min_agent.knowledge_library import KnowledgeLibrary
+
+    cfg = config(tmp_path, interval=0)
+    journal = JsonlJournal(cfg.journal_path)
+    knowledge_library = KnowledgeLibrary(cfg.knowledge_dir)
+    daemon = AgentDaemon(
+        config=cfg,
+        loop=FakeLoop(journal=journal, strategy_id="hold-strategy"),
+        sleep=lambda seconds: None,
+        journal=journal,
+        strategy_library=StrategyLibrary(cfg.strategy_dir),
+        knowledge_admission=KnowledgeAdmission(knowledge_library=knowledge_library),
+    )
+    daemon.run(max_cycles=1)
+    return daemon, journal, knowledge_library
+
+
+def test_a_day_effect_is_not_published_to_the_model_as_a_character_trait(tmp_path, monkeypatch):
+    """The lesson this project was teaching was a description of the weather.
+
+    For weeks every maintenance pass told the model its confidence "runs backwards",
+    with a 0.0-0.2 bucket at 90.6% and a 0.6-0.8 bucket at 6%. Both numbers were the
+    market's: correctness on this account is mostly the trading day's, and those buckets
+    sat on different days. Read against their own days the margins are zero. Publishing
+    that reading as a lesson puts a false claim into every subsequent decision prompt,
+    so the lesson is gated on the day-adjusted margin being materially negative - and with
+    it at zero, nothing is published.
+    """
+    from min_agent import calibration
+
+    daemon, journal, knowledge_library = _calibration_daemon(tmp_path)
+    monkeypatch.setattr(calibration, "calibrate", lambda rows, **kw: calibration.CalibrationReport(
+        source="llm", total_decisions=200, scored=200, brier=0.40, day_brier=0.27, days=4,
+        base_rate=0.53, verdict="MIS-CALIBRATED: brier 0.40",
+        buckets=(
+            calibration.Bucket(low=0.0, high=0.2, n=40, correct=36, day_expected_accuracy=0.90),
+            calibration.Bucket(low=0.4, high=0.6, n=80, correct=60, day_expected_accuracy=0.60),
+            calibration.Bucket(low=0.6, high=0.8, n=160, correct=10, day_expected_accuracy=0.06),
+        ),
+        top_bucket_day_margin=-0.001,
+        worst_bucket_day_margin=-0.001,
+    ))
+
+    daemon._record_calibration_lesson()
+
+    assert knowledge_library.list(status="ACCEPTED") == [], (
+        "a raw inversion that its own days explain must not become a lesson"
+    )
+    assert journal.read_events("KNOWLEDGE_ARTIFACT_PROPOSED") == []
+
+
+def test_the_lesson_that_is_published_quotes_the_day_adjusted_margin(tmp_path, monkeypatch):
+    """When the finding survives the control, the model is told the controlled number.
+
+    Otherwise the fix is only a deletion: the lesson would go quiet and the one stratum
+    that genuinely underperforms - high-confidence trades, 19 points under their days on
+    the live record - would stop reaching the model at all.
+    """
+    from min_agent import calibration, counterfactual
+
+    daemon, journal, knowledge_library = _calibration_daemon(tmp_path)
+    # The lesson cites scored cycles, and `build_rows` only keeps decisions whose
+    # `decision_source` is the model - so the cycle has to be an LLM one. It is written by
+    # hand rather than through `FakeLoop`, which does not set that field.
+    llm_record = journal.read_all()[0].model_copy(update={
+        "decision": TradeDecision(
+            symbol="SPY", action="HOLD", quantity=0, confidence=0.6, rationale="r",
+            strategy_id="hold-strategy", decision_source="llm",
+        ),
+    })
+    journal.append(llm_record)
+    record_cycle_id = llm_record.cycle_id
+    monkeypatch.setattr(
+        counterfactual, "evaluate",
+        lambda records, **kw: type(
+            "R", (), {"rows": [type("Row", (), {"cycle_id": record_cycle_id,
+                                                "verdict": calibration.FALSE_TRADE})()]}
+        )(),
+    )
+    monkeypatch.setattr(calibration, "calibrate", lambda rows, **kw: calibration.CalibrationReport(
+        source="llm", total_decisions=200, scored=200, brier=0.40, day_brier=0.27, days=4,
+        base_rate=0.53, verdict="MIS-CALIBRATED: brier 0.40",
+        buckets=(
+            calibration.Bucket(low=0.6, high=0.8, n=160, correct=10, day_expected_accuracy=0.34),
+            calibration.Bucket(low=0.4, high=0.6, n=40, correct=24, day_expected_accuracy=0.62),
+        ),
+        top_bucket_day_margin=-0.28,
+        worst_bucket_day_margin=-0.28,
+    ))
+
+    daemon._record_calibration_lesson()
+
+    accepted = knowledge_library.list(status="ACCEPTED")
+    assert len(accepted) == 1, [a.artifact_id for a in accepted]
+    answer = accepted[0].answer
+    assert "days it was taken on were right 34%" in answer, answer
+    # 10/160 = 6% against a 34% expectation. The margin is computed from the bucket rather
+    # than copied from the report's field, so the sentence cannot state a number the
+    # buckets do not support.
+    assert "a margin of -28%" in answer, answer
+    assert "0.130 of the gap is the market's direction" in answer, answer
+    assert "runs backwards" not in answer, (
+        "the claim that was measured to be a day effect must not come back"
+    )
+
+
+def test_one_maintenance_pass_screens_on_the_scores_it_just_recorded(tmp_path):
+    """The screen ran on a read of the ledger taken before this pass recorded anything.
+
+    So a decision scored in pass N reached its strategy's screen in pass N+1, fifteen
+    minutes later, and the lifecycle saw that verdict a pass after that. The stages now hand
+    their appended events forward: one pass, from a journal with no counterfactuals at all,
+    must produce a screen that has scored every decision.
+    """
+    daemon, journal = _screening_daemon(tmp_path)
+    for i in range(3):
+        decision, quote = _scored_cycle(f"c{i}", price=100.0 + i, horizon_price=101.0 + i)
+        journal.append(decision)
+        journal.append(quote)
+    assert not journal.read_events("COUNTERFACTUAL_EVALUATED")
+
+    daemon._maintenance()
+
+    assert journal.read_events("COUNTERFACTUAL_EVALUATED"), "the pass recorded the ledger"
+    screen = _screen_payloads(journal).get("s1", {})
+    graded = screen.get("scored", 0) + screen.get("neutral", 0)
+    assert graded == 3, f"and screened on all three in the same pass, got {screen}"
+
+
+# --- PAUSED is re-examined, but only on evidence and only with room ----------
+
+
+def _paused_setup(tmp_path, *, paused_days_ago=5, backlog=0, margin=0.05, verdict="PASS_SCREENED",
+                  record_pause=True, rules_would_repause=False):
+    from datetime import timedelta
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from min_agent.models import JournalEvent
+    from min_agent.offline_validation import OfflineValidationResult
+    from min_agent.strategy_engine import StrategyLifecycleDecision
+
+    now = datetime.now(tz=timezone.utc)
+    cfg = config(tmp_path, interval=0)
+    journal = JsonlJournal(cfg.journal_path)
+    library = StrategyLibrary(cfg.strategy_dir)
+    spec = StrategySpec(
+        strategy_id="p1", name="p1", kind="FIXED_SIZE", symbols=("SPY",),
+        parameters={"action": "BUY", "quantity": 1, "confidence": 0.7}, max_position_value=1000,
+        enabled=True, lifecycle="PAUSED", created_at=now, rationale="test",
+    )
+    library.save(spec)
+    if record_pause:
+        journal.append_event(JournalEvent(
+            event_id=str(uuid4()), event_type="STRATEGY_LIFECYCLE_UPDATED",
+            timestamp=now - timedelta(days=paused_days_ago), status="SUCCESS", message="m",
+            strategy_id="p1", payload={"phase": "applied", "new_lifecycle": "PAUSED"},
+        ))
+
+    class _Rules:
+        def review(self, strategies, results, evidence):
+            if rules_would_repause:
+                return [StrategyLifecycleDecision(strategies[0], "PAUSED", "no exploration")]
+            return []
+
+    admission = SimpleNamespace(
+        probation_backlog=lambda results: backlog, max_probation_queue=13,
+        probation_selector=SimpleNamespace(min_probation_cycles=13),
+    )
+    daemon = AgentDaemon(
+        config=cfg, loop=FakeLoop(journal=journal), sleep=lambda s: None, journal=journal,
+        strategy_library=library, lifecycle_manager=_Rules(), strategy_admission=admission,
+        now=lambda: now,
+    )
+    screen = OfflineValidationResult(strategy_id="p1", verdict=verdict, reason="r", scored=12,
+                                     day_margin=margin)
+    return daemon, {"p1": screen}
+
+
+def test_a_paused_strategy_with_evidence_and_room_returns_to_probation(tmp_path):
+    daemon, evidence = _paused_setup(tmp_path)
+    (decision,) = daemon._reconsider_paused([], evidence)
+    assert decision.new_lifecycle == "PROBATION"
+    assert decision.update["probation_restarts"] == 1
+    assert "margin +0.050" in decision.reason
+
+
+def test_a_full_queue_reopens_nothing(tmp_path):
+    daemon, evidence = _paused_setup(tmp_path, backlog=13)
+    assert daemon._reconsider_paused([], evidence) == []
+
+
+def test_a_recent_pause_is_not_reopened(tmp_path):
+    daemon, evidence = _paused_setup(tmp_path, paused_days_ago=1)
+    assert daemon._reconsider_paused([], evidence) == []
+
+
+def test_a_pause_time_not_on_the_record_is_not_invented(tmp_path):
+    daemon, evidence = _paused_setup(tmp_path, record_pause=False)
+    assert daemon._reconsider_paused([], evidence) == []
+
+
+def test_a_raw_gate_pass_is_not_enough(tmp_path):
+    daemon, evidence = _paused_setup(tmp_path, margin=None)
+    assert daemon._reconsider_paused([], evidence) == []
+
+
+def test_a_strategy_the_rules_would_pause_again_is_left_paused(tmp_path):
+    """Reopen-then-repause is churn: STATUS.md measured it lengthening the queue for nothing."""
+    daemon, evidence = _paused_setup(tmp_path, rules_would_repause=True)
+    assert daemon._reconsider_paused([], evidence) == []

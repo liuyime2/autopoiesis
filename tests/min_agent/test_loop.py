@@ -83,7 +83,7 @@ class FakeGuardian:
     # than wall-clock; a fake that omitted it would hide that interface drift instead of
     # catching it.
     def review(self, decision, snapshot, mode="paper", trades_today=0,
-               agent_position_quantity=None, now=None):
+               agent_position_quantity=None, now=None, agent_short_quantity=None):
         self.now = now
         self.trades_today = trades_today
         return GuardianResult(approved=True, reason="approved")

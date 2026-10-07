@@ -273,7 +273,7 @@ def run_walk_forward(
     strategy_id: str,
     kind: str,
     parameters: dict,
-    n_folds: int = 3,
+    n_folds: int | None = None,
     min_train_bars: int = 20,
     trials: int = 1,
     commission_pct: float = DEFAULT_COMMISSION_PCT,
@@ -282,13 +282,47 @@ def run_walk_forward(
     """Cut the series into folds and score only the out-of-sample leg.
 
     `n_folds` is the number of out-of-sample segments; the first segment is preceded
-    by `min_train_bars` of in-sample data. With 467 distinct real observations this
-    yields folds of roughly a hundred bars each, which is why the verdict refuses to
-    call anything a result.
+    by `min_train_bars` of in-sample data.
+
+    **`None` derives the fold count from `required_trades`, and that is the default,
+    because the fold count is what limits the evidence the multiple-testing control
+    counts.** `run_backtest` opens a position only when flat and force-closes it at the
+    segment's last bar, so an always-BUY rule makes exactly one counted trade per
+    segment: `out_of_sample_trades == n_folds` is an identity, measured at 3, 10, 27, 52
+    and 60 folds. The gate needs `required_trades` independent out-of-sample bets -
+    52 at 27 trials - so a hardcoded 3 folds made it unsatisfiable by construction, and
+    all 26 recorded trials returned INSUFFICIENT for that reason alone.
+
+    That is a veto, not a control. A gate nothing can pass silently stops the thing it
+    gates, which this repository already says about the promotion gate: "A gate that
+    nothing can pass is a freeze." `required_trades` is unchanged - the bar still rises
+    as sqrt(trials) - this only provisions the evidence it asks for. At
+    `n_folds == required_trades` on 847 bars the stage returns a real verdict.
+
+    An explicit `n_folds` below the requirement is honoured, because a caller asking for a
+    cheap run should get one, but it records a note saying the evidence gate cannot be
+    satisfied there. Overriding it silently would be worse: this repository has already
+    been bitten twice by a count quietly meaning something other than it says.
+
+    Segment *length* is a separate weakness this does not fix: 52 folds on 847 bars is 15
+    bars per segment, so each bet is short. Roughly 5,220 bars would give 52 segments of
+    ~100 bars. That is a quality question after the count, not the reason the gate never
+    opened.
     """
     result = WalkForwardResult(
         strategy_id=strategy_id, kind=kind, trials=trials, bars=len(bars)
     )
+    required = result.required_trades()
+    if n_folds is None:
+        n_folds = max(3, required)
+    elif n_folds < required:
+        result.notes.append(
+            f"{n_folds} folds can produce at most {n_folds} out-of-sample trade(s) "
+            f"because a strategy makes one counted trade per segment, against the "
+            f"{required} required for {trials} trial(s); the evidence gate cannot be "
+            f"satisfied at this fold count, so any INSUFFICIENT below is structural "
+            f"rather than a statement about the strategy"
+        )
     if len(bars) < min_train_bars + n_folds:
         result.notes.append(
             f"only {len(bars)} bars; need at least {min_train_bars + n_folds} for "
@@ -306,8 +340,26 @@ def run_walk_forward(
     for i in range(n_folds):
         start = min_train_bars + i * test_size
         end = start + test_size if i < n_folds - 1 else len(bars)
-        train = list(bars[:start])
         test = list(bars[start:end])
+        # The in-sample leg is length-matched to the out-of-sample leg it is compared
+        # against by `FoldResult.degraded`.
+        #
+        # It used to be `bars[:start]`, which grows to 23,786 bars by the last fold while
+        # the test leg stays at 466 - a ratio of 51:1, measured. And `return_pct` is
+        # `realized / spent` (backtest.py), which *accumulates* across round trips rather
+        # than annualising: the same rule over 100 bars returns -0.207% and over 23,800
+        # returns +2.134% with seven trades either way, because the extra bars are
+        # still-held drift that the force-close books as realized. On a rising series more
+        # bars is therefore a bigger number, so `oos < is * 0.5` tripped on length alone
+        # - 46 of 52 folds, which is why every candidate that cleared the evidence bar
+        # returned OVERFIT.
+        #
+        # Length-matched, contiguous and immediately preceding: the same regime on both
+        # sides of the boundary, which is the entire point of the comparison. `max(0, ...)`
+        # because fold 0 starts at 20 bars and there is not yet 466 of history - that fold
+        # is honestly short rather than skipped or padded. `train_bars` still records how
+        # much history preceded the fold.
+        train = list(bars[max(0, start - len(test)):start])
         result.folds.append(
             FoldResult(
                 index=i,

@@ -3,7 +3,7 @@
 Date: 2026-09-28
 Status: **SUPERSEDED — do not work from this document.**
 Baseline commit for rollback: `4092bc4`
-Scope: `/localscratch/liuyime2/QuantGroup`
+Scope: `<repo-root>`
 
 > **This plan is kept as a historical record only.** Its header said "Awaiting
 > approval - no source file has been modified yet", which stopped being true
@@ -240,7 +240,7 @@ Each phase ends with a **verification gate**. Phases 0–2 are the blockers.
 ### Phase 0 — Baseline & hygiene (done / trivial remainder)
 - [x] `git init` + `.gitignore` + baseline commit `4092bc4` *(rollback point)*
 - [ ] `pytest.ini`: add `testpaths = tests` so root `test_alpaca.py` stops being collected
-- [ ] Move `history_version/` → `/localscratch/liuyime2/_archive_QuantGroup/` (reversible `mv`)
+- [ ] Move `history_version/` → `<scratch>/_archive_QuantGroup/` (reversible `mv`)
 - [ ] Delete `screenlog.0` (8.8 MB of unrelated ANSI garbage)
 - [ ] Restore `skill_library/{knowledge,skills}.json` from `.bak`
 - [ ] Delete orphan `engine.pid` / `ollama.pid`; unlink the `engine.log` symlink
@@ -326,7 +326,7 @@ zero `_fallback_task` results are labelled `SUCCESS`.
 - [ ] `set -euo pipefail` + explicit timeouts in every `.sh`; `auto_reviewer.py` gains
       `timeout=` and 7-day retention as `AUTO_REVIEW_README.md:56` already promises
 - [ ] Re-enable curriculum; align `OLLAMA_BASE_URL` to the port ollama actually serves
-- [ ] Rewrite `docs/superpowers/specs/2026-06-09-min-agent-daemon-runbook.md` — it currently
+- [ ] Rewrite `docs/history/specs/2026-06-09-min-agent-daemon-runbook.md` — it currently
       promises "no fallbacks" in `data_gateway.py` and a live `cron` that never existed
 - [ ] Replace the stale root `task_plan.md` / `findings.md` / `progress.md` / `LEARNING_STATUS.md`
       with current state
@@ -381,8 +381,8 @@ One full paper session must produce, verified from the journal:
 ## 7. Verification Commands
 
 ```bash
-export PATH=/home/liuyime2/miniconda3/bin:$PATH
-cd /localscratch/liuyime2/QuantGroup
+export PATH=$HOME/miniconda3/bin:$PATH
+cd <repo-root>
 export PYTHONPATH=src
 
 # unit + regression suite (must stay green throughout)

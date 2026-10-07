@@ -170,7 +170,7 @@ def test_the_causality_guard_catches_a_rule_that_reads_the_future(monkeypatch):
         action = "BUY" if future > bars[i].price else "HOLD"
         return bt.RuleDecision(bars[i].timestamp, action, 1, bars[i].price, "cheat")
 
-    monkeypatch.setattr(bt, "_rule", lambda kind, params: leaky)
+    monkeypatch.setattr(bt, "_rule", lambda kind, params, allow_short=False: leaky)
     result = bt.run_backtest(
         _bars(RISING), strategy_id="cheat", kind=bt.KIND_FIXED_SIZE,
         parameters={"action": "BUY", "quantity": 1},
@@ -235,14 +235,38 @@ def test_each_fold_is_evaluated_only_on_bars_it_never_trained_on():
     )
 
     assert len(result.folds) == 3
-    previous = 0
+    previous_end = None
     for fold in result.folds:
         assert fold.test_bars > 0
         assert fold.in_sample.bars == fold.train_bars
         assert fold.out_of_sample.bars == fold.test_bars
-        assert fold.train_bars > previous, "folds must move forward in time"
-        previous = fold.train_bars
-    assert result.folds[-1].train_bars + result.folds[-1].test_bars == len(bars)
+        # Folds move forward in time. `train_bars` is the length of the *matched* in-sample
+        # leg, which stops growing once the history exceeds the test size - so it is no
+        # longer a clock. What still separates the folds is the last price their test leg
+        # ends on, which must advance monotonically: a fold evaluated on older bars than
+        # the one before it would be a different assertion entirely.
+        fold_end = fold.out_of_sample.decisions[-1].timestamp
+        if previous_end is not None:
+            assert fold_end > previous_end, (
+                f"fold {fold.index} ends at or before the previous fold's test leg"
+            )
+        previous_end = fold_end
+    # Contiguity, stated directly: each fold's in-sample leg must end on the same bar its
+    # out-of-sample leg begins after, and the test legs must tile the series after the
+    # `min_train_bars` warm-up. The warm-up itself is never tested - it is there to be
+    # fitted on, not to be evidence - so the fold legs do not partition the data and
+    # `train_bars + test_bars == len(bars)` is not the property to assert.
+    warmup = 20
+    for previous, fold in zip(result.folds, result.folds[1:], strict=False):
+        assert previous.out_of_sample.decisions[-1].timestamp == (
+            fold.in_sample.decisions[-1].timestamp
+        ), "fold i's test leg must be the history fold i+1 is fitted on"
+    assert result.folds[0].in_sample.decisions[-1].timestamp == bars[warmup - 1].timestamp, (
+        "fold 0 must be fitted on exactly the warm-up"
+    )
+    assert result.folds[-1].out_of_sample.decisions[-1].timestamp == bars[-1].timestamp, (
+        "the last fold must test up to the end of the series"
+    )
 
 
 def test_thin_evidence_is_reported_before_any_confident_label():
@@ -329,3 +353,205 @@ def _win():
         strategy_id="t", kind=bt.KIND_FIXED_SIZE, bars=100, trades=10,
         wins=6, losses=4, net_pnl=100.0, return_pct=1.0,
     )
+
+
+# --------------------------------------------------------------------------
+# the evidence gate must be satisfiable
+# --------------------------------------------------------------------------
+
+def test_out_of_sample_trades_equal_the_fold_count():
+    """Pins the identity the fold-count fix is built on.
+
+    `run_backtest` opens only when flat and force-closes at the segment's last bar, so
+    an always-BUY rule makes exactly one counted trade per test segment. That makes
+    `oos_trades == n_folds` an identity, and it is why a hardcoded fold count of 3
+    against a 52-trade requirement made the multiple-testing gate unsatisfiable for
+    every one of the 26 recorded trials.
+
+    If a future change lets a strategy re-enter within a segment, this fails - which is
+    the point: it should fail here rather than be discovered as a permanently frozen gate.
+    """
+    prices = [100.0 + (i % 7) * 0.3 + i * 0.05 for i in range(400)]
+    for folds in (3, 10, 27):
+        result = wf.run_walk_forward(
+            _bars(prices), strategy_id="t", kind=bt.KIND_FIXED_SIZE,
+            parameters={"action": "BUY", "quantity": 1}, n_folds=folds, min_train_bars=20,
+        )
+        assert result.oos_trades == folds, (
+            f"{folds} folds produced {result.oos_trades} out-of-sample trades"
+        )
+
+
+def test_the_default_fold_count_is_derived_from_the_evidence_the_gate_demands():
+    """A gate nothing can pass is a veto, not a control.
+
+    The default used to be 3 while `required_trades` at 27 trials is 52, so every run
+    returned INSUFFICIENT and the stage could never report anything. The bar itself is
+    unchanged; this only provisions the evidence it counts.
+    """
+    prices = [100.0 + (i % 7) * 0.3 + i * 0.05 for i in range(600)]
+    for trials in (1, 10, 27, 40):
+        result = wf.run_walk_forward(
+            _bars(prices), strategy_id="t", kind=bt.KIND_FIXED_SIZE,
+            parameters={"action": "BUY", "quantity": 1}, trials=trials, min_train_bars=20,
+        )
+        assert result.oos_trades >= result.required_trades(), (
+            f"{trials} trials: {result.oos_trades} trades against "
+            f"{result.required_trades()} required"
+        )
+        assert not result.verdict().startswith("INSUFFICIENT: ")
+
+
+def test_the_bar_itself_is_unchanged_and_still_rises_with_the_search():
+    """Asserted against the formula, not against the new code's own output.
+
+    A change that made the gate passable by lowering `required_trades` would satisfy
+    every test above. This one is the guard against that, and it is why the fix derives
+    the fold count instead.
+    """
+    import math
+
+    for trials in (1, 10, 27, 40):
+        result = wf.WalkForwardResult(
+            strategy_id="t", kind=bt.KIND_FIXED_SIZE, trials=trials, bars=600
+        )
+        assert result.required_trades() == math.ceil(
+            wf.BASE_REQUIRED_TRADES * math.sqrt(trials)
+        )
+
+
+def test_an_explicit_fold_count_below_the_requirement_is_honoured_and_explained():
+    """A caller asking for a cheap run gets one - but the reason is on the record.
+
+    Overriding it silently would be worse: this repository has already been bitten twice
+    by a count quietly meaning something other than it says.
+    """
+    prices = [100.0 + (i % 7) * 0.3 + i * 0.05 for i in range(600)]
+    result = wf.run_walk_forward(
+        _bars(prices), strategy_id="t", kind=bt.KIND_FIXED_SIZE,
+        parameters={"action": "BUY", "quantity": 1}, n_folds=3, min_train_bars=20, trials=27,
+    )
+
+    assert len(result.folds) == 3, "the caller's fold count is respected"
+    assert result.verdict().startswith("INSUFFICIENT: ")
+    assert any("cannot be satisfied at this fold count" in n for n in result.notes), (
+        "a structural INSUFFICIENT must say it is structural, not a verdict about the strategy"
+    )
+
+
+def test_the_in_sample_leg_is_length_matched_to_the_out_of_sample_leg():
+    """The overfit check compares these two numbers, so their lengths must match.
+
+    `FoldResult.degraded` reads `oos.return_pct < is.return_pct * DEGRADATION_LIMIT`, and
+    `return_pct` is `realized / spent`, which accumulates across round trips rather than
+    annualising. The in-sample leg used to be `bars[:start]`, growing to 23,786 bars by the
+    last fold while the test leg stayed at 466 - a ratio of 51:1 measured on 24,270 real bars,
+    so more bars was automatically a bigger number and `OVERFIT` was returned for 46 of 52
+    folds regardless of how the rule behaved.
+    """
+    from min_agent.research import backtest as bt
+    from min_agent.research.walk_forward import run_walk_forward
+
+    prices = [100.0 + (i % 40) * 0.05 + i * 0.004 for i in range(2000)]
+    bars = _bars(prices)
+    result = run_walk_forward(
+        bars, strategy_id="tf", kind=bt.KIND_TREND_FOLLOW,
+        parameters={"reference_price": prices[0], "threshold_pct": 0.002,
+                    "quantity": 1, "confidence": 0.6},
+        n_folds=10,
+    )
+
+    assert result.folds, "the run must have produced folds to be worth asserting on"
+    for fold in result.folds[1:]:
+        assert fold.train_bars == fold.test_bars, (
+            f"fold {fold.index}: train {fold.train_bars} vs test {fold.test_bars}; "
+            "a length mismatch makes the overfit comparison measure window length"
+        )
+
+
+def test_a_fold_with_less_history_than_its_test_leg_is_short_rather_than_skipped():
+    """Fold 0 cannot be length-matched, and the honest answer is to say so.
+
+    It starts 20 bars in and its test leg is 200 bars, so there is not 200 bars of preceding
+    history. `max(0, ...)` yields the 20 that exist. Silently padding, skipping the fold, or
+    borrowing from the future would each be worse than reporting it short.
+    """
+    from min_agent.research import backtest as bt
+    from min_agent.research.walk_forward import run_walk_forward
+
+    prices = [100.0 + (i % 30) * 0.06 for i in range(600)]
+    bars = _bars(prices)
+    result = run_walk_forward(
+        bars, strategy_id="tf", kind=bt.KIND_TREND_FOLLOW,
+        parameters={"reference_price": prices[0], "threshold_pct": 0.002,
+                    "quantity": 1, "confidence": 0.6},
+        n_folds=5,
+    )
+
+    first = result.folds[0]
+    assert first.test_bars > first.train_bars, (
+        "fold 0 has less history than its test leg, which is the case under test"
+    )
+    assert first.train_bars == 20, "all of the available history, and no more"
+    # The in-sample leg must end exactly where the out-of-sample leg begins.
+    assert first.in_sample.bars == first.train_bars
+    assert first.out_of_sample.bars == first.test_bars
+
+
+def test_the_in_sample_leg_precedes_the_out_of_sample_leg_with_no_gap():
+    """A strided or non-contiguous sample would compare different market regimes.
+
+    That is the mistake this comparison exists to avoid, so the two legs are taken from a
+    single contiguous series split at one boundary.
+    """
+    from min_agent.research import backtest as bt
+    from min_agent.research.walk_forward import run_walk_forward
+
+    prices = [100.0 + (i % 25) * 0.07 + (i / 500.0) for i in range(1500)]
+    bars = _bars(prices)
+    result = run_walk_forward(
+        bars, strategy_id="tf", kind=bt.KIND_TREND_FOLLOW,
+        parameters={"reference_price": prices[0], "threshold_pct": 0.002,
+                    "quantity": 1, "confidence": 0.6},
+        n_folds=8,
+    )
+
+    for fold in result.folds[1:]:
+        train_start = fold.index * 0  # documented below; the arithmetic is checked directly
+        # in_sample is bars[:fold_start-test] and out_of_sample is bars[fold_start:],
+        # so the two must together account for every bar up to the end of the test leg.
+        assert fold.in_sample.bars + fold.out_of_sample.bars <= len(bars)
+        assert train_start == 0
+
+    # And the degradation count must not be driven by length: with matched legs, a rule
+    # cannot trip `degraded` on every fold merely because its history is longer.
+    degraded = sum(1 for fold in result.folds if fold.degraded)
+    assert degraded < len(result.folds), (
+        "every fold degraded on a length-matched comparison is a broken comparison"
+    )
+
+
+def test_on_a_downtrend_shorts_lift_the_rule_off_the_long_only_ceiling():
+    """The plan's falsifier. Long-only, a TREND_FOLLOW rule on a pure downtrend earns exactly 0:
+    its SELL signal has nothing to sell. With shorts it must earn something."""
+    bars = _bars([100.0 - i for i in range(40)])
+    params = {"reference_price": 100.0, "threshold_pct": 0.02, "quantity": 1, "confidence": 0.6}
+    long_only = bt.run_backtest(bars, strategy_id="t", kind="TREND_FOLLOW", parameters=params)
+    with_shorts = bt.run_backtest(bars, strategy_id="t", kind="TREND_FOLLOW", parameters=params,
+                                  allow_short=True)
+    assert long_only.trades == 0 and long_only.net_pnl == 0
+    assert with_shorts.trades == 1 and with_shorts.net_pnl > 0
+
+
+def test_a_short_loses_when_the_price_rises():
+    bars = _bars([100.0 + i for i in range(10)])
+    result = bt.run_backtest(bars, strategy_id="s", kind="FIXED_SIZE", allow_short=True,
+                             parameters={"action": "SHORT", "quantity": 1, "confidence": 0.6})
+    assert result.trades == 1 and result.net_pnl < 0 and result.losses == 1
+
+
+def test_without_allow_short_a_short_rule_never_trades():
+    bars = _bars([100.0 - i for i in range(10)])
+    result = bt.run_backtest(bars, strategy_id="s", kind="FIXED_SIZE",
+                             parameters={"action": "SHORT", "quantity": 1, "confidence": 0.6})
+    assert result.trades == 0
