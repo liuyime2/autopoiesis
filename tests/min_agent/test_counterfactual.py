@@ -21,7 +21,9 @@ from min_agent.models import (
 )
 
 
-def _record(cycle_id, when, price, action="HOLD", symbol="SPY"):
+def _record(cycle_id, when, price, action="HOLD", symbol="SPY", status=None):
+    # A trade defaults to having been submitted; a test of an order that never left says so.
+    status = status or ("SKIPPED" if action == "HOLD" else "SUBMITTED")
     return CycleRecord(
         cycle_id=cycle_id,
         snapshot=DataSnapshot(
@@ -40,7 +42,7 @@ def _record(cycle_id, when, price, action="HOLD", symbol="SPY"):
             confidence=0.6, rationale="r",
         ),
         guardian=GuardianResult(approved=True, reason="approved"),
-        execution=ExecutionResult(status="SKIPPED", order_id=None, message="hold", filled_quantity=0.0),
+        execution=ExecutionResult(status=status, order_id=None, message="m", filled_quantity=0.0),
     )
 
 
@@ -239,3 +241,47 @@ def test_a_short_that_gains_is_a_good_trade():
 
     trade = next(r for r in report.rows if r.action == "SELL")
     assert trade.verdict == cf.GOOD_TRADE
+
+
+def test_a_sell_is_charged_the_cost_not_credited_it():
+    """Selling into a flat market costs the round trip, exactly as buying does.
+
+    The SELL branch negated the *net* return, `-(gross - cost)`, which is `cost - gross`: a
+    sell with no price move was scored +cost, and every sell was flattered by twice the
+    assumed cost relative to a buy. A sell's gain is `-gross - cost`.
+    """
+    records = [
+        _record("sell", T0, 100.0, action="SELL"),
+        _record("later", T0 + timedelta(hours=5), 99.93),  # down 0.07%: less than cost + band
+    ]
+    report = cf.evaluate(records, symbol="SPY", horizon_hours=4.0,
+                         assumed_cost_pct=0.05, dead_band_pct=0.05)
+    trade = next(r for r in report.rows if r.action == "SELL")
+    assert trade.verdict == cf.NEUTRAL, "0.07% minus 0.05% cost does not clear the 0.05% band"
+
+
+@pytest.mark.parametrize("status", ["REJECTED", "ERROR", "SKIPPED"])
+def test_an_order_that_never_left_is_not_scored_as_a_trade(status):
+    """48 rejected BUYs and 12 rejected SELLs on the live journal were graded as trades.
+
+    The Guardian refused them, so no position changed; grading them as GOOD or FALSE trades
+    put decisions that did not happen into a strategy's screen.
+    """
+    records = [
+        _record("buy", T0, 100.0, action="BUY", status=status),
+        _record("later", T0 + timedelta(hours=5), 110.0),
+    ]
+    report = cf.evaluate(records, symbol="SPY", horizon_hours=4.0)
+    row = next(r for r in report.rows if r.action == "BUY")
+    assert row.verdict == cf.NOT_EXECUTED
+    assert cf.NOT_EXECUTED not in cf.INFORMATIVE
+
+
+@pytest.mark.parametrize("status", ["SUBMITTED", "SHADOWED", "REPLAYED"])
+def test_orders_that_went_out_or_would_have_are_scored(status):
+    records = [
+        _record("buy", T0, 100.0, action="BUY", status=status),
+        _record("later", T0 + timedelta(hours=5), 110.0),
+    ]
+    report = cf.evaluate(records, symbol="SPY", horizon_hours=4.0)
+    assert next(r for r in report.rows if r.action == "BUY").verdict == cf.GOOD_TRADE

@@ -67,6 +67,16 @@ MISSED_ALPHA = "MISSED_ALPHA"
 NEUTRAL = "NEUTRAL"
 FALSE_TRADE = "FALSE_TRADE"
 GOOD_TRADE = "GOOD_TRADE"
+#: A BUY or SELL that never left: the Guardian refused it, or the executor errored or skipped
+#: it. No position changed, so there is no trade to grade - and grading it anyway put 48
+#: refused BUYs and 12 refused SELLs from the live journal into strategies' screens as if
+#: they had traded. Not informative, so it never counts for or against a strategy.
+NOT_EXECUTED = "NOT_EXECUTED"
+
+#: Execution outcomes after which a trade is graded as a trade. SHADOWED and REPLAYED are
+#: orders that would have gone out - grading them is what shadow mode and replay are for -
+#: and neither can reach the PnL ledger, which keys on broker fills, not on this.
+EXECUTED_STATUSES = frozenset({"SUBMITTED", "SHADOWED", "REPLAYED"})
 
 #: Verdicts that say the decision was right or wrong. NEUTRAL is excluded on purpose: a
 #: move that did not clear the cost is silence, not a failure.
@@ -270,9 +280,13 @@ def evaluate(
                 verdict = GOOD_HOLD
             else:
                 verdict = NEUTRAL
+        elif record.execution.status not in EXECUTED_STATUSES:
+            verdict = NOT_EXECUTED
         else:
-            # A real decision. Same arithmetic, signed for the side actually taken.
-            signed = net if action == "BUY" else -net
+            # A real decision, signed for the side actually taken and charged the cost either
+            # way. This was `net if BUY else -net`, and `-net` is `cost - gross`: a sell was
+            # credited the round trip instead of charged it.
+            signed = (gross if action == "BUY" else -gross) - assumed_cost_pct
             if signed > dead_band_pct:
                 verdict = GOOD_TRADE
             elif signed < -dead_band_pct:

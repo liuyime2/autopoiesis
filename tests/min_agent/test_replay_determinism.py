@@ -120,6 +120,19 @@ def test_the_result_survives_a_json_round_trip():
 #: move that did not clear cost, so the old journal cannot be re-derived under the new rule.
 _RELABELLED = frozenset({("NEUTRAL", "GOOD_TRADE"), ("GOOD_TRADE", "NEUTRAL")})
 
+#: Two scoring rules changed on 2026-10-07, both with the recomputed net return identical to
+#: the digit: a BUY or SELL the Guardian refused is NOT_EXECUTED rather than a graded trade,
+#: and a SELL is charged the round-trip cost instead of credited it, which moves SELL rows
+#: between the three trade verdicts. The daemon re-journals every changed row on its next
+#: maintenance pass, after which these no longer match anything.
+_TRADE_VERDICTS = frozenset({"GOOD_TRADE", "FALSE_TRADE", "NEUTRAL"})
+
+
+def _rule_change(prior: str, now: str, action: str) -> bool:
+    if now == cf.NOT_EXECUTED and prior in _TRADE_VERDICTS:
+        return True
+    return action == "SELL" and prior in _TRADE_VERDICTS and now in _TRADE_VERDICTS
+
 
 def test_replaying_the_live_journal_reproduces_the_recorded_verdicts():
     """The strongest statement available: the verdicts the daemon wrote to the
@@ -150,7 +163,10 @@ def test_replaying_the_live_journal_reproduces_the_recorded_verdicts():
         if prior is None:
             continue
         if prior[0] != row.verdict or prior[1] != row.net_return_pct:
-            if (prior[0], row.verdict) in _RELABELLED and prior[1] == row.net_return_pct:
+            if prior[1] == row.net_return_pct and (
+                (prior[0], row.verdict) in _RELABELLED
+                or _rule_change(prior[0], row.verdict, row.action)
+            ):
                 # The same arithmetic under a changed vocabulary. A winning filled order
                 # used to be labelled NEUTRAL, which is the label for a move too small to
                 # clear cost; it now has its own verdict, GOOD_TRADE. The journal is
