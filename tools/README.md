@@ -82,6 +82,41 @@ D8 safety properties over the ops scripts that remain — that no script assigns
 limit, writes a `lifecycle` field, force-enables a strategy, or touches runtime
 strategy state.
 
+## The benchmark — `benchmark.py`
+
+The falsifiable target, runnable by anyone without credentials:
+
+```
+make benchmark
+```
+
+It answers one question — *does the system beat SPY buy-and-hold, after costs, inside the stated
+risk budget, over a rolling 60-trading-day window?* — and prints the LLM increment next to its
+own attribution coverage, because a share printed without the share of decisions it covers is the
+kind of figure that gets retracted later.
+
+It needs **no credentials and no network**: `doctor` is run with `skip_broker=True` and every
+number is read out of the journal and the broker evidence already on disk. It does need the
+*record*, which lives in gitignored `runtime/` — so a fresh clone reports that there is nothing
+to measure and exits 2, rather than printing a number for a run that never happened.
+
+Every number is computed once, by `src/min_agent/doctor.py`, and parsed back out of its check
+detail rather than recomputed; a second implementation could disagree with the one the project
+argues from.
+
+Exit codes are the contract, so a green run is never mistaken for a passed target:
+
+| code | meaning |
+| --- | --- |
+| 0 | the target is met over the record |
+| 1 | the target is failed: at least one strategy is behind buy-and-hold |
+| 2 | nothing to measure — no journal, or no closed lots on record |
+
+It is failing today: all four strategies that closed a lot are behind the market by 1.47 to 4.29
+points. It also prints the record's own window and reports the target window as not met, because
+the journal holds 16 trading days and a 60-day window over a 16-day record is a division that
+hides the denominator.
+
 ## Runtime inspection
 
 **`check_runtime_integrity.py`** reconciles the journal against the strategy library and

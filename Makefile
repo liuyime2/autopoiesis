@@ -113,6 +113,11 @@ test:
 doctor:
 	@./minictrl doctor
 
+# Does the system beat SPY buy-and-hold, after costs, inside the stated risk budget?
+# The falsifiable target the whole project is measured against. No credentials needed.
+benchmark:
+	@$(PY) tools/benchmark.py
+
 audit:
 	@$(PY) tools/audit_defects.py
 

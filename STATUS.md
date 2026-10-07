@@ -3354,3 +3354,100 @@ _agent_holding("SPY") = 6.0   与券商一致
 **仍然待观察**：第二轮修复后出现的 `trend-follow-20261011-001` 构成第二条 SELL 路线，使
 `_supplies_capability` 转 False，减持靠轮转而非优先权——今天它成交了 4 笔（其中一笔 7 股），
 所以这条路径也已验证可行。
+
+## 2026-10-06 — 可证伪的目标落地了，同时撤回了这份计划自己的两条claim
+
+外部审查最核心的反驳是：没人证明过这套系统跑赢"什么都不做"，也没人分离过模型的贡献。
+两者都可测，但都没被测成别人能自己跑的形式。现在这个形式存在了：`make benchmark`。
+
+```
+record            2026-06-09 .. 2026-10-06   16 trading day(s), 1284 cycle(s)
+target window     60 trading days - NOT MET (16 of 60)
+comparison        whole of record (16 trading day(s)); no windowed comparison exists
+
+vs SPY buy-and-hold
+  strategy                     return    vs SPY
+  tiny-fixed-size-001          +3.94%     -1.47
+  trend-follow-buy-001         +3.85%     -1.56
+  fixed-size-buy-001           +1.92%     -3.48
+  fixed-size-probe-0001        +1.11%     -4.29
+  buy-and-hold (SPY)           +5.41%       ---   <- 要打败的基准
+
+VERDICT           FAIL: 4 of 4 strategies are behind buy-and-hold
+                  over the 16 trading days on record. The 60-day window is not
+                  covered, so over 60 days the target is neither met nor falsified yet.
+```
+
+目标句只有一句，且每个分句都对应今天可测的东西：
+
+> 在既定风险预算内、扣除成本后，于滚动 60 个交易日窗口内跑赢 SPY 买入持有。
+> 另外单独报告：同样窗口、同样成交下，LLM 决策相对于确定性基线的增量。
+
+**刻意不写"正收益"**。上涨市里的正收益不构成任何证据，而这四个策略已经有正收益了。
+
+### 分母问题：这份计划的第一版把 16 天印成了 60 天
+
+第一版 `benchmark.py` 取 replay cache 的日期区间，印在**全journal** 收益率的上方：
+
+```
+window            2026-07-13 .. 2026-10-05  (60 trading days, target 60)   <- cache
+  tiny-fixed-size-001=+3.94% vs market +5.41% (-1.47)                        <- 16 天的周期
+```
+
+正好 60。一个恰好落在目标上、却属于另一个窗口的数字，比没有数字更糟：它让 16 天的记录
+看起来像 60 天的检验。实测 journal：1284 条周期，**16 个交易日**；47 个已平仓 lot 集中在其中 4 天。
+
+于是 replay cache 从工具里删掉，改为打印记录自身的窗口、把目标窗口报成 `NOT MET (16 of 60)`，
+并明说对比是全记录、不伪造窗口化对比。判决同时说两件事：全记录上目标**未达成**，
+而在目标自己规定的 60 天尺度上**既未达成也未被证伪**。
+
+窗口化对比本身**故意不建**：16 天的记录上算 60 天窗口不是窗口，是把分母藏起来的除法。
+等记录长到窗口有意义时它才可建。
+
+### 撤回：`docs/evidence/fresh-clone.log` 不可以改写路径
+
+原计划 §4 提议把它里面 41 处路径改掉。那是 pip / pytest 的**逐字运行记录**，把真实路径
+替换成 `$HOME/...` 之类的占位就是伪造证据。已还原。可选的处理只有两个：
+
+- 保留它，接受一份提交进仓库的日志会写出产生它的账号；
+- 重跑 `docs/evidence/run-fresh-clone.sh`，按提交的树重新生成。
+
+日志只能由脚本重新生成，不能手工编辑。
+
+### "新克隆五分钟演示"不成立，也不这么声称
+
+benchmark 需要 `runtime/`，而 `runtime/` 被 gitignore（因为它由交易产生）。新克隆没有
+journal、没有券商证据、没有已平仓 lot，工具会如实说无可测量并退出 2。它真正的用处是给
+有只读 checkout 的审查者：不要凭证、不要网络、一条命令、一个带分母的数字。
+
+### 顺带修掉的一个真实缺陷：env 文件有两个 reader，门只认一个
+
+`make test` 红了 1 条（此前就红，与本次改动无关）：
+
+```
+set in the runtime env but never read by the loader: ['MIN_AGENT_ENVBIN']
+```
+
+根因是一个**错误的门**，不是死旋钮。env 文件是双用途的：`minictrl` 在调用
+`python -m min_agent.cli` 之前先 source 同一个文件，并从中读 `MIN_AGENT_ENVBIN`
+（env 的 bin 目录）。而 `tools/verify.py::check_config_example_names_are_real`
+的 `known` 只含 `config.py` 源码 **加上 env 文件本身**——所以把 `MIN_AGENT_ENVBIN`
+写进 `configs/paper.env.example` 之后，这台机器会过，**而新克隆（那里没有 env 文件）
+会把一个活着的旋钮报成死的**，并诱导人删掉那行让 install 失效的配置。
+
+两处都改了同一个前提：可读者是 `config.py` **和** `minictrl` 的可执行代码
+（整行 `#` 注释剔除，因为 minictrl 的头部散文把每个 shell 旋钮都写了一遍，
+而散文不是一次读取）。同时把这个旋钮补进 `configs/paper.env.example`——
+此前它唯一出现的地方是 minictrl 找不到时的报错信息，那不是一个该学设置名的地方。
+
+这是把门改宽，不是把门放松：不可达的门才是装饰品。
+
+### 个人路径：最后一个真实耦合已清
+
+`git grep -E "liuyime2|/localscratch|/home/[a-z]|/Users/"` 现在只剩两类命中，
+且两类都是**故意**的：
+
+- `tools/verify.py` 的 `host_markers` 名单——那是它**扫描**的目标，
+  认不出自己要找什么的隐私扫描比认不出更糟；
+- `docs/evidence/fresh-clone.log`——上一节说明的逐字运行记录，
+  只能由 `run-fresh-clone.sh` 重新生成。
