@@ -33,6 +33,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# Internal history: the running log, audits, plans and specs. Point-in-time by definition.
+HISTORY = ROOT / "docs" / "history"
 SRC = ROOT / "src"
 TESTS = ROOT / "tests" / "min_agent"
 
@@ -229,7 +231,6 @@ CHECK_CLASSES: tuple[str, ...] = (
     "test-coverage-map",
     "defect-regression-audit",
     "doctor",
-    "fact-docs-current",
       "bespoke-list-matches-run",
       "status-states-only-fixed-facts",
       "type-checking-is-a-gate",
@@ -388,8 +389,8 @@ def check_docs_not_stale() -> Result:
     # `deepseek-r1:8b`, and the 2026-06-09 one is structurally broken (an unclosed code fence
     # swallows the commands below it) and uses bare `conda run`, which does not work on this
     # host. Scanning only plans/ is why they survived every prior audit.
-    plans = sorted((ROOT / "docs" / "superpowers" / "plans").glob("*.md"))
-    plans += sorted((ROOT / "docs" / "superpowers" / "specs").glob("*.md"))
+    plans = sorted((HISTORY / "plans").glob("*.md"))
+    plans += sorted((HISTORY / "specs").glob("*.md"))
     if not plans:
         return Result("docs-not-stale", SKIP, "no plan documents to check")
 
@@ -920,12 +921,15 @@ def check_no_unreferenced_design_notes_at_the_root() -> Result:
     verifiers passed over it before one named it.
 
     The rule is deliberately narrow, because "delete every loose note" would be wrong -
-    `STATUS.md` and `AGENTS.md` both belong at the root. A root markdown file must be one of
+    `AGENTS.md` and the community files belong at the root. A root markdown file must be one of
     the documented entry points or open by marking itself as a historical record. The
     allow-list is explicit rather than inferred from inbound links, because a file nobody
     links to is exactly the case this exists to catch.
     """
-    allowed = {"README.md", "AGENTS.md", "STATUS.md"}
+    allowed = {
+        "README.md", "AGENTS.md", "CHANGELOG.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md",
+        "SECURITY.md",
+    }
     history = re.compile(r"^\s*>?\s*(?:\*\*)?(?:Historical|This file is a record)", re.IGNORECASE)
     problems = []
     for path in sorted(ROOT.glob("*.md")):
@@ -1152,11 +1156,11 @@ def check_the_fact_figures_in_prose_match_reality() -> Result:
     # that is actually wrong - the audit reports 61/61. A check scoped to the three documents
     # nobody read past the first page misses the one that drifts.
     for name in (
-        "STATUS.md",
+        "docs/history/STATUS.md",
         "README.md",
         "docs/MIGRATION.md",
-        "docs/superpowers/PHASES.md",
-        "docs/superpowers/CAPABILITY_CLASSIFICATION.md",
+        "docs/history/PHASES.md",
+        "docs/history/CAPABILITY_CLASSIFICATION.md",
     ):
         path = ROOT / name
         if not path.exists():
@@ -1398,7 +1402,7 @@ def check_status_only_states_what_does_not_change() -> Result:
     for the rest. What is asserted is that the split holds: no counter that moves, and every
     fixed value that is stated matching the code that uses it.
     """
-    status = ROOT / "STATUS.md"
+    status = HISTORY / "STATUS.md"
     if not status.exists():
         return Result("status-states-only-fixed-facts", SKIP, "STATUS.md is absent")
     text = status.read_text(encoding="utf-8")
@@ -1621,6 +1625,9 @@ def check_the_gate_class_count_is_reported_consistently(total: int | None = None
         # comparing them to the live count would mean rewriting the record of what was
         # once broken, which is the one thing that document exists to preserve.
         if path.name == "SYSTEM_AUDIT.md":
+            continue
+        # docs/history/ is the archive: every figure in it is the figure as of its date.
+        if path.is_relative_to(HISTORY):
             continue
         # A dated history section states the count as it was, and rewriting it would
         # destroy the record: STATUS.md's 2026-09-28 section says 17 and is correct for
@@ -2598,7 +2605,7 @@ def check_shadow_live_consistency() -> Result:
 
     This check verifies that the shadow *mechanism* is real and switchable. It does
     **not** verify that the shadow *stage* has ever been run, and it must not be
-    cited as if it did: `docs/superpowers/PHASES.md` recorded Phase 5 as MET with
+    cited as if it did: `docs/history/PHASES.md` recorded Phase 5 as MET with
     "status=SHADOWED" quoted from the live journal, while the journal contains zero
     `SHADOWED` executions and `MIN_AGENT_SHADOW` is off. Unit tests that the sink
     does not leak are evidence about the mechanism, not about the stage, and
@@ -2745,122 +2752,6 @@ def _executions_live(live: list) -> int:
     return sum(r.counts.get("passed", 0) for r in live)
 
 
-def _executions_expected(live: list) -> int:
-    """The execution count the documents state, read from what they currently say."""
-    text = (ROOT / "docs" / "superpowers" / "PHASES.md").read_text(encoding="utf-8")
-    match = re.search(r"(\d+) test executions", text)
-    return int(match.group(1)) if match else 0
-
-
-def check_fact_docs_match_the_live_gate(total: int | None = None, live: list | None = None) -> Result:
-    """The current-state blocks in the fact-level docs must match this run's gate.
-
-    The independent verifier rejected a completion claim twice over documentation that
-    had drifted: `PHASES.md` carried 1174 test executions against the gate's 1182, and
-    `SYSTEM_AUDIT.md` section 49 quoted 26 classes and 1175 while the gate ran 27 and
-    1182. Prose that reports its own verification results is a claim about the build,
-    and if it is not checked it is a claim that decays silently.
-
-    Scoped deliberately. Sections 17 onward record what the gate said *when that work
-    was done* - 1111 or 1140 executions are correct for their moments - so only the
-    blocks that describe the *present* are compared: the generated header and summary
-    line in `PHASES.md`, and section 49 of `SYSTEM_AUDIT`. STATUS.md is not among them: it
-    deliberately carries no current-state figures to compare - `status-states-only-fixed-facts`
-    checks what it *does* state instead. An earlier version of this docstring claimed a
-    STATUS.md row that `targets` has never contained.
-    """
-    # The live summary is passed in rather than re-derived by spawning this same
-    # script. The first version did spawn it, which re-entered this very check and
-    # recursed until the command was killed - a gate that hangs the gate is worse
-    # than no gate, and the recursion was mine.
-    if live is None:
-        return Result("fact-docs-current", SKIP, "no live results supplied")
-    # A partial run (--only, or a hand-picked class list) reports a class and
-    # execution count that describes the subset, not the build. The documents state
-    # full-run figures, so comparing them to a subset is meaningless - and it made the
-    # gate fail its own healthy neighbours whenever someone checked one class, which
-    # teaches people to distrust the gate instead of reading it.
-    if _partial_run:
-        return Result(
-            "fact-docs-current", SKIP,
-            "partial run: this gate compares against full-run figures, which this "
-            "run does not represent",
-        )
-    # The documents state the figures from a configured host, where broker-backed tests
-    # execute. A machine with no credentials legitimately runs fewer: two tests skip, so
-    # the execution count differs by 2 and by 1 the class count. Demanding the host figures
-    # on a credential-free clone made `make verify` red on arrival again - the same defect
-    # as the doctor check above, one layer out. The class count must still match exactly,
-    # because it does not depend on the environment; only the execution count may differ,
-    # and only downwards, since skipping is the only legal difference.
-    if not _operator_credentials_present() or not _runtime_state_present():
-        return Result(
-            "fact-docs-current", SKIP,
-            f"no broker credentials: this host runs {_executions_live(live)} executions "
-            f"against the {_executions_expected(live)} the documents state for a "
-            "configured host; skipped rather than failed, and the class count is "
-            "unaffected",
-        )
-    # `total` is the class count this run will report, supplied by the caller. This used
-    # to be `len(live) + 1`, counting on this check being the last one appended; it was
-    # correct only while that stayed true, and the sibling check one function away has
-    # already been appended after it. A green gate that certifies a figure one behind the
-    # run that produced it is the exact failure this was written to prevent, so the
-    # arithmetic is not repeated here.
-    if total is None:
-        return Result("fact-docs-current", SKIP, "no class total supplied")
-    classes = str(total)
-    failed = str(sum(1 for r in live if r.status == FAIL))
-    executions = str(sum(r.counts.get("passed", 0) for r in live))
-    files = str(len({p.name for p in TESTS.glob("test_*.py")}))
-    current = (
-        f"{classes} classes, {failed} failed, {executions} test executions across {files} files"
-    )
-
-    problems: list[str] = []
-    targets = {
-        "SYSTEM_AUDIT.md §49": (ROOT / "docs" / "superpowers" / "SYSTEM_AUDIT.md",
-                                "**Reviewed and confirmed.**"),
-        "PHASES.md header": (ROOT / "docs" / "superpowers" / "PHASES.md",
-                             "`make verify` — **"),
-        "PHASES.md summary row": (ROOT / "docs" / "superpowers" / "PHASES.md",
-                                  "| `make verify`, "),
-    }
-    for label, (path, anchor) in targets.items():
-        if not path.exists():
-            problems.append(f"{label}: file absent")
-            continue
-        lines = path.read_text(encoding="utf-8").splitlines()
-        for i, line in enumerate(lines):
-            if not line.startswith(anchor) and anchor not in line:
-                continue
-            window = " ".join(lines[i : i + 2])
-            # `failed` is compared too. It was computed, embedded in the PASS detail and never
-            # `failed` is compared too. It was computed, embedded in the PASS detail and
-            # never asserted, so the documents said "0 failed" while the gate reported 1 -
-            # and the detail line printed the real number beside a comparison that never ran.
-            if (
-                f"{classes} classes" not in window
-                or f"{executions} test executions" not in window
-                or f"{failed} failed" not in window
-            ):
-                problems.append(f"{label} does not state {current}")
-            break
-        else:
-            problems.append(f"{label}: anchor not found")
-    if problems:
-        return Result(
-            "fact-docs-current", FAIL,
-            "; ".join(problems[:3]),
-            "a document that reports the build's own results must be checked against "
-            "the build, or it decays into a claim nobody re-verified",
-        )
-    return Result(
-        "fact-docs-current", PASS,
-        f"the current-state blocks in the fact-level docs all state {current}",
-    )
-
-
 def check_all_tests_classified() -> Result:
     """Every test file must be assigned, and at least one assigned class must
     actually run it.
@@ -2926,7 +2817,6 @@ BESPOKE_CHECK_NAMES = (
     "list-count-matches-run",
     "pipeline-targets-exist",
     "gate-class-count-consistent",
-    "fact-docs-current",
 )
 
 REPOSITORY_CHECK_CLASSES: frozenset[str] = frozenset({
@@ -2960,7 +2850,6 @@ REPOSITORY_CHECK_CLASSES: frozenset[str] = frozenset({
     # it is a system check on live state, not a test of a code path in isolation.
     "replay-audit",
     "research-trial-ledger",
-    "fact-docs-current",
     # The two shadow checks report whether a stage ever executed against real state.
     "shadow-not-executed",
     "shadow-stage-exercised",
@@ -3214,7 +3103,7 @@ def self_test() -> int:
         #    marked SUPERSEDED must pass. A doc check that cannot fail is how the
         #    recovery plan sat at "Awaiting approval" for 51 commits while telling
         #    an operator to restore a directory that had been deleted on purpose.
-        probe = ROOT / "docs" / "superpowers" / "plans" / "zz_stale_probe.md"
+        probe = HISTORY / "plans" / "zz_stale_probe.md"
         stale_text = (
             "# Probe\nStatus: **Awaiting approval** - no source file has been "
             "modified yet.\n"
@@ -3442,15 +3331,11 @@ def main() -> int:
         results.append(_safe(check_defect_audit, "defect-regression-audit"))
         results.append(_safe(check_doctor, "doctor"))
 
-    # Runs last, with the results already collected: the fact-level documents state
-    # this run's own class and execution counts, so the check that keeps them honest
-    # has to read those counts rather than spawn a second copy of this script.
-    # These two are part of the count they verify, so the count they compare against is
-    # this list's length plus one for each of them - derived here, next to the calls that
-    # determine it, instead of each check guessing from the results visible at its own call.
-    total_classes = len(results) + 2
+    # Runs last, with the results already collected. It is part of the count it verifies, so
+    # the count it compares against is this list's length plus one - derived here, next to the
+    # call that determines it, instead of the check guessing from what it can see.
+    total_classes = len(results) + 1
     results.append(_safe(lambda: check_the_gate_class_count_is_reported_consistently(total_classes), "gate-class-count-consistent"))
-    results.append(_safe(lambda: check_fact_docs_match_the_live_gate(total_classes, results), "fact-docs-current"))
 
     results = [r for r in results if r is not None]
     if not results:

@@ -1,6 +1,6 @@
 [Unit]
 Description=min-agent unattended strategy research: fetch real bars, then search
-Documentation=file://@ROOT@/docs/superpowers/specs/2026-09-28-min-agent-runbook.md
+Documentation=file://@ROOT@/docs/history/specs/2026-09-28-min-agent-runbook.md
 After=network-online.target min-agent.service
 Wants=network-online.target
 

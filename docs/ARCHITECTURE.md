@@ -14,7 +14,7 @@ refusal.
 
 Live trading is forbidden. `AGENTS.md` §16 holds that until paper behaviour has been
 audited and the hard risk controls verified; the standing evidence is recorded in
-`STATUS.md` and measured by `doctor`, not asserted here.
+`docs/history/STATUS.md` and measured by `doctor`, not asserted here.
 
 ## The canonical execution path
 

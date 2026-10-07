@@ -109,7 +109,7 @@ model that is right when unsure; it is a Tuesday.
   for moving the gate: the LLM's lowest stated trade confidence is exactly `min_confidence`,
   so nothing sits below any threshold to block, and every setting above 0.5 blocks sets that
   underperform their own days. See
-  `docs/superpowers/plans/2026-10-03-min-confidence-what-it-is-worth.md`.
+  `docs/history/plans/2026-10-03-min-confidence-what-it-is-worth.md`.
 
 ## 4. The minimal change
 
@@ -169,7 +169,7 @@ next question rather than part of this change.
 the counterfactual scores as a `FALSE_TRADE` — and every setting above 0.5 blocks sets that
 underperform their own days. The "one refusal in 1179 cycles" above turns out to be exactly
 right; measuring only the LLM's own decisions finds the gate innocent, which is how a guard
-gets misjudged. See `docs/superpowers/plans/2026-10-03-min-confidence-what-it-is-worth.md`.
+gets misjudged. See `docs/history/plans/2026-10-03-min-confidence-what-it-is-worth.md`.
 
 ## 9. Result, measured against the live record
 

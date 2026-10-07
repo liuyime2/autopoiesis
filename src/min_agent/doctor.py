@@ -864,7 +864,7 @@ def _check_pnl_attribution(
             "proceeds are real and their cost basis is not on the record, so the omitted "
             "term can be positive or negative and the figure is incomplete rather than "
             "exact. This is a property of the account, not a fault in the trading path - "
-            "see STATUS.md",
+            "see docs/history/STATUS.md",
         )
     if result.closed_lots and model_lots > 0 and result.model_pnl <= 0.0:
         report.add(

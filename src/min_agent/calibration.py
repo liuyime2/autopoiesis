@@ -17,7 +17,7 @@ inertness is a fact about this model's behaviour distribution, not about the gat
 setting above 0.5 blocks sets that underperform their own days. So this module's job is to
 keep reporting what the model's confidences are worth on the trades it can see, which on the
 live record is nothing, and not to imply the gate is carrying weight it is not. See
-`docs/superpowers/plans/2026-10-03-min-confidence-what-it-is-worth.md`.
+`docs/history/plans/2026-10-03-min-confidence-what-it-is-worth.md`.
 
 The pairing is already available and needs no new data: every decision carries a
 confidence, and the counterfactual ledger already scores every decision against the

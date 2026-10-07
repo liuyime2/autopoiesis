@@ -398,7 +398,7 @@ class PnLEvidence(BaseModel):
     #: that ledger cannot see this number by construction - a trade's return there
     #: is holding from the same instant less cost, so every decision shows an excess
     #: of exactly the assumed cost over holding. See
-    #: `docs/superpowers/plans/2026-10-04-report-the-holding-benchmark.md`.
+    #: `docs/history/plans/2026-10-04-report-the-holding-benchmark.md`.
     strategy_excess_vs_market_pct: dict[str, float] = Field(default_factory=dict)
     unattributed_pnl: float | None = None
     window_start: datetime | None = None

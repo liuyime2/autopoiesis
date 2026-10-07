@@ -56,7 +56,7 @@ path: pricing those shares would mean fetching broker history the agent does not
 read, which is a scope decision rather than a defect fix. It stays a WARN rather than a FAIL
 for the same reason `make evaluate` exits zero when the profit target is unmet: a property of
 the data is not a property of the code. Plan and measurements:
-`docs/superpowers/plans/2026-10-03-the-pnl-total-omits-unmatched-exits.md`.
+`docs/history/plans/2026-10-03-the-pnl-total-omits-unmatched-exits.md`.
 
 
 > **Dated section starts here.** Everything below records the position at the time it was
@@ -140,7 +140,7 @@ closed lot behind it. It needs a new round trip, not another fix.
 ## What was wrong, and what is fixed
 
 Full detail, with reproduction evidence, in
-[`docs/superpowers/plans/2026-09-28-quantgroup-recovery-and-refactor.md`](docs/superpowers/plans/2026-09-28-quantgroup-recovery-and-refactor.md).
+[`docs/history/plans/2026-09-28-quantgroup-recovery-and-refactor.md`](docs/history/plans/2026-09-28-quantgroup-recovery-and-refactor.md).
 
 Fifteen defects were confirmed against the live code and the 16.9 MB journal.
 The ones that made the system structurally incapable of profiting:
@@ -347,7 +347,7 @@ awaiting its first evaluation window.
 
 **Six strategies were admitted and have no registry file and no recorded
 retirement.** `runtime/` is gitignored so the cause cannot be reconstructed; it is
-recorded as UNKNOWN in `docs/superpowers/known_state_findings.json` and no synthetic
+recorded as UNKNOWN in `docs/history/known_state_findings.json` and no synthetic
 retirement was written. It cannot recur — `admit()` writes the file atomically
 before returning `accepted=True`.
 
@@ -385,7 +385,7 @@ withdrawn claim left standing is worse than one never made:
 +564.39 — were opened by the `baseline` decision source on 2026-06-11, 06-12 and
 06-18. The LLM path's first decision was 2026-09-28 11:20, two and a half months
 after the last profitable lot. The headline profit is not evidence that the model
-works. Details and the full cause breakdown are in `docs/superpowers/PHASES.md` §4.
+works. Details and the full cause breakdown are in `docs/history/PHASES.md` §4.
 
 **Verified against the real account, not a fixture.** The account holds 5 positions
 worth $37,082, all outside the allowlist (BIL, TLT, XLB, XLE, XLF). At that state a
@@ -1452,7 +1452,7 @@ probation before the incumbent can trade at all.
 
 **Not claimed:** that any strategy is promoted or that the incumbent trades. Both are claims
 about the live record after the daemon has run, and both are recorded as falsifiers in
-`docs/superpowers/plans/2026-10-04-probation-measured-against-a-window.md`.
+`docs/history/plans/2026-10-04-probation-measured-against-a-window.md`.
 
 While making this change an edit to `models.py` silently deleted `StrategyEvaluation.
 rejected_orders`, because the match omitted a line between two identical anchors. The suite
@@ -1522,7 +1522,7 @@ strategy still waits roughly 17 / 4.6 ≈ 3.7 market days, and nothing here shou
 making the loop profitable. The sequence is: the deficit stops compounding, the backlog
 drains, and only then does the incumbent get cycles. Whether that happens is a live
 measurement, recorded as a falsifier in
-`docs/superpowers/plans/2026-10-04-admission-outruns-serving.md` rather than asserted here.
+`docs/history/plans/2026-10-04-admission-outruns-serving.md` rather than asserted here.
 
 `make verify`: 52 classes, 0 failed, 1412 executions across 62 files; 900 pytest pass.
 

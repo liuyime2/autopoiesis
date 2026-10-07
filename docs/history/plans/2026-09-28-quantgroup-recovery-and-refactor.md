@@ -326,7 +326,7 @@ zero `_fallback_task` results are labelled `SUCCESS`.
 - [ ] `set -euo pipefail` + explicit timeouts in every `.sh`; `auto_reviewer.py` gains
       `timeout=` and 7-day retention as `AUTO_REVIEW_README.md:56` already promises
 - [ ] Re-enable curriculum; align `OLLAMA_BASE_URL` to the port ollama actually serves
-- [ ] Rewrite `docs/superpowers/specs/2026-06-09-min-agent-daemon-runbook.md` — it currently
+- [ ] Rewrite `docs/history/specs/2026-06-09-min-agent-daemon-runbook.md` — it currently
       promises "no fallbacks" in `data_gateway.py` and a live `cron` that never existed
 - [ ] Replace the stale root `task_plan.md` / `findings.md` / `progress.md` / `LEARNING_STATUS.md`
       with current state

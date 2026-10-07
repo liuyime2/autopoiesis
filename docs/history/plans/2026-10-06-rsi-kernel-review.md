@@ -8,7 +8,7 @@ Supersedes: nothing. `STATUS.md` remains the record of what has happened; this f
 record of what should happen next, and it is a dated document too — when it is acted on, the
 dated sections of `STATUS.md` say so.
 
-Read with `docs/superpowers/plans/2026-10-06-a-falsifiable-target-and-the-llm-increment.md`
+Read with `docs/history/plans/2026-10-06-a-falsifiable-target-and-the-llm-increment.md`
 (the falsifiable target), `docs/ARCHITECTURE.md` (the current system), and `STATUS.md`
 (what happened, in order).
 
@@ -456,7 +456,7 @@ Two of those numbers need their own correction before they are used as a target:
   in either direction.
 - `+193.56` "model contribution" is an attribution over lots the model happened to open. It is
   not a counterfactual: no paired comparison was run. The file itself says so
-  (`docs/superpowers/plans/2026-10-06-a-falsifiable-target-and-the-llm-increment.md` §2).
+  (`docs/history/plans/2026-10-06-a-falsifiable-target-and-the-llm-increment.md` §2).
 
 ---
 
@@ -727,7 +727,7 @@ of that.
 
 ## 10. Documentation: the part most likely to be judged badly, for the wrong reason
 
-`STATUS.md` is 3453 lines / 191 KB of dated internal log. `docs/superpowers/plans/` holds 37
+`STATUS.md` is 3453 lines / 191 KB of dated internal log. `docs/history/plans/` holds 37
 one-shot plan files whose **names are the argument trail**:
 `2026-10-05-the-overfit-check-compares-window-length.md`,
 `2026-10-06-dormant-candidates-hold-budget-they-cannot-spend.md`.
@@ -756,7 +756,7 @@ docs/
   LIMITATIONS.md        new. the 29 unmatched shares, the 16-day sample, the frozen prompt
   MIGRATION.md          keep
   QUICKSTART.md         new. 30 seconds offline / 2 minutes to the gate / full loop needs Alpaca
-STATUS.md + docs/superpowers/   move to a private branch or private repository
+STATUS.md + docs/history/   move to a private branch or private repository
 ```
 
 Where the content goes instead:

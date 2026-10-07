@@ -131,13 +131,13 @@ Nine tracked files carried `liuyime2`, `/localscratch`, `/home/...`, or the git 
 ```
 LICENSE                                                  1   Copyright 2026 liuyime2
 docs/evidence/fresh-clone.log                            41
-docs/superpowers/SYSTEM_AUDIT.md                         9
+docs/history/SYSTEM_AUDIT.md                         9
 STATUS.md                                                6
-docs/superpowers/plans/2026-09-28-quantgroup-recovery... 4
+docs/history/plans/2026-09-28-quantgroup-recovery... 4
 minictrl                                                 3   conda discovery paths
 tools/verify.py                                          3   two are the gate's own host_markers list
 tools/ollama.service.in                                  2
-docs/superpowers/specs/2026-09-28-min-agent-runbook.md   1
+docs/history/specs/2026-09-28-min-agent-runbook.md   1
 ```
 
 Two categories, handled differently:

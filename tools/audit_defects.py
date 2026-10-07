@@ -6,7 +6,7 @@ Exit: 0 when every check passes, 1 otherwise.
 
 Each check is a property of the source, not a claim in a document. The
 originals and their reproduction evidence are in
-docs/superpowers/plans/2026-09-28-quantgroup-recovery-and-refactor.md.
+docs/history/plans/2026-09-28-quantgroup-recovery-and-refactor.md.
 """
 from __future__ import annotations
 
@@ -173,7 +173,7 @@ def main() -> int:
     check("D15", "repo is under version control", inside == "true")
     check("D15", "archived projects are out of the tree", not (ROOT / "history_version").exists())
     check("D15", "a plan document exists",
-          (ROOT / "docs/superpowers/plans/2026-09-28-quantgroup-recovery-and-refactor.md").exists())
+          (ROOT / "docs/history/plans/2026-09-28-quantgroup-recovery-and-refactor.md").exists())
 
     width = max(len(d) for d, _, _ in results)
     for defect, description, passed in results:

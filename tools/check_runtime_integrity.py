@@ -30,11 +30,12 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+HISTORY = ROOT / "docs" / "history"
 sys.path.insert(0, str(ROOT / "src"))
 
 JOURNAL_BACKUPS = 3  # matches JsonlJournal's default `backups`
 RUNTIME = ROOT / "runtime" / "min_agent"
-FINDINGS = ROOT / "docs" / "superpowers" / "known_state_findings.json"
+FINDINGS = HISTORY / "known_state_findings.json"
 
 #: From models.StrategyLifecycle. Getting this wrong flagged three healthy
 #: strategies as having an unknown lifecycle.

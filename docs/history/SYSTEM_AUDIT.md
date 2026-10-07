@@ -302,7 +302,7 @@ are two sources of truth about the same thing, and for these six they disagree.
 
 `runtime/` is gitignored, so there is no commit history from which to reconstruct
 when or why the files were removed. The cause is recorded as **UNKNOWN** in
-`docs/superpowers/known_state_findings.json` rather than guessed, and no synthetic
+`docs/history/known_state_findings.json` rather than guessed, and no synthetic
 retirement event was written — inventing one would put a false claim into the audit
 trail that the whole system is meant to rest on.
 
@@ -513,7 +513,7 @@ documents.
 
 ### 11.3 A plan document that contradicted the tree
 
-`docs/superpowers/plans/2026-09-28-quantgroup-recovery-and-refactor.md` still
+`docs/history/plans/2026-09-28-quantgroup-recovery-and-refactor.md` still
 carried the header "Awaiting approval — no source file has been modified yet" 51
 commits in, and instructed the reader to **restore `skill_library/` from its `.bak`
 file** — a directory deleted on purpose after being found to hold only
@@ -533,7 +533,7 @@ SUPERSEDED and asserts PASS.
 | actively used | `data_gateway`, `loop`, `guardian`, `executor`, `fill_reconciler`, `order_reconciler`, `evaluator`, `broker_evidence`, `reflection_memory`, `curriculum`, `strategy_admission`, `knowledge_admission`, `knowledge_library`, `policy_engine`, `llm_decision`, `strategy_engine`, `scheduler`, `health`, `doctor`, `journal`, `atomicio`, `config`, `models`, `counterfactual`, `offline_validation`, `experiment_registry`, `daemon`, `cli` |
 | partially wired | `offline_validation` (screens and can pause, but promotion stays manual and live — by design); `max_account_value` (implemented, deliberately off) |
 | implemented but unused | `auto_reviewer.py` (operator tool, unscheduled); `tools/alpaca_smoke.py` (manual smoke test) |
-| obsolete | `docs/superpowers/plans/2026-09-28-…` (superseded, retained as history) |
+| obsolete | `docs/history/plans/2026-09-28-…` (superseded, retained as history) |
 | duplicated | none remaining — the three evidence readers were merged into `latest_evidence_batch()`; the experiment registry is a view rather than a second store |
 | broken | none open; six wiring defects found and fixed this session (`strategy_library.get`, `JournalEvent` vs dict, missing verdict guard, `INFORMATIVE` ordering, `relative_to` crash, NEUTRAL-as-failure) |
 | missing | nothing in the chain. Shadow trading is **merged into probation** (10.1) rather than added, and prospective live evidence is time, not code |
@@ -1121,7 +1121,7 @@ a 30-bar window rather than expecting the classifier to see through its own wind
 
 ## 26. The binding constraint, and deliverables ⑤⑦⑧
 
-`docs/superpowers/PHASES.md` is the per-phase document the objective asks for:
+`docs/history/PHASES.md` is the per-phase document the objective asks for:
 implementation tasks, dependencies, test methods, exit criteria and verification
 results; what is proven versus what is only a design target; and the next one to
 three changes.
@@ -1406,7 +1406,7 @@ historical window of one symbol is not a track record.
 
 The objective requires every step of the loop to have an explicit **input**,
 **output**, **responsibility boundary**, **failure behaviour**, **log**,
-**provenance** and **automated test**. `docs/superpowers/STEP_CONTRACT.md` is that
+**provenance** and **automated test**. `docs/history/STEP_CONTRACT.md` is that
 table, derived from the code rather than from intent: the signatures are the real
 ones, the event types are the ones the journal actually receives, and the test files
 are the ones that exist.
@@ -2720,7 +2720,7 @@ Section 45 concluded that shadow was wired as a mode rather than a stage, and ca
 it a design decision for the operator. Checking it against the objective's own phase
 gate rather than against my own opinion turned up something worse than the wiring.
 
-**`docs/superpowers/PHASES.md` recorded Phase 5 as MET**, citing two things:
+**`docs/history/PHASES.md` recorded Phase 5 as MET**, citing two things:
 
 | claimed verification | reality |
 | --- | --- |
