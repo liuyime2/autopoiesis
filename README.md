@@ -78,7 +78,7 @@ wrappers each duplicated a flag below.
 | `make smoke` | one real cycle end to end against the broker | ~8s |
 | `make smoke-offline` | config and CLI end to end with `--skip-broker`; no broker, no model | ~20s |
 | `make fast` | check + smoke + the full gate | ~90s |
-| `make verify` | 51 check classes, non-zero on any failure | ~100s |
+| `make verify` | 52 check classes, non-zero on any failure | ~100s |
 | `make test` | the whole suite | ~5min |
 | `make doctor` | health of the running system, non-zero on any fault | ~20s |
 | `make status` | is the daemon alive and what is it doing | ~1s |
@@ -113,9 +113,9 @@ src/min_agent/          the package. 41 modules, 3 external dependencies.
   strategy_engine.py    strategy library, selection, lifecycle
   evaluator.py          scoring from broker-confirmed evidence
   research/             diagnosis only. production may not import it, and a gate enforces that
-tools/verify.py         the gate: 51 check classes
+tools/verify.py         the gate: 52 check classes
 tools/provenance.py     what `make reproduce` records
-tests/min_agent/        65 test files
+tests/min_agent/        66 test files
 examples/minimal_cycle.py   the smallest runnable example, no broker needed
 configs/paper.env.example   every environment variable, with its default
 .github/workflows/      CI: lint, mypy, tests, offline smoke, the gate and its self-test

@@ -125,6 +125,7 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_unrealized_pnl.py": ("pnl-accounting", "data-integrity"),
     "test_cost_accounting.py": ("pnl-accounting", "decision-outcome-counterfactual"),
     "test_benchmark.py": ("pnl-accounting",),
+    "test_screen_direction_check.py": ("decision-outcome-counterfactual",),
     "test_research_trials.py": (
         "lifecycle-invariants", "data-integrity", "unit-integration",
     ),
@@ -228,6 +229,7 @@ CHECK_CLASSES: tuple[str, ...] = (
     "shadow-not-executed",
     "shadow-stage-exercised",
     "research-trial-ledger",
+    "screen-direction-neutral",
     "doctor-checks-reachable",
     "test-coverage-map",
     "defect-regression-audit",
@@ -2368,6 +2370,81 @@ def check_doctor_checks_are_all_reachable() -> Result:
     return Result("doctor-checks-reachable", FAIL if unreachable else PASS, detail)
 
 
+def check_screen_is_direction_neutral(
+    journal_path: Path | None = None, strategy_dir: Path | None = None
+) -> Result:
+    """No live strategy may stand rejected for the days it happened to trade on.
+
+    Every screen verdict rests on a one-share 24-hour probe, so on a rising day every SELL
+    is wrong whoever made it. Measured on 2026-10-07: on 9 of 13 days nearly every graded
+    outcome went one way, SELL decisions were right 4% of the time against BUY's 71%, and
+    six strategies had been rejected by a raw ratio that their days alone explained. The
+    screen now reads each strategy against its days (`offline_validation.day_direction`).
+
+    This re-derives that from the journal, so a regression to a direction-blind gate shows
+    up here as soon as it rejects something: it FAILs when a PROBATION or ACTIVE strategy's
+    latest journalled verdict is REJECT_POOR_DECISIONS and the day-adjusted screen over the
+    same rows would not reject it. It also reports the correct rate by action, which is
+    where the bias shows first.
+    """
+    sys.path.insert(0, str(SRC))
+    from min_agent import offline_validation as ov
+    from min_agent.journal import JsonlJournal
+    from min_agent.strategy_engine import StrategyLibrary
+
+    journal_path = journal_path or ROOT / "runtime" / "min_agent" / "journal.jsonl"
+    strategy_dir = strategy_dir or ROOT / "runtime" / "min_agent" / "strategies"
+    if not journal_path.exists():
+        return Result(
+            "screen-direction-neutral", SKIP,
+            "no runtime/min_agent/journal.jsonl yet; nothing has been screened",
+        )
+    journal = JsonlJournal(journal_path)
+    events = journal.read_events("COUNTERFACTUAL_EVALUATED")
+    screens: dict[str, dict] = {}
+    for event in journal.read_events("OFFLINE_VALIDATION_COMPLETED"):
+        if event.strategy_id:
+            screens[event.strategy_id] = event.payload
+    day_up = ov.day_direction(events)
+
+    by_action: dict[str, list[int]] = {}
+    latest_rows: dict[str, dict] = {}
+    for event in events:
+        for row in event.payload.get("rows", []):
+            latest_rows[row["cycle_id"]] = row
+    for row in latest_rows.values():
+        if row.get("verdict") in ov.INFORMATIVE:
+            entry = by_action.setdefault(str(row.get("action")), [0, 0])
+            entry[0] += 1
+            entry[1] += 1 if row["verdict"] in {"GOOD_HOLD", "GOOD_TRADE"} else 0
+    rates = ", ".join(
+        f"{action} {right}/{n}" for action, (n, right) in sorted(by_action.items())
+    )
+
+    problems = []
+    live = [s for s in StrategyLibrary(strategy_dir).list() if s.lifecycle in {"PROBATION", "ACTIVE"}]
+    for spec in live:
+        payload = screens.get(spec.strategy_id, {})
+        if payload.get("verdict") != ov.REJECT_POOR_DECISIONS:
+            continue
+        adjusted = ov.validate(
+            ov.collect_decisions(events, spec.strategy_id),
+            strategy_id=spec.strategy_id, day_up=day_up,
+        )
+        if adjusted.verdict != ov.REJECT_POOR_DECISIONS:
+            problems.append(f"{spec.strategy_id} ({spec.lifecycle}): {adjusted.reason}")
+    if problems:
+        return Result(
+            "screen-direction-neutral", FAIL,
+            "rejected by the days, not the rule: " + "; ".join(problems[:3]),
+        )
+    return Result(
+        "screen-direction-neutral", PASS,
+        f"no live strategy stands rejected for its days alone ({len(live)} live); "
+        f"correct by action: {rates or 'none scored'}",
+    )
+
+
 def check_research_trial_ledger() -> Result:
     """Every research trial, including the failures, must be on the record.
 
@@ -2863,6 +2940,8 @@ REPOSITORY_CHECK_CLASSES: frozenset[str] = frozenset({
     # it is a system check on live state, not a test of a code path in isolation.
     "replay-audit",
     "research-trial-ledger",
+    # Reads the deployed journal and strategy library: a statement about live state.
+    "screen-direction-neutral",
     # The two shadow checks report whether a stage ever executed against real state.
     "shadow-not-executed",
     "shadow-stage-exercised",
@@ -3305,6 +3384,7 @@ def main() -> int:
     results.append(_safe(check_shadow_cannot_count_as_executed, "shadow-not-executed"))
     results.append(_safe(check_shadow_stage_has_actually_run, "shadow-stage-exercised"))
     results.append(_safe(check_research_trial_ledger, "research-trial-ledger"))
+    results.append(_safe(check_screen_is_direction_neutral, "screen-direction-neutral"))
     results.append(_safe(check_doctor_checks_are_all_reachable, "doctor-checks-reachable"))
     results.append(_safe(check_syntax_import, "syntax-import"))
     results.append(_safe(check_data_integrity, "data-integrity"))
