@@ -1202,3 +1202,52 @@ def test_an_unknown_agent_holding_falls_back_to_the_account_the_same_way_guardia
         agent_position_quantity=None,
     ).approved
     assert refused == state["buy_blocked_by_position_limit"]
+
+
+# --- the rule is the default; the model overrides it only with a reason --------
+
+
+def _llm_says(action, reason=None):
+    from min_agent.models import TradeDecision
+
+    return ScriptedLLM(TradeDecision(
+        symbol="SPY", action=action, quantity=0 if action == "HOLD" else 1, confidence=0.6,
+        rationale="r", override_reason=reason,
+    ))
+
+
+def test_the_model_is_shown_the_rule_s_decision(tmp_path):
+    llm = _llm_says("BUY")
+    engine, _ = _engine(tmp_path, llm)  # s1 is a FIXED_SIZE BUY of 1
+    engine.decide_snapshot(_snapshot())
+    assert llm.calls[0]["rule_decision"] == {"action": "BUY", "quantity": 1}
+
+
+def test_agreeing_with_the_rule_is_recorded_as_a_pair(tmp_path):
+    engine, _ = _engine(tmp_path, _llm_says("BUY"))
+    decision = engine.decide_snapshot(_snapshot())
+    assert (decision.action, decision.rule_action, decision.decision_source) == ("BUY", "BUY", "llm")
+    assert decision.override_reason is None
+
+
+def test_an_override_with_a_reason_is_taken_and_both_actions_are_recorded(tmp_path):
+    engine, _ = _engine(tmp_path, _llm_says("HOLD", "the position cap leaves no room to buy"))
+    decision = engine.decide_snapshot(_snapshot())
+    assert (decision.action, decision.rule_action, decision.decision_source) == ("HOLD", "BUY", "llm")
+    assert decision.override_reason == "the position cap leaves no room to buy"
+
+
+def test_an_override_without_a_reason_is_discarded_for_the_rule(tmp_path):
+    """112 of 113 recorded disagreements were the model declining the rule's trade, unexplained."""
+    engine, _ = _engine(tmp_path, _llm_says("HOLD", "  "))
+    decision = engine.decide_snapshot(_snapshot())
+    assert (decision.action, decision.quantity, decision.rule_action) == ("BUY", 1, "BUY")
+    assert decision.decision_source == "policy_engine"
+    assert "without an override_reason" in decision.rationale
+
+
+def test_the_fallback_records_its_own_rule_as_the_rule_action(tmp_path):
+    engine, _ = _engine(tmp_path, ScriptedLLM(error=TimeoutError("slow")))
+    decision = engine.decide_snapshot(_snapshot())
+    assert decision.decision_source == "fallback_policy_engine"
+    assert decision.rule_action == decision.action == "BUY"

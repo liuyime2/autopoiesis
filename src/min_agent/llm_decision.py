@@ -52,7 +52,7 @@ Transport = Callable[[str, Mapping[str, Any], int], Mapping[str, Any]]
 #: schema without a line here fails the build rather than costing 20% of the history.
 DECISION_INSTRUCTION = (
     "You are a paper-trading decision engine. Return exactly one JSON object with keys: "
-    "symbol, action, quantity, confidence, rationale, hold_reason. "
+    "symbol, action, quantity, confidence, rationale, hold_reason, override_reason. "
     "action must be exactly one of BUY, SELL, HOLD. "
     "quantity must be the integer 0 when action is HOLD, and a positive integer otherwise. "
     "confidence must be a decimal number between 0 and 1 inclusive, written as a decimal "
@@ -64,7 +64,11 @@ DECISION_INSTRUCTION = (
     "await_confirmation, other. Use risk_limit_near only when a risk figure in the "
     "context is what stopped you. The risk limits in the context are enforced "
     "independently downstream; state your reason, do not act as a second risk check. "
-    "Do not include any order outside the supplied symbol and risk context."
+    "Do not include any order outside the supplied symbol and risk context. "
+    "rule_decision in the context is what the selected strategy's own rule decided. It is "
+    "the default: if your action differs from rule_decision.action, override_reason must "
+    "say in one sentence what in the context makes the rule wrong here; otherwise set "
+    "override_reason to null. An override without a reason is discarded."
 )
 
 #: The one transport contract: (prompt, context, num_ctx) -> the parsed body.
@@ -220,9 +224,12 @@ class HybridDecisionEngine:
         # Without a cost basis the model cannot tell profit from loss. Every price
         # in it is broker-reported, from confirmed fills.
         self.cost_basis = cost_basis
+        #: The selected strategy's own decision for the snapshot `_context` last built.
+        self._rule_decision: TradeDecision | None = None
 
     def decide_snapshot(self, snapshot: DataSnapshot) -> TradeDecision:
         context = self._context(snapshot)
+        rule = self._rule_decision
         try:
             decision = self.llm.decide(context)
         except Exception as exc:
@@ -241,7 +248,24 @@ class HybridDecisionEngine:
         # not accumulate for the LLM path at all, and no lifecycle review could
         # ever be about a decision the model actually made.
         selected = context.get("selected_strategy_id")
+        if rule is not None and decision.action != rule.action and not (decision.override_reason or "").strip():
+            # The rule is the default and an override has to say why. Measured over 323
+            # comparable cycles before this existed, 112 of 113 disagreements were the model
+            # declining a trade the rule would have taken, with nothing recorded about why.
+            return rule.model_copy(update={
+                "decision_source": "policy_engine",
+                "rule_action": rule.action,
+                "model": decision.model,
+                "rationale": (
+                    f"{rule.rationale} | llm proposed {decision.action} without an "
+                    f"override_reason; rule taken"
+                ),
+            })
         update: dict[str, Any] = {"decision_source": "llm"}
+        if rule is not None:
+            update["rule_action"] = rule.action
+        if decision.action == (rule.action if rule is not None else decision.action):
+            update["override_reason"] = None
         if isinstance(selected, str) and selected and not decision.strategy_id:
             update["strategy_id"] = selected
         return decision.model_copy(update=update)
@@ -251,6 +275,8 @@ class HybridDecisionEngine:
         return decision.model_copy(
             update={
                 "decision_source": "fallback_policy_engine",
+                # The fallback is the rule, so the rule's action is the action taken.
+                "rule_action": decision.action,
                 "rationale": f"{decision.rationale} | llm_unavailable: {reason}",
             }
         )
@@ -262,6 +288,7 @@ class HybridDecisionEngine:
         # either way.
         strategy_id = None
         selected_spec = None
+        self._rule_decision = None
         try:
             selected = self.policy_engine.selector.select(
                 self.policy_engine.strategy_library.list(),
@@ -292,6 +319,13 @@ class HybridDecisionEngine:
                 )
         except Exception:
             strategy_id = None
+        if selected_spec is not None:
+            try:
+                self._rule_decision = self.policy_engine.executor.decide(selected_spec, snapshot)
+            except Exception:
+                # A rule that cannot be evaluated is no default; the model decides alone and
+                # the cycle carries no rule_action, which is what the journal will say.
+                self._rule_decision = None
         lots: dict[str, dict[str, object]] = {}
         if self.cost_basis is not None:
             try:
@@ -330,6 +364,11 @@ class HybridDecisionEngine:
                     "lifecycle": selected_spec.lifecycle,
                 }
                 if selected_spec is not None
+                else None
+            ),
+            "rule_decision": (
+                {"action": self._rule_decision.action, "quantity": self._rule_decision.quantity}
+                if self._rule_decision is not None
                 else None
             ),
             "paper_only": True,

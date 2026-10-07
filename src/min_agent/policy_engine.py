@@ -47,7 +47,12 @@ class PolicyEngine:
             if reflection is not None:
                 results = self.reflection_memory.strategy_results(reflection)
 
-        strategy = self.selector.select(strategies, results, served=self.served())
+        # The same arguments the LLM path selects with, so the fallback cannot serve a
+        # different strategy than the model would have been asked about. It omitted the
+        # price, so coverage was judged on paper here and at the real price there.
+        strategy = self.selector.select(
+            strategies, results, last_price=snapshot.last_price, served=self.served()
+        )
         if strategy is None:
             return TradeDecision(
                 # Named so a fallback decision is never confused with a model

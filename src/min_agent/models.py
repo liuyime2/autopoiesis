@@ -860,6 +860,20 @@ class TradeDecision(BaseModel):
     It is a reason, not a permission: Guardian still reviews every decision, and
     this never widens or narrows what is allowed.
     """
+    rule_action: Action | None = None
+    """What the selected strategy's own rule decided on the same snapshot.
+
+    Recorded on every LLM-path decision, so each cycle carries both the rule's action and the
+    action taken, and the model's contribution is a paired comparison on identical inputs
+    rather than an attribution over whichever lots it happened to open. None on cycles
+    journalled before this field existed - they cannot be paired, and back-filling would
+    claim a fact about the past that was never recorded.
+    """
+    override_reason: str | None = None
+    """Why the model departed from `rule_action`, in its own words.
+
+    The rule is the default; the model may override it, but only by saying why. An override
+    with no reason is not taken."""
     decision_source: DecisionSource = "baseline"
     """Who produced this decision.
 
