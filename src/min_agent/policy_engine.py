@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from min_agent.knowledge_library import KnowledgeLibrary
+from min_agent.knowledge_library import KnowledgeLibrary, lesson_key
 from min_agent.models import DataSnapshot, TradeDecision
 from min_agent.reflection_memory import ReflectionMemory
 from min_agent.strategy_engine import StrategyExecutor, StrategyLibrary, StrategySelector
@@ -118,12 +118,12 @@ class PolicyEngine:
         # five-slot budget. 10 of the 11 accepted artifacts share a single answer.
         # The slot is meant to buy distinct context; filling it with copies buys
         # nothing and costs prompt budget on every cycle.
-        seen: set[str] = set()
-        distinct: list = []
-        for artifact in lessons:
-            key = " ".join((artifact.answer or artifact.summary or "").lower().split())
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            distinct.append(artifact)
-        return distinct[: self.max_lessons]
+        #
+        # Keyed with the figures masked (`lesson_key`), keeping the newest copy, so a lesson
+        # re-derived with fresh numbers is one lesson showing its current numbers.
+        newest: dict[str, object] = {}
+        for artifact in sorted(lessons, key=lambda a: a.created_at, reverse=True):
+            key = lesson_key(artifact)
+            if key and key not in newest:
+                newest[key] = artifact
+        return list(newest.values())[: self.max_lessons]

@@ -1,9 +1,25 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from min_agent.atomicio import write_text_atomic
 from min_agent.models import KnowledgeArtifact
+
+_NUMBER = re.compile(r"[-+]?\d+(?:\.\d+)?%?")
+
+
+def lesson_key(artifact: KnowledgeArtifact) -> str:
+    """What a lesson says, with its figures masked.
+
+    The calibration lesson is re-derived every reflection with fresh numbers - "the worst
+    bucket is -16% ..., Brier 0.392 over 292 scored decisions" - and exact-text dedup saw each
+    re-derivation as new. 18 of the 20 accepted lessons on 2026-10-07 were that one sentence,
+    so the prompt's five lesson slots held five copies of it and the two other lessons never
+    reached the model. Two lessons with the same key are the same lesson at different times.
+    """
+    text = artifact.answer or artifact.summary or ""
+    return " ".join(_NUMBER.sub("#", text.lower()).split())
 
 
 class KnowledgeLibrary:
