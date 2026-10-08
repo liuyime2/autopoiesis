@@ -12,11 +12,11 @@ import daily_report
 
 
 def _cycle(hour_utc, action="HOLD", rule=None, reason=None, status="SKIPPED", source="llm",
-           day=7, guardian="approved"):
+           day=7, guardian="approved", rationale=""):
     return SimpleNamespace(
         snapshot=SimpleNamespace(timestamp=datetime(2026, 10, day, hour_utc, tzinfo=timezone.utc)),
         decision=SimpleNamespace(action=action, rule_action=rule, override_reason=reason,
-                                 decision_source=source),
+                                 decision_source=source, rationale=rationale),
         execution=SimpleNamespace(status=status),
         guardian=SimpleNamespace(reason=guardian),
         error=None,
@@ -46,3 +46,14 @@ def test_a_day_with_no_cycles_says_so():
     assert "NO CYCLES today" in text
 
 
+
+
+def test_decisions_that_cite_the_risk_block_are_counted_and_the_trades_among_them():
+    records = [
+        _cycle(14, action="BUY", rationale="risk is ACTIVE with vol_scaled_fraction 0.65 supporting a small add"),
+        _cycle(15, action="HOLD", rationale="vol_scaled_fraction is 1.0 so no size reduction is warranted"),
+        _cycle(16, action="BUY", rationale="the rule says BUY and the position cap leaves room"),
+    ]
+    summary = daily_report.day_summary(records, date(2026, 10, 7))
+    assert (summary["risk_cited"], summary["risk_cited_trades"]) == (2, 1)
+    assert "cite it in their reasons" in daily_report.render(date(2026, 10, 7), summary, [], "x")

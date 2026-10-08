@@ -55,7 +55,14 @@ def day_summary(records, day: date) -> dict:
          r.guardian.reason, r.execution.status)
         for r in todays if r.decision.action in {"SHORT", "COVER"}
     ]
+    cited = [
+        r for r in todays
+        if any(k in ((r.decision.rationale or "") + " " + (r.decision.override_reason or "")).lower()
+               for k in ("vol_scaled", "forecast_vol", "risk block", "risk is active", "risk status"))
+    ]
     return {
+        "risk_cited": len(cited),
+        "risk_cited_trades": sum(1 for r in cited if r.decision.action in {"BUY", "SELL", "SHORT", "COVER"}),
         "cycles": len(todays),
         "first": todays[0].snapshot.timestamp.astimezone(NEW_YORK).strftime("%H:%M") if todays else None,
         "last": todays[-1].snapshot.timestamp.astimezone(NEW_YORK).strftime("%H:%M") if todays else None,
@@ -80,6 +87,10 @@ def render(day: date, summary: dict, checks: list[tuple[str, str, str]], verdict
     lines.append("decisions    (source, action, execution): count")
     for (source, action, status), n in sorted(summary["outcomes"].items(), key=lambda kv: -kv[1]):
         lines.append(f"               {source:<22} {action:<6} {status:<10} {n}")
+    lines.append(
+        f"risk block   {summary['risk_cited']} decision(s) cite it in their reasons, {summary['risk_cited_trades']} of them trades "
+        "(it is meant to size a position down, never to argue for one)"
+    )
     lines.append(f"overrides    {len(summary['overrides'])} departure(s) from the rule")
     for when, rule, taken, reason in summary["overrides"][:20]:
         lines.append(f"               {when} rule {rule} -> {taken}: {reason[:90]}")
