@@ -33,6 +33,13 @@ the commit message; the long-form record is in [`docs/history/`](docs/history/RE
 - The RSI kernel review's headline - every SELL scored 0.000 - came from reading the oldest
   counterfactual row per cycle; corrected to 26.5% SELL vs 66.2% BUY.
 
+### Added (2026-10-08)
+- `MIN_AGENT_MANAGE_ACCOUNT` (default `false`): the agent may manage every position in the
+  account, a SELL then bounded by the account's position instead of the agent's own fills.
+- During the session the daemon sleeps only the rest of the interval after a round, so trading
+  several symbols does not stretch the interval.
+- The market context reads about three days of history per traded symbol.
+
 ### Added (2026-10-07, later)
 - The strategy's own rule decides first; the model may override it only with a reason, and
   every decision records both (`rule_action`, `override_reason`). doctor reports `llm vs rule`.

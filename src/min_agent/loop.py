@@ -25,6 +25,7 @@ class TradingLoop:
         mode: str,
         trade_counter=None,
         now: Callable[[], datetime] | None = None,
+        manage_account: bool = False,
     ):
         self.data_gateway = data_gateway
         self.decision_engine = decision_engine
@@ -47,6 +48,9 @@ class TradingLoop:
         #: which is the difference between testing the real risk path and testing a
         #: system that nobody ships.
         self.now = now
+        #: With the account holder's consent (`MIN_AGENT_MANAGE_ACCOUNT=true`) a SELL is
+        #: bounded by the account's position rather than by the agent's own fills.
+        self.manage_account = manage_account
 
     def _identical_order_already_in_flight(self, decision: TradeDecision) -> str | None:
         """A client_order_id of the client_order_id of a submission we never saw fill.
@@ -111,6 +115,13 @@ class TradingLoop:
                 f"recorded since; re-submitting would double the position"
             )
         return None
+
+    def _sellable_holding(self, symbol: str, snapshot) -> float | None:
+        """What a SELL of `symbol` may reach: the account's position when the agent manages
+        the whole account, otherwise only what the agent itself bought."""
+        if self.manage_account:
+            return float(sum(p.quantity for p in snapshot.positions if p.symbol == symbol and p.quantity > 0))
+        return self._agent_holding(symbol)
 
     def _agent_holding(self, symbol: str) -> float | None:
         """Shares of `symbol` the agent itself bought and has not sold.
@@ -254,7 +265,7 @@ class TradingLoop:
             # fills rather than from the account snapshot, because the account
             # snapshot is exactly the number that let 29 shares of someone else's
             # position be sold.
-            agent_position_quantity=self._agent_holding(decision.symbol),
+            agent_position_quantity=self._sellable_holding(decision.symbol, snapshot),
             # And what it is short, from the same fills, for the same reason on the other side.
             agent_short_quantity=self._agent_short(decision.symbol),
         )
@@ -272,7 +283,7 @@ class TradingLoop:
                 decision, snapshot, mode=self.mode,
                 now=self.now() if self.now else None,
                 trades_today=trades_today,
-                agent_position_quantity=self._agent_holding(decision.symbol),
+                agent_position_quantity=self._sellable_holding(decision.symbol, snapshot),
                 agent_short_quantity=self._agent_short(decision.symbol),
             )
             # Deliberately NOT appended to `errors`.

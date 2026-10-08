@@ -590,7 +590,8 @@ class HybridDecisionEngine:
         held = next(
             (pos for pos in snapshot.positions if pos.symbol == snapshot.symbol), None
         )
-        lot = lots.get(snapshot.symbol)
+        # Managing the whole account, Guardian measures the account's position, so this does.
+        lot = None if self.risk_limits.get("manage_account") else lots.get(snapshot.symbol)
         quantity: float | None = None
         if isinstance(lot, Mapping) and is_number(lot.get("quantity")):
             quantity = coerce.field_float_or(lot["quantity"], "open_lots.quantity", 0.0)
