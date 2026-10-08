@@ -256,6 +256,7 @@ def _run_once(config: AgentConfig) -> int:
             base_url=config.ollama_base_url,
             model=config.model,
             gpu_devices=config.gpu_devices,
+            timeout=config.llm_timeout_seconds,
         ),
         guardian=Guardian(
             allowlist=config.allowlist,
@@ -352,6 +353,7 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
             base_url=config.ollama_base_url,
             model=config.model,
             gpu_devices=config.gpu_devices,
+            timeout=config.llm_timeout_seconds,
         ),
         policy_engine=policy_engine,
         lessons=policy_engine.relevant_lessons,

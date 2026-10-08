@@ -60,3 +60,13 @@ def test_a_long_round_shortens_the_sleep_and_a_closed_market_sleep_is_kept():
     assert daemon._round_sleep_seconds(480) == 30
     daemon._sleep_seconds = lambda: 3600  # type: ignore[method-assign]
     assert daemon._round_sleep_seconds(480) == 3600
+
+
+def test_the_decision_timeout_is_configurable_and_defaults_above_the_slowest_measured_answer(monkeypatch):
+    monkeypatch.delenv("MIN_AGENT_LLM_TIMEOUT_SECONDS", raising=False)
+    assert AgentConfig.from_env().llm_timeout_seconds == 240
+    monkeypatch.setenv("MIN_AGENT_LLM_TIMEOUT_SECONDS", "90")
+    assert AgentConfig.from_env().llm_timeout_seconds == 90
+    monkeypatch.setenv("MIN_AGENT_LLM_TIMEOUT_SECONDS", "0")
+    with pytest.raises(ValueError):
+        AgentConfig.from_env()
