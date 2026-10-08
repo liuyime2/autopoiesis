@@ -202,6 +202,7 @@ class AgentDaemon:
                     self._heartbeat("BACKING_OFF", "max daily cycles reached")
                     self.sleep(self._sleep_seconds())
                     continue
+                round_started = time.monotonic()
                 for symbol in self.config.symbols:
                     if self._stop_requested:
                         break
@@ -211,7 +212,7 @@ class AgentDaemon:
                     if self.daily_cycle_count >= self.config.max_daily_cycles:
                         break
                 if not self._stop_requested:
-                    self.sleep(self._sleep_seconds())
+                    self.sleep(self._round_sleep_seconds(time.monotonic() - round_started))
             self._heartbeat("STOPPED", "daemon stopped")
             return 0
         finally:
@@ -1452,6 +1453,20 @@ class AgentDaemon:
         if last_at is None:
             return True
         return (self.now() - last_at).total_seconds() >= interval_seconds
+
+    def _round_sleep_seconds(self, elapsed: float) -> int:
+        """The rest of the trading interval, counted from the start of the round.
+
+        With one symbol a round took about a minute and a fixed interval after it was close
+        enough. Managing six symbols a round takes about eight minutes of model time, so a
+        fixed 300s after it put each symbol thirteen minutes apart. A longer sleep (the market
+        is closed) is left alone, and a 30s floor keeps the model and the broker from being
+        hit back to back when a round overruns.
+        """
+        planned = self._sleep_seconds()
+        if planned > self.config.daemon_interval_seconds:
+            return planned
+        return max(30, int(planned - elapsed))
 
     def _sleep_seconds(self) -> int:
         if self.scheduler is not None and hasattr(self.scheduler, "sleep_seconds"):

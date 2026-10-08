@@ -19,17 +19,23 @@ what does not change:
 | Fixed | Value |
 |---|---|
 | mode | `paper` - `cli.py` refuses to build a client against any host but Alpaca's paper |
-| allowlist | AAPL, MSFT, NVDA, QQQ, SPY |
-| hard limits | $5,000 per position, $20,000 total exposure, $500 daily loss, 10 trades/day |
+| allowlist | AAPL, BIL, MSFT, NVDA, QQQ, SPY, TLT, XLB, XLE, XLF |
+| traded symbols | SPY, BIL, TLT, XLB, XLE, XLF - every position in the account |
+| account | managed whole (`MIN_AGENT_MANAGE_ACCOUNT=true`), the account holder's decision of 2026-10-07 |
+| hard limits | $25,000 per position, $90,000 total exposure, $500 daily loss, 10 trades/day |
 | model | `qwen3.8:27b` on Ollama at `127.0.0.1:11434` |
 | credentials | `$XDG_CONFIG_HOME/min-agent/env`, mode 600, outside the repository |
-| units | `~/.config/systemd/user/`, four enabled, durable across reboot |
+| units | `~/.config/systemd/user/`, five enabled (daemon, Ollama, watchdog, research, report), durable across reboot |
 
-## Open finding: shares sold that no BUY accounts for
+## Resolved 2026-10-07: shares sold that no BUY accounts for
 
-`minictrl doctor` reports `UNMATCHED SELLS {'trend-follow-sell-002': 29.0}`: 29 shares were
-sold with no lot to price them against. Run `minictrl doctor` for the current figure; it moves
-as the agent trades.
+Priced in `cf4ac8d` against the account owner's recorded fills (`minictrl owner-history`):
+the 29 shares are priced FIFO against the owner's lots, reported by doctor as OWNER EXIT and
+outside every strategy's PnL; the figures are in that commit's message. What follows is the record of the finding as it
+stood before that.
+
+Doctor reported `UNMATCHED SELLS {'trend-follow-sell-002': 29.0}`: 29 shares were sold with no
+lot to price them against.
 
 **What it does to the numbers — measured, 2026-10-03.** `_apply_activity` books no PnL for a
 sell it cannot match: it records the quantity and the fee and stops

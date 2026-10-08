@@ -196,11 +196,14 @@ that can submit an order:
 | max trades per day | `MIN_AGENT_MAX_TRADES_PER_DAY` | 10 |
 | min confidence | `MIN_AGENT_MIN_CONFIDENCE` | 0.5 |
 | short selling | `MIN_AGENT_SHORTS` | `off` |
+| manage the whole account | `MIN_AGENT_MANAGE_ACCOUNT` | `false` |
 
 - **Paper only.** `config.is_paper_endpoint` is the single definition, and both the CLI and the
   executor go through it.
-- **The agent only sells what it bought.** A SELL is bounded by the agent's own confirmed
-  fills, not by what the account holds. A SHORT is refused while the account holds any long
+- **By default the agent only sells what it bought.** A SELL is bounded by the agent's own
+  confirmed fills, not by what the account holds. An account holder who wants the agent to
+  manage every position sets `MIN_AGENT_MANAGE_ACCOUNT=true`, and a SELL is then bounded by the
+  account's position. Every other limit still applies. A SHORT is refused while the account holds any long
   in that symbol, and a COVER may only buy back what the agent itself shorted.
 - **Limits only get tighter.** Nothing in the code raises a limit. A higher limit is the
   operator's decision, made in the env file.
@@ -227,7 +230,7 @@ src/min_agent/          the package (import name min_agent). 41 modules, 3 exter
   models.py             shared schema, imported by 23 modules
   research/             walk-forward backtests; production may not import it
 tools/                  the gate (verify.py), benchmark, daily report, probes, systemd templates
-tests/min_agent/        70 test files
+tests/min_agent/        71 test files
 examples/               the smallest runnable example, no broker needed
 configs/                paper.env.example: every environment variable with its default
 docs/                   ARCHITECTURE.md, evidence/, history/

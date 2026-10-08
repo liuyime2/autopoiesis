@@ -61,6 +61,12 @@ class AgentConfig:
     #: them through the Guardian and journals them as intents while long orders stay real;
     #: `paper` submits them. A rollout switch, so shorts can be watched before they trade.
     shorts: str = "off"
+    #: Whether the agent manages every position in the account, not only the shares it
+    #: bought itself. Off by default: a SELL is then bounded by the agent's own confirmed
+    #: fills, so an account holder's pre-existing shares are never sold. Turning it on is the
+    #: account holder's decision, made in the env file, and every other Guardian rule still
+    #: applies - allowlist, position and exposure caps, daily loss, trade count, paper only.
+    manage_account: bool = False
     max_daily_cycles: int = 288
     heartbeat_path: Path = Path("runtime/min_agent/heartbeat.json")
     pidfile_path: Path = Path("runtime/min_agent/daemon.pid")
@@ -113,6 +119,7 @@ class AgentConfig:
                 "MIN_AGENT_COUNTERFACTUAL_HORIZON_HOURS", 24.0),
             shadow=_flag("MIN_AGENT_SHADOW", False),
             shorts=_choice("MIN_AGENT_SHORTS", ("off", "shadow", "paper"), "off"),
+            manage_account=_choice("MIN_AGENT_MANAGE_ACCOUNT", ("false", "true"), "false") == "true",
             max_daily_cycles=_positive_int("MIN_AGENT_MAX_DAILY_CYCLES", 288),
             heartbeat_path=Path(os.getenv("MIN_AGENT_HEARTBEAT", "runtime/min_agent/heartbeat.json")),
             pidfile_path=Path(os.getenv("MIN_AGENT_PIDFILE", "runtime/min_agent/daemon.pid")),

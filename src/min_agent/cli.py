@@ -319,12 +319,15 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
     # batches. Measured live on 2026-10-05: 0 incumbent selections in 8 cycles.
     served_count: dict[str, int] = {"cycles": 0}
 
+    # ~300 cycles per symbol: the journal interleaves every symbol the daemon trades, and the
+    # market context needs about three trading days of each.
+    history_records = 300 * max(1, len(config.symbols))
     policy_engine = PolicyEngine(
         strategy_library=strategy_library,
         reflection_memory=reflection_memory,
         knowledge_library=knowledge_library,
         served_provider=lambda: served_count["cycles"],
-        market_history=lambda: journal.last_n(300),
+        market_history=lambda: journal.last_n(history_records),
     )
     # The LLM proposes; the policy engine is the disclosed fallback. Guardian
     # reviews whatever comes out either way. Previously the daemon injected
@@ -361,11 +364,12 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
             "allowlist": sorted(config.allowlist),
             "max_account_value": config.max_account_value or None,
             "shorts": config.shorts,
+            "manage_account": config.manage_account,
         },
         cost_basis=cost_basis,
         # ~300 five-minute cycles is a little over three trading days: enough for a 1-day
         # return and the regime's 78-bar window after repeated quotes are collapsed.
-        market_history=lambda: journal.last_n(300),
+        market_history=lambda: journal.last_n(history_records),
     )
     loop = TradingLoop(
         data_gateway=AlpacaDataGateway(client=client),
@@ -375,6 +379,7 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         journal=journal,
         mode=config.mode,
         trade_counter=TradeCounter(journal=journal),
+        manage_account=config.manage_account,
     )
     daemon = AgentDaemon(
         config=config,
