@@ -39,6 +39,10 @@ PNL_PENALTY = 0.2
 # rate 1.00" when every one of its orders was correctly blocked for selling
 # shares the gateway could not see.
 SYSTEM_REJECTION_REASONS = frozenset({
+    "the tradable universe is unknown, so a symbol outside the allowlist is refused",
+    "symbol is not a tradable US equity on a major exchange",
+    "symbol is priced below the minimum",
+    "symbol is a warrant, unit or right, not a stock",
     "market is closed",
     "max trades per day reached",
     "data snapshot is stale",

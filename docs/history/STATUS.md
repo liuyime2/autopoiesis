@@ -19,10 +19,10 @@ what does not change:
 | Fixed | Value |
 |---|---|
 | mode | `paper` - `cli.py` refuses to build a client against any host but Alpaca's paper |
-| allowlist | AAPL, BIL, MSFT, NVDA, QQQ, SPY, TLT, XLB, XLE, XLF |
+| allowlist | AAPL, BIL, MSFT, NVDA, QQQ, SPY, TLT, XLB, XLE, XLF; universe `tradable`: any active US stock on a major exchange priced at least $5, 4 extra liquid names per round |
 | traded symbols | SPY, BIL, TLT, XLB, XLE, XLF - every position in the account |
 | account | managed whole (`MIN_AGENT_MANAGE_ACCOUNT=true`), the account holder's decision of 2026-10-07 |
-| hard limits | $25,000 per position, $90,000 total exposure, $500 daily loss, 10 trades/day |
+| hard limits | $25,000 per position, $90,000 total exposure, $500 daily loss, 100 trades/day |
 | model | `qwen3.8:27b` on Ollama at `127.0.0.1:11434` |
 | credentials | `$XDG_CONFIG_HOME/min-agent/env`, mode 600, outside the repository |
 | units | `~/.config/systemd/user/`, five enabled (daemon, Ollama, watchdog, research, report), durable across reboot |

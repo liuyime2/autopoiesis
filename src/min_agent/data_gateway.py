@@ -34,6 +34,7 @@ class AlpacaDataGateway:
         self.client = client
         #: Why the last `daily_closes` call returned nothing (None while it has not failed).
         self.last_daily_error: str | None = None
+        self.last_universe_error: str | None = None
 
     def snapshot(self, symbol: str) -> DataSnapshot:
         symbol = symbol.upper()
@@ -74,6 +75,69 @@ class AlpacaDataGateway:
             positions=self._fetch_positions(),
             open_orders=self._fetch_open_orders(),
         )
+
+    #: Exchanges whose listings count as a normal US stock. OTC is a different market.
+    MAJOR_EXCHANGES = frozenset({"NASDAQ", "NYSE", "ARCA", "AMEX", "BATS"})
+
+    def tradable_symbols(self) -> frozenset[str] | None:
+        """Active, tradable US equities on a major exchange, cached for the day. `None` on failure
+        (the Guardian then refuses rather than guess). Read-only."""
+        from datetime import date
+
+        today = date.today()
+        cached = getattr(self, "_tradable_cache", None)
+        if cached and cached[0] == today:
+            return cached[1]
+        try:
+            assets = self.client.list_assets(status="active", asset_class="us_equity")
+            symbols = frozenset(
+                str(a.symbol).upper() for a in assets
+                if getattr(a, "tradable", False) and str(getattr(a, "exchange", "")).upper() in self.MAJOR_EXCHANGES
+            )
+        except Exception as exc:
+            self.last_universe_error = f"{type(exc).__name__}: {exc}"
+            return cached[1] if cached else None  # yesterday's list beats no list
+        self._tradable_cache = (today, symbols)
+        return symbols
+
+    def held_symbols(self) -> list[str]:
+        """Every symbol the account holds a non-zero position in, sorted. Read-only."""
+        return sorted({p.symbol for p in self._fetch_positions() if p.quantity != 0})
+
+    def attention_symbols(self, k: int, *, min_price: float = 5.0, exclude: frozenset[str] = frozenset()) -> list[str]:
+        """Up to `k` symbols worth a look this round: the broker's most active by dollar volume,
+        after quality filters (a major exchange, priced at least `min_price`, not a warrant, unit
+        or right). The raw list is mostly penny stocks and SPAC paper. Read-only; `[]` on failure."""
+        if k <= 0:
+            return []
+        try:
+            raw = self.client.data_get("/screener/stocks/most-actives", {"by": "volume", "top": 60}, api_version="v1beta1")
+            names = [str(x["symbol"]).upper() for x in raw.get("most_actives", [])]
+            allowed = self.tradable_symbols()
+            movers = self.client.data_get("/screener/stocks/movers", {"top": 40}, api_version="v1beta1")
+            names += [str(x["symbol"]).upper() for x in movers.get("gainers", []) + movers.get("losers", [])
+                      if float(x.get("price", 0) or 0) >= min_price]
+        except Exception as exc:
+            self.last_universe_error = f"{type(exc).__name__}: {exc}"
+            return []
+        candidates: list[str] = []
+        for s in names:
+            if s in exclude or s in candidates or not (1 <= len(s) <= 5) or not s.isalpha():
+                continue
+            if len(s) == 5 and s[-1] in "WUR":  # warrants, units, rights
+                continue
+            if allowed is not None and s not in allowed:
+                continue
+            candidates.append(s)
+        if not candidates:
+            return []
+        try:  # the most-active list carries no price; one batched call removes the penny stocks
+            trades = self.client.get_latest_trades(candidates[:80])
+            price = {s: float(getattr(trades.get(s), "price", 0) or getattr(trades.get(s), "p", 0) or 0) for s in candidates[:80]}
+        except Exception as exc:
+            self.last_universe_error = f"{type(exc).__name__}: {exc}"
+            return []
+        return [s for s in candidates if price.get(s, 0.0) >= min_price][:k]
 
     def daily_closes(self, symbol: str, days: int = 2800) -> list[float] | None:
         """Split- and dividend-adjusted daily closes, oldest first, ending yesterday. Read-only.

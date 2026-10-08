@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from min_agent.models import BROKER_SIDE, DataSnapshot, GuardianResult, StrategySpec, TradeDecision
@@ -23,7 +24,16 @@ class Guardian:
         min_confidence: float = 0.5,
         max_snapshot_age_seconds: int = 900,
         shorts: str = "off",
+        universe: str = "allowlist",
+        tradable: Callable[[], frozenset[str] | None] | frozenset[str] | None = None,
+        min_price: float = 5.0,
     ):
+        #: See config.AgentConfig.universe. `tradable` is the broker's set of active US equities on
+        #: major exchanges (or a function returning it, refreshed daily by the gateway); when the
+        #: universe needs it and it is unknown, the Guardian refuses rather than guess.
+        self.universe = universe
+        self._tradable = tradable
+        self.min_price = min_price
         self.allowlist = frozenset(symbol.upper() for symbol in allowlist)
         self.max_position_value = max_position_value
         self.max_daily_loss = max_daily_loss
@@ -52,12 +62,9 @@ class Guardian:
         if decision.symbol != snapshot.symbol:
             return GuardianResult(approved=False, reason="decision symbol does not match data snapshot")
 
-        if decision.action != "SELL" and decision.symbol not in self.allowlist:
-            return GuardianResult(approved=False, reason="symbol is outside the allowlist")
-
-        if decision.action == "SELL" and decision.symbol not in self.allowlist:
-            if not any(pos.symbol == decision.symbol for pos in snapshot.positions):
-                return GuardianResult(approved=False, reason="symbol is outside the allowlist")
+        outside = self._outside_mandate(decision, snapshot)
+        if outside is not None:
+            return GuardianResult(approved=False, reason=outside)
 
         if self._is_stale(snapshot, now=now):
             return GuardianResult(approved=False, reason="data snapshot is stale")
@@ -187,8 +194,12 @@ class Guardian:
         # accounting stays auditable rather than merely convenient.
         # Absolute values: a short position's market value is negative, and netting it against
         # longs would let a short *raise* the room left for buying. Exposure is gross.
+        # Under a universe wider than the allowlist the agent may trade every position, so its
+        # book is the whole account; otherwise only the allowlist's.
         mandate_value = sum(
-            abs(pos.market_value) for pos in snapshot.positions if pos.symbol in self.allowlist
+            abs(pos.market_value)
+            for pos in snapshot.positions
+            if self.universe != "allowlist" or pos.symbol in self.allowlist
         )
         account_value = sum(abs(pos.market_value) for pos in snapshot.positions)
         if self.max_total_exposure is not None and decision.action in {"BUY", "SHORT"}:
@@ -240,6 +251,27 @@ class Guardian:
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=timezone.utc)
         return (current - timestamp).total_seconds() > self.max_snapshot_age_seconds
+
+    def _outside_mandate(self, decision: TradeDecision, snapshot: DataSnapshot) -> str | None:
+        """Why this symbol may not be traded, or None. The one place the universe is decided."""
+        symbol = decision.symbol
+        if symbol in self.allowlist:
+            return None
+        held = any(pos.symbol == symbol and pos.quantity != 0 for pos in snapshot.positions)
+        if held and (decision.action == "SELL" or self.universe != "allowlist"):
+            return None  # an exit of what the account holds was always allowed; a wider universe allows more
+        if self.universe == "tradable":
+            if len(symbol) == 5 and symbol[-1] in "WUR":
+                return "symbol is a warrant, unit or right, not a stock"
+            known = self._tradable() if callable(self._tradable) else self._tradable
+            if known is None:
+                return "the tradable universe is unknown, so a symbol outside the allowlist is refused"
+            if symbol not in known:
+                return "symbol is not a tradable US equity on a major exchange"
+            if snapshot.last_price < self.min_price:
+                return "symbol is priced below the minimum"
+            return None
+        return "symbol is outside the allowlist"
 
     def _has_position(self, snapshot: DataSnapshot, symbol: str, quantity: int) -> bool:
         positions = [pos for pos in snapshot.positions if pos.symbol == symbol]

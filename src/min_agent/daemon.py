@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from min_agent import calibration, coerce, counterfactual, offline_validation
@@ -203,7 +204,7 @@ class AgentDaemon:
                     self.sleep(self._sleep_seconds())
                     continue
                 round_started = time.monotonic()
-                for symbol in self.config.symbols:
+                for symbol in self._round_symbols():
                     if self._stop_requested:
                         break
                     self._run_symbol(symbol)
@@ -1453,6 +1454,34 @@ class AgentDaemon:
         if last_at is None:
             return True
         return (self.now() - last_at).total_seconds() >= interval_seconds
+
+    def _round_symbols(self) -> list[str]:
+        """The symbols this round looks at: the configured ones, then (under a universe wider than
+        the allowlist) everything the account holds, then up to `attention_slots` of the broker's
+        most-active liquid names. Any failure to ask the broker falls back to what is configured,
+        so a data problem narrows the round rather than stopping it."""
+        symbols = list(self.config.symbols)
+        if self.config.universe == "allowlist":
+            return symbols
+        gateway: Any = getattr(self.loop, "data_gateway", None)
+        if gateway is None:
+            return symbols
+        seen = set(symbols)
+        try:
+            for held in gateway.held_symbols():
+                if held not in seen:
+                    symbols.append(held)
+                    seen.add(held)
+        except Exception as exc:
+            self._append_event("CYCLE_FAILED", status="FAILED", message=f"could not list held symbols: {exc}")
+        if self.config.universe == "tradable" and self.config.attention_slots > 0:
+            try:
+                symbols += gateway.attention_symbols(
+                    self.config.attention_slots, min_price=self.config.min_price, exclude=frozenset(seen)
+                )
+            except Exception as exc:
+                self._append_event("CYCLE_FAILED", status="FAILED", message=f"could not pick attention symbols: {exc}")
+        return symbols
 
     def _round_sleep_seconds(self, elapsed: float) -> int:
         """The rest of the trading interval, counted from the start of the round.
