@@ -164,6 +164,7 @@ def run_doctor(config: AgentConfig, *, client=None, skip_broker: bool = False) -
     _check_environment(report, config)
     _check_config(report, config)
     _check_broker(report, config, client, skip_broker)
+    _check_risk_forecast(report, config, client, skip_broker)
     _check_ollama(report, config)
     _check_daemon(report, config)
     _check_journal(report, config)
@@ -1161,6 +1162,40 @@ def _check_broker(report: DoctorReport, config: AgentConfig, client, skip: bool)
         hint="" if orders else "no open orders",
     )
     _check_unmanaged_exposure(report, config, client, positions)
+
+
+def _check_risk_forecast(report: DoctorReport, config: AgentConfig, client, skip: bool) -> None:
+    """Is the volatility forecast the decision context carries still ranking the volatility that followed?
+
+    The risk judgment is the one prediction that held up out of sample (rank correlation about
+    0.31), so it is held to a number: for each traded symbol, the forecast made on each of the
+    last year's days against the volatility that actually followed it. Below the floor the
+    context marks the judgment SUSPENDED; this reports why, so a stale forecast is not
+    mistaken for a working one.
+    """
+    if skip or client is None or config.missing_alpaca_credentials():
+        report.add("risk forecast", SKIP, "needs the broker's daily bars")
+        return
+    from min_agent.data_gateway import AlpacaDataGateway
+    from min_agent.risk_judgment import MIN_QUALITY, forecast_quality, quality_status
+
+    gateway = AlpacaDataGateway(client=client)
+    rows, weak = [], []
+    for symbol in config.symbols:
+        closes = gateway.daily_closes(symbol)
+        q = forecast_quality(closes) if closes else {"rank_corr": None, "n": 0, "effective_n": 0.0, "se": None}
+        rc = q["rank_corr"]
+        rows.append(f"{symbol} {'n/a' + (f' ({gateway.last_daily_error})' if gateway.last_daily_error else '') if rc is None else f'{rc:+.2f}'}")
+        if quality_status(q) != "ACTIVE":
+            weak.append(symbol)
+    if weak:
+        report.add(
+            "risk forecast", WARN,
+            f"the forecast is not shown to rank realised volatility (floor {MIN_QUALITY}) for: {', '.join(weak)} ({'; '.join(rows)})",
+            hint="the risk block gives no scaling advice for these symbols (UNVERIFIED or SUSPENDED)",
+        )
+    else:
+        report.add("risk forecast", OK, f"forecast vs realised 21-day volatility, whole history: {'; '.join(rows)}")
 
 
 def _position_quantity(position) -> float:

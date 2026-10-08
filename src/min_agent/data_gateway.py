@@ -32,6 +32,8 @@ class AlpacaDataGateway:
 
     def __init__(self, *, client):
         self.client = client
+        #: Why the last `daily_closes` call returned nothing (None while it has not failed).
+        self.last_daily_error: str | None = None
 
     def snapshot(self, symbol: str) -> DataSnapshot:
         symbol = symbol.upper()
@@ -72,6 +74,24 @@ class AlpacaDataGateway:
             positions=self._fetch_positions(),
             open_orders=self._fetch_open_orders(),
         )
+
+    def daily_closes(self, symbol: str, days: int = 2800) -> list[float] | None:
+        """Split- and dividend-adjusted daily closes, oldest first, ending yesterday. Read-only.
+
+        Adjusted so a split is not a crash: a volatility forecast fed a raw 2:1 split would see a
+        50% one-day move. `None` when the broker returns nothing or the call fails.
+        """
+        from datetime import date, timedelta
+
+        try:
+            end = (date.today() - timedelta(days=1)).isoformat()
+            start = (date.today() - timedelta(days=int(days * 1.5))).isoformat()
+            frame = self.client.get_bars(symbol.upper(), "1Day", start, end, adjustment="all").df
+            closes = [float(v) for v in frame["close"].tolist()]
+            return closes[-days:] if closes else None
+        except Exception as exc:
+            self.last_daily_error = f"{type(exc).__name__}: {exc}"
+            return None
 
     def _latest_price(self, symbol: str) -> float:
         trade = self.client.get_latest_trade(symbol)

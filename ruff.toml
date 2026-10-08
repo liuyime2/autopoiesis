@@ -8,7 +8,7 @@
 # house style it does not follow. `BLE001` (blind `except`) is deliberately excluded:
 # the daemon is designed to catch broadly and record the failure in the journal rather
 # than die mid-cycle, which is a correctness property here, not an oversight. Enabling
-# it would have produced 62 findings, all of them intentional.
+# it would have produced 65 findings, all of them intentional.
 
 
 line-length = 110
@@ -35,7 +35,7 @@ select = [
 ignore = [
     # The daemon catches broadly on purpose: a maintenance failure must be journaled
     # and survive, not crash the process and take the paper run down with it. Each of
-    # these 62 sites record what failed (see `_agent_holding_errors`,
+    # these 65 sites record what failed (see `_agent_holding_errors`,
     # `_maintenance`'s try/except, the doctor's per-check isolation).
     "BLE001",
     # Long lines in the strategy-library lookup tables are data, not logic; reflowing
@@ -59,7 +59,7 @@ ignore = [
     # contextlib.suppress says the same thing in more characters.
     "SIM105",
     # `cli.py` imports inside functions so that `--help` and the cheap subcommands do not
-    # pay for the 24 modules the daemon path needs. E402 is the wrong rule for deferred
+    # pay for the 25 modules the daemon path needs. E402 is the wrong rule for deferred
     # imports that are the entire point of the module.
     "E402",
     # Single-letter loop and lambda names in `tools/verify.py` (`for l in lines`,

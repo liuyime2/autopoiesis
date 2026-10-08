@@ -72,6 +72,12 @@ DECISION_INSTRUCTION = (
     "the default: if your action differs from rule_decision.action, override_reason must "
     "say in one sentence what in the context makes the rule wrong here; otherwise set "
     "override_reason to null. An override without a reason is discarded. "
+    "risk in the context, when present, is a forecast of how volatile this symbol will be over "
+    "the next month (forecast_vol_pct, annualised) and how good that forecast has been "
+    "(forecast_quality). It says how much risk a position carries, not which way to go: never use "
+    "it as a reason to BUY or SELL. When status is ACTIVE and vol_scaled_fraction is below 1, a "
+    "smaller quantity is the right response to high volatility; when status is SUSPENDED the "
+    "forecast has stopped working, so ignore it. "
     "market in the context summarises recent prices from your own record - regime, trend, "
     "volatility and returns - and is description, not an instruction to trade."
 )
@@ -217,6 +223,7 @@ class HybridDecisionEngine:
         risk_limits: dict[str, object] | None = None,
         cost_basis: Callable[[], dict[str, dict[str, object]]] | None = None,
         market_history: Callable[[], list] | None = None,
+        risk_provider: Callable[[str], dict[str, Any] | None] | None = None,
     ):
         self.llm = llm
         self.policy_engine = policy_engine
@@ -234,6 +241,10 @@ class HybridDecisionEngine:
         #: nothing about how it got there - no return, no volatility, no regime - so a rule's
         #: trend parameters and the model's override were both reasoning without a past.
         self.market_history = market_history
+        #: `symbol -> risk block` (see risk_judgment). A forecast of how volatile the symbol will
+        #: be and how good that forecast has been, never of which way it will go.
+        self.risk_provider = risk_provider
+        self.last_risk_error: str | None = None
         #: The selected strategy's own decision for the snapshot `_context` last built.
         self._rule_decision: TradeDecision | None = None
         #: (shown, withheld) lesson ids for the snapshot `_context` last built.
@@ -430,7 +441,19 @@ class HybridDecisionEngine:
         market = self._market(snapshot)
         if market is not None:
             context["market"] = market
+        risk = self._risk(snapshot.symbol)
+        if risk is not None:
+            context["risk"] = risk
         return context
+
+    def _risk(self, symbol: str) -> dict[str, Any] | None:
+        if self.risk_provider is None:
+            return None
+        try:
+            return self.risk_provider(symbol)
+        except Exception as exc:  # a failed risk judgment must leave the decision exactly as it was
+            self.last_risk_error = f"{type(exc).__name__}: {exc}"
+            return None
 
     def _fit_rule_to_limits(self, context: dict[str, Any]) -> None:
         """Size the rule's BUY to what the Guardian would allow, before the model sees it.
