@@ -68,6 +68,10 @@ class AgentConfig:
     #: applies - allowlist, position and exposure caps, daily loss, trade count, paper only.
     manage_account: bool = False
     max_daily_cycles: int = 288
+    #: How long one trading decision may take before the rule decides instead. The model
+    #: thinks before it answers - 30-50s on SPY, 122s once on a symbol it had not seen - so
+    #: the old fixed 120s turned a slow answer into a silent fallback to the rule.
+    llm_timeout_seconds: int = 240
     heartbeat_path: Path = Path("runtime/min_agent/heartbeat.json")
     pidfile_path: Path = Path("runtime/min_agent/daemon.pid")
     strategy_dir: Path = Path("runtime/min_agent/strategies")
@@ -121,6 +125,7 @@ class AgentConfig:
             shorts=_choice("MIN_AGENT_SHORTS", ("off", "shadow", "paper"), "off"),
             manage_account=_choice("MIN_AGENT_MANAGE_ACCOUNT", ("false", "true"), "false") == "true",
             max_daily_cycles=_positive_int("MIN_AGENT_MAX_DAILY_CYCLES", 288),
+            llm_timeout_seconds=_positive_int("MIN_AGENT_LLM_TIMEOUT_SECONDS", 240),
             heartbeat_path=Path(os.getenv("MIN_AGENT_HEARTBEAT", "runtime/min_agent/heartbeat.json")),
             pidfile_path=Path(os.getenv("MIN_AGENT_PIDFILE", "runtime/min_agent/daemon.pid")),
             strategy_dir=Path(os.getenv("MIN_AGENT_STRATEGY_DIR", "runtime/min_agent/strategies")),
