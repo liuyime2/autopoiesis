@@ -1,312 +1,251 @@
-# min-agent
+# Autopoiesis
 
-[![ci](https://github.com/liuyime2/autopoiesis/actions/workflows/ci.yml/badge.svg)](https://github.com/liuyime2/autopoiesis/actions/workflows/ci.yml)
+**A self-evolving LLM trading agent that has to prove every strategy it keeps — against the
+broker's own records — and retires the ones that cannot.**
 
-A paper-trading agent that decides for itself whether its own strategies are any good,
-using the broker's records as evidence, and retires the ones that are not.
+[![CI](https://github.com/liuyime2/autopoiesis/actions/workflows/ci.yml/badge.svg)](https://github.com/liuyime2/autopoiesis/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+[![Paper trading only](https://img.shields.io/badge/trading-paper%20only-orange.svg)](#safety)
+[![Gate: 52 check classes](https://img.shields.io/badge/gate-52%20check%20classes-brightgreen.svg)](tools/verify.py)
+[![Lint: ruff](https://img.shields.io/badge/lint-ruff-261230.svg)](ruff.toml)
+[![Types: mypy](https://img.shields.io/badge/types-mypy-2a6db2.svg)](pyproject.toml)
+[![Broker: Alpaca](https://img.shields.io/badge/broker-Alpaca%20paper-yellow.svg)](https://alpaca.markets/)
+[![LLM: Ollama](https://img.shields.io/badge/LLM-local%20via%20Ollama-black.svg)](https://ollama.com/)
 
-> **Paper trading only. Not investment advice. No performance claim.** Live trading is
-> refused in code: `cli.py` rejects any base URL that is not a paper endpoint before a client
-> is constructed. On the record so far the system **does not** beat holding SPY - run
-> `make benchmark` for the current verdict and its denominators, and see
-> [`docs/history/`](docs/history/README.md) for every number that was later retracted.
+*Autopoiesis* — from the Greek for "self-making": a system that produces and maintains itself.
+This agent trades, scores its own decisions against what the market did next, proposes new
+strategies, and removes the ones the evidence does not support. Every step is written to an
+append-only journal, so whatever the agent claims about itself can be checked.
 
-**No credentials needed to start.** `make smoke-offline` and `make verify` run on a fresh
-clone with no broker account, no model and no secrets; CI runs the same way.
+> **Paper trading only. Not investment advice. No performance claim.**
+> Live trading is refused in code: any broker URL that is not Alpaca's paper endpoint is
+> rejected before a client is built. On the record so far the system **does not** beat
+> holding SPY — `make benchmark` prints the current verdict with its denominators.
 
-For how the system is put together - the canonical execution path, the evolution loop,
-and which module owns which fact - start at [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-This file is the operator's guide: what to run, what to look at when it misbehaves, and
-what each hard limit is. To contribute, read [`CONTRIBUTING.md`](CONTRIBUTING.md); to report
-a vulnerability, [`SECURITY.md`](SECURITY.md). Changes are listed in
-[`CHANGELOG.md`](CHANGELOG.md); community standards are in
-[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+## Contents
 
-## What it actually does
+[What it is](#what-it-is) · [Features](#features) · [How it works](#how-it-works) ·
+[Quick start](#quick-start) · [Paper trading](#paper-trading) · [Commands](#commands) ·
+[Reproducing the results](#reproducing-the-results) · [Safety](#safety) ·
+[Project layout](#project-layout) · [Documentation](#documentation) · [License](#license)
 
-Every five minutes while the market is open:
+## What it is
 
-1. Read a snapshot from the broker - price, positions, account, clock.
-2. Ask the model for a decision, or use the deterministic fallback if it cannot be reached.
-3. Put the decision past the **Guardian**, which refuses anything that breaches a hard risk
-   limit. The Guardian is not advisory and has no bypass.
-4. Submit the order and journal the cycle.
-5. Every fifteen minutes, reconcile pending orders against the broker, re-score the
-   strategies from broker-confirmed fills, propose a new strategy if the library has a gap
-   in it, and move each strategy's lifecycle on the evidence.
+Most LLM trading demos show a model choosing BUY or SELL. That is the easy part. The hard part
+is knowing whether a decision was *any good*, and acting on the answer without fooling
+yourself. Autopoiesis is built around that second part:
 
-The unusual part is step 5. The system is permitted to remove its own strategies. A
-strategy that cannot demonstrate worth does not stay in the library just because it is
-there.
+- **Evidence comes from the broker, not the agent.** PnL is computed from broker-confirmed
+  fills, FIFO lot by lot. Nothing the model says about itself counts as evidence.
+- **A strategy has to earn its place.** Strategies start on probation, are promoted only on
+  measured evidence, and are paused or retired with the numbers written into the reason.
+- **The model is scored against a baseline.** Each strategy's own rule decides first. The LLM
+  may override it only by stating a reason, and both actions are recorded, so the model's
+  contribution is measured as a pair on identical inputs.
+- **Hard limits that the agent cannot change.** A deterministic Guardian sits on the only path
+  that can submit an order, and it has no bypass.
 
-## Install
+## Features
 
-Requires Python 3.10+. A broker account is needed only to trade; everything else runs
-without one.
+| | |
+|---|---|
+| **Autonomous loop** | Every 5 minutes while the market is open: snapshot → decision → Guardian → order → journal. It starts at the open and drops to maintenance-only at the close. |
+| **LLM decisions with a baseline** | A local LLM (via Ollama) sees the strategy's rule decision, the position and limits, and market context (regime, trend, volatility, returns). An override with no reason is discarded. |
+| **Self-evolution** | Counterfactual scoring of every decision → calibration → reflection → a curriculum agent proposing new strategies → admission → offline screen → probation → promotion or retirement. |
+| **Honest screening** | A strategy is compared with what its trading days alone would have scored, so a rising market does not pass as skill. It is rejected only when worse by two standard errors. |
+| **Lessons with an ablation** | Each lesson in the prompt is shown on half the cycles. One with no measured effect after 10 trading days is retired. |
+| **Constrained strategy DSL** | New strategies are parameter-only rules (`RULE`, `TREND_FOLLOW`, …) checked by a schema. The model never writes code. |
+| **Bounded short selling** | SHORT/COVER sit behind `MIN_AGENT_SHORTS` (`off` / `shadow` / `paper`), with their own Guardian rule. Off by default. |
+| **Broker-verified accounting** | FIFO lot ledger, realised and unrealised PnL, attribution to model vs baseline, and a SPY buy-and-hold benchmark on the same capital and window. |
+| **Self-checking** | `make verify` runs 52 check classes over code *and* the running system; `make verify-self-test` breaks the gate on purpose to prove it can fail. A watchdog restarts the daemon, and a report is written after every close. |
+| **Reproducible** | One script clones the committed tree into a new venv with no credentials and runs everything; its log is committed. |
 
-```bash
-git clone https://github.com/liuyime2/autopoiesis.git min-agent && cd min-agent
-python3 -m venv .venv && . .venv/bin/activate
-make install           # pip install -e ".[dev]"
-make smoke-offline     # import, config, CLI - no broker contacted
-make check             # lint + mypy + tests
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph cycle["Trading cycle, every 5 min"]
+        A["Broker snapshot<br/>(Alpaca paper)"] --> B["Strategy rule<br/>decides first"]
+        B --> C["LLM may override<br/>with a reason"]
+        C --> D{"Guardian<br/>hard limits"}
+        D -- approved --> E["Submit order"]
+        D -- refused --> F["Journal the refusal"]
+        E --> G[("Append-only<br/>journal")]
+        F --> G
+    end
+    subgraph evolve["Maintenance, every 15 min"]
+        G --> H["Reconcile fills<br/>FIFO ledger"]
+        H --> I["Counterfactual scoring<br/>vs what the market did"]
+        I --> J["Reflection + lessons"]
+        J --> K["Curriculum proposes<br/>a strategy"]
+        K --> L["Admission + offline screen"]
+        L --> M["Lifecycle: probation →<br/>active / paused / retired"]
+    end
+    M -. "strategy library" .-> B
+    J -. "lessons" .-> C
 ```
 
-On Debian or Ubuntu the system Python needs `sudo apt install python3-venv` first, or
-`python3 -m venv` creates an environment without pip. conda works too (`conda create -n llm python=3.10 && conda activate llm`, then the same
-`make` targets); an active venv takes precedence over conda, and neither `make` nor
-`minictrl` requires conda.
+The journal (`runtime/min_agent/journal.jsonl`) is the only source of truth. Every other piece
+of state is derived from it and can be regenerated. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the execution path, the evolution loop and
+which module owns which fact.
 
-To trade on paper, put `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` and `ALPACA_BASE_URL` (the paper
-endpoint) into `${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env`, mode 600. Credentials live
-outside the repository and are never read from a checked-in file;
-`configs/paper.env.example` lists every variable with its default. `make setup` prints these
-steps.
+## Quick start
 
-That path is verified rather than asserted: cloning into a clean environment and running it
-found three things that only fail off the live machine - `ruff` and `mypy` missing from
-`[dev]`, a test that read the live strategy library from `runtime/`, and a `smoke-offline`
-target that passed `--skip-broker` to a flag which only applies to `--doctor`. All three
-are fixed; see `docs/MIGRATION.md`.
+No broker account, model or credentials are needed for any of this.
+
+```bash
+git clone https://github.com/liuyime2/autopoiesis.git && cd autopoiesis
+python3 -m venv .venv && . .venv/bin/activate
+make install                    # pip install -e ".[dev]"
+make check                      # ruff + mypy + the test suite
+make smoke-offline              # config and CLI end to end, no broker contacted
+python examples/minimal_cycle.py  # the Guardian approving one order and refusing another
+make verify                     # the full gate: 52 check classes
+```
+
+On Debian or Ubuntu, run `sudo apt install python3-venv` first. conda also works: the `make`
+targets use an active venv first, then conda, and need neither.
+
+## Paper trading
+
+1. Create a free [Alpaca](https://alpaca.markets/) **paper** account and an API key.
+2. Install [Ollama](https://ollama.com/) and pull a model (default: `qwen3.8:27b`; set
+   `MIN_AGENT_MODEL` to use another). Without a model, the deterministic policy engine decides
+   and every decision is labelled `fallback_policy_engine`.
+3. Put the credentials in `${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env`, mode 600. They are
+   never read from the repository. [`configs/paper.env.example`](configs/paper.env.example)
+   lists every variable with its default:
+
+   ```bash
+   ALPACA_API_KEY=...
+   ALPACA_SECRET_KEY=...
+   ALPACA_BASE_URL=https://paper-api.alpaca.markets
+   ```
+
+4. Check the connection, then run it:
+
+   ```bash
+   make smoke                      # one real cycle against the paper account
+   ./minictrl install-service      # systemd user units: daemon, Ollama, watchdog, research, report
+   make run                        # start the daemon
+   make status                     # alive? which strategy? last decision?
+   make doctor                     # health of the running system, non-zero on any fault
+   ```
+
+On Linux, `loginctl enable-linger $USER` keeps the services running after you log out and
+starts them at boot. The daemon trades by itself at the open and drops to maintenance at the
+close. The report timer writes `runtime/min_agent/reports/<date>.txt` at 16:30 New York time
+on weekdays.
 
 ## Commands
 
-Every task is a `make` target. There are no other scripts to memorise - the deleted shell
-wrappers each duplicated a flag below.
+Every task is a `make` target.
 
-| Command | What it does | Cost |
-| --- | --- | --- |
-| `make check` | lint + mypy + test, no broker | ~15s |
-| `make smoke` | one real cycle end to end against the broker | ~8s |
-| `make smoke-offline` | config and CLI end to end with `--skip-broker`; no broker, no model | ~20s |
-| `make fast` | check + smoke + the full gate | ~90s |
-| `make verify` | 52 check classes, non-zero on any failure | ~100s |
-| `make test` | the whole suite | ~5min |
-| `make doctor` | health of the running system, non-zero on any fault | ~20s |
-| `make status` | is the daemon alive and what is it doing | ~1s |
-| `make run` / `make stop` / `make restart` | control the daemon via systemd | ~2s |
-| `make reproduce` | record commit, config, versions, broker clock, metrics for this run | ~5s |
-| `make benchmark` | does the system beat SPY buy-and-hold on the same capital and window; exit 0 met / 1 behind / 2 nothing to measure | ~30s |
-| `./minictrl owner-history` | journal the account owner's fills (read-only) so an agent sale beyond its own lots can be priced | ~60s |
+| Command | What it does | Needs a broker |
+|---|---|---|
+| `make check` | lint + mypy + tests | no |
+| `make smoke-offline` | config and CLI end to end with `--skip-broker` | no |
+| `make verify` | the gate: 52 check classes; `CLASS=<name>` re-runs one | no¹ |
+| `make verify-self-test` | breaks the gate on purpose and checks it fails | no |
+| `make smoke` | one real cycle against the paper account | yes |
+| `make fast` | check + smoke + the gate | yes |
+| `make run` / `stop` / `restart` / `status` | control the daemon via systemd | yes |
+| `make doctor` | health of the running system | yes |
+| `make benchmark` | each strategy against SPY buy-and-hold, same capital and window; exit 0 ahead / 1 behind / 2 nothing to measure | journal |
+| `make daily-report` | one trading day's validation report (`DATE=YYYY-MM-DD`) | journal |
+| `make pipeline` | validate-data → test → evaluate → reproduce | journal |
+| `make reproduce` | record commit, config, versions and metrics for a run | no |
 
-`make type` runs mypy and blocks. It is part of `make check`, so a type
-regression fails the fast loop rather than waiting for review.
+¹ On a deployment the gate also checks the running daemon. On a fresh clone, those checks
+report SKIP rather than FAIL.
 
-### The iteration loop
+When the gate is red, read which class failed before concluding the code is wrong. Some
+classes judge the running system (for example, "is the model adding value?"). Those can fail
+on a trading result, while `make check` speaks only about the repository.
 
-```
-edit  ->  make check  ->  make smoke  ->  make fast
-```
-
-`make check` is deliberately cheap and catches the things a real edit breaks. `make smoke`
-is the first stage that touches the network and the model, so it catches a changed API
-contract, a broken credential path or an unparseable decision. `make fast` is the gate.
-
-One failing check class can be re-run alone: `make verify CLASS=pnl-accounting`.
-
-## Where things are
-
-```
-src/min_agent/          the package. 41 modules, 3 external dependencies.
-  cli.py                the single entry point
-  daemon.py             the cycle loop and the maintenance loop
-  guardian.py           hard risk limits. not bypassable
-  loop.py               one cycle: snapshot -> decision -> guardian -> execute
-  journal.py            append-only record. the source of truth
-  models.py             shared schema, imported by 23 modules
-  strategy_engine.py    strategy library, selection, lifecycle
-  evaluator.py          scoring from broker-confirmed evidence
-  research/             diagnosis only. production may not import it, and a gate enforces that
-tools/verify.py         the gate: 52 check classes
-tools/provenance.py     what `make reproduce` records
-tests/min_agent/        71 test files
-examples/minimal_cycle.py   the smallest runnable example, no broker needed
-configs/paper.env.example   every environment variable, with its default
-.github/workflows/      CI: lint, mypy, tests, offline smoke, the gate and its self-test
-runtime/min_agent/      all state. gitignored, regenerable except journal.jsonl
-docs/ARCHITECTURE.md    the current architecture, then the pre-refactor map behind a dated marker
-docs/MIGRATION.md       what changed and what replaced it
-```
-
-## State
-
-`runtime/min_agent/journal.jsonl` is the only source of truth. Every other file is derived
-from it and can be deleted and regenerated: `reflection.json`, `heartbeat.json`,
-`risk_baseline.json`, `market-state.json` (written by nothing since the deleted `check-market-open.sh`), `curriculum_state.json`, `strategies/`.
-
-`docs/ARCHITECTURE.md` has the full table and the data flow; its final section records
-what the repository looked like before this refactor.
-
-## Debugging
-
-```bash
-make status                      # daemon alive? which strategy? last decision?
-./minictrl logs        # the systemd journal for the daemon
-python -m min_agent.cli --doctor # why the doctor says what it says
-```
-
-When something looks wrong, the journal is the record. One line is one cycle, and it
-carries the snapshot, the decision, the Guardian's verdict and the execution result:
-
-```bash
-tail -1 runtime/min_agent/journal.jsonl | python3 -m json.tool | head -40
-```
-
-## Adding a strategy
-
-Strategies are proposed by the curriculum agent, admitted by `strategy_admission.py`, and
-moved through `PROBATION -> ACTIVE / PAUSED / RETIRED`. A new one is not added by writing a
-file into `strategies/` - `doctor` reports any file without a recorded admission verdict as
-a blocking failure, on purpose.
-
-A `TREND_FOLLOW` is refused if its `reference_price` cannot trade in either direction: too
-far from the market to be a real price, or so close that its own trigger band already
-contains the current price, which would leave it permanently `HOLD`. A trigger the market
-has not reached yet is fine - that is a resting order, and the rule follows the price
-rather than purging once. See
-[`docs/history/plans/2026-10-03-refuse-untradeable-strategy.md`](docs/history/plans/2026-10-03-refuse-untradeable-strategy.md)
-for the measurement behind it.
-
-## Verifying a change did not break something
-
-```bash
-make fast
-```
-
-`make verify` is the gate the project's own objective asks for. `make verify-self-test`
-breaks it on purpose to prove it can fail - a verification command that cannot fail is
-believed rather than run.
-
-## Hard limits
-
-Read once from the environment by `config.py` and enforced by `guardian.py`. The Guardian
-has no bypass - it is called on the single path that can submit an order.
-
-| Limit | Env var | Default |
-| --- | --- | --- |
-| max position value | `MIN_AGENT_MAX_POSITION_VALUE` | $5,000 |
-| max total exposure | `MIN_AGENT_MAX_TOTAL_EXPOSURE` | 4x position value |
-| max daily loss | `MIN_AGENT_MAX_DAILY_LOSS` | $500 |
-| max trades per day | `MIN_AGENT_MAX_TRADES_PER_DAY` | 10 |
-| min confidence | `MIN_AGENT_MIN_CONFIDENCE` | 0.5 |
-| short selling | `MIN_AGENT_SHORTS` | `off` (`shadow` journals SHORT/COVER as intents; `paper` submits them) |
-
-A short is a separate rule, not a relaxation of these: it is refused while the account holds
-any long in the symbol, capped by the same position and exposure limits (measured gross), and
-a COVER may only buy back what the agent itself shorted.
-
-They are environment-overridable, so a *lower* limit is a legitimate tightening and a
-*higher* one is a risk decision that belongs to whoever operates the account, not to the
-agent. Nothing in the codebase raises them.
-
-A SELL is additionally bounded by what the agent itself bought, computed by replaying
-`ORDER_FILL_CONFIRMED` events from the journal - not by what the account holds. The account
-holder's shares are not the agent's to sell, and an agent that cannot establish what it
-owns is refused rather than allowed to guess.
-
-## Known debt
-
-`make type` is a gate and reports 0 findings. It used to report 95 and block
-nothing: the recipe was `-@$(CONDA_RUN) mypy ...`, and the leading `-` makes make
-ignore the exit code, so the findings were printed on every run while the command
-still passed. Paying that debt is what found four real defects, none of them
-annotation noise:
-
-- `cli.py` passed `cost_basis` as a one-argument callable to a parameter typed as
-  taking none. The engine's zero-argument call raised `TypeError`, a surrounding
-  `except Exception` turned it into an empty mapping, and the model was silently
-  given no cost basis - so it could not tell profit from loss, which is the one
-  thing that context exists to provide.
-- `llm_decision.py` defined `Transport` twice at module level with incompatible
-  signatures. Python bound the second, so the type readers saw was not the type
-  that ran, and the first was unreachable.
-- `research/backtest.py` carried its own `Bar` and `bars_from_records`,
-  byte-identical to `min_agent.regime`'s. A bar built by the research copy was a
-  *different class* from the one production returns, so a rule could be handed
-  something structurally right and nominally wrong. It now imports both.
-- `strategy_engine.py` printed "kept X which has N cycles against this one's N",
-  reading the duplicate's result for both numbers, so the justification for a
-  retirement compared a strategy against itself.
-
-The remaining 91 were annotation precision at `Callable` and `dict` boundaries.
-They were fixed at the boundaries rather than silenced: one canonical
-`min_agent.coerce` now does every payload narrowing, and reports the field name
-and the offending value when a record is unreadable, instead of raising a bare
-`invalid literal for int()`.
-
-[`docs/history/`](docs/history/README.md) is the historical record - the running log
-(`STATUS.md`), the defect audit, and one plan per change - kept because it records why
-specific decisions were made, including the claims that were later retracted. It is not documentation of how the system works - this
-file and `docs/ARCHITECTURE.md` are.
-
-## The pipeline
-
-```bash
-make install        # once: install the package and its dev dependencies
-make pipeline       # validate-data -> test -> evaluate -> reproduce
-```
-
-`make pipeline` is the whole loop as one command. Each stage is independently runnable and
-each is a real check rather than a step that prints "ok": `validate-data` parses the runtime
-state before anything consumes it, `test` runs the suite, `evaluate` scores the paper record
-from broker evidence, and `reproduce` records the commit, environment, config and metrics that
-produced the result.
-
-`install` is deliberately not a pipeline stage - re-resolving dependencies partway through
-would mutate the environment the other stages are running in.
-
-`evaluate` exits zero even when the 10% daily target is not met. That is a measurement, not a
-build failure; if it failed the pipeline, the one number this project exists to move would
-become something you learn to ignore.
-
-### Two gates, and why
-
-`make check` (lint + mypy + tests) answers "is this repository correct?" and is the gate that runs in
-CI. `make verify` additionally runs `minictrl doctor` against the live deployment, so on a
-host where the agent is trading it also answers "is the agent doing well?".
-
-That means `make verify` can legitimately go **red for a trading result rather than a code
-defect**, and on this host it does. `pnl attribution` is FAIL right now: the model opened four
-lots and contributed -0.98 to a total of +563.41. That is a health failure and not a build
-failure, and `tests/min_agent/test_attribution.py` guards the severity deliberately - an
-earlier version used `== 0.0` instead of `<= 0.0` and reported OK while the model lost money.
-
-So when you read a red run, read which class failed before concluding anything is wrong with
-the code. `make check` (lint + mypy + tests) is the one that speaks only about the repository.
-
-Findings that are limits on the *record* rather than outcomes - currently the 29 shares sold
-that no BUY accounts for, written up in `docs/history/STATUS.md` - are WARN. They are stated prominently
-but do not redden the gate, because a four-month-old accounting gap that is permanent red is
-how a gate gets ignored.
-
-## Verifying a clone
-
-The figures quoted elsewhere in this repository are reproduced by one script, and its
-output is committed:
+## Reproducing the results
 
 ```bash
 docs/evidence/run-fresh-clone.sh
 ```
 
-It clones the committed tree into a scratch directory, installs it, and runs seven steps:
-lint, the full test suite, the example cycle, the entry point, provenance, the gate's own
-self-test, and the gate itself. No credentials are needed. That last one is the one that
-matters - it is the check a newcomer runs before they have a paper account or a single
-recorded cycle, and it was red for several commits while every other step was green. The result is written to `docs/evidence/fresh-clone.log` and the
-gate checks that log against the script and the commit it names, so a green claim here is
-traceable to a run rather than to prose. `make verify` runs the same checks in place; the
-clone exists to prove they pass from nothing but a checkout.
+This clones the committed tree into a scratch directory, creates a new venv, removes every
+credential, and runs seven steps: lint, the full test suite, the example, the entry point,
+provenance, the gate's self-test and the gate. The output is committed as
+[`docs/evidence/fresh-clone.log`](docs/evidence/fresh-clone.log), and the gate checks that log
+against the script and the commit it names. CI runs the same steps on every push.
+
+Figures about trading, by contrast, come from a running paper account and change as it
+trades, so they are not written into these documents. Reproduce them on your own record with
+`make benchmark`, `make doctor` and `make daily-report`. The strategy search's full trial
+ledger — 59 walk-forward trials on real bars, none of which passed — is in
+[`docs/evidence/`](docs/evidence/README.md).
+
+## Safety
+
+Read once from the environment by `config.py` and enforced by `guardian.py` on the single path
+that can submit an order:
+
+| Limit | Env var | Default |
+|---|---|---|
+| max position value | `MIN_AGENT_MAX_POSITION_VALUE` | $5,000 |
+| max total exposure | `MIN_AGENT_MAX_TOTAL_EXPOSURE` | 4× position value |
+| max daily loss | `MIN_AGENT_MAX_DAILY_LOSS` | $500 |
+| max trades per day | `MIN_AGENT_MAX_TRADES_PER_DAY` | 10 |
+| min confidence | `MIN_AGENT_MIN_CONFIDENCE` | 0.5 |
+| short selling | `MIN_AGENT_SHORTS` | `off` |
+
+- **Paper only.** `config.is_paper_endpoint` is the single definition, and both the CLI and the
+  executor go through it.
+- **The agent only sells what it bought.** A SELL is bounded by the agent's own confirmed
+  fills, not by what the account holds. A SHORT is refused while the account holds any long
+  in that symbol, and a COVER may only buy back what the agent itself shorted.
+- **Limits only get tighter.** Nothing in the code raises a limit. A higher limit is the
+  operator's decision, made in the env file.
+- **No generated code runs.** The model returns structured decisions and strategy parameters
+  checked against a schema, and never shell commands or code.
+- **Market-open and staleness checks** cannot be skipped. A stale snapshot is refused.
+
+Report a vulnerability as described in [`SECURITY.md`](SECURITY.md).
+
+## Project layout
+
+```
+src/min_agent/          the package (import name min_agent). 41 modules, 3 external dependencies.
+  cli.py                the single entry point
+  daemon.py             the trading loop and the maintenance loop
+  loop.py               one cycle: snapshot -> decision -> guardian -> execute
+  guardian.py           hard risk limits; no bypass
+  llm_decision.py       rule-first decisions, the LLM override, market context
+  strategy_engine.py    strategy library, selection, lifecycle
+  evaluator.py          FIFO ledger and PnL from broker-confirmed fills
+  counterfactual.py     scoring each decision against what the market did next
+  curriculum.py         the agent proposing new strategies
+  journal.py            append-only record; the source of truth
+  models.py             shared schema, imported by 23 modules
+  research/             walk-forward backtests; production may not import it
+tools/                  the gate (verify.py), benchmark, daily report, probes, systemd templates
+tests/min_agent/        70 test files
+examples/               the smallest runnable example, no broker needed
+configs/                paper.env.example: every environment variable with its default
+docs/                   ARCHITECTURE.md, evidence/, history/
+minictrl                operator script: services, logs, owner history
+```
+
+## Documentation
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): how the system is put together.
+- [`tools/README.md`](tools/README.md): every tool and what it checks.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md): how to propose a change, and the rules a change must keep.
+- [`AGENTS.md`](AGENTS.md): the working principles every change follows, human or AI.
+- [`CHANGELOG.md`](CHANGELOG.md): what changed.
+- [`docs/history/`](docs/history/README.md): the running log, the defect audit and one plan per
+  change. It records why decisions were made, including claims that were later retracted.
 
 ## License
 
-Apache License 2.0 - see [`LICENSE`](LICENSE).
-
-Two things a reader should know before running this against a real account, because the
-license does not cover them. It **trades in paper mode only**: `config.is_paper_endpoint`
-is the single definition of paper-only and both `cli` and the executor go through it, so
-there is one line to audit rather than a setting to trust. And it makes no claim of profit.
-The figures this repository quotes are broker-verified for a paper account and are evidence
-that the accounting and the loop are real, not a track record - and they are deliberately
-not written into these documents, because they move while the agent trades. Run
-`minictrl doctor` for the current ones.
-
+[Apache License 2.0](LICENSE). This software makes no claim of profit, and nothing in it is
+investment advice. The figures it reports are evidence that the accounting and the loop are
+real, not a track record.

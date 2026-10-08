@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "min-agent"
 version = "0.1.0"
-description = "A paper-trading agent that grades its own strategies against broker evidence and retires the ones that do not earn their place."
+description = "Autopoiesis: a self-evolving LLM paper-trading agent that grades its own strategies against broker evidence and retires the ones that do not earn their place."
 readme = "README.md"
 requires-python = ">=3.10"
 # The table form, not the PEP 639 SPDX string `license = "Apache-2.0"`. That is the
