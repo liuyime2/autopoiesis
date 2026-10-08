@@ -8,7 +8,7 @@ longer exist — the directory held nothing but `__pycache__` residue. Naming fi
 are gone is worse than not naming them: a reader concludes the tool is missing rather than
 that it was consolidated, and a `tools/README.md` that cannot be trusted is not worth
 maintaining. The scripts that remain are listed here with what each is for; a script that
-is deleted rather than replaced has no entry, and `docs/MIGRATION.md` records the ones
+is deleted rather than replaced has no entry, and `docs/history/MIGRATION.md` records the ones
 this refactor removed.
 
 ## The gate — `verify.py`
@@ -153,16 +153,11 @@ moment. A separate file rather than a Makefile recipe because a backslash-contin
 Python program inside `$(...)` is consumed by make instead of continuing the shell line,
 and fails silently.
 
-## Repairs
-
-**`prune_knowledge.py`** deduplicates the knowledge library by statement, preserving every
-`source_ref`.
-
 ## Service templates
 
-`min-agent.service.in`, `watchdog.service.in`, `ollama.service.in`, `research.service.in` (the
-timer units ship as files, `tools/watchdog.timer` and `tools/research.timer`, which `minictrl`
-copies into place) —
+`min-agent.service.in`, `watchdog.service.in`, `ollama.service.in`, `research.service.in`,
+`report.service.in` (the timer units ship as files, `tools/watchdog.timer`, `tools/research.timer`
+and `tools/report.timer`, which `minictrl` copies into place) —
 substituted by `minictrl install-service`, which uses `systemd_unit_dir.sh` to ask
 the systemd user manager where it actually searches rather than trusting the shell's
 `XDG_CONFIG_HOME`. Installing to the latter produces files systemd never opens, while

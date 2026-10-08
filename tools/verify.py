@@ -96,9 +96,6 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_daemon_heartbeat.py": (
         "crash-recovery", "unit-integration", "data-integrity",
     ),
-    "test_knowledge_prune.py": (
-        "data-integrity", "unit-integration",
-    ),
     "test_knowledge_lessons.py": (
         "data-integrity", "unit-integration", "lifecycle-invariants",
     ),
@@ -362,7 +359,7 @@ def check_syntax_import() -> Result:
 
 #: Phrases that assert a plan is not yet acted on. Any of these appearing in a
 #: plan document means the document is describing a tree that no longer exists.
-# Scripts this refactor deleted, per docs/MIGRATION.md. Named here so the docs check and the
+# Scripts this refactor deleted, per docs/history/MIGRATION.md. Named here so the docs check and the
 # deleted-command check agree on one list rather than two.
 DELETED_SCRIPT_NAMES = (
     "auto-fix.sh",
@@ -1172,7 +1169,7 @@ def check_the_fact_figures_in_prose_match_reality() -> Result:
     for name in (
         "docs/history/STATUS.md",
         "README.md",
-        "docs/MIGRATION.md",
+        "docs/history/MIGRATION.md",
         "docs/history/PHASES.md",
         "docs/history/CAPABILITY_CLASSIFICATION.md",
     ):
@@ -2014,7 +2011,7 @@ def check_docs_do_not_instruct_deleted_commands() -> Result:
 
     A document that names a script is an executable instruction whether or not anyone
     runs it, and an instruction that cannot work is worse than a missing one: the reader
-    concludes the tool is broken rather than that it moved. `docs/MIGRATION.md` is
+    concludes the tool is broken rather than that it moved. `docs/history/MIGRATION.md` is
     exempt by name - its entire purpose is to name removed paths - and matches on the
     command form (`bash x.sh`, `python x.py`) so prose describing a past event is not
     mistaken for a live instruction.
@@ -2043,7 +2040,7 @@ def check_docs_do_not_instruct_deleted_commands() -> Result:
         return Result(
             "docs-no-deleted-commands", FAIL,
             f"{len(problems)} instruction(s) name a deleted script: {problems[:4]}. "
-            "Point them at the replacement in docs/MIGRATION.md.",
+            "Point them at the replacement in docs/history/MIGRATION.md.",
         )
     return Result(
         "docs-no-deleted-commands", PASS,

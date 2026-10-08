@@ -11,7 +11,7 @@ Run it:
 
     python tools/replay_self_evolution.py
 
-It is wired into `make verify` as `self-evolution-closes`, because a claim that the
+It is the harness `tools/self_evolution_probe.py` drives for the gate class `self-evolution-closes`, because a claim that the
 self-evolution loop closes should be re-runnable rather than asserted from a session. It needs
 no network and no credentials: the bars come from the cache written by
 `tools/fetch_replay_bars.py`, and the account is simulated.
