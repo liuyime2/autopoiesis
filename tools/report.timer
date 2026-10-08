@@ -1,0 +1,12 @@
+[Unit]
+Description=Write the min-agent validation report after every weekday close
+
+[Timer]
+# New York time, so the report follows the market across daylight-saving changes. A holiday
+# produces a report that says there were no cycles, which is itself the check.
+OnCalendar=Mon..Fri 16:30 America/New_York
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

@@ -223,11 +223,14 @@ case "$cmd" in
     # itself on its own output.
     render "$ROOT_DIR/tools/research.service.in"   "quant-research.service"
     cp "$ROOT_DIR/tools/research.timer" "$unit_dir/quant-research.timer"
+    render "$ROOT_DIR/tools/report.service.in"     "quant-report.service"
+    cp "$ROOT_DIR/tools/report.timer" "$unit_dir/quant-report.timer"
     systemd-analyze verify "$unit_dir/$SERVICE_NAME" "$unit_dir/ollama.service" \
-        "$unit_dir/quant-watchdog.service" "$unit_dir/quant-research.service" 2>&1 \
+        "$unit_dir/quant-watchdog.service" "$unit_dir/quant-research.service" \
+        "$unit_dir/quant-report.service" 2>&1 \
         | grep -viE "not found|canonical" | head -5
     systemctl --user daemon-reload
-    echo "wrote 6 unit files to $unit_dir"
+    echo "wrote 8 unit files to $unit_dir"
 
     # Verify the manager can actually SEE them before claiming success. The
     # manager resolves unit paths from its own start-time environment, so a
@@ -252,7 +255,7 @@ case "$cmd" in
     # false-success as a unit in a directory the manager never opens: it looks configured and does
     # nothing. This is why quant-research.timer sat `inactive (dead)` with `Trigger: n/a` while
     # the watchdog next to it was `active (waiting)`.
-    for t in quant-watchdog.timer quant-research.timer; do
+    for t in quant-watchdog.timer quant-research.timer quant-report.timer; do
       if systemctl --user enable --now "$t" 2>/dev/null; then
         if systemctl --user is-active --quiet "$t"; then
           echo "  enabled and running $t"

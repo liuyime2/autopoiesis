@@ -1320,3 +1320,24 @@ def test_each_lesson_is_shown_on_a_reproducible_half_of_cycles():
     assert shown == [HybridDecisionEngine._show_lesson(s, "k1") for s in snaps], "reproducible"
     other = [HybridDecisionEngine._show_lesson(s, "k2") for s in snaps]
     assert shown != other, "independent across lessons"
+
+
+def test_a_rule_buy_with_no_room_under_the_position_cap_is_a_hold(tmp_path):
+    """39 of 43 paired cycles on 2026-10-07 paired the model against a BUY that could not fill."""
+    from min_agent.models import PositionSnapshot
+
+    llm = _llm_says("HOLD")
+    engine, _ = _engine(tmp_path, llm)
+    engine.risk_limits = {"max_position_value": 1000, "allowlist": ["SPY"]}
+    held = (PositionSnapshot(symbol="SPY", quantity=1, market_value=REAL_SPY_PRICE),)
+    decision = engine.decide_snapshot(_snapshot(positions=held))
+    assert llm.calls[0]["rule_decision"] == {"action": "HOLD", "quantity": 0}
+    assert (decision.action, decision.rule_action, decision.override_reason) == ("HOLD", "HOLD", None)
+
+
+def test_a_rule_buy_with_room_is_unchanged(tmp_path):
+    llm = _llm_says("BUY")
+    engine, _ = _engine(tmp_path, llm)
+    engine.risk_limits = {"max_position_value": 5000, "allowlist": ["SPY"]}
+    engine.decide_snapshot(_snapshot())
+    assert llm.calls[0]["rule_decision"] == {"action": "BUY", "quantity": 1}
