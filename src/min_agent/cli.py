@@ -303,6 +303,7 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
     strategy_library = StrategyLibrary(config.strategy_dir)
     knowledge_library = KnowledgeLibrary(config.knowledge_dir)
     reflection_memory = ReflectionMemory(config.journal_path.parent / "reflection.json")
+    data_gateway = AlpacaDataGateway(client=client)
     guardian = Guardian(
         allowlist=config.allowlist,
         max_position_value=config.max_position_value,
@@ -313,6 +314,9 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         max_account_value=config.max_account_value or None,
         max_snapshot_age_seconds=config.stale_after_seconds,
         shorts=config.shorts,
+        universe=config.universe,
+        tradable=data_gateway.tradable_symbols if config.universe == "tradable" else None,
+        min_price=config.min_price,
     )
     # Declared before the daemon so the provider can read the daemon's own cycle count. The
     # incumbent cadence is defined over cycles, and the only cycle count the selector could
@@ -349,7 +353,6 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         # thing it needs to tell profit from loss.
         return {symbol: dict(lots) for symbol, lots in agent_lots.items() if lots}
 
-    data_gateway = AlpacaDataGateway(client=client)
     risk_judgment = RiskJudgment(data_gateway.daily_closes)
     decision_engine = HybridDecisionEngine(
         llm=OllamaDecisionEngine(
@@ -369,7 +372,8 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
             "allowlist": sorted(config.allowlist),
             "max_account_value": config.max_account_value or None,
             "shorts": config.shorts,
-            "manage_account": config.manage_account,
+            "manage_account": config.whole_account,
+            "universe": config.universe,
         },
         cost_basis=cost_basis,
         risk_provider=risk_judgment.block,
@@ -385,7 +389,7 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         journal=journal,
         mode=config.mode,
         trade_counter=TradeCounter(journal=journal),
-        manage_account=config.manage_account,
+        manage_account=config.whole_account,
     )
     daemon = AgentDaemon(
         config=config,

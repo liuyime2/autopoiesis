@@ -286,6 +286,8 @@ def _check_risk_baseline(report: DoctorReport, config: AgentConfig) -> None:
         "max_trades_per_day": config.max_trades_per_day,
         "min_confidence": config.min_confidence,
         "allowlist": sorted(config.allowlist),
+        "universe": config.universe,
+        "min_price": config.min_price,
     }
     path = Path(config.journal_path).parent / RISK_BASELINE_PATH
     if not path.exists():
@@ -310,10 +312,19 @@ def _check_risk_baseline(report: DoctorReport, config: AgentConfig) -> None:
         return
 
     loosened = []
+    reach = {"allowlist": 0, "account": 1, "tradable": 2}
     for key, value in current.items():
         before = recorded.get(key)
+        if key == "universe":  # a baseline written before this setting existed meant the allowlist
+            if reach.get(str(value), 0) > reach.get(str(before or "allowlist"), 0):
+                loosened.append(f"universe {before or 'allowlist'} -> {value}")
+            continue
+        if key == "min_price":  # a lower price floor is the loosening here
+            if isinstance(before, (int, float)) and isinstance(value, (int, float)) and value < before:
+                loosened.append(f"min_price {before} -> {value}")
+            continue
         if isinstance(value, (int, float)) and isinstance(before, (int, float)):
-            if value > before:
+            if float(value) > float(before):
                 loosened.append(f"{key} {before} -> {value}")
         elif value != before:
             loosened.append(f"{key} {before} -> {value}")

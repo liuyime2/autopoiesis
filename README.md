@@ -197,9 +197,17 @@ that can submit an order:
 | min confidence | `MIN_AGENT_MIN_CONFIDENCE` | 0.5 |
 | short selling | `MIN_AGENT_SHORTS` | `off` |
 | manage the whole account | `MIN_AGENT_MANAGE_ACCOUNT` | `false` |
+| universe | `MIN_AGENT_UNIVERSE` | `allowlist`; `account` adds every held symbol; `tradable` adds any active US stock on a major exchange priced at least `MIN_AGENT_MIN_PRICE` ($5) |
+| extra symbols looked at per round | `MIN_AGENT_ATTENTION_SLOTS` | 0 (the broker's most-active liquid names, filtered) |
 
 - **Paper only.** `config.is_paper_endpoint` is the single definition, and both the CLI and the
   executor go through it.
+- **The universe is the account holder's decision.** By default only the allowlist can be
+  traded. `MIN_AGENT_UNIVERSE=account` adds everything the account holds, and `tradable` adds
+  any active US stock on a major exchange priced at least $5 (never a warrant, unit or right).
+  Widening changes which symbols pass and nothing else: paper only, market open, a fresh
+  snapshot, the position and exposure caps (the exposure cap then measures the whole account),
+  daily loss, trades per day and confidence all still apply.
 - **By default the agent only sells what it bought.** A SELL is bounded by the agent's own
   confirmed fills, not by what the account holds. An account holder who wants the agent to
   manage every position sets `MIN_AGENT_MANAGE_ACCOUNT=true`, and a SELL is then bounded by the
@@ -230,7 +238,7 @@ src/min_agent/          the package (import name min_agent). 43 modules, 3 exter
   models.py             shared schema, imported by 23 modules
   research/             walk-forward backtests; production may not import it
 tools/                  the gate (verify.py), benchmark, daily report, probes, systemd templates
-tests/min_agent/        73 test files
+tests/min_agent/        75 test files
 examples/               the smallest runnable example, no broker needed
 configs/                paper.env.example: every environment variable with its default
 docs/                   ARCHITECTURE.md, evidence/, history/

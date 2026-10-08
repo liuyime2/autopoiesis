@@ -67,6 +67,18 @@ class AgentConfig:
     #: account holder's decision, made in the env file, and every other Guardian rule still
     #: applies - allowlist, position and exposure caps, daily loss, trade count, paper only.
     manage_account: bool = False
+    #: Which symbols the agent may trade, a decision of the account holder made in the env file.
+    #: `allowlist` (default): only `MIN_AGENT_ALLOWLIST`. `account`: that list plus every symbol
+    #: the account holds, so nothing in the account is out of reach. `tradable`: that, plus any
+    #: active US equity on a major exchange priced at least `min_price`. Under `account` and
+    #: `tradable` the exposure cap measures the whole account and a SELL is bounded by the
+    #: account's position. Everything else the Guardian checks - paper only, market open, a fresh
+    #: snapshot, position and exposure caps, daily loss, trades per day, confidence - still applies.
+    universe: str = "allowlist"
+    min_price: float = 5.0
+    #: Extra symbols looked at each round beyond the configured and held ones, chosen from the
+    #: broker's most-active list after quality filters. Zero (default) looks at none.
+    attention_slots: int = 0
     max_daily_cycles: int = 288
     #: How long one trading decision may take before the rule decides instead. The model
     #: thinks before it answers - 30-50s on SPY, 122s once on a symbol it had not seen - so
@@ -85,6 +97,12 @@ class AgentConfig:
     reflection_interval_seconds: int = 1800
     curriculum_interval_seconds: int = 3600
     profit_target_return_pct: float = 0.10
+
+    @property
+    def whole_account(self) -> bool:
+        """The agent manages every position in the account: asked for directly, or implied by a
+        universe wider than the allowlist (a position it may trade must be one it may sell)."""
+        return self.manage_account or self.universe != "allowlist"
 
     @classmethod
     def from_env(cls) -> AgentConfig:
@@ -124,6 +142,9 @@ class AgentConfig:
             shadow=_flag("MIN_AGENT_SHADOW", False),
             shorts=_choice("MIN_AGENT_SHORTS", ("off", "shadow", "paper"), "off"),
             manage_account=_choice("MIN_AGENT_MANAGE_ACCOUNT", ("false", "true"), "false") == "true",
+            universe=_choice("MIN_AGENT_UNIVERSE", ("allowlist", "account", "tradable"), "allowlist"),
+            min_price=_bounded_float("MIN_AGENT_MIN_PRICE", 5.0, 0.0, 10_000.0),
+            attention_slots=_bounded_int("MIN_AGENT_ATTENTION_SLOTS", 0, 0, 25),
             max_daily_cycles=_positive_int("MIN_AGENT_MAX_DAILY_CYCLES", 288),
             llm_timeout_seconds=_positive_int("MIN_AGENT_LLM_TIMEOUT_SECONDS", 240),
             heartbeat_path=Path(os.getenv("MIN_AGENT_HEARTBEAT", "runtime/min_agent/heartbeat.json")),
@@ -211,6 +232,13 @@ def _flag(name: str, default: bool) -> bool:
     raise ValueError(
         f"{name}={raw!r} is not a boolean; use 1/0, true/false, yes/no or on/off"
     )
+
+
+def _bounded_int(name: str, default: int, low: int, high: int) -> int:
+    value = int(os.getenv(name, str(default)))
+    if not low <= value <= high:
+        raise ValueError(f"{name} must be between {low} and {high}")
+    return value
 
 
 def _positive_float(name: str, default: float) -> float:

@@ -33,6 +33,13 @@ the commit message; the long-form record is in [`docs/history/`](docs/history/RE
 - The RSI kernel review's headline - every SELL scored 0.000 - came from reading the oldest
   counterfactual row per cycle; corrected to 26.5% SELL vs 66.2% BUY.
 
+### Added (2026-10-08, night)
+- `MIN_AGENT_UNIVERSE` (`allowlist` | `account` | `tradable`), `MIN_AGENT_MIN_PRICE`,
+  `MIN_AGENT_ATTENTION_SLOTS`: the account holder can widen what the Guardian lets through to
+  every held symbol, or to any active US stock on a major exchange priced at least $5, with the
+  broker's most-active liquid names looked at each round. Default unchanged. The risk baseline now
+  records the universe and the price floor, so a widening is flagged until a human re-approves it.
+
 ### Added (2026-10-08, evening)
 - `risk_judgment`: an EWMA volatility forecast per symbol in the decision context, with its own
   measured quality (rank correlation with the volatility that followed, over up to ten years,

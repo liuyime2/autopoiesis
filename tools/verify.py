@@ -129,6 +129,8 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_manage_account.py": ("unit-integration",),
     "test_signal_test.py": ("unit-integration",),
     "test_risk_judgment.py": ("unit-integration",),
+    "test_universe.py": ("unit-integration", "guardian-bypass-prevention"),
+    "test_universe_wiring.py": ("unit-integration",),
     "test_screen_direction_check.py": ("decision-outcome-counterfactual",),
     "test_research_trials.py": (
         "lifecycle-invariants", "data-integrity", "unit-integration",
