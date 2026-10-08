@@ -33,6 +33,17 @@ the commit message; the long-form record is in [`docs/history/`](docs/history/RE
 - The RSI kernel review's headline - every SELL scored 0.000 - came from reading the oldest
   counterfactual row per cycle; corrected to 26.5% SELL vs 66.2% BUY.
 
+### Added (2026-10-08, evening)
+- `risk_judgment`: an EWMA volatility forecast per symbol in the decision context, with its own
+  measured quality (rank correlation with the volatility that followed, over up to ten years,
+  with its standard error) and an evidence-earned status: ACTIVE only when the pessimistic end
+  of that correlation clears 0.10, SUSPENDED only when the optimistic end falls below it,
+  UNVERIFIED otherwise. A doctor check (`risk forecast`) reports it.
+- `research/signal_test`: the gate every hypothesis about what predicts returns has to pass, with
+  a ledger that makes the bar rise with the number of hypotheses tried.
+- `docs/evidence/signal-research-2026-10-08/`: why no brain showed judgment - 47 hypotheses on
+  real bars (intraday, daily, cross-sectional), the news event study, the volatility result.
+
 ### Added (2026-10-08)
 - `MIN_AGENT_MANAGE_ACCOUNT` (default `false`): the agent may manage every position in the
   account, a SELL then bounded by the account's position instead of the agent's own fills.

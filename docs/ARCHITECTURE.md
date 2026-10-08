@@ -48,6 +48,10 @@ broker fill and cannot reach the PnL ledger even by accident.
    decision (`rule_decision`) beside a `market` block of recent returns, volatility and
    regime from the agent's own record. The model may override the rule only by giving an
    `override_reason`; an override without one is discarded and the rule's decision taken.
+   A `risk` block says how volatile the symbol is forecast to be over the next month and how
+   good that forecast has been on ten years of the symbol's own history; it informs how much to
+   risk, never which way to go, and it gives no scaling advice unless the forecast is shown to
+   work (`ACTIVE`; otherwise `UNVERIFIED` or `SUSPENDED`).
    Every decision records `rule_action` beside the action taken, so the model's
    contribution is a paired comparison on identical inputs. If the model cannot be reached
    the policy engine decides, labelled `fallback_policy_engine` - recorded, not disguised.
@@ -82,6 +86,7 @@ decision → counterfactual → calibration → reflection → curriculum
 | Admission | Whether that proposal is admissible at all | 177 reviewed |
 | Offline screen | Whether the candidate's own rule did better than its days alone would have: each day's up-share comes from the market's moves, and a strategy is rejected only when worse than that by two standard errors | 9,646 |
 | Lifecycle | Promotion, pausing, retirement - each with its reason | 90 changes |
+| Signal gate | Whether a hypothesis about what predicts returns is real: selected on the earlier 60% of days, read once on the later 40%, same sign in both, an interval from resampling whole days, and a significance bar that counts every hypothesis the ledger has ever seen (`research/signal_test.py`, `runtime/min_agent/signal_trials.jsonl`). 61 hypotheses so far (47 on prices, 14 on news): none carried a direction | 61 recorded in `docs/evidence/signal-research-2026-10-08/` |
 | Knowledge | What the model is told about its own reliability. Lessons are de-duplicated by content with figures masked, each is shown on half of cycles, and one with no measured effect after 10 trading days is retired | 47 proposed |
 
 **Promotion is evidence-gated and cannot be earned by inaction.** A candidate reaches

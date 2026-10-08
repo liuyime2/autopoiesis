@@ -216,7 +216,7 @@ Report a vulnerability as described in [`SECURITY.md`](SECURITY.md).
 ## Project layout
 
 ```
-src/min_agent/          the package (import name min_agent). 41 modules, 3 external dependencies.
+src/min_agent/          the package (import name min_agent). 43 modules, 3 external dependencies.
   cli.py                the single entry point
   daemon.py             the trading loop and the maintenance loop
   loop.py               one cycle: snapshot -> decision -> guardian -> execute
@@ -230,7 +230,7 @@ src/min_agent/          the package (import name min_agent). 41 modules, 3 exter
   models.py             shared schema, imported by 23 modules
   research/             walk-forward backtests; production may not import it
 tools/                  the gate (verify.py), benchmark, daily report, probes, systemd templates
-tests/min_agent/        71 test files
+tests/min_agent/        73 test files
 examples/               the smallest runnable example, no broker needed
 configs/                paper.env.example: every environment variable with its default
 docs/                   ARCHITECTURE.md, evidence/, history/

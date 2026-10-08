@@ -43,6 +43,7 @@ from min_agent.models import BrokerEvidenceBatch, JournalEvent, JournalEventStat
 from min_agent.order_reconciler import OrderReconciler
 from min_agent.policy_engine import PolicyEngine
 from min_agent.reflection_memory import ReflectionMemory
+from min_agent.risk_judgment import RiskJudgment
 from min_agent.scheduler import MarketScheduler
 from min_agent.shadow import ShadowExecutor, ShadowShorts
 from min_agent.strategy_admission import StrategyAdmission
@@ -348,6 +349,8 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         # thing it needs to tell profit from loss.
         return {symbol: dict(lots) for symbol, lots in agent_lots.items() if lots}
 
+    data_gateway = AlpacaDataGateway(client=client)
+    risk_judgment = RiskJudgment(data_gateway.daily_closes)
     decision_engine = HybridDecisionEngine(
         llm=OllamaDecisionEngine(
             base_url=config.ollama_base_url,
@@ -369,12 +372,13 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
             "manage_account": config.manage_account,
         },
         cost_basis=cost_basis,
+        risk_provider=risk_judgment.block,
         # ~300 five-minute cycles is a little over three trading days: enough for a 1-day
         # return and the regime's 78-bar window after repeated quotes are collapsed.
         market_history=lambda: journal.last_n(history_records),
     )
     loop = TradingLoop(
-        data_gateway=AlpacaDataGateway(client=client),
+        data_gateway=data_gateway,
         decision_engine=decision_engine,
         guardian=guardian,
         executor=_execution_sink(config, client, journal),
