@@ -245,7 +245,17 @@ def _vol_pct(rets: list[float]) -> float:
     return (var**0.5) * (252**0.5) * 100.0
 
 
-def vix_floor(closes: Sequence[float], current: float | None) -> tuple[float | None, str]:
+def vix_floor(
+    closes: Sequence[float], current: float | None, as_of_vix: float | None = None
+) -> tuple[float | None, str]:
+    """`max(forecast, VIX rescaled to this symbol)` when VIX exceeds the forecast by the margin.
+
+    `as_of_vix` is the index reading for the day being judged. It defaults to the cache's last point,
+    which is right for the live path - the decision is being made today - and wrong for any replay
+    over history, where every day would otherwise be judged against today's index. The first version
+    of the A/B did exactly that and measured the floor engaging on 99.9% of days, which is the
+    signature of a backfill rather than of a floor.
+    """
     """`max(forecast, VIX rescaled to this symbol)` when VIX exceeds the forecast by the margin.
 
     Returns `(forecast, reason)`. `reason` says which of the two won and by how much, because a floor
@@ -266,26 +276,36 @@ def vix_floor(closes: Sequence[float], current: float | None) -> tuple[float | N
         if not history:
             return current, "no VIX history"
         ordered = sorted(history.items())
-        vix = ordered[-1][1]
-        # How old is that reading? The plan that ordered this work flagged it: taking the cache's
-        # last point without checking its date means a stale index silently becomes today's risk
-        # judgement. Measured the failure rather than assume it: a cache frozen on a calm week keeps
-        # saying "calm" through a spike, and the floor - whose whole purpose is to add caution -
+        # How old is the reading being used? The plan that ordered this work flagged it: taking the
+        # cache's last point without checking its date means a stale index silently becomes today's
+        # risk judgement. Measured the failure rather than assume it: a cache frozen on a calm week
+        # keeps saying "calm" through a spike, and the floor - whose whole purpose is to add caution -
         # becomes a reason to stay sized up.
-        as_of = ordered[-1][0]
+        #
+        # The guard applies to the cached last point, which is the live path. A caller replaying
+        # history supplies its own point-in-time reading and its own notion of "today", so checking
+        # the cache's date against the wall clock would be wrong there - and the first version of
+        # that change made it fail with "last date None is not a date", which silently disabled the
+        # floor for every replay.
         stale_after = 4  # a 3-day holiday weekend is the longest normal gap; four is the ceiling
-        try:
-            from datetime import date as _date
+        if as_of_vix is None:
+            try:
+                from datetime import date as _date
 
-            today = _date.today()
-            reading = _date.fromisoformat(as_of)
-            age = (today - reading).days
-            if age > stale_after:
-                return current, f"VIX reading {as_of} is {age} days old; floor not engaged"
-            if age < 0:
-                return current, f"VIX reading {as_of} is in the future; floor not engaged"
-        except ValueError:
-            return current, f"VIX cache's last date {as_of!r} is not a date; floor not engaged"
+                today = _date.today()
+                reading = _date.fromisoformat(ordered[-1][0])
+                age = (today - reading).days
+                if age > stale_after:
+                    return current, f"VIX reading {ordered[-1][0]} is {age} days old; floor not engaged"
+                if age < 0:
+                    return current, f"VIX reading {ordered[-1][0]} is in the future; floor not engaged"
+            except ValueError:
+                return current, (
+                    f"VIX cache's last date {ordered[-1][0]!r} is not a date; floor not engaged"
+                )
+            vix = ordered[-1][1]
+        else:
+            vix = as_of_vix
         # Rescale VIX onto this symbol's own volatility *level*. The ratio is of the two averages,
         # not of the two volatilities: VIX is already an annualised volatility number, so the symbol's
         # mean annualised volatility against the index's mean annualised volatility is the exchange
