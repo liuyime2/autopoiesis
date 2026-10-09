@@ -79,6 +79,13 @@ def test_the_verdict_names_the_strategy_furthest_behind():
     class _Report:
         checks = [_Check()]
 
-    verdict, code = _load_benchmark()._headline(_Report())
+    agent = {"return_pct": 1.95, "spy_pct": 2.80, "excess": -0.85, "pnl": 867.73,
+             "realized": 757.95, "unrealized": 110.16, "capital": 44455.08}
+    verdict, code = _load_benchmark()._headline(_Report(), agent)
     assert code == 1
+    # The worst-case naming survives, but as a labelled diagnostic: the verdict itself is now the
+    # agent-level claim the target sentence makes, and a single weak strategy failing must not be
+    # reported as the agent failing.
     assert "worst b by 4.29" in verdict
+    assert "diagnostic" in verdict
+    assert "the agent returned +1.95%" in verdict and "SPY +2.80%" in verdict

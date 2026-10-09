@@ -607,7 +607,15 @@ def _pnl_evidence(
         for strategy_id, exposure in peak_exposure.items()
         if exposure > 0 and (strategy_id in strategy_realized or strategy_id in unrealized_by_strategy)
     }
-    market_return_pct = _market_return_pct(records)
+    # Only the symbols the lots were actually traded in. A round now covers up to fifteen
+    # symbols, and averaging them with the traded one makes the comparison leg a different
+    # population from the PnL it judges - see _market_return_pct.
+    traded_symbols = frozenset(
+        symbol
+        for lot in (*closed_lots, *open_lots)
+        if (symbol := getattr(lot, "symbol", None))
+    )
+    market_return_pct = _market_return_pct(records, traded_symbols or None)
     strategy_market_return: dict[str, float] = {}
     for strategy_id, (symbol, start, end) in _strategy_windows(closed_lots, open_lots).items():
         leg = _market_return_over(records, symbol, start, end)
@@ -949,7 +957,7 @@ def _market_return_over(
     return round((prices[-1][1] / prices[0][1] - 1.0) * 100.0, 6)
 
 
-def _market_return_pct(records: list[CycleRecord]) -> float | None:
+def _market_return_pct(records: list[CycleRecord], traded_symbols: frozenset[str] | None = None) -> float | None:
     """What the traded instrument returned over the window these records cover.
 
     The first and last real quotes the loop observed, and nothing else. This exists so
@@ -957,19 +965,37 @@ def _market_return_pct(records: list[CycleRecord]) -> float | None:
     can silently disagree, and a benchmark that disagrees with the PnL it is judging is
     worse than no benchmark. Returns None when no price series covers the window, which
     is reported rather than papered over.
+
+    **Restricted to the symbols the lots were actually traded in.** Without that filter
+    this was a mixed-symbol series: the account holder widened the universe to `tradable`,
+    a round now covers up to fifteen symbols, and the record's first quote was SPY at 739.24
+    while its last was a $6 stock at 11.31 - so this function reported the traded instrument
+    as returning -98.47% over a window in which SPY returned +5.41%. The comparison leg had
+    silently become a different population from the PnL it was judging, which is the exact
+    failure the docstring above warns about, arriving through the population rather than
+    through a second source.
+
+    When several symbols are traded the returns are averaged, unweighted, because a weighted
+    average would need a capital basis this function does not have; a single-symbol record -
+    which is every one on disk at the time of writing - is unaffected.
     """
     prices = [
-        (record.snapshot.timestamp, record.snapshot.last_price)
+        (record.snapshot.timestamp, record.snapshot.last_price, record.snapshot.symbol)
         for record in records
         if getattr(record, "snapshot", None) is not None and record.snapshot.last_price > 0
     ]
+    if traded_symbols is not None:
+        prices = [p for p in prices if p[2] in traded_symbols]
     if len(prices) < 2:
         return None
     prices.sort(key=lambda item: item[0])
-    first, last = prices[0][1], prices[-1][1]
-    if first <= 0:
+    per_symbol: dict[str, list[float]] = {}
+    for _when, price, symbol in prices:
+        per_symbol.setdefault(symbol, []).append(price)
+    returns = [v[-1] / v[0] - 1.0 for v in per_symbol.values() if v[0] > 0 and len(v) > 1]
+    if not returns:
         return None
-    return round((last / first - 1.0) * 100.0, 6)
+    return round(sum(returns) / len(returns) * 100.0, 6)
 
 
 def _assumed_cost_for_lots(

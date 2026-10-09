@@ -101,9 +101,20 @@ class _Snap:
         self.last_price = last_price
 
 
-class _Rec:
-    def __init__(self, timestamp, last_price):
+class _SymRec:
+    """A cycle record with the symbol field `DataSnapshot` has always carried and the evaluator
+    now reads, so the holding benchmark can be restricted to the symbols actually traded."""
+
+    def __init__(self, timestamp, last_price, symbol="SPY"):
         self.snapshot = _Snap(timestamp, last_price)
+        self.snapshot.symbol = symbol
+
+
+class _Rec(_SymRec):
+    """Kept as the name the older tests use."""
+
+    def __init__(self, timestamp, last_price):
+        super().__init__(timestamp, last_price)
 
 
 def test_the_holding_benchmark_is_computed_from_the_prices_the_evaluation_already_holds():
@@ -183,12 +194,6 @@ def test_a_strategy_that_did_not_trade_is_absent_rather_than_zero():
     returns = {k: round(realized[k] / peak[k] * 100.0, 6) for k in peak if k in realized}
 
     assert "s2" not in returns
-
-
-class _SymRec:
-    def __init__(self, timestamp, last_price, symbol="SPY"):
-        self.snapshot = _Snap(timestamp, last_price)
-        self.snapshot.symbol = symbol
 
 
 def _day(d, h=15):
