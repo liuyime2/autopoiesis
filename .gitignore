@@ -46,3 +46,11 @@ venv/
 *.swp
 .idea/
 .vscode/
+
+# --- loop and harness state (regenerated per session; not project content) ---
+# The loop's goal, its attempts log and its criterion checks are process records about *how* a
+# change was made. They are the working notes that produced the change, not the change, and a
+# reader of the repository wants the commit and its message - not the twenty attempts that got
+# there. `.opencode/goals/` above was already excluded for the same reason; this is the same
+# rule applied to the rest of it.
+.opencode/loop-history/
