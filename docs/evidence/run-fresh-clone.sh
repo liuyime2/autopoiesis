@@ -2,7 +2,8 @@
 # Reproduce docs/evidence/fresh-clone.log.
 #
 # Clones the committed tree into a scratch directory, installs it into a new venv, and runs
-# the seven steps that must work before anyone touches a broker: lint, the full test suite,
+# the steps that must work before anyone touches a broker: the documented Makefile
+# entry points (lint, type, test, the no-credentials smoke), the full test suite,
 # the example cycle, the entry point, provenance, the gate's own self-test, and the gate.
 #
 # No credentials are read and none are required. If a step fails, the log records
@@ -101,6 +102,20 @@ run_step() {
 }
 
 run_step lint    "$PYTHON -m ruff check src/ tools/ tests/ examples/"
+# The Makefile is the documented developer entry point - the README tells a newcomer
+# `make install` then `make check` - and this script used to prove only the raw commands while
+# the thing a newcomer actually runs stayed unverified. `make check` is lint + type + test, so
+# a broken Makefile target now fails here instead of in a newcomer's shell.
+#
+# The venv is activated first because the Makefile prefers an active venv over conda: someone
+# who made a venv and ran `make install` in it has said which interpreter they mean, and
+# `conda run -n llm` would silently ignore it. That also keeps this step from reaching the
+# operator's conda environment and proving nothing about the clone.
+run_step make-check "source .venv/bin/activate && make check"
+# The no-credentials entry point, which is the first thing a contributor without a paper
+# account runs. It was invoking the deleted `min_agent.cli` module, so it failed outright while
+# every other step in this script was green.
+run_step smoke-offline "source .venv/bin/activate && make smoke-offline"
 run_step test    "$PYTHON -m pytest -q"
 run_step example "$PYTHON examples/minimal_cycle.py"
 run_step entry-point "$PYTHON -m autopoiesis.cli --help"
