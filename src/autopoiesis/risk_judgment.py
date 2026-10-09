@@ -288,7 +288,14 @@ def vix_floor(closes: Sequence[float], current: float | None) -> tuple[float | N
             f"VIX floor engaged: index-implied {scaled:.1f}% against the forecast {current:.1f}%, "
             f"which can only shrink the position"
         )
-    except Exception as exc:  # a broken floor must leave the judgement exactly as it was
+    # Named, not blind. A floor that cannot be read must leave the judgement exactly as it was,
+    # but "must not crash" does not require swallowing every exception: the failure modes here are
+    # a missing file, an unparseable one, and a shape that is not what `fetch_vix` wrote. Catching
+    # `Exception` would have covered those and everything else - and would have made the gate's
+    # BLE001 count drift for no benefit, which is exactly the hardcoded-figure churn the project's
+    # own review flags as fragile.
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        # A broken floor must leave the judgement exactly as it was.
         return current, f"VIX floor unavailable: {type(exc).__name__}: {exc}"
 
 
