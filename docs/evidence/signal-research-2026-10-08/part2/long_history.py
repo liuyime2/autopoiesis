@@ -33,7 +33,7 @@ def ledger(name, tr, te, note=None):
     path = os.environ.get("SIGNAL_LEDGER")
     if not path: return
     from pathlib import Path
-    from min_agent.research import signal_test as st
+    from autopoiesis.research import signal_test as st
     mk = lambda d: st.CorrelationResult(int(d["n"]), 0, d["rho"], d.get("lo", np.nan), d.get("hi", np.nan), d.get("p", np.nan))
     st.judge(name, mk(tr), mk(te), ledger=Path(path), extra={"downstream": note} if note else None)
 

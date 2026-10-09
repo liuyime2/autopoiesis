@@ -60,7 +60,7 @@ def record_to_ledger(panel_path, score_paths, ledger):
     """Every tradable news hypothesis (model x window) into the signal ledger: earlier 60% of event
     days is the selection period, the later 40% the test, as for every other hypothesis."""
     from pathlib import Path
-    from min_agent.research import signal_test as st
+    from autopoiesis.research import signal_test as st
     openp, closep = load_panel(panel_path)
     for path in score_paths:
         df = events(json.load(open(path)), openp, closep)

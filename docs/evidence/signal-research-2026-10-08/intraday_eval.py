@@ -54,7 +54,7 @@ if __name__ == "__main__" and not (len(sys.argv) > 1 and sys.argv[1] == "--ledge
 def record_to_ledger(events_path, score_paths, ledger):
     """The tradable in-session hypotheses (+30 and +60 minutes) into the signal ledger."""
     from pathlib import Path
-    from min_agent.research import signal_test as st
+    from autopoiesis.research import signal_test as st
     events = json.load(open(events_path)); outs = {e["id"]: outcome(e) for e in events}
     for path in score_paths:
         sc = {s["id"]: s for s in json.load(open(path))}

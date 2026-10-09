@@ -47,6 +47,20 @@ Issues = "https://github.com/liuyime2/autopoiesis/issues"
 Changelog = "https://github.com/liuyime2/autopoiesis/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
+# The research tree under docs/evidence reads real bars and real filings. It needs numpy, pandas
+# and yfinance, and it needs them **here** rather than in the runtime set: the trading path has
+# three dependencies, a clean clone installs in seconds, and `docs/evidence/run-fresh-clone.sh`
+# passes with no network. Adding them to `dependencies` would trade that asset for a convenience
+# the trading path does not use.
+#
+# They were undeclared, which meant a contributor following the research README hit
+# ModuleNotFoundError on the first import and had no way to know what to install. Declared here
+# and behind one extra: `pip install -e ".[research]"`.
+research = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "yfinance>=0.2",
+]
 dev = [
     "pytest>=8,<9",
     # `make lint` and `make type` invoke these by module name. They were missing here

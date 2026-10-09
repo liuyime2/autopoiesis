@@ -20,7 +20,7 @@ def ledger(name, tr, te, control=None):
     path = os.environ.get("SIGNAL_LEDGER")
     if not path: return
     from pathlib import Path
-    from min_agent.research import signal_test as st
+    from autopoiesis.research import signal_test as st
     mk = lambda d: st.CorrelationResult(int(d["n"]), int(d.get("D", 0)), d["rho"], d["lo"], d["hi"], d["p"])
     st.judge(name, mk(tr), mk(te), control=mk(control) if control else None, ledger=Path(path))
 

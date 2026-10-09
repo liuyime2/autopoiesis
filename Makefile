@@ -115,6 +115,57 @@ verify:
 
 # Must stay green. If this ever fails, the gate cannot be trusted and every other
 # result from it is meaningless.
+# --- research -------------------------------------------------------------------------------
+#
+# The research tree reads real bars, real filings and real headlines, and it needs numpy, pandas
+# and yfinance to do it - which the runtime deliberately does not carry (see pyproject's `research`
+# extra). So each target says what it installs rather than leaving a contributor to find out by
+# hitting ModuleNotFoundError.
+#
+# Every one of these writes to the signal ledger when SIGNAL_LEDGER is set, so a failed hypothesis
+# leaves the same trace as a passing one. That is the whole protocol: a search that only records
+# what worked is not a search, it is a highlight reel.
+
+RESEARCH_DIR := docs/evidence/signal-research-2026-10-08
+LEDGER ?= runtime/autopoiesis/signal_trials.jsonl
+
+research-install:
+	@$(CONDA_RUN) python -m pip install -e ".[research]"
+	@echo "installed the research extra (numpy, pandas, yfinance); the runtime set is unchanged"
+
+# The three price searches from the 2026-10-08 study, over the cached panel.
+research-signals: research-install
+	@PYTHONPATH=src SIGNAL_LEDGER=$(LEDGER) $(CONDA_RUN) python $(RESEARCH_DIR)/signal_research.py SPY
+
+research-long: research-install
+	@PYTHONPATH=src SIGNAL_LEDGER=$(LEDGER) $(CONDA_RUN) python $(RESEARCH_DIR)/part2/long_history.py \
+		runtime/autopoiesis/replay/YAHOO.pkl
+
+# The vol fusion tests, which are what the VIX floor was built on.
+research-vix: research-install
+	@PYTHONPATH=src SIGNAL_LEDGER=$(LEDGER) $(CONDA_RUN) python $(RESEARCH_DIR)/part2/vix_fusion.py \
+		runtime/autopoiesis/replay/YAHOO.pkl
+	@PYTHONPATH=src SIGNAL_LEDGER=$(LEDGER) $(CONDA_RUN) python $(RESEARCH_DIR)/part2/vix_shock.py \
+		runtime/autopoiesis/replay/YAHOO.pkl
+
+# The six-meridian resonance, which measured 0.27% and is recorded as UNDERPOWERED.
+research-six: research-install
+	@PYTHONPATH=src SIGNAL_LEDGER=$(LEDGER) $(CONDA_RUN) python $(RESEARCH_DIR)/part2/six_meridians.py \
+		runtime/autopoiesis/replay/YAHOO.pkl SPY
+
+# Staged fundamentals (earnings dates, surprises, sector, consensus) from Yahoo Finance.
+research-fundamentals: research-install
+	@PYTHONPATH=src $(CONDA_RUN) python $(RESEARCH_DIR)/part2/stage_fundamentals.py \
+		runtime/autopoiesis/replay/FUNDAMENTALS.json SPY QQQ AAPL MSFT NVDA
+
+research-help:
+	@echo "Research targets (each installs the research extra first):"
+	@echo "  make research-signals       the 2026-10-08 price searches over the cached panel"
+	@echo "  make research-long          the same hypotheses on 28 years of ETFs"
+	@echo "  make research-vix           the vol-fusion tests the VIX floor rests on"
+	@echo "  make research-six           the six-meridian resonance"
+	@echo "  make research-fundamentals  earnings dates, surprises, sector, consensus"
+
 verify-self-test:
 	@$(PY) tools/verify.py --self-test
 

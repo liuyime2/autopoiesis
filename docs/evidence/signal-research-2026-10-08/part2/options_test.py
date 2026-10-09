@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import signal_research as sr
-from min_agent import risk_judgment as rj
+from autopoiesis import risk_judgment as rj
 
 o = pd.read_csv(sys.argv[1], parse_dates=["date"]).set_index("date")
 c = pd.read_pickle(sys.argv[2]).xs("close", axis=1, level=1)["SPY"].dropna()
@@ -45,7 +45,7 @@ for name, x, y in tests:
     path = os.environ.get("SIGNAL_LEDGER")
     if path:
         from pathlib import Path
-        from min_agent.research import signal_test as st
+        from autopoiesis.research import signal_test as st
         mk = lambda d_: st.CorrelationResult(int(d_["n"]), int(d_.get("D", 0)), d_["rho"], d_["lo"], d_["hi"], d_["p"])
         st.judge("options:" + name, mk(res[0]), mk(res[1]), ledger=Path(path))
     print(f"{name:42} {res[0]['rho']:+9.3f} | {res[1]['rho']:+9.3f} [{res[1]['lo']:+.3f},{res[1]['hi']:+.3f}] {res[1]['p']:7.4f} {res[1]['n']:4d}")

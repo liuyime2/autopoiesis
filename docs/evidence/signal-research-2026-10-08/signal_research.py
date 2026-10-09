@@ -20,7 +20,7 @@ import pandas as pd
 
 NY = ZoneInfo("America/New_York")
 BARS_PER_DAY = 78
-REPLAY = "runtime/min_agent/replay/{sym}_5Min_2024-01-02_2026-10-08.json"
+REPLAY = "runtime/autopoiesis/replay/{sym}_5Min_2024-01-02_2026-10-08.json"
 
 
 def load(sym: str) -> pd.DataFrame:
@@ -97,13 +97,13 @@ def test(days, x, y, reps=4000, seed=11):
 
 
 def _ledger(name, train, test, blocks=0):
-    """Write the hypothesis to the signal ledger when SIGNAL_LEDGER is set (see min_agent.research.signal_test)."""
+    """Write the hypothesis to the signal ledger when SIGNAL_LEDGER is set (see autopoiesis.research.signal_test)."""
     import os
     path = os.environ.get("SIGNAL_LEDGER")
     if not path:
         return
     from pathlib import Path
-    from min_agent.research import signal_test as st
+    from autopoiesis.research import signal_test as st
     make = lambda d: st.CorrelationResult(int(d["n"]), int(d.get("D", blocks)), d["rho"], d["lo"], d["hi"], d["p"])
     st.judge(name, make(train), make(test), ledger=Path(path))
 

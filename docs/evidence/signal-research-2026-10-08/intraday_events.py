@@ -7,7 +7,7 @@ import alpaca_trade_api as t
 NY = ZoneInfo("America/New_York"); UTC = dt.timezone.utc
 api = t.REST(os.environ["ALPACA_API_KEY"], os.environ["ALPACA_SECRET_KEY"], os.environ["ALPACA_BASE_URL"])
 import bisect
-spy_all = json.load(open("runtime/min_agent/replay/SPY_5Min_2024-01-02_2026-10-08.json"))["bars"]
+spy_all = json.load(open("runtime/autopoiesis/replay/SPY_5Min_2024-01-02_2026-10-08.json"))["bars"]
 spy_ts = [dt.datetime.fromisoformat(b["t"]) for b in spy_all]
 items = []
 for x in json.load(open(sys.argv[1])):

@@ -41,7 +41,7 @@ def get(url, params):
     return {}
 
 
-bars = json.load(open("runtime/min_agent/replay/SPY_5Min_2024-01-02_2026-10-08.json"))["bars"]
+bars = json.load(open("runtime/autopoiesis/replay/SPY_5Min_2024-01-02_2026-10-08.json"))["bars"]
 df = pd.DataFrame(bars); df["t"] = pd.to_datetime(df.t, utc=True).dt.tz_convert("America/New_York")
 df = df[(df.t.dt.time >= dt.time(9, 30)) & (df.t.dt.time < dt.time(16, 0))]
 df["pv"] = df.c * df.v

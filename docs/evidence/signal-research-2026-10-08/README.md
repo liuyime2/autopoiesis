@@ -56,7 +56,7 @@ select, the later 40% test, read once. The interval and p-value resample whole d
 (neighbouring bars share their session, and a bar-level interval is far too narrow). The bar for
 "significant" divides 0.05 by every hypothesis ever recorded. A survivor must keep its sign
 between the two periods and, where it shares a driver with what it predicts, hold once that
-driver is removed. This is `src/min_agent/research/signal_test.py`; the ledger holds all 61 (47 price hypotheses and 14 tradable news tests).
+driver is removed. This is `src/autopoiesis/research/signal_test.py`; the ledger holds all 61 (47 price hypotheses and 14 tradable news tests).
 
 ## 1. Intraday, SPY (17 testable hypotheses, `signal_research.py`)
 

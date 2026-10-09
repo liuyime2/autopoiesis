@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 SYMS = ["SPY", "QQQ", "IWM", "DIA", "TLT", "XLF", "XLE", "XLB"]
-PATH = "runtime/min_agent/replay/{s}_5Min_2010-01-04_2026-10-07.json"
+PATH = "runtime/autopoiesis/replay/{s}_5Min_2010-01-04_2026-10-07.json"
 SPLIT = pd.Timestamp("2023-01-01")
 
 
@@ -74,13 +74,13 @@ def corr_boot(blocks, x, y, reps=4000, seed=5):
 
 
 def _ledger(name, train, test, blocks=0):
-    """Write the hypothesis to the signal ledger when SIGNAL_LEDGER is set (see min_agent.research.signal_test)."""
+    """Write the hypothesis to the signal ledger when SIGNAL_LEDGER is set (see autopoiesis.research.signal_test)."""
     import os
     path = os.environ.get("SIGNAL_LEDGER")
     if not path:
         return
     from pathlib import Path
-    from min_agent.research import signal_test as st
+    from autopoiesis.research import signal_test as st
     make = lambda d: st.CorrelationResult(int(d["n"]), int(d.get("D", blocks)), d["rho"], d["lo"], d["hi"], d["p"])
     st.judge(name, make(train), make(test), ledger=Path(path))
 

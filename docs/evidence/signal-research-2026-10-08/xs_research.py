@@ -44,13 +44,13 @@ def build(close: pd.DataFrame) -> dict[str, pd.DataFrame]:
 
 
 def _ledger(name, train, test, blocks=0, control=None):
-    """Write the hypothesis to the signal ledger when SIGNAL_LEDGER is set (see min_agent.research.signal_test)."""
+    """Write the hypothesis to the signal ledger when SIGNAL_LEDGER is set (see autopoiesis.research.signal_test)."""
     import os
     path = os.environ.get("SIGNAL_LEDGER")
     if not path:
         return
     from pathlib import Path
-    from min_agent.research import signal_test as st
+    from autopoiesis.research import signal_test as st
     make = lambda d: st.CorrelationResult(int(d["n"]), int(d.get("D", blocks)), d["rho"], d["lo"], d["hi"], d["p"])
     st.judge(name, make(train), make(test), control=make(control) if control else None, ledger=Path(path))
 

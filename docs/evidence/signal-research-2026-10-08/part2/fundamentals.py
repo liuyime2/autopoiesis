@@ -22,7 +22,7 @@ def ledger(name, tr, te):
     path = os.environ.get("SIGNAL_LEDGER")
     if not path: return
     from pathlib import Path
-    from min_agent.research import signal_test as st
+    from autopoiesis.research import signal_test as st
     mk = lambda d: st.CorrelationResult(int(d["n"]), 0, d["rho"], d.get("lo", np.nan), d.get("hi", np.nan), d.get("p", np.nan))
     st.judge(name, mk(tr), mk(te), ledger=Path(path))
 
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     cut = ev.day.iloc[int(len(ev) * 0.6)]
     print(f"earnings events {len(ev)} ({ev.day.min().date()}..{ev.day.max().date()}); test from {cut.date()}\n")
     print(f"{'hypothesis':26} {'train':>8} | {'test rho':>9} {'95% CI':>17} {'p':>7} {'n':>5}")
-    from min_agent.research import signal_test as st
+    from autopoiesis.research import signal_test as st
     import signal_research as sr
     for y in ("d20", "d60"):
         res = {}
