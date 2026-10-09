@@ -649,7 +649,7 @@ def _durable_unit_dir() -> str | None:
 
 
 # Captured at import, not at first call. `minictrl doctor` shells out to
-# `minictrl doctor`, which creates runtime/min_agent as a side effect; a lazily-evaluated
+# `minictrl doctor`, which creates runtime/autopoiesis as a side effect; a lazily-evaluated
 # cache therefore read True in a clone that started with none, because the check that
 # created the directory had already run. Two attempts got this wrong in sequence - first
 # reading it live, then caching it on first call - and the way out was to ask the question
@@ -683,7 +683,7 @@ def _safe(check, name: str):
     module, a FileNotFoundError for a missing Makefile, a TimeoutExpired from a hung script -
     propagated out of main() and killed the entire gate: the remaining 30+ checks never ran,
     no summary printed, exit 1 with a stack trace. Verified by making
-    `min_agent/research/trials.py` raise on import: `python3 tools/verify.py` produced a
+    `autopoiesis/research/trials.py` raise on import: `python3 tools/verify.py` produced a
     traceback and nothing else.
 
     That is the worst possible failure mode for a gate, because it looks like a crash rather
@@ -1040,7 +1040,7 @@ def check_the_documented_pipeline_targets_exist() -> Result:
 def check_type_checking_is_a_real_gate() -> Result:
     """`make type` must block, and `make check` must run it.
 
-    `type:` was written `-@$(CONDA_RUN) mypy src/min_agent`. The leading `-` tells
+    `type:` was written `-@$(CONDA_RUN) mypy src/autopoiesis`. The leading `-` tells
     make to ignore a non-zero exit, so mypy reported 95 findings on every run and
     the command still exited 0 - the findings were visible and nothing acted on
     them, which is worse than not running it. `check:` did not depend on `type:`
@@ -1082,8 +1082,14 @@ def check_type_checking_is_a_real_gate() -> Result:
             "never type-checks",
         )
     return Result(
+        # The message states what was *not* proven, because "type is a real gate" reads like
+        # "the types are fine" to anyone skimming a green gate, and a check that reports PASS for
+        # a comparison it could not make is the defect class this repository has already caught
+        # three times. mypy itself is run by `make check` (and so by CI and by the fresh-clone
+        # script), which is where a type error fails.
         "type-checking-is-a-gate", PASS,
-        "`type:` runs mypy and blocks; `check:` runs lint, type and test",
+        "`type:` runs mypy and blocks; `check:` runs lint, type and test. This class asserts the "
+        "wiring only - it does not run mypy, and no verdict here says the types pass.",
     )
 
 
@@ -1854,7 +1860,7 @@ def check_one_credentials_path_everywhere() -> Result:
 
 
 def check_no_production_function_is_unreachable() -> Result:
-    """Every function under src/min_agent must be called by something.
+    """Every function under src/autopoiesis must be called by something.
 
     An audit listed 25 definitions that no code path reaches. Most were pydantic validators
     and properties, which the framework invokes without a name and which must not be
@@ -1921,7 +1927,7 @@ def check_no_production_function_is_unreachable() -> Result:
         )
     return Result(
         "no-unreachable-production-code", PASS,
-        "every function under src/min_agent is called, or is a pydantic hook or property",
+        "every function under src/autopoiesis is called, or is a pydantic hook or property",
     )
 
 
@@ -2133,7 +2139,7 @@ def check_the_running_daemon_matches_the_worktree() -> Result:
     if recorded != current:
         return Result(
             "daemon-source-matches-worktree", FAIL,
-            f"the daemon reports fingerprint {recorded} but src/min_agent is now {current}"
+            f"the daemon reports fingerprint {recorded} but src/autopoiesis is now {current}"
             f" - it is running superseded code; systemctl --user restart min-agent.service",
         )
     return Result(
@@ -2249,7 +2255,7 @@ def check_replay_audit() -> Result:
     feature works", and asserting +564.39 is correct by asking the code that
     computed +564.39 is that same mistake one level up.
 
-    `tools/replay_audit.py` parses the jsonl as text with no `min_agent` import in
+    `tools/replay_audit.py` parses the jsonl as text with no `autopoiesis` import in
     its counting path and re-derives each number from first principles, including
     the FIFO lot arithmetic. It exits non-zero on any disagreement.
     """
@@ -3053,12 +3059,12 @@ def check_defect_audit() -> Result:
 def _runtime_state_present() -> bool:
     """Whether this checkout has any deployment to check.
 
-    A clone has no `runtime/min_agent`, and that is not a health problem: there has been no
+    A clone has no `runtime/autopoiesis`, and that is not a health problem: there has been no
     cycle yet. What is being asked here is narrower than "is the agent healthy" - it is
     "is there a deployment to be healthy about".
     """
     # Checked *before* anything runs, not after: `fact-figures-match` and `doctor` shell out to
-    # `minictrl doctor`, which creates runtime/min_agent as a side effect. Reading this
+    # `minictrl doctor`, which creates runtime/autopoiesis as a side effect. Reading this
     # after the fact meant a fresh clone - which starts with no runtime at all - looked like
     # a deployment by the time doctor ran, and the gate demanded a clean health report from
     # a machine that had never run a cycle. Found by deleting runtime/ and watching it

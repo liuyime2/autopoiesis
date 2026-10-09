@@ -88,14 +88,14 @@ help:
 	@echo "make test             unit and integration tests only"
 	@echo "make classes          list the check classes and their test files"
 	@echo "make lint             ruff over src/ tools/ tests/ examples/"
-	@echo "make type             mypy over src/min_agent; reports without gating"
+	@echo "make type             mypy over src/autopoiesis; reports without gating"
 	@echo "make check            lint + test (no broker, no credentials)"
 	@echo "make test             unit and integration tests only"
 	@echo "make smoke            one real cycle against the paper broker"
 	@echo "make smoke-offline    the widest check needing no broker and no credentials"
 	@echo "make fast             lint + test + smoke + verify"
 	@echo "make fast-no-broker   lint + test + smoke-offline, no credentials needed"
-	@echo "make reproduce        write runtime/min_agent/reproduce.txt (provenance)"
+	@echo "make reproduce        write runtime/autopoiesis/reproduce.txt (provenance)"
 	@echo "make clean            remove caches; clean-pyc removes only bytecode"
 	@echo "make integrity        runtime state integrity only"
 	@echo "make doctor           health and evidence checks"
@@ -155,13 +155,13 @@ classes:
 classes-list: classes
 
 run:
-	@systemctl --user start min-agent.service
+	@systemctl --user start autopoiesis.service
 
 stop:
-	@systemctl --user stop min-agent.service
+	@systemctl --user stop autopoiesis.service
 
 restart:
-	@systemctl --user restart min-agent.service
+	@systemctl --user restart autopoiesis.service
 
 status:
 	@./minictrl status
@@ -192,7 +192,7 @@ lint:
 # passing `make type` meant nothing at all. It is now 0 findings and blocking, so a
 # regression is caught by the fast loop rather than discovered at review time.
 type:
-	@$(CONDA_RUN) mypy src/min_agent
+	@$(CONDA_RUN) mypy src/autopoiesis
 
 check: lint type test
 
@@ -215,9 +215,9 @@ fast-no-broker: lint test smoke-offline
 # so the target checks the report was produced, not that it was clean. What it proves is
 # that the package imports, config loads, and the CLI runs end to end without a broker.
 smoke-offline:
-	@PYTHONPATH=src $(CONDA_RUN) python -c "import min_agent, min_agent.cli; print('import ok')"
-	@PYTHONPATH=src $(CONDA_RUN) python -m min_agent.cli --check-env > /dev/null || true
-	@PYTHONPATH=src $(CONDA_RUN) python -m min_agent.cli --doctor --skip-broker --quiet || true
+	@PYTHONPATH=src $(CONDA_RUN) python -c "import autopoiesis, autopoiesis.cli; print('import ok')"
+	@PYTHONPATH=src $(CONDA_RUN) python -m autopoiesis.cli --check-env > /dev/null || true
+	@PYTHONPATH=src $(CONDA_RUN) python -m autopoiesis.cli --doctor --skip-broker --quiet || true
 	@echo "offline smoke ok: package imports, config loads, CLI runs with no broker"
 
 fast: lint test smoke verify
@@ -265,8 +265,8 @@ pipeline: validate-data test evaluate reproduce
 # such rather than as a failure - otherwise this stage could never pass before the first
 # cycle, which is when it is most useful.
 validate-data:
-	@if [ ! -d runtime/min_agent ]; then \
-		echo "validate-data: no runtime/min_agent; nothing recorded yet (run 'make run' first)"; \
+	@if [ ! -d runtime/autopoiesis ]; then \
+		echo "validate-data: no runtime/autopoiesis; nothing recorded yet (run 'make run' first)"; \
 	else \
 		$(CONDA_RUN) python tools/check_runtime_integrity.py && \
 		echo "validate-data: runtime state parses and is internally consistent"; \
@@ -287,13 +287,13 @@ validate-data:
 # version used `|| true`, which swallowed both, so a missing interpreter, a crash and an unmet
 # target were indistinguishable - and the comment claiming a genuine failure still surfaced
 # was simply wrong. Only the absence of a report fails this stage.
-EVAL_REPORT := runtime/min_agent/evaluate.txt
+EVAL_REPORT := runtime/autopoiesis/evaluate.txt
 
 evaluate:
-	@mkdir -p runtime/min_agent
-	@if [ ! -f runtime/min_agent/journal.jsonl ]; then \
+	@mkdir -p runtime/autopoiesis
+	@if [ ! -f runtime/autopoiesis/journal.jsonl ]; then \
 		echo "evaluate: no journal yet; run 'make run' for at least one cycle first"; \
-	elif $(CONDA_RUN) python -m min_agent.cli --verify-profit-target > $(EVAL_REPORT); then \
+	elif $(CONDA_RUN) python -m autopoiesis.cli --verify-profit-target > $(EVAL_REPORT); then \
 		cat $(EVAL_REPORT); \
 		echo "evaluate: target met"; \
 	else \
@@ -305,10 +305,10 @@ evaluate:
 		echo "evaluate: target NOT met (exit 1). That is a measurement, not a gate failure."; \
 	fi
 reproduce:
-	@mkdir -p runtime/min_agent
-	@$(PY) tools/provenance.py > runtime/min_agent/reproduce.txt
-	@echo "wrote runtime/min_agent/reproduce.txt"
-	@sed -n '1,10p' runtime/min_agent/reproduce.txt
+	@mkdir -p runtime/autopoiesis
+	@$(PY) tools/provenance.py > runtime/autopoiesis/reproduce.txt
+	@echo "wrote runtime/autopoiesis/reproduce.txt"
+	@sed -n '1,10p' runtime/autopoiesis/reproduce.txt
 
 
 clean: clean-pyc

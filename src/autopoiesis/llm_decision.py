@@ -54,7 +54,7 @@ Transport = Callable[[str, Mapping[str, Any], int], Mapping[str, Any]]
 #: market was open for.
 #:
 #: Every constraint the validator enforces is stated here in words. `tests/
-#: min_agent/test_llm_decision.py` asserts that correspondence, so a field added to the
+#: tests/autopoiesis/test_llm_decision.py` asserts that correspondence, so a field added to the
 #: schema without a line here fails the build rather than costing 20% of the history.
 DECISION_INSTRUCTION = (
     "You are a paper-trading decision engine. Return exactly one JSON object with keys: "

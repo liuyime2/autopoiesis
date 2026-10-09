@@ -21,10 +21,12 @@ Pure standard library; reads daily closes through a provider and never touches a
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Callable, Sequence
 from datetime import date
 from itertools import pairwise
+from pathlib import Path
 from typing import Any
 
 TRADING_DAYS = 252
@@ -70,8 +72,34 @@ def ewma_series(closes: Sequence[float], lam: float = LAMBDA) -> list[float]:
 
 
 def forecast_vol_pct(closes: Sequence[float]) -> float | None:
-    s = ewma_series(closes)
-    return s[-1] if s and len(closes) >= MIN_CLOSES else None
+    """The forecast the decision context carries: the symbol's own EWMA, floored by VIX when the
+    index is more worried than we are.
+
+    The floor is applied here rather than at a call site so there is one definition of "the
+    forecast", and it travels with `vix_note` so the caller can say which of the two produced it.
+    """
+    series = ewma_series(closes)
+    if not series or len(closes) < MIN_CLOSES:
+        return None
+    forecast = series[-1]
+    floored, _note = vix_floor(closes, forecast)
+    return floored
+
+
+def forecast_detail(closes: Sequence[float]) -> dict[str, Any] | None:
+    """The forecast and why it is that number, for the decision context and the doctor."""
+    series = ewma_series(closes)
+    if not series or len(closes) < MIN_CLOSES:
+        return None
+    own = series[-1]
+    floored, note = vix_floor(closes, own)
+    # `floored` is `own` whenever the floor does not engage, and never below it - see vix_floor.
+    return {
+        "forecast_vol_pct": round(own if floored is None else floored, 2),
+        "own_ewma_vol_pct": round(own, 2),
+        "vix_note": note,
+        "floored_by_vix": bool(floored and floored > own * (1 + 1e-9)),
+    }
 
 
 def _rank(values: Sequence[float]) -> list[float]:
@@ -155,6 +183,113 @@ def quality_status(quality: dict[str, Any], floor: float = MIN_QUALITY) -> str:
     if rc + Z * se < floor:
         return "SUSPENDED"
     return "UNVERIFIED"
+
+
+#: The index's own implied volatility, used as a **floor** on the symbol's forecast and nothing
+#: else.
+#:
+#: Tested before it was built, and the first test said no: blending VIX into the forecast beat the
+#: shipped EWMA on 2 of 4 symbols and lost on one, which this project's own rule calls inconsistent
+#: and therefore not a fusion. The second test asked the question that matters for a *risk* system
+#: instead - does VIX notice a shock before the symbol's own forecast does - and that one held:
+#:
+#:     symbol  asymmetry  rho     p        (VIX above forecast -> realised misses high)
+#:     SPY     +12.91     +0.304  0.0004
+#:     TLT      +1.40     +0.183  0.0056
+#:     XLE     +10.29     +0.241  0.0004
+#:     XLF     +19.36     +0.427  0.0004
+#:
+#: Asymmetry positive and significant on 4 of 4, so the relationship is one-sided: VIX above the
+#: forecast means the forecast is too low, and VIX below it does not mean the forecast is too high.
+#: That is what makes a floor the right shape - it can only ever raise the forecast, and raising the
+#: forecast can only shrink the position. It cannot ask for more risk, which is the invariant
+#: `vol_scaled_fraction` already keeps.
+VIX_CACHE = Path("runtime") / "autopoiesis" / "replay" / "VIX.pkl"
+#: How far VIX must exceed the forecast before the floor engages. The same threshold the test used,
+#: recorded there so it is not a knob chosen after the fact.
+VIX_FLOOR_MARGIN = 0.15
+
+
+def _mean_annualised_vol(closes: list[float]) -> float:
+    """The mean annualised volatility over this window, which is the symbol's typical level.
+
+    Averaged over the window rather than taken at the end, because the point is the exchange rate
+    between "index vol units" and "this symbol's vol units" over a long stretch, not today's reading.
+    """
+    if len(closes) < MIN_CLOSES:
+        return 0.0
+    rets = [b / a - 1.0 for a, b in pairwise(closes) if a > 0 and b > 0]
+    if len(rets) < MIN_CLOSES:
+        return 0.0
+    mean = sum(rets) / len(rets)
+    var = sum((x - mean) ** 2 for x in rets) / (len(rets) - 1)
+    return (var**0.5) * (252**0.5) * 100.0
+
+
+def _mean_of(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _vol_pct(rets: list[float]) -> float:
+    """Annualised volatility in percent from returns, or 0.0 when there is nothing to measure.
+
+    Local rather than imported from `data_gateway`: this module is pure standard library on purpose,
+    and reaching into the gateway for one arithmetic helper would couple a risk judgement to a broker
+    client it does not otherwise touch.
+    """
+    n = len(rets)
+    if n < 3:
+        return 0.0
+    mean = sum(rets) / n
+    var = sum((x - mean) ** 2 for x in rets) / (n - 1)
+    return (var**0.5) * (252**0.5) * 100.0
+
+
+def vix_floor(closes: Sequence[float], current: float | None) -> tuple[float | None, str]:
+    """`max(forecast, VIX rescaled to this symbol)` when VIX exceeds the forecast by the margin.
+
+    Returns `(forecast, reason)`. `reason` says which of the two won and by how much, because a floor
+    that silently replaces the forecast is indistinguishable from the forecast.
+
+    Never raises, and returns the input unchanged when the cache is absent or unreadable: a missing
+    VIX series must leave the judgement exactly as it was, not degrade it into a guess. That is the
+    same discipline the rest of this module keeps.
+    """
+    if current is None:
+        return current, "no forecast"
+    try:
+        if not VIX_CACHE.exists():
+            return current, "no VIX cache"
+        with open(VIX_CACHE, encoding="utf-8") as handle:
+            series = json.load(handle)
+        history = series.get("^VIX") or {}
+        if not history:
+            return current, "no VIX history"
+        ordered = sorted(history.items())
+        vix = ordered[-1][1]
+        # Rescale VIX onto this symbol's own volatility *level*. The ratio is of the two averages,
+        # not of the two volatilities: VIX is already an annualised volatility number, so the symbol's
+        # mean annualised volatility against the index's mean annualised volatility is the exchange
+        # rate between the two units. The first version divided volatility by volatility, which
+        # degenerates to zero on a flat index series and made a perfectly usable reading unreadable.
+        symbol_closes = list(closes)
+        if len(symbol_closes) < MIN_CLOSES:
+            return current, "too few closes to scale VIX"
+        window = symbol_closes[-252:]
+        symbol_mean_vol = _mean_annualised_vol(window)
+        index_values = [value for _, value in ordered[-253:] if value > 0]
+        index_mean_vol = _mean_of(index_values)
+        if not symbol_mean_vol or not index_mean_vol:
+            return current, "VIX not comparable on this window"
+        scaled = vix * (symbol_mean_vol / index_mean_vol)
+        if scaled <= current * (1 + VIX_FLOOR_MARGIN):
+            return current, f"VIX {scaled:.1f}% below the forecast {current:.1f}%; floor not engaged"
+        return round(scaled, 2), (
+            f"VIX floor engaged: index-implied {scaled:.1f}% against the forecast {current:.1f}%, "
+            f"which can only shrink the position"
+        )
+    except Exception as exc:  # a broken floor must leave the judgement exactly as it was
+        return current, f"VIX floor unavailable: {type(exc).__name__}: {exc}"
 
 
 def quality_ladder(closes: Sequence[float], floor: float = MIN_QUALITY) -> dict[str, Any]:
@@ -250,20 +385,27 @@ class RiskJudgment:
                 ladder = quality_ladder(closes, self.min_quality)
                 status = str(ladder["status"])
                 whole = forecast_quality(closes)
-                result = {
-                    "forecast_vol_pct": round(vol, 2),
-                    "regime": regime(closes),
-                    "forecast_quality": ladder["whole_history"],
-                    "independent_outcomes": int(whole["effective_n"]),
-                    # The verdict the longest window that could decide gave, and which window it was.
-                    # Reported with the ladder so a reader can see both the decision and the power
-                    # behind it - a status with no window attached is a claim with no denominator.
-                    "status": status,
-                    "quality_decided_on_days": ladder["decided_on"],
-                    "quality_ladder": ladder["rungs"],
-                }
-                if status == "ACTIVE":
-                    result["vol_scaled_fraction"] = round(vol_scaled_fraction(vol, self.target_vol_pct), 3)
+                detail = forecast_detail(closes)
+                if detail is None:  # unreachable while `closes` is not None, but the type needs it
+                    result = None
+                else:
+                    result = {
+                        "forecast_vol_pct": detail["forecast_vol_pct"],
+                        "own_ewma_vol_pct": detail["own_ewma_vol_pct"],
+                        # Which of the two produced the number above. A floor that silently replaces
+                        # the forecast is indistinguishable from the forecast.
+                        "vix_note": detail["vix_note"],
+                        "regime": regime(closes),
+                        "forecast_quality": ladder["whole_history"],
+                        "independent_outcomes": int(whole["effective_n"]),
+                        "status": status,
+                        "quality_decided_on_days": ladder["decided_on"],
+                        "quality_ladder": ladder["rungs"],
+                    }
+                if status == "ACTIVE" and result is not None:
+                    result["vol_scaled_fraction"] = round(
+                        vol_scaled_fraction(vol, self.target_vol_pct), 3
+                    )
         except Exception as exc:
             self.last_errors[symbol] = f"{type(exc).__name__}: {exc}"
             result = None

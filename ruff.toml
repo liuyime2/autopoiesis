@@ -110,4 +110,4 @@ ignore = [
 "tools/verify.py" = ["S101", "F401", "C4", "C416", "SIM102", "UP031", "PIE810", "RUF005", "RUF059", "B007", "B017", "B018"]
 
 [lint.isort]
-known-first-party = ["min_agent"]
+known-first-party = ["autopoiesis"]

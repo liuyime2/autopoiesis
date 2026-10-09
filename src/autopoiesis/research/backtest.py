@@ -58,7 +58,7 @@ from datetime import datetime
 
 #: Reused, not re-declared. The separation rule is one-way - production must never
 #: import research - so research may import production. This module previously had
-#: zero `min_agent` imports and therefore carried its own copies of `Bar` and
+#: zero `autopoiesis` imports and therefore carried its own copies of `Bar` and
 #: `bars_from_records`, byte-identical to `autopoiesis.regime`'s apart from a
 #: docstring. That made a bar built here a *different class* from the one
 #: `regime.bars_from_records` returns, so a rule handed a real bar could fail an

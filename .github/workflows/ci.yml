@@ -37,16 +37,16 @@ jobs:
       # `make check` runs mypy and blocks on it; CI did not, so a type regression passed CI
       # and failed the first local `make check` afterwards.
       - name: type check
-        run: mypy src/min_agent
+        run: mypy src/autopoiesis
 
       - name: unit and integration tests
         run: python -m pytest -q
 
       - name: offline smoke (no broker, no credentials)
         run: |
-          python -c "import min_agent, min_agent.cli"
-          python -m min_agent.cli --check-env > /dev/null || true
-          python -m min_agent.cli --doctor --skip-broker --quiet || true
+          python -c "import autopoiesis, autopoiesis.cli"
+          python -m autopoiesis.cli --check-env > /dev/null || true
+          python -m autopoiesis.cli --doctor --skip-broker --quiet || true
 
       - name: the gate can fail
         run: python tools/verify.py --self-test

@@ -7,7 +7,7 @@ objective forbids treating "the function exists and the test passes" as "the
 feature works", and asserting that +564.39 is correct *by asking the code that
 computed +564.39* is the same mistake one level up.
 
-So this parses `journal.jsonl` as text, with no `min_agent` import anywhere in the
+So this parses `journal.jsonl` as text, with no `autopoiesis` import anywhere in the
 counting path, and re-derives each number from first principles. Where the two
 disagree, the disagreement is the finding - not this script's opinion.
 
@@ -103,7 +103,7 @@ def _production_lot_figures():
     """The same three figures as the production ledger reads them.
 
     Imported here rather than at module scope so the naive counting above stays
-    independent: nothing in the arithmetic it performs touches `min_agent`.
+    independent: nothing in the arithmetic it performs touches `autopoiesis`.
 
     Two things had to be right and both were wrong first. `evaluate()` returns a
     result whose figures live under `.pnl`, not on the top-level object; and it
