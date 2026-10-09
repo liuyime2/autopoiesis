@@ -2,10 +2,10 @@
 
 ## Scope
 
-min-agent places orders against an Alpaca **paper** account. The security properties it
+autopoiesis places orders against an Alpaca **paper** account. The security properties it
 claims are:
 
-- credentials are read only from `${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env`, never
+- credentials are read only from `${XDG_CONFIG_HOME:-$HOME/.config}/autopoiesis/env` (the pre-rename `min-agent` path is still honoured as a fallback), never
   from the repository, and are never written to the journal, logs, or `doctor` output;
 - no order reaches the broker except through the Guardian, which has no bypass;
 - a non-paper base URL is refused before a broker client is constructed;

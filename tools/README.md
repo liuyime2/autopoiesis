@@ -153,6 +153,13 @@ moment. A separate file rather than a Makefile recipe because a backslash-contin
 Python program inside `$(...)` is consumed by make instead of continuing the shell line,
 and fails silently.
 
+**`status_page.py`** renders a read-only static snapshot of the same numbers the CLI computes, as
+one HTML file. It has no order path and reads no credentials: a page that could trade would be a
+second execution path, and the Guardian's single-path property is worth more than a button. A
+number that cannot be computed reads UNKNOWN rather than 0, because "not measurable" and "measured
+at zero" are different claims. `make status-page` writes it to
+`runtime/autopoiesis/report/site/index.html`.
+
 **`migrate_state_dir.py`** moves the state directory across the rename from
 `runtime/min_agent/` to `runtime/autopoiesis/`, and refuses rather than guessing.
 That directory holds the journal, which is this project's only source of truth
