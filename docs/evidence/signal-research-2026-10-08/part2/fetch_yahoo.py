@@ -12,7 +12,11 @@ for s in sys.argv[2:]:
             j = r.json()["chart"]["result"][0]
             ts = pd.to_datetime(j["timestamp"], unit="s", utc=True).tz_convert("America/New_York").tz_localize(None).normalize()
             q = j["indicators"]["quote"][0]; adj = j["indicators"]["adjclose"][0]["adjclose"]
-            frames[s] = pd.DataFrame({"open": q["open"], "close": q["close"], "adjclose": adj, "volume": q["volume"]}, index=ts)
+            # high and low were missing, which made two of the 六脉神剑 indicators (KDJ and LWR,
+            # both stochastic-style and both needing the bar's range) unbuildable on this panel.
+            # The chart endpoint returns them; the first version simply did not ask.
+            frames[s] = pd.DataFrame({"open": q["open"], "high": q["high"], "low": q["low"],
+                                      "close": q["close"], "adjclose": adj, "volume": q["volume"]}, index=ts)
             print(s, len(ts), ts[0].date(), flush=True); break
         except Exception as e:
             time.sleep(2)
