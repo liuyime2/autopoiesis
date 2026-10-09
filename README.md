@@ -91,6 +91,61 @@ of state is derived from it and can be regenerated. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the execution path, the evolution loop and
 which module owns which fact.
 
+## What it has shown, and what it has not
+
+Everything in this section is reproducible: each figure names the command that produces it. The
+numbers move while the agent trades; run the command rather than trusting this page.
+
+**Shown.** The accounting and the loop are real. Broker-confirmed fills, a FIFO lot ledger
+attributed to the strategy that opened each lot, and a Guardian on the single order path — all
+of it checked by 52 gate classes and reproducible on a clean clone with no credentials.
+
+**Shown, and it is the one thing that survives every test.** Volatility is forecastable, and the
+forecast is honest about when it stops working. On real bars the last month's volatility ranks the
+next month's at rank correlation +0.31 to +0.57 per instrument, and an EWMA of daily returns beats
+a long-run average by 47% out of sample. That is a statement about **risk, not direction**: it can
+size a position, and it cannot tell you which way to go.
+
+**Not shown: any directional edge.** 47 pre-stated price hypotheses and 14 news hypotheses went
+through a family-wise gate; none carried a direction. The closest directional survivor (trailing
+volatility against the next 21 days' return) dies once the market's common move is removed — it is
+beta. The six-meridian indicator composite (MACD+KDJ+RSI+LWR+BBI+MTM) fires on **0.27%** of bars,
+twice bullish in 33 years, and RSI and LWR disagree on 87% of them because `%R` is inverted, so
+"six independent signals" is closer to four. It is recorded as UNDERPOWERED, not as a null it did
+not earn.
+
+**Not shown: that the agent beats holding.** `make benchmark` reports the agent's own return on
+deployed capital after cost against SPY over the same window. Over the record on disk (19 trading
+days against a 60-day target) the agent is **behind**, and the figure is printed with its
+denominator. A per-strategy comparison is printed beside it as a *diagnostic* — given each strategy
+its own peak capital, on its own window — and is labelled as such, because one weak strategy
+failing is not the agent failing.
+
+**Not shown: that the LLM helps.** A large share of decisions predate provenance capture and
+cannot be attributed to a model at all; `make benchmark` prints that coverage with every share it
+reports. Where paired comparison is possible, the model's most common override of the
+deterministic rule is to refuse a trade the rule would have taken.
+
+### The VIX floor, stated as what it measured
+
+The decision context carries a `risk` block whose volatility forecast can be raised — never
+lowered — by the index's own implied volatility when the index is more worried than the symbol's
+own history. It was fused because that relationship is one-sided on 4 of 4 instruments, and because
+a floor can only shrink a position.
+
+Measured against itself on the same bars, cost and window:
+
+| | CAGR | Sharpe | max drawdown | floor engaged |
+|---|---|---|---|---|
+| SPY, no floor | 8.33 | 0.756 | −36.87 | 0% |
+| SPY, VIX floor | 6.71 | 0.714 | **−26.52** | 43% |
+| TLT, no floor | 2.93 | 0.314 | −39.85 | 0% |
+| TLT, VIX floor | **3.49** | **0.394** | **−30.25** | 36% |
+
+So it does what volatility targeting does: **it trades return for drawdown**, and on SPY that is
+1.62 CAGR points for 10.4 points of maximum drawdown with a slightly *worse* Sharpe. It is a risk
+measure and it is not an edge. `make research-vix-ab` reproduces the table.
+
 ## Quick start
 
 No broker account, model or credentials are needed for any of this.

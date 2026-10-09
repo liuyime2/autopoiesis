@@ -157,8 +157,11 @@ and fails silently.
 one HTML file. It has no order path and reads no credentials: a page that could trade would be a
 second execution path, and the Guardian's single-path property is worth more than a button. A
 number that cannot be computed reads UNKNOWN rather than 0, because "not measurable" and "measured
-at zero" are different claims. `make status-page` writes it to
-`runtime/autopoiesis/report/site/index.html`.
+at zero" are different claims. `make status-page` writes four pages to
+`runtime/autopoiesis/report/site/`: Overview (is it running, does the result hold up), Decisions
+(the rule's decision, the model's override and its reason, the Guardian's refusal), Strategies
+(lifecycle transitions with their reasons — what the self-evolution actually changed), and Evidence
+(the agent-level claim, the attribution coverage, and the signal ledger's verdict counts).
 
 **`migrate_state_dir.py`** moves the state directory across the rename from
 `runtime/min_agent/` to `runtime/autopoiesis/`, and refuses rather than guessing.
