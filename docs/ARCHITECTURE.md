@@ -137,8 +137,8 @@ computed, reported, and never reached anything that could act on it:
 
 ## Module responsibilities
 
-Verified by reading the modules rather than described from memory: 37 files under
-`src/autopoiesis/`, of which 4 are quarantined under `research/`. Counting
+Verified by reading the modules rather than described from memory: 43 files under
+`src/autopoiesis/`, of which 5 are quarantined under `research/`. Counting
 `__init__.py` as a module is the only place the total is arguable, so it is stated as
 files.
 
@@ -269,10 +269,10 @@ is regenerable: `reflection.json`, `heartbeat.json`, `risk_baseline.json`,
 ## 3. Module dependency reality
 
 `src/autopoiesis/` - 40 files, ~11,950 lines, 3 external dependencies (`alpaca_trade_api`,
-`pydantic`, `requests`). Heaviest nodes: `models.py` (imported 21x, the shared schema),
+`pydantic`, `requests`). Heaviest nodes: `models.py` (imported 23x, the shared schema),
 `atomicio.py` (8x), `journal.py` (6x), `strategy_engine.py` (6x).
 
-`cli.py` imports **25 modules**. That is the real measure of coupling, not module count:
+`cli.py` imports **26 modules**. That is the real measure of coupling, not module count:
 almost the entire package is reachable from the entry point, so almost nothing can be
 changed without risking the entry point.
 
