@@ -7,6 +7,7 @@ docs/evidence/signal-research-2026-10-08/, not here.
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 import random
 from datetime import date, timedelta
@@ -196,3 +197,162 @@ def test_the_decision_block_carries_the_window_it_was_decided_on():
     assert block["quality_ladder"], "the ladder must travel with the verdict"
     if block["status"] == "ACTIVE":
         assert block["quality_decided_on_days"] is not None
+
+
+# --- the VIX floor ---------------------------------------------------------------------------
+#
+# The first test of VIX said no: blending it into the forecast beat the shipped EWMA on 2 of 4
+# symbols and lost on one, which this project's own rule calls inconsistent. The second test asked
+# whether VIX notices a shock earlier and that held on 4 of 4 (asymmetry +1.4 to +19.4 points,
+# rho +0.18 to +0.43, p 0.0004 to 0.0056). The asymmetry is one-sided, so the right shape is a floor.
+
+
+def _calm_vix_days(level: float = 9.0, count: int = 260) -> dict:
+    """A flat VIX history long enough that its own volatility is measurable. One point is not: the
+    floor rescales VIX by the ratio of the two volatilities, and a ratio needs both."""
+    return {f"2026-{(i // 28) + 1:02d}-{(i % 28) + 1:02d}": level for i in range(count)}
+
+
+def _cache_vix(tmp_path, values):
+    import json
+
+    path = tmp_path / "VIX.pkl"
+    path.write_text(json.dumps({"^VIX": values}), encoding="utf-8")
+    return path
+
+
+def test_the_floor_never_raises_the_forecast_and_says_which_one_won():
+    """A floor by definition can only lift the number, and lifting it can only shrink the
+    position. If this test ever fails the other way, the floor has become leverage."""
+    from autopoiesis import risk_judgment as rj
+
+    closes = _ladder_series(n=900)
+    own = rj.ewma_series(closes)[-1]
+    for vix_level in (5.0, 20.0, 80.0, 400.0):
+        floored, note = rj.vix_floor(closes, own)
+        assert floored is None or floored >= own, f"VIX {vix_level} lowered the forecast"
+        if floored and floored > own * (1 + 1e-9):
+            assert "VIX floor engaged" in note
+
+
+def test_a_calm_index_leaves_the_forecast_alone(monkeypatch, tmp_path):
+    """Low VIX, no floor. The cache is patched rather than read from `runtime/`, because a test that
+    depends on a gitignored file passes on the machine that fetched it and fails on a fresh clone."""
+    from autopoiesis import risk_judgment as rj
+
+    monkeypatch.setattr(rj, "VIX_CACHE", _cache_vix(tmp_path, _calm_vix_days()))
+    closes = _ladder_series(n=900)
+    own = rj.ewma_series(closes)[-1]
+    floored, note = rj.vix_floor(closes, own)
+    assert floored == own
+    assert "below the forecast" in note
+
+
+def test_a_missing_cache_leaves_the_judgement_exactly_as_it_was(monkeypatch, tmp_path):
+    """No VIX series must not degrade the forecast into a guess. The module's own discipline: a
+    judgement that fails leaves the decision as it was."""
+    from autopoiesis import risk_judgment as rj
+
+    monkeypatch.setattr(rj, "VIX_CACHE", tmp_path / "absent.pkl")
+    closes = _ladder_series(n=900)
+    own = rj.ewma_series(closes)[-1]
+    floored, note = rj.vix_floor(closes, own)
+    assert floored == own
+    assert "no VIX cache" in note
+
+
+def test_an_unreadable_cache_is_reported_not_swallowed(monkeypatch, tmp_path):
+    from autopoiesis import risk_judgment as rj
+
+    broken = tmp_path / "VIX.pkl"
+    broken.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(rj, "VIX_CACHE", broken)
+    closes = _ladder_series(n=900)
+    # An unreadable cache must leave the number alone, which is also what the first value asserts.
+    own = rj.ewma_series(closes)[-1]
+    floored, note = rj.vix_floor(closes, own)
+    assert floored == own
+    assert "unavailable" in note
+
+
+def test_the_decision_block_reports_both_numbers_when_the_floor_engages(monkeypatch, tmp_path):
+    """`forecast_vol_pct` next to `own_ewma_vol_pct` next to the note, so a reader can see which of
+    the two produced the number and disagree with it."""
+    import json
+
+    from autopoiesis import risk_judgment as rj
+
+    # A VIX series that is far above anything the symbol's own returns produce.
+    values = {f"2026-10-{d:02d}": 90.0 for d in range(1, 30)}
+    monkeypatch.setattr(rj, "VIX_CACHE", _cache_vix(tmp_path, values))
+    block = rj.RiskJudgment(lambda symbol: _ladder_series(n=900)).block("SPY")
+    assert block is not None
+    assert "own_ewma_vol_pct" in block and "vix_note" in block
+    if block.get("floored_by_vix"):
+        assert block["forecast_vol_pct"] >= block["own_ewma_vol_pct"]
+
+
+# --- a stale reading is not today's judgement ------------------------------------------------
+
+
+def _vix_days(level: float, count: int = 260, last: str | None = None) -> dict:
+    """A flat VIX history whose final date can be set, so staleness is testable."""
+    import datetime as dt
+
+    end = dt.date.fromisoformat(last) if last else dt.date.today()
+    return {(end - dt.timedelta(days=i)).isoformat(): level for i in range(count)}
+
+
+def test_a_stale_reading_does_not_become_todays_judgement(monkeypatch, tmp_path):
+    """The defect the plan flagged: taking the cache's last point without checking its date. A
+    cache frozen on a calm week keeps saying "calm" through a spike, and the floor - whose purpose is
+    to add caution - becomes a reason to stay sized up."""
+    from autopoiesis import risk_judgment as rj
+
+    stale = (dt.date.today() - dt.timedelta(days=30)).isoformat()
+    monkeypatch.setattr(rj, "VIX_CACHE", _cache_vix(tmp_path, _vix_days(90.0, last=stale)))
+    closes = _ladder_series(n=900)
+    own = rj.ewma_series(closes)[-1]
+    floored, note = rj.vix_floor(closes, own)
+    assert floored == own
+    assert "days old" in note
+
+
+def test_a_reading_from_the_future_is_refused(monkeypatch, tmp_path):
+    from autopoiesis import risk_judgment as rj
+
+    future = (dt.date.today() + dt.timedelta(days=5)).isoformat()
+    monkeypatch.setattr(rj, "VIX_CACHE", _cache_vix(tmp_path, _vix_days(90.0, last=future)))
+    closes = _ladder_series(n=900)
+    own = rj.ewma_series(closes)[-1]
+    floored, note = rj.vix_floor(closes, own)
+    assert floored == own and "future" in note
+
+
+def test_a_fresh_reading_is_used(monkeypatch, tmp_path):
+    """A reading from today engages the floor when it is high enough, so the staleness guard is a
+    guard and not a permanent disable.
+
+    The history is varied rather than flat at 90. A flat history is degenerate for the rescale, which
+    divides by the *mean* index level: a series pinned at 90 makes every reading look calm relative
+    to itself. Real VIX history averages near 20 with spikes, so that is the shape used."""
+    from autopoiesis import risk_judgment as rj
+
+    history = _calm_vix_days(level=18.0, count=259)
+    history[dt.date.today().isoformat()] = 120.0        # the spike the floor exists to catch
+    monkeypatch.setattr(rj, "VIX_CACHE", _cache_vix(tmp_path, history))
+    closes = _ladder_series(n=900)
+    own = rj.ewma_series(closes)[-1]
+    floored, note = rj.vix_floor(closes, own)
+    assert floored > own, f"a fresh high reading should engage the floor: {note}"
+    assert "floor engaged" in note
+
+
+def test_an_unparseable_date_is_a_refusal_not_a_crash(monkeypatch, tmp_path):
+    from autopoiesis import risk_judgment as rj
+
+    monkeypatch.setattr(rj, "VIX_CACHE", _cache_vix(tmp_path, {"not-a-date": 90.0}))
+    closes = _ladder_series(n=900)
+    own = rj.ewma_series(closes)[-1]
+    floored, note = rj.vix_floor(closes, own)
+    assert floored == own and "not a date" in note

@@ -267,6 +267,25 @@ def vix_floor(closes: Sequence[float], current: float | None) -> tuple[float | N
             return current, "no VIX history"
         ordered = sorted(history.items())
         vix = ordered[-1][1]
+        # How old is that reading? The plan that ordered this work flagged it: taking the cache's
+        # last point without checking its date means a stale index silently becomes today's risk
+        # judgement. Measured the failure rather than assume it: a cache frozen on a calm week keeps
+        # saying "calm" through a spike, and the floor - whose whole purpose is to add caution -
+        # becomes a reason to stay sized up.
+        as_of = ordered[-1][0]
+        stale_after = 4  # a 3-day holiday weekend is the longest normal gap; four is the ceiling
+        try:
+            from datetime import date as _date
+
+            today = _date.today()
+            reading = _date.fromisoformat(as_of)
+            age = (today - reading).days
+            if age > stale_after:
+                return current, f"VIX reading {as_of} is {age} days old; floor not engaged"
+            if age < 0:
+                return current, f"VIX reading {as_of} is in the future; floor not engaged"
+        except ValueError:
+            return current, f"VIX cache's last date {as_of!r} is not a date; floor not engaged"
         # Rescale VIX onto this symbol's own volatility *level*. The ratio is of the two averages,
         # not of the two volatilities: VIX is already an annualised volatility number, so the symbol's
         # mean annualised volatility against the index's mean annualised volatility is the exchange
