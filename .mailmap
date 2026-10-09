@@ -1,0 +1,23 @@
+# The identity this project publishes under.
+#
+# Every commit was authored locally, and most of them carry a numeric GitHub noreply address that
+# ties them to one account. The commits are real and their authorship is not disputed - what this
+# file does is give the project one published name, so a reader looking at `git log` sees a project
+# rather than an account.
+#
+# Deliberately NOT rewritten history. `git filter-repo` would have burned the author identity out of
+# every commit and rewritten all 316 hashes, which is irreversible and would sever the link to
+# `origin/main`. A mailmap changes what `git log` *renders* and touches no object, so the local
+# record and the remote stay intact, and the change is revertible by deleting this file.
+#
+# Format is `Proper Name <proper@email> Commit Name <commit@email>`. Writing it as
+# `Name <new> <old>` parses as two contacts and git rejects the whole line, which is why the first
+# version of this file changed nothing at all - a `.mailmap` that silently fails is worse than none,
+# because it reads like the problem is solved.
+#
+# The `opencode@local` commits are this same person's; they were made by an agent on their behalf.
+# Publishing them under the same name is honest about who made them.
+
+Yimeng Liu <yimeng-liu@users.noreply.github.com> Yimeng Liu <52685375+lyimeng23@users.noreply.github.com>
+Yimeng Liu <yimeng-liu@users.noreply.github.com> Yimeng Liu <143660297+liuyime2@users.noreply.github.com>
+Yimeng Liu <yimeng-liu@users.noreply.github.com> opencode <opencode@local>

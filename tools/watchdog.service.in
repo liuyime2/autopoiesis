@@ -1,7 +1,7 @@
 [Unit]
-Description=min-agent unattended health watchdog
+Description=autopoiesis unattended health watchdog
 Documentation=file://@ROOT@/docs/history/specs/2026-09-28-min-agent-runbook.md
-After=min-agent.service
+After=autopoiesis.service
 
 [Service]
 Type=oneshot
@@ -9,7 +9,7 @@ WorkingDirectory=@ROOT@
 Environment=PYTHONPATH=@ROOT@/src
 Environment=PATH=@ENVBIN@:/usr/local/bin:/usr/bin:/bin
 Environment=OLLAMA_BASE_URL=http://127.0.0.1:11434
-# Rendered by minictrl from the same variable as min-agent.service. This was a
+# Rendered by minictrl from the same variable as autopoiesis.service. This was a
 # hardcoded -%h/.config/min-agent/env, which resolves to $HOME - a directory
 # this account's credentials are not in - so the watchdog started with no
 # credentials and its review reported "alpaca credentials" as a failure on
@@ -19,7 +19,7 @@ Environment=OLLAMA_BASE_URL=http://127.0.0.1:11434
 # No leading `-`: a missing credentials file should stop the unit with the
 # real reason, not start it and surface as a confusing health failure later.
 EnvironmentFile=@ENVFILE@
-ExecStart=@PYTHON@ -m min_agent.cli --watchdog
+ExecStart=@PYTHON@ -m autopoiesis.cli --watchdog
 
 # The whole point: an unattended system that never notices it is broken is the
 # failure mode this project spent a refactor removing. A daemon was dead for 97
@@ -36,5 +36,5 @@ ExecStart=@PYTHON@ -m min_agent.cli --watchdog
 # ExecStartCondition is not used on purpose: the watchdog must run *because* the
 # daemon may be down, not skip when it is.
 
-StandardOutput=append:@ROOT@/runtime/min_agent/watchdog.log
-StandardError=append:@ROOT@/runtime/min_agent/watchdog.log
+StandardOutput=append:@ROOT@/runtime/autopoiesis/watchdog.log
+StandardError=append:@ROOT@/runtime/autopoiesis/watchdog.log

@@ -1,5 +1,5 @@
 [Unit]
-Description=Write the min-agent validation report after every weekday close
+Description=Write the autopoiesis validation report after every weekday close
 
 [Timer]
 # New York time, so the report follows the market across daylight-saving changes. A holiday

@@ -12,7 +12,7 @@ places or reads an order):
   the owner exit, and the overall result;
 - the benchmark verdict.
 
-It reads; it changes nothing. Written to runtime/min_agent/reports/<date>.txt and printed.
+It reads; it changes nothing. Written to runtime/autopoiesis/reports/<date>.txt and printed.
 Run by the report timer (tools/report.timer) on weekdays at 16:30 New York time, or by hand with
 `make daily-report` (optionally `DATE=YYYY-MM-DD`).
 """
@@ -110,9 +110,9 @@ def main() -> int:
     args = parser.parse_args()
     day = date.fromisoformat(args.date) if args.date else datetime.now(NEW_YORK).date()
 
-    from min_agent.config import AgentConfig
-    from min_agent.doctor import run_doctor
-    from min_agent.journal import JsonlJournal
+    from autopoiesis.config import AgentConfig
+    from autopoiesis.doctor import run_doctor
+    from autopoiesis.journal import JsonlJournal
 
     config = AgentConfig.from_env()
     summary = day_summary(JsonlJournal(config.journal_path).read_all(), day)

@@ -34,7 +34,7 @@ HISTORY = ROOT / "docs" / "history"
 sys.path.insert(0, str(ROOT / "src"))
 
 JOURNAL_BACKUPS = 3  # matches JsonlJournal's default `backups`
-RUNTIME = ROOT / "runtime" / "min_agent"
+RUNTIME = ROOT / "runtime" / "autopoiesis"
 FINDINGS = HISTORY / "known_state_findings.json"
 
 #: From models.StrategyLifecycle. Getting this wrong flagged three healthy

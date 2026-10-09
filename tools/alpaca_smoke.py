@@ -6,8 +6,8 @@ sys.path.insert(0, 'src')
 
 import alpaca_trade_api as tradeapi
 
-from min_agent.config import AgentConfig
-from min_agent.data_gateway import AlpacaDataGateway
+from autopoiesis.config import AgentConfig
+from autopoiesis.data_gateway import AlpacaDataGateway
 
 
 def main():

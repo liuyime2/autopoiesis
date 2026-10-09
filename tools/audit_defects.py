@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src" / "min_agent"
+SRC = ROOT / "src" / "autopoiesis"
 
 results: list[tuple[str, str, bool]] = []
 
@@ -138,7 +138,7 @@ def main() -> int:
         check("D9", f"{name} enables pipefail", "pipefail" in text)
 
     # D10 - supervision
-    unit = (ROOT / "tools" / "min-agent.service.in").read_text(encoding="utf-8")
+    unit = (ROOT / "tools" / "autopoiesis.service.in").read_text(encoding="utf-8")
     check("D10", "systemd unit exists", "[Service]" in unit)
     check("D10", "restarts are bounded", "StartLimitBurst=" in unit and "StartLimitIntervalSec=" in unit)
     check("D10", "no credential in the unit", "ALPACA_API_KEY=" not in unit)

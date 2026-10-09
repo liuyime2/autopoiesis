@@ -41,13 +41,13 @@ ROOT = Path(__file__).resolve().parents[1]
 def _journal_path() -> Path:
     """The journal path, resolved through AgentConfig rather than written out again.
 
-    Six sites in this repository spelled out `runtime/min_agent/journal.jsonl`, which made
+    Six sites in this repository spelled out `runtime/autopoiesis/journal.jsonl`, which made
     `MIN_AGENT_JOURNAL` a setting that changed nothing for the tools - a documented option
     that was silently ignored by half the code that reads the file it names. One resolver,
     and the tools agree with the agent.
     """
     sys.path.insert(0, str(ROOT / "src"))
-    from min_agent.config import AgentConfig
+    from autopoiesis.config import AgentConfig
     return Path(AgentConfig.from_env().journal_path)
 
 
@@ -114,10 +114,10 @@ def _production_lot_figures():
     because it reads as a pass.
     """
     try:
-        from min_agent.broker_evidence import latest_evidence_batch
-        from min_agent.evaluator import DeterministicEvaluator, confirmed_fill_activities
-        from min_agent.fill_reconciler import FILL_EVENT
-        from min_agent.journal import JsonlJournal
+        from autopoiesis.broker_evidence import latest_evidence_batch
+        from autopoiesis.evaluator import DeterministicEvaluator, confirmed_fill_activities
+        from autopoiesis.fill_reconciler import FILL_EVENT
+        from autopoiesis.journal import JsonlJournal
     except Exception as exc:  # surfaced below rather than silently skipped
         return f"import failed: {type(exc).__name__}: {exc}"
     journal = JsonlJournal(JOURNAL)
@@ -143,7 +143,7 @@ def _production_lot_figures():
     # a different module), and `strategy_realized_pnl` is a per-strategy dict rather
     # than a total. The figures the doctor prints come from the attribution result,
     # so that is what is compared here.
-    from min_agent.attribution import attribute
+    from autopoiesis.attribution import attribute
     report = attribute(records, result.pnl.model_dump(mode="json"))
     # unmatched_sell_quantity is per-strategy, which is why the doctor prints
     # "UNMATCHED SELLS {'trend-follow-sell-002': 29.0}". The naive pass has no

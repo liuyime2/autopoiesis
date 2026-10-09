@@ -91,7 +91,7 @@ Concretely, in this repository:
 
 - dependencies are declared in `pyproject.toml` and nothing else;
 - the task runner is the `Makefile`; scripts are not run by hand;
-- credentials live only in `${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env`,
+- credentials live only in `${XDG_CONFIG_HOME:-$HOME/.config}/autopoiesis/env`,
   never in the repository;
 - `docs/evidence/run-fresh-clone.sh` clones the committed tree, installs it, and
   runs it with credentials removed — that is the proof the machine is not load-bearing.

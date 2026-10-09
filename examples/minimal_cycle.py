@@ -25,8 +25,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from min_agent.guardian import Guardian
-from min_agent.models import (
+from autopoiesis.guardian import Guardian
+from autopoiesis.models import (
     AccountSnapshot,
     DataSnapshot,
     PositionSnapshot,

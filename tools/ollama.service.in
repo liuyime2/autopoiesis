@@ -1,5 +1,5 @@
 [Unit]
-Description=Ollama LLM server (dependency of the min_agent paper-trading daemon)
+Description=Ollama LLM server (dependency of the autopoiesis paper-trading daemon)
 Documentation=https://github.com/ollama/ollama
 After=network-online.target
 Wants=network-online.target
@@ -7,7 +7,7 @@ StartLimitIntervalSec=1800
 StartLimitBurst=5
 # The agent must not start before the model endpoint it calls, or the first
 # cycles would all fall back and journal themselves as fallback_policy_engine.
-Before=min-agent.service
+Before=autopoiesis.service
 
 [Service]
 Type=exec
@@ -35,7 +35,7 @@ Environment=CUDA_VISIBLE_DEVICES=0
 Environment=OLLAMA_VULKAN=0
 
 # One model, one slot, resident forever. The agent uses qwen3.8:27b and nothing
-# else (src/min_agent/config.py:76 pins it), so there is no second model to make
+# else (src/autopoiesis/config.py:76 pins it), so there is no second model to make
 # room for. MAX_LOADED_MODELS=2 was what let a second model evict the first: two
 # 27B-class models do not fit in 45 GiB alongside KV cache, so the agent's model
 # was being unloaded and cold-reloaded mid-session.

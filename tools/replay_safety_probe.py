@@ -32,15 +32,15 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from min_agent.evaluator import DeterministicEvaluator
-from min_agent.journal import JsonlJournal
-from min_agent.models import (
+from autopoiesis.evaluator import DeterministicEvaluator
+from autopoiesis.journal import JsonlJournal
+from autopoiesis.models import (
     CycleRecord,
     ExecutionResult,
     GuardianResult,
     TradeDecision,
 )
-from min_agent.replay import (
+from autopoiesis.replay import (
     REPLAY_SOURCE,
     REPLAYED,
     ReplayBar,
@@ -77,7 +77,7 @@ def _approve() -> GuardianResult:
 def probe() -> list[str]:
     problems: list[str] = []
     bars = _bars()
-    source = (pathlib.Path(__file__).resolve().parents[1] / "src" / "min_agent" / "replay.py").read_text()
+    source = (pathlib.Path(__file__).resolve().parents[1] / "src" / "autopoiesis" / "replay.py").read_text()
 
     # 1. No broker client, no paper/live executor.
     for banned in ("AlpacaPaperExecutor", "submit_order", "tradeapi.REST", "tradeapi.REST("):

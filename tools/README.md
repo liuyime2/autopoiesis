@@ -1,7 +1,7 @@
 # tools/
 
 Operator utilities. **None of these are part of the trading path and none are imported by
-`src/min_agent/`.**
+`src/autopoiesis/`.**
 
 A previous version of this file documented fifteen one-off diagnostic scripts that no
 longer exist — the directory held nothing but `__pycache__` residue. Naming files that
@@ -25,7 +25,7 @@ failure. `make verify` runs it. Three modes:
 ## The replay environment — real bars, simulated account
 
 **`fetch_replay_bars.py`** takes `[SYMBOL] [START] [END] [INTERVAL]` and writes what the
-broker's historical endpoint actually returns into `runtime/min_agent/replay/`, with the
+broker's historical endpoint actually returns into `runtime/autopoiesis/replay/`, with the
 provenance recorded in the file. It never falls back to a generator: a replay over invented
 prices can only show that code runs, and this is the one step that needs network and
 credentials. Everything below it runs offline against that cache. On a fresh clone run it
@@ -100,7 +100,7 @@ number is read out of the journal and the broker evidence already on disk. It do
 *record*, which lives in gitignored `runtime/` — so a fresh clone reports that there is nothing
 to measure and exits 2, rather than printing a number for a run that never happened.
 
-Every number is computed once, by `src/min_agent/doctor.py`, and parsed back out of its check
+Every number is computed once, by `src/autopoiesis/doctor.py`, and parsed back out of its check
 detail rather than recomputed; a second implementation could disagree with the one the project
 argues from.
 
@@ -127,7 +127,7 @@ make daily-report DATE=2026-10-07
 
 Run after every weekday close, at 16:30 New York time, by the timer installed from
 `report.timer` and `report.service.in`. It reads the journal and runs doctor without the broker - it places and
-reads no order - and writes `runtime/min_agent/reports/<date>.txt`:
+reads no order - and writes `runtime/autopoiesis/reports/<date>.txt`:
 
 - the day's first and last cycle, which is how a missed open shows up;
 - decisions by source, action and execution result;
@@ -153,9 +153,17 @@ moment. A separate file rather than a Makefile recipe because a backslash-contin
 Python program inside `$(...)` is consumed by make instead of continuing the shell line,
 and fails silently.
 
+**`migrate_state_dir.py`** moves the state directory across the rename from
+`runtime/min_agent/` to `runtime/autopoiesis/`, and refuses rather than guessing.
+That directory holds the journal, which is this project's only source of truth
+(everything else in it is derived and regenerable), and two directories both
+holding a real journal cannot be merged without inventing a history. `check`
+(default) only reports; `apply` moves, and prints the command to undo it. Run it
+with the daemon stopped.
+
 ## Service templates
 
-`min-agent.service.in`, `watchdog.service.in`, `ollama.service.in`, `research.service.in`,
+`autopoiesis.service.in`, `watchdog.service.in`, `ollama.service.in`, `research.service.in`,
 `report.service.in` (the timer units ship as files, `tools/watchdog.timer`, `tools/research.timer`
 and `tools/report.timer`, which `minictrl` copies into place) —
 substituted by `minictrl install-service`, which uses `systemd_unit_dir.sh` to ask
@@ -168,7 +176,7 @@ them into place, rather than being templated inline, because a timer has no `Exe
 substitute into. That makes them the units here that are not `.in` templates.
 
 `research.service.in` installs as the unit quant-research.service: it fetches real bars from
-the broker and then runs `min_agent.research.driver`. It is a separate unit rather than something
+the broker and then runs `autopoiesis.research.driver`. It is a separate unit rather than something
 the daemon invokes because `check_production_research_separation` fails the gate when any
 production module imports the research package — letting the daemon run the search would break
 that separation for the sake of one scheduler, and a component that both searches and trades can

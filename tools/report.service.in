@@ -1,7 +1,7 @@
 [Unit]
-Description=min-agent daily validation report
+Description=autopoiesis daily validation report
 Documentation=file://@ROOT@/tools/README.md
-After=min-agent.service
+After=autopoiesis.service
 
 [Service]
 Type=oneshot
@@ -10,5 +10,5 @@ Environment=PYTHONPATH=@ROOT@/src
 Environment=PATH=@ENVBIN@:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=@ENVFILE@
 # Reads the journal and runs doctor without the broker; writes
-# runtime/min_agent/reports/<date>.txt. It places and reads no order.
+# runtime/autopoiesis/reports/<date>.txt. It places and reads no order.
 ExecStart=@PYTHON@ tools/daily_report.py

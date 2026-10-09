@@ -1,4 +1,4 @@
-"""Total-return-adjusted daily bars (splits and dividends) for the research universe, one file."""
+"""Daily bars for the research universe, one file. ADJUSTMENT=all (default: splits and dividends), raw, or split."""
 import os, sys, time
 import pandas as pd
 import alpaca_trade_api as tradeapi
@@ -8,7 +8,7 @@ frames = {}
 for s in syms:
     for attempt in range(3):
         try:
-            df = api.get_bars(s, "1Day", "2016-01-01", "2026-10-07", adjustment="all").df
+            df = api.get_bars(s, "1Day", "2016-01-01", "2026-10-07", adjustment=os.environ.get("ADJUSTMENT", "all")).df
             if len(df): frames[s] = df[["open", "high", "low", "close", "volume"]]
             break
         except Exception as e:

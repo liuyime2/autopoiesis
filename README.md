@@ -86,7 +86,7 @@ flowchart LR
     J -. "lessons" .-> C
 ```
 
-The journal (`runtime/min_agent/journal.jsonl`) is the only source of truth. Every other piece
+The journal (`runtime/autopoiesis/journal.jsonl`) is the only source of truth. Every other piece
 of state is derived from it and can be regenerated. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the execution path, the evolution loop and
 which module owns which fact.
@@ -114,7 +114,7 @@ targets use an active venv first, then conda, and need neither.
 2. Install [Ollama](https://ollama.com/) and pull a model (default: `qwen3.8:27b`; set
    `MIN_AGENT_MODEL` to use another). Without a model, the deterministic policy engine decides
    and every decision is labelled `fallback_policy_engine`.
-3. Put the credentials in `${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env`, mode 600. They are
+3. Put the credentials in `${XDG_CONFIG_HOME:-$HOME/.config}/autopoiesis/env`, mode 600. They are
    never read from the repository. [`configs/paper.env.example`](configs/paper.env.example)
    lists every variable with its default:
 
@@ -136,7 +136,7 @@ targets use an active venv first, then conda, and need neither.
 
 On Linux, `loginctl enable-linger $USER` keeps the services running after you log out and
 starts them at boot. The daemon trades by itself at the open and drops to maintenance at the
-close. The report timer writes `runtime/min_agent/reports/<date>.txt` at 16:30 New York time
+close. The report timer writes `runtime/autopoiesis/reports/<date>.txt` at 16:30 New York time
 on weekdays.
 
 ## Commands
@@ -224,7 +224,7 @@ Report a vulnerability as described in [`SECURITY.md`](SECURITY.md).
 ## Project layout
 
 ```
-src/min_agent/          the package (import name min_agent). 43 modules, 3 external dependencies.
+src/autopoiesis/          the package (import name autopoiesis). 43 modules, 3 external dependencies.
   cli.py                the single entry point
   daemon.py             the trading loop and the maintenance loop
   loop.py               one cycle: snapshot -> decision -> guardian -> execute
@@ -238,7 +238,7 @@ src/min_agent/          the package (import name min_agent). 43 modules, 3 exter
   models.py             shared schema, imported by 23 modules
   research/             walk-forward backtests; production may not import it
 tools/                  the gate (verify.py), benchmark, daily report, probes, systemd templates
-tests/min_agent/        75 test files
+tests/autopoiesis/        76 test files
 examples/               the smallest runnable example, no broker needed
 configs/                paper.env.example: every environment variable with its default
 docs/                   ARCHITECTURE.md, evidence/, history/

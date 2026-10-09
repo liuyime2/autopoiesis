@@ -15,7 +15,7 @@ network - `doctor` is run with `skip_broker=True` and every number is read out o
 already on disk. That also means it is **not** a fresh-clone demo: a new clone has no record
 and the tool reports that rather than inventing a number for it.
 
-Every figure is computed once, by `src/min_agent/doctor.py`, and parsed back out of its check
+Every figure is computed once, by `src/autopoiesis/doctor.py`, and parsed back out of its check
 detail rather than recomputed here. A second implementation of the comparison could disagree
 with the one the project argues from, and then two numbers would exist and only one of them
 would be defended.
@@ -79,7 +79,7 @@ EXIT_NOTHING_TO_MEASURE = 2
 def _load_doctor():
     """`doctor` by module path, because `tools/` is not a package."""
     spec = importlib.util.spec_from_file_location(
-        "doctor_under_benchmark", ROOT / "src" / "min_agent" / "doctor.py"
+        "doctor_under_benchmark", ROOT / "src" / "autopoiesis" / "doctor.py"
     )
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -94,7 +94,7 @@ def _record_window(config) -> tuple[str, str, int, int]:
     `doctor`. What is measured here is only *how much record the comparison covers*, which is
     the number that decides whether the 60-day target can be judged at all.
     """
-    from min_agent.journal import JsonlJournal
+    from autopoiesis.journal import JsonlJournal
 
     records = JsonlJournal(config.journal_path).read_all()
     stamps = sorted(
@@ -204,7 +204,7 @@ def _print_split_section(title: str, detail: str | None, extras: list[str], inde
 
 
 def main() -> int:
-    from min_agent.config import AgentConfig
+    from autopoiesis.config import AgentConfig
 
     try:
         config = AgentConfig.from_env()
@@ -212,7 +212,7 @@ def main() -> int:
         config = None
         print(f"# config unavailable ({type(exc).__name__}: {exc}); using documented defaults")
     if config is None:
-        from min_agent.config import AgentConfig as _AgentConfig
+        from autopoiesis.config import AgentConfig as _AgentConfig
 
         config = _AgentConfig()
 

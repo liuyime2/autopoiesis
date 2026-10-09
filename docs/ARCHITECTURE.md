@@ -88,7 +88,7 @@ decision → counterfactual → calibration → reflection → curriculum
 | Admission | Whether that proposal is admissible at all | 177 reviewed |
 | Offline screen | Whether the candidate's own rule did better than its days alone would have: each day's up-share comes from the market's moves, and a strategy is rejected only when worse than that by two standard errors | 9,646 |
 | Lifecycle | Promotion, pausing, retirement - each with its reason | 90 changes |
-| Signal gate | Whether a hypothesis about what predicts returns is real: selected on the earlier 60% of days, read once on the later 40%, same sign in both, an interval from resampling whole days, and a significance bar that counts every hypothesis the ledger has ever seen (`research/signal_test.py`, `runtime/min_agent/signal_trials.jsonl`). 61 hypotheses so far (47 on prices, 14 on news): none carried a direction | 61 recorded in `docs/evidence/signal-research-2026-10-08/` |
+| Signal gate | Whether a hypothesis about what predicts returns is real: selected on the earlier 60% of days, read once on the later 40%, same sign in both, an interval from resampling whole days, and a significance bar that counts every hypothesis the ledger has ever seen (`research/signal_test.py`, `runtime/autopoiesis/signal_trials.jsonl`). 61 hypotheses so far (47 on prices, 14 on news): none carried a direction | 61 recorded in `docs/evidence/signal-research-2026-10-08/` |
 | Knowledge | What the model is told about its own reliability. Lessons are de-duplicated by content with figures masked, each is shown on half of cycles, and one with no measured effect after 10 trading days is retired | 47 proposed |
 
 **Promotion is evidence-gated and cannot be earned by inaction.** A candidate reaches
@@ -138,7 +138,7 @@ computed, reported, and never reached anything that could act on it:
 ## Module responsibilities
 
 Verified by reading the modules rather than described from memory: 37 files under
-`src/min_agent/`, of which 4 are quarantined under `research/`. Counting
+`src/autopoiesis/`, of which 4 are quarantined under `research/`. Counting
 `__init__.py` as a module is the only place the total is arguable, so it is stated as
 files.
 
@@ -193,7 +193,7 @@ deleted    437 lines   5 shell wrappers, each a thin duplicate of CLI flags
 added      545 lines   README, ARCHITECTURE, MIGRATION
 added      264 lines   pyproject.toml, ruff.toml, Makefile targets
 added      368 lines   tests, of which 40 are the syntax-import class's own
-production +131 / -98   net +33 lines in src/min_agent
+production +131 / -98   net +33 lines in src/autopoiesis
 ```
 
 The production-code number is the one that matters, and +33 is almost entirely comments
@@ -207,7 +207,7 @@ What was genuinely removed, in the objective's own order:
 - **Delete** - 437 lines of five entry points that did the same things as the CLI; a dead
   package; every unused import and dead local ruff could identify (12 and 2, before the
   rules were scoped down to what is worth enforcing).
-- **Merge** - five ways to start the daemon became one `min-agent` console script.
+- **Merge** - five ways to start the daemon became one `autopoiesis` console script.
 - **Simplify** - `CHECK_CLASSES` was a list that had stopped matching reality; it now does.
 - **Reuse** - the D8 safety property outlived the script it was written next to.
 - **Rewrite** - `smoke-offline` and the `--help` string, both of which had never worked.
@@ -241,7 +241,7 @@ strategy's worth measured, or a strategy's lifecycle changed.
 
 ## 2. Core execution path
 
-There is exactly one, and it is short. `src/min_agent/daemon.py` runs it:
+There is exactly one, and it is short. `src/autopoiesis/daemon.py` runs it:
 
 ```
 MarketScheduler.should_trade_now()           market open? (broker clock)
@@ -268,7 +268,7 @@ is regenerable: `reflection.json`, `heartbeat.json`, `risk_baseline.json`,
 
 ## 3. Module dependency reality
 
-`src/min_agent/` - 40 files, ~11,950 lines, 3 external dependencies (`alpaca_trade_api`,
+`src/autopoiesis/` - 40 files, ~11,950 lines, 3 external dependencies (`alpaca_trade_api`,
 `pydantic`, `requests`). Heaviest nodes: `models.py` (imported 21x, the shared schema),
 `atomicio.py` (8x), `journal.py` (6x), `strategy_engine.py` (6x).
 
@@ -280,7 +280,7 @@ changed without risking the entry point.
 
 `src/voyager_quant/` contains 7 files, all `__pycache__/*.pyc`, zero `.py` sources, and zero
 references anywhere in the repository. It is the compiled residue of a renamed package, and
-being the only thing in `src/` besides `min_agent`, it makes the layout look ambiguous to a
+being the only thing in `src/` besides `autopoiesis`, it makes the layout look ambiguous to a
 newcomer for no benefit.
 
 ### Correction: "11 modules are unimported" was wrong
@@ -288,12 +288,12 @@ newcomer for no benefit.
 A static import scan flagged `attribution`, `calibration`, `counterfactual`,
 `experiment_registry`, `lineage`, `model_registry`, `offline_validation`, `regime` as having
 no importers. All are imported - by `daemon.py:15`,
-`from min_agent import counterfactual, offline_validation`, a form the scan's `ImportFrom`
-handling missed. **Nothing in `min_agent/` is dead code.**
+`from autopoiesis import counterfactual, offline_validation`, a form the scan's `ImportFrom`
+handling missed. **Nothing in `autopoiesis/` is dead code.**
 
 ### `research/` is production-excluded on purpose
 
-`src/min_agent/research/` - `backtest.py`, `walk_forward.py`, `trials.py`, 845 lines - is
+`src/autopoiesis/research/` - `backtest.py`, `walk_forward.py`, `trials.py`, 845 lines - is
 imported by tests only. `tools/verify.py:317 check_production_research_separation` fails
 the build if production ever imports them. This is a correct separation of diagnosis from
 execution and must be kept, not "fixed" by wiring research into production.
@@ -302,14 +302,14 @@ execution and must be kept, not "fixed" by wiring research into production.
 
 | Path | Role | Regenerable |
 | --- | --- | --- |
-| `runtime/min_agent/journal.jsonl` | **source of truth**, append-only | no |
-| `runtime/min_agent/strategies/*.json` | strategy specs + lifecycle | from journal + admission |
-| `runtime/min_agent/reflection.json` | 50-cycle evaluation snapshot | yes |
-| `runtime/min_agent/heartbeat.json` | liveness + source fingerprint | yes |
-| `runtime/min_agent/curriculum_state.json` | curriculum dedup state | yes |
-| `runtime/min_agent/risk_baseline.json` | daily loss baseline | yes |
-| `runtime/min_agent/doctor-history.jsonl` | watchdog history | append-only |
-| `runtime/min_agent/research_trials.jsonl` | research-only trial ledger | append-only |
+| `runtime/autopoiesis/journal.jsonl` | **source of truth**, append-only | no |
+| `runtime/autopoiesis/strategies/*.json` | strategy specs + lifecycle | from journal + admission |
+| `runtime/autopoiesis/reflection.json` | 50-cycle evaluation snapshot | yes |
+| `runtime/autopoiesis/heartbeat.json` | liveness + source fingerprint | yes |
+| `runtime/autopoiesis/curriculum_state.json` | curriculum dedup state | yes |
+| `runtime/autopoiesis/risk_baseline.json` | daily loss baseline | yes |
+| `runtime/autopoiesis/doctor-history.jsonl` | watchdog history | append-only |
+| `runtime/autopoiesis/research_trials.jsonl` | research-only trial ledger | append-only |
 
 `runtime/` is correctly gitignored.
 
@@ -355,7 +355,7 @@ make integrity         PASS  ( 4s)
 make verify-self-test  PASS  (14s)
 ```
 
-60 test files under `tests/min_agent/`. `tools/verify.py` is a custom gate layer of 29 check
+60 test files under `tests/autopoiesis/`. `tools/verify.py` is a custom gate layer of 29 check
 classes. Several are genuine invariants worth keeping and extending: production may not
 import `research/`; every deployed unit's `EnvironmentFile` must resolve to a real file; the
 running daemon's source fingerprint must match the worktree; replayed FIFO accounting must
@@ -378,12 +378,12 @@ Ordered by the objective's own rule (delete -> merge -> simplify -> reuse -> rew
 
 ## 8. Import cost: measured, not assumed
 
-`cli.py` imports 24 `min_agent` modules at module level, which looks like the coupling
+`cli.py` imports 24 `autopoiesis` modules at module level, which looks like the coupling
 problem this refactor was supposed to reduce. It was measured instead of restructured.
 
 ```
 --help                          0.62s   (of which bare interpreter start is 0.10s)
-import min_agent.cli             0.76s
+import autopoiesis.cli             0.76s
 import alpaca_trade_api          1.83s
 ```
 
@@ -391,7 +391,7 @@ import alpaca_trade_api          1.83s
 `import alpaca_trade_api` into the four functions that need it (`cli.py:172, 219, 398,
 536`). The heavy dependency is already off the help path.
 
-`requests` shows 175ms of the profile via `min_agent.broker_evidence`. Deferring it was
+`requests` shows 175ms of the profile via `autopoiesis.broker_evidence`. Deferring it was
 tried by measurement rather than by taste: removing the top-level import and adding a
 function-local one made `--help` **14ms slower**, not faster, because `alpaca_trade_api`
 imports `requests` itself and the cost is paid either way once any subcommand runs.
@@ -400,7 +400,7 @@ So the import surface was left alone. Restructuring it would have added an indir
 a comment explaining why, in exchange for nothing - which is the opposite of the stated
 goal of reducing long-term complexity rather than line count. The real reduction already
 happened elsewhere: five duplicated shell entry points became one CLI, and one canonical
-`min-agent` console script replaced an absolute interpreter path baked into a script.
+`autopoiesis` console script replaced an absolute interpreter path baked into a script.
 
 ## 9. Acceptance audit
 
@@ -411,11 +411,11 @@ a list of what was checked and what the check returned.
 | --- | --- |
 | One authoritative implementation per concept | Risk limits are defined in `config.py` alone (`Guardian` takes them as parameters, so it cannot disagree); `submit_order` appears in exactly one module, `executor.py:38`; the journal is written in exactly one place, `journal.py:153`. Two other append sites exist - `doctor.py:144` and `research/trials.py:59` - and both write separate ledgers with their own schema (`doctor-history.jsonl`, `research_trials.jsonl`), not a second copy of the journal |
 | One primary execution path per core task | `loop.py` runs one cycle and only one: snapshot → decision → `Guardian.review` → `Executor.submit` → journal. `--daemon`, `--once` and `make run` all enter through it |
-| One source of truth for config and data semantics | `runtime/min_agent/journal.jsonl`; the other six state files are derived and the table in section 4 says which. Environment variables are read only by `config.py`; the other occurrences are documentation, assertions that a variable exists, or installer plumbing |
+| One source of truth for config and data semantics | `runtime/autopoiesis/journal.jsonl`; the other six state files are derived and the table in section 4 says which. Environment variables are read only by `config.py`; the other occurrences are documentation, assertions that a variable exists, or installer plumbing |
 | Tests for key behaviour | 61 test files, all mapped, no unclassified file and no ghost mapping. `class-coverage` now *requires* a test behind every behaviour class, so a substantive check added untested fails the gate |
-| Fresh clone runs from the documentation | Cloned to an empty directory, new `conda create`, `pip install -e ".[dev]"`, 800 tests pass, lint clean, `min-agent --help` works - with zero Alpaca credentials set |
+| Fresh clone runs from the documentation | Cloned to an empty directory, new `conda create`, `pip install -e ".[dev]"`, 800 tests pass, lint clean, `autopoiesis --help` works - with zero Alpaca credentials set |
 | Fast verification loop | `make check` ≈ 40s (lint + tests), `make smoke` ≈ 9s against the live broker |
-| Full experiment traceability | `make reproduce` writes commit, dirty state, interpreter, pinned dependency versions and broker clock to `runtime/min_agent/reproduce.txt` |
+| Full experiment traceability | `make reproduce` writes commit, dirty state, interpreter, pinned dependency versions and broker clock to `runtime/autopoiesis/reproduce.txt` |
 | Understandable without the history | `README.md` (what/how/where/debug), `docs/ARCHITECTURE.md` (this file), `docs/MIGRATION.md` (what changed and what replaced it). `SYSTEM_AUDIT.md` opens by declaring itself historical |
 
 ### One thing deliberately not done

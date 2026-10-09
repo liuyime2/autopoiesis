@@ -56,7 +56,11 @@ PY := PYTHONPATH=src $(CONDA_RUN) python
 # unset - the state CI and the runbook are in - so `make` silently proceeded with no
 # credentials and no warning, while `minictrl` looked in the right place. Two entry points
 # disagreeing about the configuration is exactly what this refactor set out to remove.
-ENVFILE ?= $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/min-agent/env
+# The new directory first, the old one still honoured: see minictrl for why.
+# The credential file, under its current name and the one it had before the rename. Both are
+# honoured, the new one first: `minictrl` resolves it the same way, and dropping the old name
+# without moving the file would leave the agent unable to find its credentials at all.
+ENVFILE ?= $(if $(MIN_AGENT_ENV_FILE),$(MIN_AGENT_ENV_FILE),$(if $(AUTOPOIESIS_ENV_FILE),$(AUTOPOIESIS_ENV_FILE),$(firstword $(wildcard $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/autopoiesis/env $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/min-agent/env))))
 
 # Credentials live outside the repo. Every target that touches the broker or the
 # model loads them from there; nothing reads a checked-in secret.
@@ -227,7 +231,7 @@ setup:
 	@echo "  python3 -m venv .venv && . .venv/bin/activate && make install"
 	@echo "  (or: conda create -n llm python=3.10 -y && conda activate llm && make install)"
 	@echo "  export XDG_CONFIG_HOME=\$$HOME/.config"
-	@echo "  mkdir -p $$XDG_CONFIG_HOME/min-agent"
+	@echo "  mkdir -p $$XDG_CONFIG_HOME/autopoiesis"
 	@echo "  # put ALPACA_API_KEY / ALPACA_SECRET_KEY / ALPACA_BASE_URL there"
 	@echo "Then: make check"
 

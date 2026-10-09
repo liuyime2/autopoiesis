@@ -10,7 +10,7 @@ tape can show whether a change would have traded. So this writes what the broker
 records that provenance in the file, and never falls back to a generator - if the fetch fails,
 it fails.
 
-Written to `runtime/min_agent/replay/`, which is not committed. On a fresh clone run this once,
+Written to `runtime/autopoiesis/replay/`, which is not committed. On a fresh clone run this once,
 with credentials, and the replay and the `self-evolution-closes` gate become runnable. It needs
 network and credentials; nothing else in the gate does.
 """
@@ -29,7 +29,7 @@ DEFAULT_SYMBOL = "SPY"
 DEFAULT_START = "2026-09-28T13:30:00Z"
 DEFAULT_END = "2026-10-02T20:00:00Z"
 DEFAULT_INTERVAL = "5Min"
-OUT_DIR = pathlib.Path("runtime/min_agent/replay")
+OUT_DIR = pathlib.Path("runtime/autopoiesis/replay")
 
 
 #: Where the rolling fetch writes. Deliberately not derived from the window requested.
@@ -68,7 +68,7 @@ def client_from_env():
 
     env_file = Path(
         os.getenv("XDG_CONFIG_HOME", str(Path.home() / ".config"))
-    ) / "min-agent" / "env"
+    ) / "autopoiesis" / "env"
     if env_file.exists():
         for line in env_file.read_text(encoding="utf-8").splitlines():
             if "=" in line and not line.strip().startswith("#"):
@@ -91,7 +91,7 @@ def cached_last_bar(symbol: str, interval: str = DEFAULT_INTERVAL) -> datetime |
     are exactly what stopped being trustworthy. `None` when the cache holds no usable bars,
     which callers treat as "fetch".
     """
-    from min_agent.replay import load_bars
+    from autopoiesis.replay import load_bars
 
     newest: datetime | None = None
     for path in sorted(OUT_DIR.glob("*.json")):
@@ -169,7 +169,7 @@ def main(argv: list[str]) -> int:
     # The scheduled fetch passes ROLLING; a hand-run window keeps its dated path.
     rolling = len(argv) > 5 and argv[5] == "ROLLING"
 
-    from min_agent.replay import fetch_bars, save_bars
+    from autopoiesis.replay import fetch_bars, save_bars
 
     client = client_from_env()
 

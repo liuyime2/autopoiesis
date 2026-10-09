@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-RUNTIME = ROOT / "runtime" / "min_agent"
+RUNTIME = ROOT / "runtime" / "autopoiesis"
 
 
 def _journal_path() -> str:
@@ -37,7 +37,7 @@ def _journal_path() -> str:
     for this tool even though the agent honoured it.
     """
     sys.path.insert(0, str(ROOT / "src"))
-    from min_agent.config import AgentConfig
+    from autopoiesis.config import AgentConfig
     return str(AgentConfig.from_env().journal_path)
 
 
@@ -113,7 +113,7 @@ def main() -> int:
     add("\n## configuration in effect")
     try:
         sys.path.insert(0, str(ROOT / "src"))
-        from min_agent.config import AgentConfig
+        from autopoiesis.config import AgentConfig
 
         config = AgentConfig.from_env()
         for label, value in (
@@ -142,10 +142,10 @@ def main() -> int:
     add("\n## output paths")
     for label, path in (
         ("journal", str(_journal_path())),
-        ("strategies", "runtime/min_agent/strategies/"),
-        ("reflection", "runtime/min_agent/reflection.json"),
-        ("doctor history", "runtime/min_agent/doctor-history.jsonl"),
-        ("this record", "runtime/min_agent/reproduce.txt"),
+        ("strategies", "runtime/autopoiesis/strategies/"),
+        ("reflection", "runtime/autopoiesis/reflection.json"),
+        ("doctor history", "runtime/autopoiesis/doctor-history.jsonl"),
+        ("this record", "runtime/autopoiesis/reproduce.txt"),
     ):
         add(f"  {label:<15} {path}")
 
@@ -156,7 +156,7 @@ def main() -> int:
         # on a file that held only events. A provenance record that silently omits its own
         # metrics is worse than one that reports none: it looks complete.
         sys.path.insert(0, str(ROOT / "src"))
-        from min_agent.journal import JsonlJournal
+        from autopoiesis.journal import JsonlJournal
         journal = JsonlJournal(Path(_journal_path()))
         cycles = journal.read_all()
         if not cycles:

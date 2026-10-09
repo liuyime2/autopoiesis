@@ -1,7 +1,7 @@
 [Unit]
-Description=min-agent unattended strategy research: fetch real bars, then search
+Description=autopoiesis unattended strategy research: fetch real bars, then search
 Documentation=file://@ROOT@/docs/history/specs/2026-09-28-min-agent-runbook.md
-After=network-online.target min-agent.service
+After=network-online.target autopoiesis.service
 Wants=network-online.target
 
 [Service]
@@ -15,7 +15,7 @@ Environment=MIN_AGENT_MODE=paper
 Environment=ALPACA_BASE_URL=https://paper-api.alpaca.markets
 Environment=APCA_API_BASE_URL=https://paper-api.alpaca.markets
 
-# Rendered from the same variable as min-agent.service, and no leading `-` for the same reason as
+# Rendered from the same variable as autopoiesis.service, and no leading `-` for the same reason as
 # the watchdog: a missing credentials file must stop this unit with the actual cause named, rather
 # than starting it and producing a research run with no bars.
 EnvironmentFile=@ENVFILE@
@@ -53,7 +53,7 @@ EnvironmentFile=@ENVFILE@
 # Twenty minutes clears the measured ~15 minute lag with a margin, and the fetcher skips
 # entirely when the cache already holds a bar inside the last interval.
 ExecStart=/bin/sh -c '@PYTHON@ tools/fetch_replay_bars.py SPY "$(date -u -d "-6 months" +%%Y-%%m-%%dT13:30:00Z)" "$(date -u -d "-20 minutes" +%%Y-%%m-%%dT%%H:%%M:00Z)" 5Min ROLLING || echo "bar fetch returned $?; searching the existing cache anyway"'
-ExecStart=@PYTHON@ -m min_agent.research.driver
+ExecStart=@PYTHON@ -m autopoiesis.research.driver
 
-StandardOutput=append:@ROOT@/runtime/min_agent/research.log
-StandardError=append:@ROOT@/runtime/min_agent/research.log
+StandardOutput=append:@ROOT@/runtime/autopoiesis/research.log
+StandardError=append:@ROOT@/runtime/autopoiesis/research.log

@@ -46,20 +46,20 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 #: dangling reference the moment someone changes the interval or the window - and the first
 #: version of this pointed at `SPY_5min_...` while the tool wrote `SPY_5Min_...`.
 import fetch_replay_bars as _fetcher
-from min_agent.config import AgentConfig
-from min_agent.daemon import AgentDaemon
-from min_agent.guardian import Guardian
-from min_agent.journal import JsonlJournal
-from min_agent.loop import TradingLoop
-from min_agent.models import StrategySpec, TradeDecision
-from min_agent.reflection_memory import ReflectionMemory
-from min_agent.replay import (
+from autopoiesis.config import AgentConfig
+from autopoiesis.daemon import AgentDaemon
+from autopoiesis.guardian import Guardian
+from autopoiesis.journal import JsonlJournal
+from autopoiesis.loop import TradingLoop
+from autopoiesis.models import StrategySpec, TradeDecision
+from autopoiesis.reflection_memory import ReflectionMemory
+from autopoiesis.replay import (
     ReplayBook,
     ReplayDataGateway,
     ReplayExecutor,
     load_bars,
 )
-from min_agent.strategy_engine import StrategyLibrary, StrategyLifecycleManager
+from autopoiesis.strategy_engine import StrategyLibrary, StrategyLifecycleManager
 
 BARS = str(
     _fetcher.cache_path(

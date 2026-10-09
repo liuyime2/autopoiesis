@@ -36,7 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # Internal history: the running log, audits, plans and specs. Point-in-time by definition.
 HISTORY = ROOT / "docs" / "history"
 SRC = ROOT / "src"
-TESTS = ROOT / "tests" / "min_agent"
+TESTS = ROOT / "tests" / "autopoiesis"
 
 PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
 #: True when --only narrowed the run; set in main() before checks execute.
@@ -129,6 +129,7 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_manage_account.py": ("unit-integration",),
     "test_signal_test.py": ("unit-integration",),
     "test_risk_judgment.py": ("unit-integration",),
+    "test_instrument_profile.py": ("unit-integration", "data-integrity"),
     "test_universe.py": ("unit-integration", "guardian-bypass-prevention"),
     "test_universe_wiring.py": ("unit-integration",),
     "test_screen_direction_check.py": ("decision-outcome-counterfactual",),
@@ -297,7 +298,7 @@ def check_software_supply_chain() -> Result:
         if name in tracked:
             problems.append(f"{name} is tracked")
     if env_path and any(
-        t.endswith("min-agent/env") for t in tracked
+        t.endswith(("autopoiesis/env", "min-agent/env")) for t in tracked
     ):
         problems.append("the runtime env file is tracked")
 
@@ -347,13 +348,13 @@ def check_syntax_import() -> Result:
     if rc != 0:
         return Result("syntax-import", FAIL, _tail(out))
 
-    modules = sorted(p.stem for p in (SRC / "min_agent").glob("*.py")
+    modules = sorted(p.stem for p in (SRC / "autopoiesis").glob("*.py")
                      if p.stem != "__init__")
     probe = (
         "import importlib, sys\n"
         f"mods = {modules!r}\n"
         "for m in mods:\n"
-        "    importlib.import_module('min_agent.' + m)\n"
+        "    importlib.import_module('autopoiesis.' + m)\n"
         f"print('imported', len(mods), 'modules')\n"
     )
     rc, out = _run([sys.executable, "-c", probe])
@@ -366,6 +367,17 @@ def check_syntax_import() -> Result:
 #: plan document means the document is describing a tree that no longer exists.
 # Scripts this refactor deleted, per docs/history/MIGRATION.md. Named here so the docs check and the
 # deleted-command check agree on one list rather than two.
+#: The credential file, under its current name and the one it had before the rename. Both are
+#: resolved: the project reads the new directory first and still honours the old one, so an
+#: operator who has not moved their file gets a working daemon rather than an auth error with
+#: nothing pointing at the rename.
+#:
+#: `minictrl` builds the path from a shell variable (`$_cfg/autopoiesis/env`) because it has to
+#: test which file exists before choosing one. A literal-only pattern would report that entry point
+#: as never reading the credentials, which is the exact failure this check exists to catch - so the
+#: directory name counts with or without a variable in front of it.
+_CREDENTIAL_FILE_RE = re.compile(r"(?:\$\{?[\w:]+\}?/[\w${}.]*/|_[\w]+/)?(?:autopoiesis|min-agent)/env")
+
 DELETED_SCRIPT_NAMES = (
     "auto-fix.sh",
     "monitor.sh",
@@ -440,12 +452,12 @@ def check_docs_not_stale() -> Result:
         # An earlier version carried that exemption with no explanation, which reads as an
         # arbitrary hole in the check.
         absent = sorted(
-            m for m in re.findall(r"src/min_agent/([a-z_]+)\.py", raw)
-            if not (SRC / "min_agent" / f"{m}.py").exists()
+            m for m in re.findall(r"src/autopoiesis/([a-z_]+)\.py", raw)
+            if not (SRC / "autopoiesis" / f"{m}.py").exists()
         )
         absent += sorted(
-            m for m in re.findall(r"tests/min_agent/(test_[a-z_]+)\.py", raw)
-            if not (ROOT / "tests" / "min_agent" / f"{m}.py").exists()
+            m for m in re.findall(r"tests/autopoiesis/(test_[a-z_]+)\.py", raw)
+            if not (ROOT / "tests" / "autopoiesis" / f"{m}.py").exists()
         )
         if marked:
             continue  # explicitly marked as a historical record
@@ -479,14 +491,14 @@ def check_production_research_separation() -> Result:
     for it. So this is checked rather than documented.
     """
     production = [
-        p for p in sorted((SRC / "min_agent").glob("*.py"))
+        p for p in sorted((SRC / "autopoiesis").glob("*.py"))
     ]
-    research_dir = SRC / "min_agent" / "research"
+    research_dir = SRC / "autopoiesis" / "research"
     violations: list[str] = []
     for module in production:
         for line_no, line in enumerate(module.read_text().splitlines(), 1):
             code = line.split("#", 1)[0]
-            if "min_agent.research" in code or (
+            if "autopoiesis.research" in code or (
                 code.strip().startswith(("import ", "from ")) and " research" in code
             ):
                 violations.append(f"{module.name}:{line_no}: {line.strip()}")
@@ -527,7 +539,7 @@ def check_home_independence() -> Result:
     quota pressure, and the failure looks like data loss rather than a bad path.
     """
     violations: list[str] = []
-    targets = sorted((SRC / "min_agent").rglob("*.py"))
+    targets = sorted((SRC / "autopoiesis").rglob("*.py"))
     # `minictrl` is at the repository root, not under tools/. The path here said
     # tools/minictrl, the file does not exist there, and the `if ... exists()` guard turned
     # that mistake into silence - so the check skipped the one script that most needs it and
@@ -548,7 +560,7 @@ def check_home_independence() -> Result:
     # where an operator's env file exists - a deployment - and is reported otherwise.
     home = str(Path.home())
     config_root = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    deployed = (Path(config_root) / "min-agent" / "env").exists()
+    deployed = (Path(config_root) / "autopoiesis" / "env").exists()
     xdg = []
     for var in ("XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME"):
         value = os.environ.get(var)
@@ -642,7 +654,7 @@ def _durable_unit_dir() -> str | None:
 # created the directory had already run. Two attempts got this wrong in sequence - first
 # reading it live, then caching it on first call - and the way out was to ask the question
 # before anything has had a chance to change the answer.
-_RUNTIME_PRESENT_AT_START = (ROOT / "runtime" / "min_agent").is_dir()
+_RUNTIME_PRESENT_AT_START = (ROOT / "runtime" / "autopoiesis").is_dir()
 
 
 def _wanted(name: str) -> bool:
@@ -724,7 +736,7 @@ def _research_verdict_codes() -> set[str]:
     ledger check.
     """
     sys.path.insert(0, str(SRC))
-    from min_agent.research import walk_forward
+    from autopoiesis.research import walk_forward
 
     codes: set[str] = set()
     for name in dir(walk_forward):
@@ -733,13 +745,13 @@ def _research_verdict_codes() -> set[str]:
             continue
         if member and member.replace("_", "").isupper():
             codes.add(member)
-    source = (SRC / "min_agent" / "research" / "walk_forward.py").read_text(encoding="utf-8")
+    source = (SRC / "autopoiesis" / "research" / "walk_forward.py").read_text(encoding="utf-8")
     for match in re.finditer(r'"([A-Z][A-Z_]{3,}):', source):
         codes.add(match.group(1))
     for match in re.finditer(r'return\s+f?"([A-Z][A-Z_]{3,})"', source):
         codes.add(match.group(1))
     # backtest.py emits its own codes
-    backtest = (SRC / "min_agent" / "research" / "backtest.py").read_text(encoding="utf-8")
+    backtest = (SRC / "autopoiesis" / "research" / "backtest.py").read_text(encoding="utf-8")
     for match in re.finditer(r'"([A-Z][A-Z_]{3,}):', backtest):
         codes.add(match.group(1))
     return codes
@@ -931,7 +943,7 @@ def check_no_unreferenced_design_notes_at_the_root() -> Result:
 
     `react_agent_design.md` sat beside README.md for the whole refactor, describing a
     `ReactAgent` with a `Reasoner`, a `ToolSelector` and an `ActionExecutor`. None of those
-    five components exists in `src/min_agent/`, no code or document referenced the file, and
+    five components exists in `src/autopoiesis/`, no code or document referenced the file, and
     git shows it predating the refactor. It was a design for a system that was never built,
     so the repository root documented an architecture it does not contain. Three completion
     verifiers passed over it before one named it.
@@ -1349,7 +1361,7 @@ def check_figures_quoted_in_config_comments() -> Result:
         # different interpreter than the one running the gate, and on a host where `python3`
         # is not the gate's environment ruff may not even be importable - in which case the
         # count silently became "?" and the check passed.
-        [sys.executable, "-m", "ruff", "check", "--isolated", "--select", "BLE001", "src/min_agent"],
+        [sys.executable, "-m", "ruff", "check", "--isolated", "--select", "BLE001", "src/autopoiesis"],
         cwd=str(ROOT), capture_output=True, text=True,
     )
     found = _re.search(r"Found (\d+) error", proc.stdout)
@@ -1380,7 +1392,7 @@ def check_figures_quoted_in_config_comments() -> Result:
                     f"{found.group(1)}"
                 )
 
-    cli_imports = len(_re.findall(r"^from min_agent", (SRC / "min_agent" / "cli.py").read_text(), _re.M))
+    cli_imports = len(_re.findall(r"^from autopoiesis", (SRC / "autopoiesis" / "cli.py").read_text(), _re.M))
     for match in _re.finditer(r"pay for the (\d+) modules", text):
         if int(match.group(1)) != cli_imports:
             problems.append(
@@ -1423,7 +1435,7 @@ def check_status_only_states_what_does_not_change() -> Result:
         return Result("status-states-only-fixed-facts", SKIP, "STATUS.md is absent")
     text = status.read_text(encoding="utf-8")
     sys.path.insert(0, str(SRC))
-    from min_agent.config import AgentConfig
+    from autopoiesis.config import AgentConfig
 
     config = AgentConfig.from_env()
     problems: list[str] = []
@@ -1481,7 +1493,7 @@ def check_status_only_states_what_does_not_change() -> Result:
     # checkout reads (no operator env file), a correct table is "wrong" - CI failed on exactly
     # that the first time the limits were scaled - so the comparison binds where the
     # deployment is.
-    env_file = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "min-agent" / "env"
+    env_file = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "autopoiesis" / "env"
     if not env_file.exists():
         return Result(
             "status-states-only-fixed-facts", PASS,
@@ -1790,7 +1802,7 @@ def check_one_credentials_path_everywhere() -> Result:
     }
     problems = []
     for name, text in patterns.items():
-        if "min-agent/env" not in text:
+        if not _CREDENTIAL_FILE_RE.search(text):
             problems.append(f"{name} does not mention the credentials file at all")
             continue
         # The line that actually resolves the file, rather than whether the word
@@ -1814,13 +1826,13 @@ def check_one_credentials_path_everywhere() -> Result:
         )
         resolution = [
             line for line in text.splitlines()
-            if "min-agent/env" in line and verbs.search(line)
+            if _CREDENTIAL_FILE_RE.search(line) and verbs.search(line)
         ]
         if not resolution:
             problems.append(
-                f"{name} has no instruction that names min-agent/env, so its credentials "
-                "path cannot be checked - an entry point that never reads the file would "
-                "pass this check"
+                f"{name} has no instruction that names the credentials file, so its "
+                "credentials path cannot be checked - an entry point that never reads "
+                "the file would pass this check"
             )
             continue
         if not any("XDG_CONFIG_HOME" in line for line in resolution):
@@ -1837,7 +1849,7 @@ def check_one_credentials_path_everywhere() -> Result:
     return Result(
         "one-credentials-path", PASS,
         "Makefile, minictrl and the config example all resolve "
-        "$XDG_CONFIG_HOME/min-agent/env with a $HOME/.config fallback",
+        "$XDG_CONFIG_HOME/autopoiesis/env with a $HOME/.config fallback",
     )
 
 
@@ -1859,7 +1871,7 @@ def check_no_production_function_is_unreachable() -> Result:
     """
     import ast
 
-    roots = [SRC / "min_agent", ROOT / "tools", ROOT / "tests", ROOT / "examples"]
+    roots = [SRC / "autopoiesis", ROOT / "tools", ROOT / "tests", ROOT / "examples"]
     haystack = []
     for base in roots:
         if not base.exists():
@@ -1877,7 +1889,7 @@ def check_no_production_function_is_unreachable() -> Result:
         r"^(normalize_|require_|validate_|model_|parse_|is_|has_|get_|set_|__)"
     )
     dead: list[str] = []
-    for path in sorted((SRC / "min_agent").rglob("*.py")):
+    for path in sorted((SRC / "autopoiesis").rglob("*.py")):
         if "research" in path.parts:
             continue
         try:
@@ -1935,17 +1947,24 @@ def check_config_example_covers_every_variable() -> Result:
     if not example.exists():
         return Result("config-example-complete", FAIL, "configs/paper.env.example is absent")
     sys.path.insert(0, str(SRC))
-    from min_agent.config import AgentConfig
+    from autopoiesis.config import AgentConfig
     documented = set(re.findall(r"^\s*#?\s*([A-Z][A-Z0-9_]+)=", example.read_text(encoding="utf-8"), re.M))
     # The dataclass field names and the env var names differ by prefix and word order
     # (`max_position_value` reads MIN_AGENT_MAX_POSITION_VALUE), so the names are taken from
     # the loader's own read sites rather than derived from the fields. An earlier version
     # computed the field set and then never used it - ruff caught the dead assignment, which
     # is the check working - so `fields` is gone and the scan below stands on its own.
-    loader = (SRC / "min_agent" / "config.py").read_text(encoding="utf-8")
+    loader = (SRC / "autopoiesis" / "config.py").read_text(encoding="utf-8")
+    # The loader names its settings with the legacy `MIN_AGENT_` prefix because `env()` maps that
+    # onto the current `AUTOPOIESIS_` prefix at read time, so a scan of the loader sees only the old
+    # names. The example documents the current ones. Both spellings count as documented, and the
+    # example's own header says the fallback exists - a check that only accepted one of the two
+    # would fail a correct file and pass a half-migrated one.
     read = set(re.findall(r'"(MIN_AGENT_[A-Z0-9_]+)"', loader)) | set(
-        re.findall(r'"(ALPACA_[A-Z0-9_]+)"', loader)
+        re.findall(r'"(AUTOPOIESIS_[A-Z0-9_]+)"', loader)
+    ) | set(re.findall(r'"(ALPACA_[A-Z0-9_]+)"', loader)
     ) | set(re.findall(r'"(APCA_[A-Z0-9_]+)"', loader)) | set(re.findall(r'"(OLLAMA_[A-Z0-9_]+)"', loader))
+    documented |= {name.replace("AUTOPOIESIS_", "MIN_AGENT_") for name in documented}
     missing = sorted(read - documented)
     if missing:
         return Result(
@@ -1969,7 +1988,7 @@ def check_config_example_names_are_real() -> Result:
 
     `config.py` is not the only reader, and assuming it was made this check host-dependent
     in the worst possible way. The env file is dual-purpose: `minictrl` sources the same file
-    before it ever calls `python -m min_agent.cli`, and reads MIN_AGENT_ENVBIN out of it to
+    before it ever calls `python -m autopoiesis.cli`, and reads MIN_AGENT_ENVBIN out of it to
     find the environment's bin directory. `MIN_AGENT_ENVBIN` is set in the deployed env file
     on this host and is absent from config.py, so documenting it made this check pass *only
     because the env file happened to be present* - and a fresh clone, which is exactly where
@@ -1982,9 +2001,9 @@ def check_config_example_names_are_real() -> Result:
     names = set(re.findall(r"^(MIN_AGENT_[A-Z_]+|ALPACA_[A-Z_]+|OLLAMA_BASE_URL)=", example.read_text(), re.M))
     if not names:
         return Result("config-example-names", FAIL, "no variable names found in the example")
-    known = (ROOT / "src" / "min_agent" / "config.py").read_text(encoding="utf-8")
+    known = (ROOT / "src" / "autopoiesis" / "config.py").read_text(encoding="utf-8")
     known += _entry_point_reads()
-    env_file = Path(os.environ.get("XDG_CONFIG_HOME", "")) / "min-agent" / "env"
+    env_file = Path(os.environ.get("XDG_CONFIG_HOME", "")) / "autopoiesis" / "env"
     if env_file.exists():
         known += env_file.read_text(encoding="utf-8")
     unknown = sorted(n for n in names if n not in known)
@@ -2080,11 +2099,11 @@ def check_the_running_daemon_matches_the_worktree() -> Result:
     daemon running superseded code is the most expensive kind of wrong: it looks like
     progress and it is not.
 
-    The fingerprint is hashed from the `min_agent` package as it sits on disk, and the
+    The fingerprint is hashed from the `autopoiesis` package as it sits on disk, and the
     heartbeat records the one the running process imported. Comparing the two turns "did
     anyone restart it" from an unanswerable question into a fact.
     """
-    heartbeat = ROOT / "runtime" / "min_agent" / "heartbeat.json"
+    heartbeat = ROOT / "runtime" / "autopoiesis" / "heartbeat.json"
     if not heartbeat.exists():
         return Result("daemon-source-matches-worktree", SKIP, "no heartbeat; daemon not running")
     try:
@@ -2101,7 +2120,7 @@ def check_the_running_daemon_matches_the_worktree() -> Result:
     proc = subprocess.run(
         [sys.executable, "-c",
          "import sys; sys.path.insert(0, %r); "
-         "from min_agent.daemon import source_fingerprint; print(source_fingerprint())"
+         "from autopoiesis.daemon import source_fingerprint; print(source_fingerprint())"
          % str(ROOT / "src")],
         capture_output=True, text=True, timeout=180,
     )
@@ -2258,11 +2277,11 @@ def check_replay_audit() -> Result:
     # made `make verify` unusable on the one machine state a new developer starts from -
     # the gate could not be run before the first cycle. Absence of state is SKIP; state
     # that contradicts itself is still FAIL.
-    journal = ROOT / "runtime" / "min_agent" / "journal.jsonl"
+    journal = ROOT / "runtime" / "autopoiesis" / "journal.jsonl"
     if not journal.exists():
         return Result(
             "replay-audit", SKIP,
-            "no runtime/min_agent/journal.jsonl yet; nothing to replay",
+            "no runtime/autopoiesis/journal.jsonl yet; nothing to replay",
         )
     bad = [
         l.strip() for l in proc.stdout.splitlines() if "[MISMATCH]" in l
@@ -2292,8 +2311,8 @@ def check_shadow_stage_has_actually_run() -> Result:
     an honest starting state, not a defect - but it must not be able to say "MET".
     """
     sys.path.insert(0, str(SRC))
-    from min_agent.config import AgentConfig
-    from min_agent.journal import JsonlJournal
+    from autopoiesis.config import AgentConfig
+    from autopoiesis.journal import JsonlJournal
 
     journal = JsonlJournal(AgentConfig.from_env().journal_path)
     generations = journal.history_paths()
@@ -2342,7 +2361,7 @@ def check_shadow_cannot_count_as_executed() -> Result:
     it would be introduced.
     """
     problems: list[str] = []
-    for module in sorted((ROOT / "src" / "min_agent").glob("*.py")):
+    for module in sorted((ROOT / "src" / "autopoiesis").glob("*.py")):
         text = module.read_text()
         for line_no, line in enumerate(text.splitlines(), 1):
             code = line.split("#", 1)[0]
@@ -2379,7 +2398,7 @@ def check_doctor_checks_are_all_reachable() -> Result:
     every other way: the module imports cleanly, the tests pass, and the report is
     simply missing a line.
     """
-    doctor = (SRC / "min_agent" / "doctor.py").read_text()
+    doctor = (SRC / "autopoiesis" / "doctor.py").read_text()
     defined = set(re.findall(r"^def (_check_[A-Za-z0-9_]+)\(", doctor, re.M))
     # A call site is any mention NOT preceded by `def `. Subtracting name *sets*
     # cannot work here: every called name is also a defined name, so the two sets are
@@ -2418,16 +2437,16 @@ def check_screen_is_direction_neutral(
     where the bias shows first.
     """
     sys.path.insert(0, str(SRC))
-    from min_agent import offline_validation as ov
-    from min_agent.journal import JsonlJournal
-    from min_agent.strategy_engine import StrategyLibrary
+    from autopoiesis import offline_validation as ov
+    from autopoiesis.journal import JsonlJournal
+    from autopoiesis.strategy_engine import StrategyLibrary
 
-    journal_path = journal_path or ROOT / "runtime" / "min_agent" / "journal.jsonl"
-    strategy_dir = strategy_dir or ROOT / "runtime" / "min_agent" / "strategies"
+    journal_path = journal_path or ROOT / "runtime" / "autopoiesis" / "journal.jsonl"
+    strategy_dir = strategy_dir or ROOT / "runtime" / "autopoiesis" / "strategies"
     if not journal_path.exists():
         return Result(
             "screen-direction-neutral", SKIP,
-            "no runtime/min_agent/journal.jsonl yet; nothing has been screened",
+            "no runtime/autopoiesis/journal.jsonl yet; nothing has been screened",
         )
     journal = JsonlJournal(journal_path)
     events = journal.read_events("COUNTERFACTUAL_EVALUATED")
@@ -2490,9 +2509,9 @@ def check_research_trial_ledger() -> Result:
     selection bias.
     """
     sys.path.insert(0, str(SRC))
-    from min_agent.research import trials
+    from autopoiesis.research import trials
 
-    path = ROOT / "runtime" / "min_agent" / "research_trials.jsonl"
+    path = ROOT / "runtime" / "autopoiesis" / "research_trials.jsonl"
     recorded = trials.read_trials(path)
     if not recorded:
         # Same distinction as `replay-audit` beside it: no trials recorded yet is the state
@@ -2601,7 +2620,7 @@ def check_self_evolution_closes() -> Result:
     # FAIL, because there the loop is supposed to be provable.
     # No journal is the mark of a checkout that has never run - CI creates runtime/ in earlier
     # steps, so the directory alone was not enough, and GitHub's runner failed here.
-    journal = ROOT / "runtime" / "min_agent" / "journal.jsonl"
+    journal = ROOT / "runtime" / "autopoiesis" / "journal.jsonl"
     if not (ROOT / "runtime").exists() or not journal.exists():
         return Result(
             "self-evolution-closes", SKIP,
@@ -2744,7 +2763,7 @@ def check_shadow_live_consistency() -> Result:
         "import os, sys\n"
         "sys.path.insert(0, 'src')\n"
         "os.environ['MIN_AGENT_MODE'] = 'live'\n"
-        "from min_agent.config import AgentConfig\n"
+        "from autopoiesis.config import AgentConfig\n"
         "try:\n"
         "    AgentConfig.from_env()\n"
         "    print('LIVE MODE WAS ACCEPTED')\n"
@@ -2761,7 +2780,7 @@ def check_shadow_live_consistency() -> Result:
     # failure mode that teaches people to ignore a red gate.
     rc, out = _run([sys.executable, "-c", (
         "import sys; sys.path.insert(0, 'src')\n"
-        "from min_agent.strategy_engine import StrategySelector\n"
+        "from autopoiesis.strategy_engine import StrategySelector\n"
         "import inspect\n"
         "src = inspect.getsource(StrategySelector._needs_probation)\n"
         "assert 'min_probation_cycles' in src, src\n"
@@ -2779,10 +2798,10 @@ def check_shadow_live_consistency() -> Result:
         "import os, sys; sys.path.insert(0, 'src')\n"
         "os.environ.update(ALPACA_API_KEY='k', ALPACA_SECRET_KEY='s',\n"
         "                  MIN_AGENT_SHADOW='1')\n"
-        "from min_agent.config import AgentConfig\n"
-        "from min_agent.shadow import ShadowExecutor\n"
-        "from min_agent.executor import AlpacaPaperExecutor\n"
-        "from min_agent.cli import _execution_sink\n"
+        "from autopoiesis.config import AgentConfig\n"
+        "from autopoiesis.shadow import ShadowExecutor\n"
+        "from autopoiesis.executor import AlpacaPaperExecutor\n"
+        "from autopoiesis.cli import _execution_sink\n"
         "cfg = AgentConfig.from_env()\n"
         "assert cfg.shadow is True, 'MIN_AGENT_SHADOW=1 did not enable shadow'\n"
         "sink = _execution_sink(cfg, object(), None)\n"
@@ -2799,7 +2818,7 @@ def check_shadow_live_consistency() -> Result:
     # read by truthiness: MIN_AGENT_SHADOW=0 has to mean off.
     rc, out = _run([sys.executable, "-c", (
         "import os, sys; sys.path.insert(0, 'src')\n"
-        "from min_agent.config import AgentConfig, _flag\n"
+        "from autopoiesis.config import AgentConfig, _flag\n"
         "assert _flag('X', True) is True\n"
         "os.environ['X'] = '0'\n"
         "assert _flag('X', True) is False, '0 must read as off'\n"
@@ -3055,7 +3074,7 @@ def _operator_credentials_present() -> bool:
     """
     if os.environ.get("ALPACA_API_KEY") and os.environ.get("ALPACA_SECRET_KEY"):
         return True
-    env_file = Path(os.environ.get("XDG_CONFIG_HOME", "")) / "min-agent" / "env"
+    env_file = Path(os.environ.get("XDG_CONFIG_HOME", "")) / "autopoiesis" / "env"
     if env_file.exists():
         text = env_file.read_text(encoding="utf-8", errors="ignore")
         if "ALPACA_API_KEY" in text and "ALPACA_SECRET_KEY" in text:
@@ -3084,7 +3103,7 @@ def check_doctor() -> Result:
     # problem about state it was never meant to have.
     if not _operator_credentials_present() or not _runtime_state_present():
         rc, out = _run(
-            [sys.executable, "-m", "min_agent.cli", "--doctor", "--skip-broker", "--quiet"],
+            [sys.executable, "-m", "autopoiesis.cli", "--doctor", "--skip-broker", "--quiet"],
             timeout=900,
         )
         # --quiet prints `ok=False exit=1 failures=[...]`, not the `RESULT:` line the
@@ -3155,7 +3174,7 @@ def self_test() -> int:
 
         # 2. A test importing a name that does not exist must be reported FAIL.
         canary.write_text(
-            "def test_missing_name():\n    from min_agent import _does_not_exist\n"
+            "def test_missing_name():\n    from autopoiesis import _does_not_exist\n"
         )
         TEST_CLASS_MAP["test_zz_self_test_canary.py"] = ("syntax-import",)
         result = run_pytest_class("syntax-import")
@@ -3257,7 +3276,7 @@ def self_test() -> int:
         #    rather than at startup, and the symptom is a journal that silently
         #    stops growing. Verified once by hand it would just be a comment; only
         #    a probe that is proven to fail keeps the claim honest.
-        src_probe = SRC / "min_agent" / "zz_home_probe.py"
+        src_probe = SRC / "autopoiesis" / "zz_home_probe.py"
         try:
             src_probe.write_text('x = "~/somewhere"\n')
             result = check_home_independence()

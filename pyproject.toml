@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "min-agent"
+name = "autopoiesis"
 version = "0.1.0"
 description = "Autopoiesis: a self-evolving LLM paper-trading agent that grades its own strategies against broker evidence and retires the ones that do not earn their place."
 readme = "README.md"
@@ -60,7 +60,7 @@ dev = [
 [project.scripts]
 # The single canonical entry point. Every operational task is a subcommand here;
 # the Makefile delegates to this rather than reimplementing any of it.
-min-agent = "min_agent.cli:main"
+autopoiesis = "autopoiesis.cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -70,7 +70,7 @@ where = ["src"]
 # research/ is a deliberate quarantine: diagnosis, never execution. It ships with the
 # package because `tools/verify.py` scans it and the tests exercise it, but
 # check_production_research_separation() fails the build if production imports it.
-include = ["min_agent*"]
+include = ["autopoiesis*"]
 
 [tool.mypy]
 python_version = "3.10"

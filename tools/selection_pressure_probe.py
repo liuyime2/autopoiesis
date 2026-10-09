@@ -27,9 +27,9 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from min_agent.models import StrategySpec
-from min_agent.offline_validation import OfflineValidationResult
-from min_agent.strategy_engine import StrategyLifecycleManager, StrategyResult
+from autopoiesis.models import StrategySpec
+from autopoiesis.offline_validation import OfflineValidationResult
+from autopoiesis.strategy_engine import StrategyLifecycleManager, StrategyResult
 
 BROKER_VERIFIED = {"broker_strategy_closed_lot_pnl_verified"}
 
