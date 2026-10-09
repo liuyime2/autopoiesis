@@ -13,7 +13,7 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DEST="${1:-$(mktemp -d "${TMPDIR:-/tmp}/min-agent-fresh-clone.XXXXXX")}"
+DEST="${1:-$(mktemp -d "${TMPDIR:-/tmp}/autopoiesis-fresh-clone.XXXXXX")}"
 LOG="$REPO/docs/evidence/fresh-clone.log"
 
 # Deliberately not the invoking shell's interpreter. A run that inherits the developer's
@@ -103,7 +103,7 @@ run_step() {
 run_step lint    "$PYTHON -m ruff check src/ tools/ tests/ examples/"
 run_step test    "$PYTHON -m pytest -q"
 run_step example "$PYTHON examples/minimal_cycle.py"
-run_step entry-point "$PYTHON -m min_agent.cli --help"
+run_step entry-point "$PYTHON -m autopoiesis.cli --help"
 run_step provenance "$PYTHON tools/provenance.py"
 run_step self-test "$PYTHON tools/verify.py --self-test"
 # The gate itself, in the clone, with no credentials and no runtime directory. This is the

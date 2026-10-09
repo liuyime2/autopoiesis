@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Print the provenance of one run of min-agent.
+"""Print the provenance of one run of autopoiesis.
 
 Called by `make reproduce`. The objective asks for config, commit hash, environment,
 seed, dataset version, output paths and core metrics to be recorded so any result can be
@@ -88,7 +88,7 @@ def main() -> int:
     out: list[str] = []
     add = out.append
 
-    add("# provenance for one run of min-agent")
+    add("# provenance for one run of autopoiesis")
     add(f"generated: {datetime.now(tz=timezone.utc):%Y-%m-%dT%H:%M:%SZ}")
 
     add("\n## code")

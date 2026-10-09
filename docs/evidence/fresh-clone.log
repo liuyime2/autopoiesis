@@ -8,16 +8,16 @@ $ python3 -m venv .venv
 $ .venv/bin/python -m pip install -e ".[dev]"
 
 ## commit under test
-db02b44 Rewrite the README as the project's front page: Autopoiesis
+d4f3019 Keep trading when the broker clock cannot be read, and record the plan that came first
 
 ## environment
-interpreter: /tmp/min-agent-fresh-clone.881ubF/.venv/bin/python
-version: 3.13.2
+interpreter: /tmp/autopoiesis-fresh-clone.v17DDK/.venv/bin/python
+version: 3.10.18
 credentials: none present (verified by probing, after unset)
 
 ## install
 $ .venv/bin/python -m pip install -e ".[dev]"
-Obtaining file:///tmp/min-agent-fresh-clone.881ubF
+Obtaining file:///tmp/autopoiesis-fresh-clone.v17DDK
   Installing build dependencies: started
   Installing build dependencies: finished with status 'done'
   Checking if build backend supports build_editable: started
@@ -26,170 +26,135 @@ Obtaining file:///tmp/min-agent-fresh-clone.881ubF
   Getting requirements to build editable: finished with status 'done'
   Preparing editable metadata (pyproject.toml): started
   Preparing editable metadata (pyproject.toml): finished with status 'done'
-Collecting alpaca-trade-api<4,>=3.2 (from min-agent==0.1.0)
-  Downloading alpaca_trade_api-3.2.0-py3-none-any.whl.metadata (29 kB)
-Collecting pydantic<3,>=2.9 (from min-agent==0.1.0)
-  Downloading pydantic-2.13.5-py3-none-any.whl.metadata (110 kB)
-Collecting requests<3,>=2.31 (from min-agent==0.1.0)
-  Downloading requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
-Collecting pytest<9,>=8 (from min-agent==0.1.0)
-  Downloading pytest-8.4.2-py3-none-any.whl.metadata (7.7 kB)
-Collecting ruff>=0.6 (from min-agent==0.1.0)
-  Downloading ruff-0.16.10-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (20 kB)
-Collecting mypy>=1.11 (from min-agent==0.1.0)
-  Downloading mypy-2.4.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
-Collecting pandas>=0.18.1 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading pandas-3.0.6-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (79 kB)
-Collecting numpy>=1.11.1 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading numpy-2.5.3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
-Collecting urllib3<2,>1.24 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading urllib3-1.26.20-py2.py3-none-any.whl.metadata (50 kB)
-Collecting websocket-client<2,>=0.56.0 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading websocket_client-1.9.2-py3-none-any.whl.metadata (8.3 kB)
-Collecting websockets<11,>=9.0 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading websockets-10.4.tar.gz (84 kB)
-  Installing build dependencies: started
-  Installing build dependencies: finished with status 'done'
-  Getting requirements to build wheel: started
-  Getting requirements to build wheel: finished with status 'done'
-  Preparing metadata (pyproject.toml): started
-  Preparing metadata (pyproject.toml): finished with status 'done'
-Collecting msgpack==1.0.3 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading msgpack-1.0.3.tar.gz (123 kB)
-  Installing build dependencies: started
-  Installing build dependencies: finished with status 'done'
-  Getting requirements to build wheel: started
-  Getting requirements to build wheel: finished with status 'done'
-  Preparing metadata (pyproject.toml): started
-  Preparing metadata (pyproject.toml): finished with status 'done'
-Collecting aiohttp<4,>=3.8.3 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading aiohttp-3.14.4-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.3 kB)
-Collecting PyYAML==6.0.1 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading PyYAML-6.0.1.tar.gz (125 kB)
-  Installing build dependencies: started
-  Installing build dependencies: finished with status 'done'
-  Getting requirements to build wheel: started
-  Getting requirements to build wheel: finished with status 'done'
-  Preparing metadata (pyproject.toml): started
-  Preparing metadata (pyproject.toml): finished with status 'done'
-Collecting deprecation==2.1.0 (from alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading deprecation-2.1.0-py2.py3-none-any.whl.metadata (4.6 kB)
-Collecting packaging (from deprecation==2.1.0->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Using cached packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
-Collecting typing_extensions>=4.6.0 (from mypy>=1.11->min-agent==0.1.0)
-  Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
-Collecting mypy_extensions>=1.0.0 (from mypy>=1.11->min-agent==0.1.0)
-  Downloading mypy_extensions-1.1.0-py3-none-any.whl.metadata (1.1 kB)
-Collecting pathspec>=1.0.0 (from mypy>=1.11->min-agent==0.1.0)
-  Downloading pathspec-1.1.1-py3-none-any.whl.metadata (14 kB)
-Collecting librt>=0.16.0 (from mypy>=1.11->min-agent==0.1.0)
-  Downloading librt-0.16.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (1.3 kB)
-Collecting ast-serialize<1.0.0,>=0.11.2 (from mypy>=1.11->min-agent==0.1.0)
-  Downloading ast_serialize-0.12.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.4 kB)
-Collecting annotated-types>=0.6.0 (from pydantic<3,>=2.9->min-agent==0.1.0)
-  Downloading annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
-Collecting pydantic-core==2.46.5 (from pydantic<3,>=2.9->min-agent==0.1.0)
-  Downloading pydantic_core-2.46.5-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.6 kB)
-Collecting typing-inspection>=0.4.2 (from pydantic<3,>=2.9->min-agent==0.1.0)
-  Downloading typing_inspection-0.4.4-py3-none-any.whl.metadata (2.6 kB)
-Collecting iniconfig>=1 (from pytest<9,>=8->min-agent==0.1.0)
-  Downloading iniconfig-2.3.1-py3-none-any.whl.metadata (2.8 kB)
-Collecting pluggy<2,>=1.5 (from pytest<9,>=8->min-agent==0.1.0)
-  Downloading pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
-Collecting pygments>=2.7.2 (from pytest<9,>=8->min-agent==0.1.0)
-  Downloading pygments-2.21.0-py3-none-any.whl.metadata (2.5 kB)
-Collecting charset_normalizer<4,>=2 (from requests<3,>=2.31->min-agent==0.1.0)
-  Downloading charset_normalizer-3.5.2-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (46 kB)
-Collecting idna<4,>=2.5 (from requests<3,>=2.31->min-agent==0.1.0)
-  Downloading idna-3.20-py3-none-any.whl.metadata (7.2 kB)
-Collecting certifi>=2023.5.7 (from requests<3,>=2.31->min-agent==0.1.0)
-  Downloading certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
-Collecting aiohappyeyeballs>=2.5.0 (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading aiohappyeyeballs-2.7.1-py3-none-any.whl.metadata (5.9 kB)
-Collecting aiosignal>=1.4.0 (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
-Collecting attrs>=17.3.0 (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading attrs-26.1.0-py3-none-any.whl.metadata (8.8 kB)
-Collecting frozenlist>=1.1.1 (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading frozenlist-1.8.0-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (20 kB)
-Collecting multidict<7.0,>=4.5 (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading multidict-6.9.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.3 kB)
-Collecting propcache>=0.2.0 (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading propcache-0.5.4-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (25 kB)
-Collecting yarl<2.0,>=1.25.1 (from aiohttp<4,>=3.8.3->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading yarl-1.25.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (111 kB)
-Collecting python-dateutil>=2.8.2 (from pandas>=0.18.1->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
-Collecting six>=1.5 (from python-dateutil>=2.8.2->pandas>=0.18.1->alpaca-trade-api<4,>=3.2->min-agent==0.1.0)
-  Downloading six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
-Downloading alpaca_trade_api-3.2.0-py3-none-any.whl (34 kB)
-Downloading deprecation-2.1.0-py2.py3-none-any.whl (11 kB)
-Downloading mypy-2.4.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (15.5 MB)
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 15.5/15.5 MB 10.6 MB/s eta 0:00:00
-Downloading pydantic-2.13.5-py3-none-any.whl (472 kB)
-Downloading pydantic_core-2.46.5-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 43.8 MB/s eta 0:00:00
-Downloading pytest-8.4.2-py3-none-any.whl (365 kB)
-Downloading requests-2.34.2-py3-none-any.whl (73 kB)
-Downloading ruff-0.16.10-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.4 MB)
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.4/10.4 MB 12.1 MB/s eta 0:00:00
-Downloading aiohttp-3.14.4-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.9 MB)
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.9/1.9 MB 36.8 MB/s eta 0:00:00
-Downloading annotated_types-0.8.0-py3-none-any.whl (13 kB)
-Downloading ast_serialize-0.12.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.3 MB)
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 22.0 MB/s eta 0:00:00
-Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
-Downloading charset_normalizer-3.5.2-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (254 kB)
-Downloading idna-3.20-py3-none-any.whl (69 kB)
-Downloading iniconfig-2.3.1-py3-none-any.whl (7.6 kB)
-Downloading librt-0.16.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (531 kB)
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 531.7/531.7 kB 69.6 MB/s eta 0:00:00
-Downloading mypy_extensions-1.1.0-py3-none-any.whl (5.0 kB)
-Downloading numpy-2.5.3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.7 MB)
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.7/16.7 MB 16.5 MB/s eta 0:00:00
-Using cached packaging-26.3-py3-none-any.whl (129 kB)
-Downloading pandas-3.0.6-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (10.8 MB)
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.8/10.8 MB 12.2 MB/s eta 0:00:00
-Downloading pathspec-1.1.1-py3-none-any.whl (57 kB)
-Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
-Downloading pygments-2.21.0-py3-none-any.whl (1.3 MB)
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 32.4 MB/s eta 0:00:00
-Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
-Downloading typing_inspection-0.4.4-py3-none-any.whl (14 kB)
-Downloading urllib3-1.26.20-py2.py3-none-any.whl (144 kB)
-Downloading websocket_client-1.9.2-py3-none-any.whl (95 kB)
-Downloading aiohappyeyeballs-2.7.1-py3-none-any.whl (15 kB)
-Downloading aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
-Downloading attrs-26.1.0-py3-none-any.whl (67 kB)
-Downloading frozenlist-1.8.0-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (234 kB)
-Downloading multidict-6.9.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (336 kB)
-Downloading propcache-0.5.4-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (234 kB)
-Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
-Downloading yarl-1.25.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (117 kB)
-Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
-Building wheels for collected packages: min-agent, msgpack, PyYAML, websockets
-  Building editable for min-agent (pyproject.toml): started
-  Building editable for min-agent (pyproject.toml): finished with status 'done'
-  Created wheel for min-agent: filename=min_agent-0.1.0-0.editable-py3-none-any.whl size=12014 sha256=eb7fbf6a71fb4fbeebfd0f3e597e933553331e678c06b20cadd57174fac050fd
-  Stored in directory: /tmp/pip-ephem-wheel-cache-nl3ze5eg/wheels/ae/c6/45/83906dfbdc297d90f3c8322f3ad58b9f7cc3d3b146519baea0
-  Building wheel for msgpack (pyproject.toml): started
-  Building wheel for msgpack (pyproject.toml): finished with status 'done'
-  Created wheel for msgpack: filename=msgpack-1.0.3-cp313-cp313-linux_x86_64.whl size=15772 sha256=4bec96595a25b489b401db8fdf27bc54800667273d2839c1d3f8c5f58cab59a2
-  Stored in directory: /tmp/min-agent-fresh-clone.881ubF/.pip-cache/wheels/35/fa/14/d8be957d182ae6702082fc85f93bb705f26723c831079c6862
-  Building wheel for PyYAML (pyproject.toml): started
-  Building wheel for PyYAML (pyproject.toml): finished with status 'done'
-  Created wheel for PyYAML: filename=pyyaml-6.0.1-cp313-cp313-linux_x86_64.whl size=45459 sha256=85d1c442cc39ba6cb5a0761003e2582ffa0cb4d5e8fdd515b64a298f6af71d1d
-  Stored in directory: /tmp/min-agent-fresh-clone.881ubF/.pip-cache/wheels/9c/9e/34/1e1548811b63a9d001469f21797e8b7d5c216d8eb928e7d6ad
-  Building wheel for websockets (pyproject.toml): started
-  Building wheel for websockets (pyproject.toml): finished with status 'done'
-  Created wheel for websockets: filename=websockets-10.4-cp313-cp313-linux_x86_64.whl size=98686 sha256=29ca34afbe94b8002b106bfe46d321c977242b6e11305ce781bb3db278e8f7af
-  Stored in directory: /tmp/min-agent-fresh-clone.881ubF/.pip-cache/wheels/f5/dd/43/5b7132085406a982d2e0dd808f0ffed137865c8a8c5c7a5e4b
-Successfully built min-agent msgpack PyYAML websockets
-Installing collected packages: msgpack, websockets, websocket-client, urllib3, typing_extensions, six, ruff, PyYAML, pygments, propcache, pluggy, pathspec, packaging, numpy, mypy_extensions, multidict, librt, iniconfig, idna, frozenlist, charset_normalizer, certifi, attrs, ast-serialize, annotated-types, aiohappyeyeballs, yarl, typing-inspection, requests, python-dateutil, pytest, pydantic-core, mypy, deprecation, aiosignal, pydantic, pandas, aiohttp, alpaca-trade-api, min-agent
-Successfully installed PyYAML-6.0.1 aiohappyeyeballs-2.7.1 aiohttp-3.14.4 aiosignal-1.4.0 alpaca-trade-api-3.2.0 annotated-types-0.8.0 ast-serialize-0.12.1 attrs-26.1.0 certifi-2026.7.22 charset_normalizer-3.5.2 deprecation-2.1.0 frozenlist-1.8.0 idna-3.20 iniconfig-2.3.1 librt-0.16.0 min-agent-0.1.0 msgpack-1.0.3 multidict-6.9.1 mypy-2.4.0 mypy_extensions-1.1.0 numpy-2.5.3 packaging-26.3 pandas-3.0.6 pathspec-1.1.1 pluggy-1.6.0 propcache-0.5.4 pydantic-2.13.5 pydantic-core-2.46.5 pygments-2.21.0 pytest-8.4.2 python-dateutil-2.9.0.post0 requests-2.34.2 ruff-0.16.10 six-1.17.0 typing-inspection-0.4.4 typing_extensions-4.16.0 urllib3-1.26.20 websocket-client-1.9.2 websockets-10.4 yarl-1.25.1
+Collecting requests<3,>=2.31
+  Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.1/73.1 kB 6.1 MB/s eta 0:00:00
+Collecting pydantic<3,>=2.9
+  Downloading pydantic-2.14.0-py3-none-any.whl (487 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 487.1/487.1 kB 13.2 MB/s eta 0:00:00
+Collecting alpaca-trade-api<4,>=3.2
+  Downloading alpaca_trade_api-3.2.0-py3-none-any.whl (34 kB)
+Collecting mypy>=1.11
+  Downloading mypy-2.4.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (15.5 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 15.5/15.5 MB 31.8 MB/s eta 0:00:00
+Collecting pytest<9,>=8
+  Downloading pytest-8.4.2-py3-none-any.whl (365 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 365.8/365.8 kB 42.8 MB/s eta 0:00:00
+Collecting ruff>=0.6
+  Downloading ruff-0.16.10-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.4 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.4/10.4 MB 54.4 MB/s eta 0:00:00
+Collecting aiohttp<4,>=3.8.3
+  Downloading aiohttp-3.14.4-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.9 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.9/1.9 MB 50.3 MB/s eta 0:00:00
+Collecting websocket-client<2,>=0.56.0
+  Downloading websocket_client-1.9.2-py3-none-any.whl (95 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 95.8/95.8 kB 28.9 MB/s eta 0:00:00
+Collecting deprecation==2.1.0
+  Downloading deprecation-2.1.0-py2.py3-none-any.whl (11 kB)
+Collecting urllib3<2,>1.24
+  Downloading urllib3-1.26.20-py2.py3-none-any.whl (144 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 144.2/144.2 kB 35.6 MB/s eta 0:00:00
+Collecting numpy>=1.11.1
+  Downloading numpy-2.2.6-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (16.8 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.8/16.8 MB 37.4 MB/s eta 0:00:00
+Collecting msgpack==1.0.3
+  Downloading msgpack-1.0.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (323 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 323.7/323.7 kB 31.3 MB/s eta 0:00:00
+Collecting websockets<11,>=9.0
+  Downloading websockets-10.4-cp310-cp310-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (106 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 106.8/106.8 kB 15.2 MB/s eta 0:00:00
+Collecting PyYAML==6.0.1
+  Downloading PyYAML-6.0.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (705 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 705.5/705.5 kB 55.8 MB/s eta 0:00:00
+Collecting pandas>=0.18.1
+  Downloading pandas-2.3.3-cp310-cp310-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.8 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 18.1 MB/s eta 0:00:00
+Collecting packaging
+  Using cached packaging-26.3-py3-none-any.whl (129 kB)
+Collecting tomli>=1.1.0
+  Downloading tomli-2.5.0-py3-none-any.whl (14 kB)
+Collecting typing_extensions>=4.6.0
+  Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 45.6/45.6 kB 13.0 MB/s eta 0:00:00
+Collecting ast-serialize<1.0.0,>=0.11.2
+  Downloading ast_serialize-0.12.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.3 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 55.2 MB/s eta 0:00:00
+Collecting librt>=0.16.0
+  Downloading librt-0.16.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (515 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 515.5/515.5 kB 38.2 MB/s eta 0:00:00
+Collecting pathspec>=1.0.0
+  Downloading pathspec-1.1.1-py3-none-any.whl (57 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 57.3/57.3 kB 12.7 MB/s eta 0:00:00
+Collecting mypy_extensions>=1.0.0
+  Downloading mypy_extensions-1.1.0-py3-none-any.whl (5.0 kB)
+Collecting annotated-types>=0.6.0
+  Downloading annotated_types-0.8.0-py3-none-any.whl (13 kB)
+Collecting typing-inspection>=0.4.4
+  Downloading typing_inspection-0.4.4-py3-none-any.whl (14 kB)
+Collecting pydantic-core==2.50.0
+  Downloading pydantic_core-2.50.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.2/2.2 MB 32.1 MB/s eta 0:00:00
+Collecting pluggy<2,>=1.5
+  Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+Collecting iniconfig>=1
+  Downloading iniconfig-2.3.1-py3-none-any.whl (7.6 kB)
+Collecting exceptiongroup>=1
+  Downloading exceptiongroup-1.3.1-py3-none-any.whl (16 kB)
+Collecting pygments>=2.7.2
+  Downloading pygments-2.21.0-py3-none-any.whl (1.3 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 59.9 MB/s eta 0:00:00
+Collecting charset_normalizer<4,>=2
+  Downloading charset_normalizer-3.5.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (271 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 271.1/271.1 kB 23.0 MB/s eta 0:00:00
+Collecting idna<4,>=2.5
+  Downloading idna-3.20-py3-none-any.whl (69 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 69.6/69.6 kB 18.1 MB/s eta 0:00:00
+Collecting certifi>=2023.5.7
+  Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 137.0/137.0 kB 25.0 MB/s eta 0:00:00
+Collecting frozenlist>=1.1.1
+  Downloading frozenlist-1.8.0-cp310-cp310-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (219 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 219.5/219.5 kB 29.6 MB/s eta 0:00:00
+Collecting attrs>=17.3.0
+  Downloading attrs-26.1.0-py3-none-any.whl (67 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 67.5/67.5 kB 9.9 MB/s eta 0:00:00
+Collecting aiohappyeyeballs>=2.5.0
+  Downloading aiohappyeyeballs-2.7.1-py3-none-any.whl (15 kB)
+Collecting multidict<7.0,>=4.5
+  Downloading multidict-6.9.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (303 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 303.7/303.7 kB 22.3 MB/s eta 0:00:00
+Collecting yarl<2.0,>=1.25.1
+  Downloading yarl-1.25.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (118 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 118.1/118.1 kB 13.1 MB/s eta 0:00:00
+Collecting async-timeout<6.0,>=4.0
+  Downloading async_timeout-5.0.1-py3-none-any.whl (6.2 kB)
+Collecting propcache>=0.2.0
+  Downloading propcache-0.5.4-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (224 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 224.3/224.3 kB 22.7 MB/s eta 0:00:00
+Collecting aiosignal>=1.4.0
+  Downloading aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+Collecting pytz>=2020.1
+  Downloading pytz-2026.5-py2.py3-none-any.whl (506 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 506.3/506.3 kB 39.0 MB/s eta 0:00:00
+Collecting python-dateutil>=2.8.2
+  Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 38.5 MB/s eta 0:00:00
+Collecting tzdata>=2022.7
+  Downloading tzdata-2026.5-py2.py3-none-any.whl (347 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 348.0/348.0 kB 46.6 MB/s eta 0:00:00
+Collecting six>=1.5
+  Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+Building wheels for collected packages: autopoiesis
+  Building editable for autopoiesis (pyproject.toml): started
+  Building editable for autopoiesis (pyproject.toml): finished with status 'done'
+  Created wheel for autopoiesis: filename=autopoiesis-0.1.0-0.editable-py3-none-any.whl size=12454 sha256=d8230f5535a16b0f3348166934084b4897c0138f7afd876fe169f536e83185eb
+  Stored in directory: /tmp/pip-ephem-wheel-cache-8glda059/wheels/eb/01/62/a69f3f6fabe1126668a6fccf8c9f91f9cce32043f37bcf4544
+Successfully built autopoiesis
+Installing collected packages: pytz, msgpack, websockets, websocket-client, urllib3, tzdata, typing_extensions, tomli, six, ruff, PyYAML, pygments, propcache, pluggy, pathspec, packaging, numpy, mypy_extensions, librt, iniconfig, idna, frozenlist, charset_normalizer, certifi, attrs, async-timeout, ast-serialize, annotated-types, aiohappyeyeballs, typing-inspection, requests, python-dateutil, pydantic-core, mypy, multidict, exceptiongroup, deprecation, aiosignal, yarl, pytest, pydantic, pandas, aiohttp, alpaca-trade-api, autopoiesis
+Successfully installed PyYAML-6.0.1 aiohappyeyeballs-2.7.1 aiohttp-3.14.4 aiosignal-1.4.0 alpaca-trade-api-3.2.0 annotated-types-0.8.0 ast-serialize-0.12.1 async-timeout-5.0.1 attrs-26.1.0 autopoiesis-0.1.0 certifi-2026.7.22 charset_normalizer-3.5.2 deprecation-2.1.0 exceptiongroup-1.3.1 frozenlist-1.8.0 idna-3.20 iniconfig-2.3.1 librt-0.16.0 msgpack-1.0.3 multidict-6.9.1 mypy-2.4.0 mypy_extensions-1.1.0 numpy-2.2.6 packaging-26.3 pandas-2.3.3 pathspec-1.1.1 pluggy-1.6.0 propcache-0.5.4 pydantic-2.14.0 pydantic-core-2.50.0 pygments-2.21.0 pytest-8.4.2 python-dateutil-2.9.0.post0 pytz-2026.5 requests-2.34.2 ruff-0.16.10 six-1.17.0 tomli-2.5.0 typing-inspection-0.4.4 typing_extensions-4.16.0 tzdata-2026.5 urllib3-1.26.20 websocket-client-1.9.2 websockets-10.4 yarl-1.25.1
 
-[notice] A new release of pip is available: 24.3.1 -> 26.2.1
-[notice] To update, run: /tmp/min-agent-fresh-clone.881ubF/.venv/bin/python -m pip install --upgrade pip
+[notice] A new release of pip is available: 23.0.1 -> 26.2.1
+[notice] To update, run: python -m pip install --upgrade pip
 
 ## lint
 $ .venv/bin/python -m ruff check src/ tools/ tests/ examples/
@@ -199,21 +164,22 @@ RESULT: PASS
 ## test
 $ .venv/bin/python -m pytest -q
 ........................................................................ [  6%]
-....................................................s................... [ 13%]
-........................................................................ [ 20%]
-........................................................................ [ 27%]
-........................................................................ [ 33%]
-........................................................................ [ 40%]
-........................................................................ [ 47%]
-........................................................................ [ 54%]
-........................................................................ [ 61%]
-......................................s................................. [ 67%]
-..................s..................................................... [ 74%]
-........................................................................ [ 81%]
-.........s.............................................................. [ 88%]
+.........................................................s.............. [ 12%]
+........................................................................ [ 19%]
+........................................................................ [ 25%]
+........................................................................ [ 31%]
+........................................................................ [ 38%]
+........................................................................ [ 44%]
+........................................................................ [ 50%]
+........................................................................ [ 57%]
+..................................................................s..... [ 63%]
+..............................................s......................... [ 70%]
+........................................................................ [ 76%]
+.......................................................s................ [ 82%]
+........................................................................ [ 89%]
 ........................................................................ [ 95%]
 ...................................................                      [100%]
-1055 passed, 4 skipped in 13.78s
+1127 passed, 4 skipped in 31.89s
 RESULT: PASS
 
 ## example
@@ -234,7 +200,7 @@ $ .venv/bin/python examples/minimal_cycle.py
 RESULT: PASS
 
 ## entry-point
-$ .venv/bin/python -m min_agent.cli --help
+$ .venv/bin/python -m autopoiesis.cli --help
 usage: cli.py [-h] [--check-env] [--once] [--daemon] [--status] [--stop]
               [--reconcile] [--ingest-evidence] [--ingest-owner-history]
               [--evidence-report] [--verify-profit-target]
@@ -273,17 +239,17 @@ RESULT: PASS
 ## provenance
 $ .venv/bin/python tools/provenance.py
 # provenance for one run of min-agent
-generated: 2026-10-08T00:28:54Z
+generated: 2026-10-09T08:33:44Z
 
 ## code
-commit: db02b44705ad096526c6e66686f93f1e4194fec4
+commit: d4f3019ac8b85373800c0e33e078c7e773c37c70
 dirty:  yes
 
 ## environment
-python: 3.13.2
+python: 3.10.18
 packages:
   alpaca-trade-api==3.2.0
-  pydantic==2.13.5
+  pydantic==2.14.0
   requests==2.34.2
   pytest==8.4.2
   ruff==0.16.10
@@ -308,11 +274,11 @@ packages:
   broker at: unavailable (no credentials in the environment)
 
 ## output paths
-  journal         runtime/min_agent/journal.jsonl
-  strategies      runtime/min_agent/strategies/
-  reflection      runtime/min_agent/reflection.json
-  doctor history  runtime/min_agent/doctor-history.jsonl
-  this record     runtime/min_agent/reproduce.txt
+  journal         runtime/autopoiesis/journal.jsonl
+  strategies      runtime/autopoiesis/strategies/
+  reflection      runtime/autopoiesis/reflection.json
+  doctor history  runtime/autopoiesis/doctor-history.jsonl
+  this record     runtime/autopoiesis/reproduce.txt
 
 ## metrics at the time of this record
   (no cycle records yet)
@@ -345,60 +311,60 @@ $ .venv/bin/python tools/verify.py
 verify: every check class, one gate
 ==============================================================================
 
-[PASS] test-coverage-map                     all 70 test files are assigned, and each is assigned to at least one class that actually runs it
+[PASS] test-coverage-map                     all 76 test files are assigned, and each is assigned to at least one class that actually runs it
 [PASS] class-coverage                        all 12 behaviour classes have tests; 22 repository/system checks are exempt by name
-[PASS] software-supply-chain                 212 tracked files, no credentials, no tracked env file
-[PASS] docs-not-stale                        43 plan document(s), none asserting an unacted state
-[PASS] production-research-separation        5 research module(s), 38 production module(s), no production import of research
-[PASS] home-independence                     44 production file(s) with no $HOME path construction
+[PASS] software-supply-chain                 257 tracked files, no credentials, no tracked env file
+[PASS] docs-not-stale                        44 plan document(s), none asserting an unacted state
+[PASS] production-research-separation        6 research module(s), 39 production module(s), no production import of research
+[PASS] home-independence                     46 production file(s) with no $HOME path construction; XDG_STATE_HOME=outside; XDG_DATA_HOME=outside
 [PASS] units-where-systemd-looks             every --user unit loads from a durable path, is enabled without a tmpfs link, and its ExecStart exists
 [SKIP] daemon-source-matches-worktree        no heartbeat; daemon not running
 [PASS] docs-no-deleted-commands              no document instructs a reader to run one of the 6 removed scripts
 [PASS] example-runs                          examples/minimal_cycle.py runs with no broker or credentials
-[PASS] tools-readme-accurate                 tools/README.md names all 22 tools and invents none of them
+[PASS] tools-readme-accurate                 tools/README.md names all 23 tools and invents none of them
 [PASS] no-loose-design-notes                 every root markdown file is a documented entry point (AGENTS.md, CHANGELOG.md, CODE_OF_CONDUCT.md, CONTRIBUTING.md, README.md, SECURITY.md) or declare
-[PASS] fresh-clone-evidence-real             log records 7 steps from commit 8431f3f, regenerable by run-fresh-clone.sh
+[PASS] fresh-clone-evidence-real             log records 7 steps from commit db02b44, regenerable by run-fresh-clone.sh
 [PASS] shell-scripts-well-formed             3 shell script(s) parse cleanly under bash -n
 [PASS] bespoke-list-matches-run              19 bespoke names, all appended by main() and all reported by --list
-[PASS] status-states-only-fixed-facts        STATUS.md states only fixed configuration (mode=paper, model=qwen3.8:27b, 5 symbols, 3 hard limits); live counters are queried rather than written dow
-[PASS] config-comment-figures-true           ruff.toml's measured figures hold: verify.py 3,483 lines, 62 BLE001 findings, 24 deferred imports
+[PASS] status-states-only-fixed-facts        no counter that moves in STATUS.md; the fixed table is checked against the configuration only where an operator env file exists
+[PASS] config-comment-figures-true           ruff.toml's measured figures hold: verify.py 3,519 lines, 75 BLE001 findings, 25 deferred imports
 [PASS] list-count-matches-run                --list says 52; the run produces 52 for the same set (syntax-import contributes the extra row)
-[SKIP] fact-figures-match                    minictrl doctor produced no report (exit 2); nothing to compare against
+[PASS] fact-figures-match                    prose agrees with the commands: audit 61/61, 1131 tests collected; and no document claims a doctor warnings count (live value is 15, which is why none
 [PASS] unit-templates-portable               8 unit template(s) carry no host path and every placeholder is substituted
 [PASS] pipeline-targets-exist                pipeline runs ['validate-data', 'test', 'evaluate', 'reproduce'] and every stage has a rule
 [PASS] type-checking-is-a-gate               `type:` runs mypy and blocks; `check:` runs lint, type and test
-[PASS] config-example-names                  all 35 variable names in the example are read by config.py, by minictrl, or by the env file
-[PASS] config-example-complete               all 39 variable(s) the loader reads are documented in the example
+[PASS] config-example-names                  all 4 variable names in the example are read by config.py, by minictrl, or by the env file
+[PASS] config-example-complete               all 44 variable(s) the loader reads are documented in the example
 [PASS] no-unreachable-production-code        every function under src/min_agent is called, or is a pydantic hook or property
-[PASS] one-credentials-path                  Makefile, minictrl and the config example all resolve $XDG_CONFIG_HOME/min-agent/env with a $HOME/.config fallback
-[PASS] unit-environment-files                4 EnvironmentFile reference(s) across the deployed units all resolve
-[SKIP] replay-audit                          no runtime/min_agent/journal.jsonl yet; nothing to replay
+[PASS] one-credentials-path                  Makefile, minictrl and the config example all resolve $XDG_CONFIG_HOME/autopoiesis/env with a $HOME/.config fallback
+[PASS] unit-environment-files                5 EnvironmentFile reference(s) across the deployed units all resolve
+[SKIP] replay-audit                          no runtime/autopoiesis/journal.jsonl yet; nothing to replay
 [PASS] shadow-not-executed                   no module treats SHADOWED as an executed order
 [SKIP] shadow-stage-exercised                no journal to inspect
 [SKIP] research-trial-ledger                 research_trials.jsonl does not exist yet; no search has run, so there is nothing to omit
-[SKIP] screen-direction-neutral              no runtime/min_agent/journal.jsonl yet; nothing has been screened
-[PASS] doctor-checks-reachable               all 22 doctor checks are called
-[PASS] syntax-import                         imported 37 modules
+[SKIP] screen-direction-neutral              no runtime/autopoiesis/journal.jsonl yet; nothing has been screened
+[PASS] doctor-checks-reachable               all 24 doctor checks are called
+[PASS] syntax-import                         imported 38 modules
 [PASS] data-integrity                        runtime integrity: OK (0 cycles, 0 events, 0 strategies) |   no journal yet |   no strategy registry yet |   6 previously-missing strategies recorded 
 [PASS] shadow-live-consistency               live mode hard-blocked; probation gate enforced; shadow implemented, reachable by MIN_AGENT_SHADOW=1, off by default, strict boolean
 [PASS] replay-cannot-reach-the-account       replay holds no broker client, reports REPLAYED with no order_id, and a journal of replayed fills evaluates to zero realized PnL
 [PASS] selection-pressure-reaches-the-rules  a REJECT verdict retires from the rule set carrying its ratio, while INCONCLUSIVE and absent evidence do not
 [SKIP] self-evolution-closes                 no runtime journal in this checkout; the replay needs real bars fetched with a paper account (tools/fetch_replay_bars.py)
-[PASS] syntax-import                         ..................................................                       [100%] | 50 passed in 3.77s
-[PASS] unit-integration                      ..............................................................s......... [ 20%] | ....................................................................
+[PASS] syntax-import                         ...................................................                      [100%] | 51 passed in 5.14s
+[PASS] unit-integration                      ...................................................................s.... [ 16%] | ....................................................................
 [PASS] point-in-time-no-leakage              ................................................s....................... [ 61%] | .............................................                       
 [PASS] pnl-accounting                        ........................................................................ [ 43%] | ....................................................................
 [PASS] lifecycle-invariants                  ........................................................................ [ 19%] | ....................................................................
-[PASS] guardian-bypass-prevention            ........................................................................ [ 52%] | ..................................................................  
+[PASS] guardian-bypass-prevention            ........................................................................ [ 49%] | ....................................................................
 [PASS] replay-determinism                    ........................................................................ [ 54%] | ...........................................................s.       
-[PASS] crash-recovery                        ........................................................................ [ 40%] | ....................................................................
-[PASS] broker-reconciliation                 ................................................................         [100%] | 64 passed in 1.08s
+[PASS] crash-recovery                        ........................................................................ [ 39%] | ....................................................................
+[PASS] broker-reconciliation                 ................................................................         [100%] | 64 passed in 1.21s
 [PASS] decision-outcome-counterfactual       ........................................................................ [ 62%] | ...........................................                         
 [PASS] defect-regression-audit               D15  archived projects are out of the tree  PASS | D15  a plan document exists  PASS | 61/61 checks pass across 15 defects
 [PASS] doctor                                no broker credentials and no runtime state in this checkout; ran offline (ok=False exit=1 failures=[alpaca credentials,strategy library] warnings=[dae
 [PASS] gate-class-count-consistent           every document that states the count says '52 check classes'
 
-classes: 52   passed: 52   failed: 0   test executions: 1684 across 70 test files
+classes: 52   passed: 52   failed: 0   test executions: 1770 across 76 test files
 
 OK - all check classes pass
 RESULT: PASS
