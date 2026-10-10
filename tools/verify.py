@@ -328,7 +328,7 @@ def check_software_supply_chain() -> Result:
     # Both spellings the project actually uses. The pattern only knew `APCA_API*`, so the
     # one class whose entire purpose is preventing a committed credential could not see
     # ALPACA_API_KEY or ALPACA_SECRET_KEY - the two names configs/paper.env.example, README
-    # and minictrl all use. Demonstrated by committing a plausible paper key pair into a
+    # and autopoiesis all use. Demonstrated by committing a plausible paper key pair into a
     # README in a throwaway clone: software-supply-chain reported "no credentials".
     #
     # The key shape is also matched as a standalone value, not only after a recognised name,
@@ -393,7 +393,7 @@ def check_syntax_import() -> Result:
 #: operator who has not moved their file gets a working daemon rather than an auth error with
 #: nothing pointing at the rename.
 #:
-#: `minictrl` builds the path from a shell variable (`$_cfg/autopoiesis/env`) because it has to
+#: `autopoiesis` builds the path from a shell variable (`$_cfg/autopoiesis/env`) because it has to
 #: test which file exists before choosing one. A literal-only pattern would report that entry point
 #: as never reading the credentials, which is the exact failure this check exists to catch - so the
 #: directory name counts with or without a variable in front of it.
@@ -586,13 +586,13 @@ def check_home_independence() -> Result:
     """
     violations: list[str] = []
     targets = sorted((SRC / "autopoiesis").rglob("*.py"))
-    # `minictrl` is at the repository root, not under tools/. The path here said
-    # tools/minictrl, the file does not exist there, and the `if ... exists()` guard turned
+    # `autopoiesis` is at the repository root, not under tools/. The path here said
+    # tools/autopoiesis, the file does not exist there, and the `if ... exists()` guard turned
     # that mistake into silence - so the check skipped the one script that most needs it and
     # reported a clean bill. Found by reading where the file actually is. The root script is
     # now scanned directly, with no existence guard, because it is on the gate's own path:
     # `make doctor` and `make status` both invoke it.
-    targets.append(ROOT / "minictrl")
+    targets.append(ROOT / "autopoiesis")
     for path in targets:
         for line_no, line in enumerate(path.read_text().splitlines(), 1):
             code = line.split("#", 1)[0]
@@ -634,7 +634,7 @@ def check_unit_environment_files_exist() -> Result:
 
     Found by the verifier, not by the gate: the unattended watchdog review had been
     reporting `ok=False exit=1 failures=[alpaca credentials]` on every run, 275 of 453
-    doctor runs in total, while `minictrl doctor` was green from a shell with the
+    doctor runs in total, while `autopoiesis doctor` was green from a shell with the
     environment sourced. The watchdog unit carried a hardcoded
     `EnvironmentFile=-%h/.config/autopoiesis/env`, which resolves to $HOME - where this
     account's credentials are not - and the leading `-` told systemd to ignore the
@@ -694,8 +694,8 @@ def _durable_unit_dir() -> str | None:
     return str(Path(path).parent)
 
 
-# Captured at import, not at first call. `minictrl doctor` shells out to
-# `minictrl doctor`, which creates runtime/autopoiesis as a side effect; a lazily-evaluated
+# Captured at import, not at first call. `autopoiesis doctor` shells out to
+# `autopoiesis doctor`, which creates runtime/autopoiesis as a side effect; a lazily-evaluated
 # cache therefore read True in a clone that started with none, because the check that
 # created the directory had already run. Two attempts got this wrong in sequence - first
 # reading it live, then caching it on first call - and the way out was to ask the question
@@ -831,10 +831,10 @@ _SHELL_METACHARACTERS = frozenset(map(chr, (124, 59, 38, 40, 41, 60, 62, 36, 92,
 def check_shell_scripts_have_no_orphaned_lines() -> Result:
     """No shell script may run a line of English as a command.
 
-    `minictrl:165` held ` Detect that instead of silently` - a fragment of a wrapped comment
+    `autopoiesis:165` held ` Detect that instead of silently` - a fragment of a wrapped comment
     that lost both its `#` and its indentation. `bash -n` passes, because it is valid syntax,
     and ruff does not lint shell. But it sat at column 0 inside the `install-service)` branch,
-    so bash executed `Detect` as a command and `./minictrl install-service` printed
+    so bash executed `Detect` as a command and `./autopoiesis install-service` printed
     "Detect: command not found" to stderr on the way to doing its real work.
 
     `bash -n` alone is therefore not enough, and neither is an indentation heuristic: an
@@ -853,7 +853,7 @@ def check_shell_scripts_have_no_orphaned_lines() -> Result:
         sorted(ROOT.glob("*.sh"))
         + sorted((ROOT / "tools").glob("*.sh"))
         + sorted((ROOT / "docs" / "evidence").glob("*.sh"))
-        + [ROOT / "minictrl"]
+        + [ROOT / "autopoiesis"]
     )
     scripts = [p for p in scripts if p.exists()]
     problems: list[str] = []
@@ -1143,12 +1143,12 @@ def check_unit_templates_have_no_host_paths() -> Result:
     """A `.service.in` template must not contain a path from the machine that wrote it.
 
     `tools/ollama.service.in` carried an `ExecStart` pointing at one account's local ollama binary
-    and a matching OLLAMA_MODELS path, because that is where Ollama lives here. `minictrl`
+    and a matching OLLAMA_MODELS path, because that is where Ollama lives here. `autopoiesis`
     substituted @ROOT@, @PYTHON@, @ENVBIN@ and @ENVFILE@ but not those, so every install on
     any other machine produced a unit that systemd could not start - and the failure appears
     at boot, long after the command that caused it returned success.
 
-    Both are placeholders now, with `minictrl` substituting them from OLLAMA_BIN and
+    Both are placeholders now, with `autopoiesis` substituting them from OLLAMA_BIN and
     OLLAMA_MODELS with sane defaults. This checks both halves: no absolute host path in a
     template, and no placeholder left unsubstituted by the renderer.
     """
@@ -1166,12 +1166,12 @@ def check_unit_templates_have_no_host_paths() -> Result:
                     f"{template.name}:{line_no} hardcodes a host path: {line.strip()[:60]}"
                 )
     # Every placeholder the renderer is expected to fill must actually be filled by it.
-    renderer = (ROOT / "minictrl").read_text(encoding="utf-8")
+    renderer = (ROOT / "autopoiesis").read_text(encoding="utf-8")
     for template in templates:
         for placeholder in set(re.findall(r"@([A-Z_]+)@", template.read_text(encoding="utf-8"))):
             if f"@{placeholder}@" not in renderer:
                 problems.append(
-                    f"{template.name} uses @{placeholder}@ but minictrl never substitutes it"
+                    f"{template.name} uses @{placeholder}@ but autopoiesis never substitutes it"
                 )
     if problems:
         return Result("unit-templates-portable", FAIL, f"{len(problems)}: {problems[:3]}")
@@ -1220,14 +1220,14 @@ def check_the_fact_figures_in_prose_match_reality() -> Result:
             f"documents cannot be checked against a collection that did not finish",
         )
 
-    rc, doctor_out = _run(["./minictrl", "doctor"], timeout=900)
+    rc, doctor_out = _run(["./autopoiesis", "doctor"], timeout=900)
     if "RESULT" not in doctor_out and "ok=" not in doctor_out:
         # Without this, a doctor that never ran left `failures == 0`, which *activated* the
         # branch forbidding documents from claiming RESULT OK - a check enforcing a rule on
         # the strength of a run that did not happen.
         return Result(
             "fact-figures-match", SKIP,
-            f"minictrl doctor produced no report (exit {rc}); nothing to compare against",
+            f"autopoiesis doctor produced no report (exit {rc}); nothing to compare against",
         )
     warnings = len(re.findall(r"^\[WARN\]", doctor_out, re.MULTILINE))
     failures = len(re.findall(r"^\[FAIL\]", doctor_out, re.MULTILINE))
@@ -1267,7 +1267,7 @@ def check_the_fact_figures_in_prose_match_reality() -> Result:
         #
         # So it now asserts the opposite, which is the enforceable claim: no current-state
         # document may carry a warnings figure, because any it carried would be stale the
-        # moment it was written. Run `minictrl doctor` for the live number.
+        # moment it was written. Run `autopoiesis doctor` for the live number.
         for match in re.finditer(r"(?:RESULT:?\s+\w+(?:\s+with)?\s+)(\d+) warnings?", text):
             if any(lo <= match.start() <= hi for lo, hi in skip):
                 continue
@@ -1275,7 +1275,7 @@ def check_the_fact_figures_in_prose_match_reality() -> Result:
             problems.append(
                 f"{name}:{line} states {match.group(1)} doctor warnings; that count changes "
                 "every cycle, so it cannot be maintained in a document - read it from "
-                "`minictrl doctor`"
+                "`autopoiesis doctor`"
             )
         # And the same for a RESULT line claiming a clean bill of health. A document that
         # says "RESULT OK" is making a claim about the running system, which is true for a
@@ -1291,7 +1291,7 @@ def check_the_fact_figures_in_prose_match_reality() -> Result:
                 line = text[: match.start()].count("\n") + 1
                 problems.append(
                     f"{name}:{line} claims doctor reported RESULT OK; that is a statement "
-                    "about the running system at one moment - read it from `minictrl doctor`"
+                    "about the running system at one moment - read it from `autopoiesis doctor`"
                 )
 
     if problems:
@@ -1473,7 +1473,7 @@ def check_status_only_states_what_does_not_change() -> Result:
     the agent runs does not belong in a file a human reads.
 
     STATUS.md now carries only what is fixed - mode, allowlist, hard limits, model,
-    credential location, unit paths - and points at `minictrl status`, `doctor` and `profit`
+    credential location, unit paths - and points at `autopoiesis status`, `doctor` and `profit`
     for the rest. What is asserted is that the split holds: no counter that moves, and every
     fixed value that is stated matching the code that uses it.
     """
@@ -1509,7 +1509,7 @@ def check_status_only_states_what_does_not_change() -> Result:
             line = text[: match.start()].count("\n") + 1
             problems.append(
                 f"STATUS.md:{line} states {label} ({match.group(0)!r}); that changes while the "
-                "agent runs - read it from `minictrl status` or `doctor` instead"
+                "agent runs - read it from `autopoiesis status` or `doctor` instead"
             )
 
     # The fixed values are checked inside the current-facts table only, not anywhere in the
@@ -1843,7 +1843,7 @@ def check_one_credentials_path_everywhere() -> Result:
 
     Three destinations were documented and two of them were wrong on this host. The Makefile
     used a path that became `/autopoiesis/env` when
-    `XDG_CONFIG_HOME` is unset; `minictrl` used `${XDG_CONFIG_HOME:-$HOME/.config}/...`;
+    `XDG_CONFIG_HOME` is unset; `autopoiesis` used `${XDG_CONFIG_HOME:-$HOME/.config}/...`;
     `configs/paper.env.example` and the operator runbook both hardcoded an absolute path.
     Here `XDG_CONFIG_HOME` points at a non-default directory and
     that path does not exist - so following the example put the credentials
@@ -1855,7 +1855,7 @@ def check_one_credentials_path_everywhere() -> Result:
     """
     patterns = {
         "Makefile": (ROOT / "Makefile").read_text(encoding="utf-8"),
-        "minictrl": (ROOT / "minictrl").read_text(encoding="utf-8"),
+        "autopoiesis": (ROOT / "autopoiesis").read_text(encoding="utf-8"),
         "configs/paper.env.example": (ROOT / "configs" / "paper.env.example").read_text(encoding="utf-8"),
     }
     problems = []
@@ -1906,7 +1906,7 @@ def check_one_credentials_path_everywhere() -> Result:
         return Result("one-credentials-path", FAIL, f"{len(problems)}: {problems}")
     return Result(
         "one-credentials-path", PASS,
-        "Makefile, minictrl and the config example all resolve "
+        "Makefile, autopoiesis and the config example all resolve "
         "$XDG_CONFIG_HOME/autopoiesis/env with a $HOME/.config fallback",
     )
 
@@ -1940,7 +1940,7 @@ def check_no_production_function_is_unreachable() -> Result:
             except OSError:
                 continue
     haystack.append((ROOT / "Makefile").read_text(encoding="utf-8"))
-    haystack.append((ROOT / "minictrl").read_text(encoding="utf-8"))
+    haystack.append((ROOT / "autopoiesis").read_text(encoding="utf-8"))
     combined = "\n".join(haystack)
 
     pydantic_hooks = re.compile(
@@ -2043,13 +2043,13 @@ def check_config_example_names_are_real() -> Result:
     which together are where a variable can legitimately come from.
 
     `config.py` is not the only reader, and assuming it was made this check host-dependent
-    in the worst possible way. The env file is dual-purpose: `minictrl` sources the same file
+    in the worst possible way. The env file is dual-purpose: `autopoiesis` sources the same file
     before it ever calls `python -m autopoiesis.cli`, and reads AUTOPOIESIS_ENVBIN out of it to
     find the environment's bin directory. `AUTOPOIESIS_ENVBIN` is set in the deployed env file
     on this host and is absent from config.py, so documenting it made this check pass *only
     because the env file happened to be present* - and a fresh clone, which is exactly where
     someone reads the example, would have reported a live knob as dead and sent them to delete
-    the line that makes their install work. So `minictrl`'s executable code is a reader too.
+    the line that makes their install work. So `autopoiesis`'s executable code is a reader too.
     """
     example = ROOT / "configs" / "paper.env.example"
     if not example.exists():
@@ -2070,21 +2070,21 @@ def check_config_example_names_are_real() -> Result:
         )
     return Result(
         "config-example-names", PASS,
-        f"all {len(names)} variable names in the example are read by config.py, by minictrl, "
+        f"all {len(names)} variable names in the example are read by config.py, by autopoiesis, "
         "or by the env file",
     )
 
 
 def _entry_point_reads() -> str:
-    """`minictrl`'s executable code, whole-line comments dropped.
+    """`autopoiesis`'s executable code, whole-line comments dropped.
 
     The same file documents in its header every shell knob it honours, so scanning it whole
     would count a variable that is only described as having existed. The header is entirely
     `#` comment lines, so dropping those is enough to make the scan mean "this code reads it".
-    Inline trailing comments are left in: minictrl's executable body is short, and excluding
+    Inline trailing comments are left in: autopoiesis's executable body is short, and excluding
     them would need a shell tokenizer to do properly.
     """
-    script = ROOT / "minictrl"
+    script = ROOT / "autopoiesis"
     if not script.exists():
         return ""
     code = [line for line in script.read_text(encoding="utf-8").splitlines()
@@ -2253,7 +2253,7 @@ def check_units_are_where_systemd_looks() -> Result:
     # link, and still be unable to start, because nothing has checked that the binary
     # in ExecStart exists. `systemd-analyze verify` does not stat it.
     #
-    # That is not hypothetical: `minictrl install-service` fell back to the literal
+    # That is not hypothetical: `autopoiesis install-service` fell back to the literal
     # /usr/local/bin/ollama when `command -v ollama` found nothing, and this host has
     # no such file. The install reported success and the unit loaded from $HOME. The
     # service only failed when it was next started - 40 minutes later, with
@@ -3035,7 +3035,7 @@ REPOSITORY_CHECK_CLASSES: frozenset[str] = frozenset({
     # claimed it had test coverage it does not have and made `class-coverage` unable to
     # distinguish "runs a script" from "runs the suite".
     "defect-regression-audit",
-    # Runs ./minictrl doctor, not pytest. Same miscategorisation.
+    # Runs ./autopoiesis doctor, not pytest. Same miscategorisation.
     "doctor",
     # Inspects the deployed system: systemd unit files, the running daemon, the
     # journal, the shadow stage, doctor's own reachability.
@@ -3114,7 +3114,7 @@ def _runtime_state_present() -> bool:
     "is there a deployment to be healthy about".
     """
     # Checked *before* anything runs, not after: `fact-figures-match` and `doctor` shell out to
-    # `minictrl doctor`, which creates runtime/autopoiesis as a side effect. Reading this
+    # `autopoiesis doctor`, which creates runtime/autopoiesis as a side effect. Reading this
     # after the fact meant a fresh clone - which starts with no runtime at all - looked like
     # a deployment by the time doctor ran, and the gate demanded a clean health report from
     # a machine that had never run a cycle. Found by deleting runtime/ and watching it
@@ -3123,9 +3123,9 @@ def _runtime_state_present() -> bool:
 
 
 def _operator_credentials_present() -> bool:
-    """Whether this shell can reach a broker, following the same resolution minictrl uses.
+    """Whether this shell can reach a broker, following the same resolution autopoiesis uses.
 
-    Deliberately the shell environment and the XDG env file, which is where `minictrl`
+    Deliberately the shell environment and the XDG env file, which is where `autopoiesis`
     looks - so this answers "can doctor check anything", not "is a key spelled correctly".
     """
     if os.environ.get("ALPACA_API_KEY") and os.environ.get("ALPACA_SECRET_KEY"):
@@ -3184,9 +3184,9 @@ def check_doctor() -> Result:
             f"{' and '.join(why)}; ran offline ({line}) - "
             "install verified, deployment not checked",
         )
-    # minictrl is a shell script, not Python. Running it through sys.executable
+    # autopoiesis is a shell script, not Python. Running it through sys.executable
     # made every run fail with a SyntaxError that had nothing to do with health.
-    rc, out = _run(["./minictrl", "doctor"], timeout=900)
+    rc, out = _run(["./autopoiesis", "doctor"], timeout=900)
     line = next(
         (ln for ln in out.splitlines() if ln.startswith("RESULT")), "no RESULT line"
     )

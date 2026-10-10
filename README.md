@@ -216,7 +216,7 @@ targets use an active venv first, then conda, and need neither.
 
    ```bash
    make smoke                      # one real cycle against the paper account
-   ./minictrl install-service      # systemd user units: daemon, Ollama, watchdog, research, report
+   ./autopoiesis install-service      # systemd user units: daemon, Ollama, watchdog, research, report
    make run                        # start the daemon
    make status                     # alive? which strategy? last decision?
    make doctor                     # health of the running system, non-zero on any fault
@@ -331,7 +331,7 @@ tests/autopoiesis/        80 test files
 examples/               the smallest runnable example, no broker needed
 configs/                paper.env.example: every environment variable with its default
 docs/                   ARCHITECTURE.md, evidence/, history/
-minictrl                operator script: services, logs, owner history
+autopoiesis                operator script: services, logs, owner history
 ```
 
 ## Documentation

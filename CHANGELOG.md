@@ -15,7 +15,7 @@ the commit message; the long-form record is in [`docs/history/`](docs/history/RE
 ### Changed
 - `STATUS.md` and `docs/superpowers/` moved to `docs/history/`. Git history is kept, not
   rewritten.
-- `minictrl` and `make` run in a plain venv; conda is optional.
+- `autopoiesis` and `make` run in a plain venv; conda is optional.
 - CI runs mypy, matching `make check`.
 - The gate has 52 check classes. `fact-docs-current`, which made archived audit documents
   restate live counts, is retired; `screen-direction-neutral` is new.
@@ -68,7 +68,7 @@ the commit message; the long-form record is in [`docs/history/`](docs/history/RE
 - SHORT and COVER, behind `AUTOPOIESIS_SHORTS` (default off) and a Guardian rule with its own
   limits; short lots in the ledger; shorts in the counterfactual and the backtest.
 - A `RULE` strategy kind: a constrained, parameter-only DSL the curriculum may propose.
-- `minictrl owner-history`: prices an agent sale beyond its own lots against the account
+- `autopoiesis owner-history`: prices an agent sale beyond its own lots against the account
   owner's recorded fills, reported as the owner's exit.
 - `docs/evidence/research_trials-2026-10-07.jsonl`: every research trial, 0 of 59 passed.
 

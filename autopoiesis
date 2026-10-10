@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# minictrl - the single command for operating the paper-trading agent.
+# autopoiesis - the single command for operating the paper-trading agent.
 #
-#   minictrl doctor              check everything, non-zero on any fault
-#   minictrl once                run one cycle
-#   minictrl loop [n]            run n cycles (default 5) and stop
-#   minictrl daemon               run the daemon in the foreground
-#   minictrl install-service     install the systemd --user unit (reboot-persistent)
-#   minictrl service             status|start|stop|restart|logs for the unit
-#   minictrl status              account, position and clock
-#   minictrl stop                stop the daemon
-#   minictrl reconcile           match pending orders against the broker
-#   minictrl evidence ingest|report   refresh or show broker evidence
-#   minictrl owner-history       journal the account owner's fills (read-only), to price the 29 shares
-#   minictrl profit              verify the paper-profit target from broker evidence
-#   minictrl check-env           report configuration and connectivity only
-#   minictrl test|audit          unit tests; the recorded-defect audit
+#   autopoiesis doctor              check everything, non-zero on any fault
+#   autopoiesis once                run one cycle
+#   autopoiesis loop [n]            run n cycles (default 5) and stop
+#   autopoiesis daemon               run the daemon in the foreground
+#   autopoiesis install-service     install the systemd --user unit (reboot-persistent)
+#   autopoiesis service             status|start|stop|restart|logs for the unit
+#   autopoiesis status              account, position and clock
+#   autopoiesis stop                stop the daemon
+#   autopoiesis reconcile           match pending orders against the broker
+#   autopoiesis evidence ingest|report   refresh or show broker evidence
+#   autopoiesis owner-history       journal the account owner's fills (read-only), to price the 29 shares
+#   autopoiesis profit              verify the paper-profit target from broker evidence
+#   autopoiesis check-env           report configuration and connectivity only
+#   autopoiesis test|audit          unit tests; the recorded-defect audit
 #
 set -uo pipefail
 
@@ -22,11 +22,11 @@ ROOT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 cd "$ROOT_DIR" || exit 2
 # ---------------------------------------------------------------------------
 # Notes on why this script looks the way it does. Kept below the command list so
-# `minictrl help` prints commands and not an essay; a reader who wants the reasoning
+# `autopoiesis help` prints commands and not an essay; a reader who wants the reasoning
 # opens the file.
 # `loop` took `--cycles 5`, a flag that has never existed: cli.py defines `--max-cycles`, and
-# minictrl forwarded the extra words, so the documented command failed with "unrecognized
-# arguments". The count is now a positional argument. It was also printed in minictrl's own
+# autopoiesis forwarded the extra words, so the documented command failed with "unrecognized
+# arguments". The count is now a positional argument. It was also printed in autopoiesis's own
 # header and in the runbook, so three places advertised a command that could not run.
 #
 # Every subcommand propagates its real exit code. The previous scripts did not:
@@ -62,7 +62,7 @@ elif [ -z "${ALPACA_API_KEY:-}" ] && [ "${AUTOPOIESIS_REQUIRE_CREDENTIALS:-0}" =
 fi
 
 export PYTHONPATH="$ROOT_DIR/src:${PYTHONPATH:-}"
-# Exported under the current prefix. These are names minictrl *writes* into the environment for
+# Exported under the current prefix. These are names autopoiesis *writes* into the environment for
 # the processes it starts, and writing the retired prefix defeats the rename at the last step: an
 # The old name is still accepted when it is the only one set.
 export AUTOPOIESIS_MODE="${AUTOPOIESIS_MODE:-paper}"
@@ -70,7 +70,7 @@ export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
 export AUTOPOIESIS_MODEL="${AUTOPOIESIS_MODEL:-qwen3.8:27b}"
 export AUTOPOIESIS_CURRICULUM_ENABLED="${AUTOPOIESIS_CURRICULUM_ENABLED:-true}"
 # The paper URL is set by default, never forced. It used to be assigned unconditionally,
-# which silently overrode an operator's own ALPACA_BASE_URL for every minictrl subcommand
+# which silently overrode an operator's own ALPACA_BASE_URL for every autopoiesis subcommand
 # including the ones the gate runs. cli.py already refuses to build a client against a
 # non-paper URL, so forcing it here bought no safety and cost the ability to configure it.
 export ALPACA_BASE_URL="${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}"
@@ -122,7 +122,7 @@ agent() {
 }
 
 # The comment block ends at the first non-comment line. `sed -n '2,20p'` ran past it, so
-# `./minictrl help` - which the runbook tells the reader to run for the command list - printed
+# `./autopoiesis help` - which the runbook tells the reader to run for the command list - printed
 # six lines of shell source ending in `set -uo pipefail`. Derived from the file rather than
 # hardcoded, so adding a line to the header cannot put the range out of date again.
 # Only the command list, then. The header also carries the reasoning behind `set -uo
@@ -142,7 +142,7 @@ cmd="${1:-}"
 case "$cmd" in
   doctor)          agent --doctor "$@" ;;
   once)            agent --once "$@" ;;
-  # A positional count, and "--cycles N" accepted too, because three documents - minictrl's
+  # A positional count, and "--cycles N" accepted too, because three documents - autopoiesis's
   # own header, the runbook, and muscle memory - all wrote `--cycles 5` and it has never
   # worked. Translating it here is cheaper than editing every caller and breaking the habit.
   loop)
@@ -201,14 +201,14 @@ case "$cmd" in
         echo "       written - a unit pointing at a missing binary does not fail" >&2
         echo "       here, it fails whenever the service is next started." >&2
         echo "       Add OLLAMA_BIN=/path/to/ollama to $ENV_FILE and re-run" >&2
-        echo "       'minictrl install-service', or export it for this run." >&2
+        echo "       'autopoiesis install-service', or export it for this run." >&2
         exit 2
       fi
       OLLAMA_MODELS_RESOLVED="${OLLAMA_MODELS:-$(env_setting OLLAMA_MODELS)}"
       if [ -z "$OLLAMA_MODELS_RESOLVED" ] || [ ! -d "$OLLAMA_MODELS_RESOLVED" ]; then
         echo "FATAL: cannot find an ollama model directory." >&2
         echo "       Add OLLAMA_MODELS=/path/to/models to $ENV_FILE and re-run" >&2
-        echo "       'minictrl install-service', or export it for this run." >&2
+        echo "       'autopoiesis install-service', or export it for this run." >&2
         exit 2
       fi
       render() {
@@ -258,7 +258,7 @@ case "$cmd" in
     # Timers are enabled *and started*, and the started state is checked rather than assumed.
     # `enable` alone only arranges for the timer to run at next boot, so a fresh install reported
     # "enabled quant-watchdog.timer" and "enabled quant-research.timer" while `list-timers` showed
-    # the research one with no next-run at all and `minictrl service start` - which starts only the
+    # the research one with no next-run at all and `autopoiesis service start` - which starts only the
     # daemon - could not start it. A timer that is enabled but not running is the same
     # false-success as a unit in a directory the manager never opens: it looks configured and does
     # nothing. This is why quant-research.timer sat `inactive (dead)` with `Trigger: n/a` while
@@ -282,11 +282,11 @@ case "$cmd" in
       echo "It searches \$HOME/.config/systemd/user unless it was started with" >&2
       echo "XDG_CONFIG_HOME=$XDG_CONFIG_HOME is set but no unit directory exists under it." >&2
       echo "The daemon and watchdog still work as transient units:" >&2
-      echo "  ./minictrl install-transient" >&2
+      echo "  ./autopoiesis install-transient" >&2
       echo "For permanent enablement, free a few MB under \$HOME and re-run this." >&2
       exit 1
     fi
-    echo "all enabled. start with: minictrl service start"
+    echo "all enabled. start with: autopoiesis service start"
     ;;
 
   install-transient)
@@ -348,7 +348,7 @@ case "$cmd" in
     echo
     echo "These live in /run, so they are lost on reboot or a manager restart."
     echo "For permanent enablement, free a few MB under \$HOME so that"
-    echo "\$HOME/.config/systemd/user can be created, then: minictrl install-service"
+    echo "\$HOME/.config/systemd/user can be created, then: autopoiesis install-service"
     ;;
 
   service-status)

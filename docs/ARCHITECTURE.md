@@ -352,9 +352,9 @@ references from any code, script, or test.** Debris from manual debugging sessio
 | Defect | Evidence | Consequence |
 | --- | --- | --- |
 | **No dependency declaration at all** | no `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements*.txt`, `environment.yml` | a fresh clone cannot be installed; the 3 real dependencies are discoverable only by reading imports |
-| **Package is not installable** | no entry point declared | `pip install -e .` impossible; `minictrl` hardcodes an absolute interpreter path |
+| **Package is not installable** | no entry point declared | `pip install -e .` impossible; `autopoiesis` hardcodes an absolute interpreter path |
 | **Four redundant shell wrappers** | `monitor.sh`, `observe.sh`, `run_forever.sh`, `check-market-open.sh` | each is a thin wrapper re-implementing CLI flags (`--status`, `--doctor`, `--daemon`, `--reconcile`, `--evidence`). Two run modes for the same operations |
-| **`minictrl` hardcodes paths** | 204 lines of absolute interpreter and unit paths | environment not reproducible across hosts |
+| **`autopoiesis` hardcodes paths** | 204 lines of absolute interpreter and unit paths | environment not reproducible across hosts |
 | **Docs dominated by one narrative file** | `SYSTEM_AUDIT.md` = 3,756 of 6,529 doc lines | a newcomer reads a chronological debugging log before learning what the system is. The actual design docs (`plans/`, `specs/`) are a fifth the size and are not the entry point |
 | **No README at repository root** | absent | the first thing a newcomer looks for does not exist |
 | **No CI** | no `.github/` | nothing verifies a change on push |

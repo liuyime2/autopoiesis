@@ -43,10 +43,10 @@ def main() -> int:
     py = {p.name: p.read_text(encoding="utf-8") for p in SRC.glob("*.py") if p.is_file()}
     py = {k: v for k, v in py.items() if k != "__init__.py"}
     # The five shell wrappers and auto_reviewer.py were deleted: each duplicated CLI
-    # flags or doctor's checks, and nothing scheduled them. `minictrl` is the only ops
+    # flags or doctor's checks, and nothing scheduled them. `autopoiesis` is the only ops
     # script that remains, and the D8 properties are asserted over whatever is here.
     ops = {name: (ROOT / name).read_text(encoding="utf-8") for name in (
-        "minictrl",
+        "autopoiesis",
     ) if (ROOT / name).exists()}
 
     dg, g, ev, se = py["data_gateway.py"], py["guardian.py"], py["evaluator.py"], py["strategy_engine.py"]
@@ -131,7 +131,7 @@ def main() -> int:
     # "refused by admission but still selectable".
 
     # D9 - real interpreter, real exit codes
-    shells = {n: t for n, t in ops.items() if n.endswith(".sh") or n == "minictrl"}
+    shells = {n: t for n, t in ops.items() if n.endswith(".sh") or n == "autopoiesis"}
     for name, text in ops.items():
         check("D9", f"{name} uses no bare `conda run`", not re.search(r"(?<![/\w-])conda run", text))
     for name, text in shells.items():

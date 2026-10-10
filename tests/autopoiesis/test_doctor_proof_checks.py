@@ -89,7 +89,7 @@ def test_an_empty_record_set_proves_nothing(tmp_path):
     lines = _lines(report)
     assert lines["end-to-end proof"].status.value == "warn"
     assert "nothing proven yet" in lines["end-to-end proof"].detail
-    assert "minictrl once" in lines["end-to-end proof"].hint
+    assert "autopoiesis once" in lines["end-to-end proof"].hint
 
 
 def test_a_fill_alone_is_not_pnl(tmp_path):

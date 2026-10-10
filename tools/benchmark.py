@@ -334,7 +334,7 @@ def main() -> int:
     if not days:
         print("record            none: no cycle records in the journal, so nothing to measure")
         print(f"                  journal: {config.journal_path}")
-        print("                  run 'minictrl once' (or let the daemon run) to produce one")
+        print("                  run 'autopoiesis once' (or let the daemon run) to produce one")
         return EXIT_NOTHING_TO_MEASURE
     print(f"record            {first} .. {last}   {days} trading day(s), {cycles} cycle(s)")
     print(

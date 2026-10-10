@@ -16,7 +16,7 @@
 
 SHELL := /bin/bash
 
-# One interpreter, discovered rather than assumed - the same resolution `minictrl` performs,
+# One interpreter, discovered rather than assumed - the same resolution `autopoiesis` performs,
 # in the same order: an explicit CONDA_BIN, then PATH, then the usual install prefixes.
 #
 # The first version was a bare `conda run -n llm`, which meant every target below it died with
@@ -51,10 +51,10 @@ endif
 
 PY := PYTHONPATH=src $(CONDA_RUN) python
 
-# The credentials file, resolved the same way `minictrl` resolves it. It used to be
+# The credentials file, resolved the same way `autopoiesis` resolves it. It used to be
 # `$(XDG_CONFIG_HOME)/autopoiesis/env`, which becomes `/autopoiesis/env` when XDG_CONFIG_HOME is
 # unset - the state CI and the runbook are in - so `make` silently proceeded with no
-# credentials and no warning, while `minictrl` looked in the right place. Two entry points
+# credentials and no warning, while `autopoiesis` looked in the right place. Two entry points
 # disagreeing about the configuration is exactly what this refactor set out to remove.
 #
 # One path and one spelling. The name is stated on its own line below because the
@@ -196,7 +196,7 @@ test:
 	@$(PY) -m pytest -q
 
 doctor:
-	@./minictrl doctor
+	@./autopoiesis doctor
 
 # Does the system beat SPY buy-and-hold, after costs, inside the stated risk budget?
 # The falsifiable target the whole project is measured against. No credentials needed.
@@ -238,7 +238,7 @@ restart:
 	@systemctl --user restart autopoiesis.service
 
 status:
-	@./minictrl status
+	@./autopoiesis status
 
 clean-pyc:
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +

@@ -33,7 +33,7 @@ class BrokerEvidenceProvider:
         returned 100, with no missing reason recorded anywhere.
 
         Not paging is deliberate. Every window this code asks for is far under the
-        limit - the daemon's 24 hours returns 0-20, `minictrl evidence ingest`'s 30 days
+        limit - the daemon's 24 hours returns 0-20, `autopoiesis evidence ingest`'s 30 days
         returns 43, four months returns 66 - so fetching more pages would be building
         for a window nobody requests. The truncation is stated instead, so a caller that
         does ask for a wider window is told its evidence is partial rather than being

@@ -19,7 +19,7 @@ from autopoiesis.config import AgentConfig
 SRC = Path(__file__).resolve().parents[2] / "src" / "autopoiesis"
 REPO = Path(__file__).resolve().parents[2]
 CONFIG_PY = SRC / "config.py"
-OPERATOR_ENTRY_POINT = REPO / "minictrl"
+OPERATOR_ENTRY_POINT = REPO / "autopoiesis"
 PRODUCTION = "\n".join(
     p.read_text() for p in sorted(SRC.glob("*.py")) if p.name != "config.py"
 )
@@ -29,9 +29,9 @@ FIELDS = [f.name for f in dataclasses.fields(AgentConfig)]
 
 
 def _entry_point_reads() -> str:
-    """`minictrl`'s executable code, whole-line comments dropped.
+    """`autopoiesis`'s executable code, whole-line comments dropped.
 
-    The env file is dual-purpose: `minictrl` sources the same file the loader reads and then
+    The env file is dual-purpose: `autopoiesis` sources the same file the loader reads and then
     does its own shell work before it ever invokes `python -m autopoiesis.cli`. AUTOPOIESIS_ENVBIN
     is the live case - it names the environment's bin directory and nothing in Python reads it.
 
@@ -51,7 +51,7 @@ def _env_vars_read() -> set[str]:
     """Every AUTOPOIESIS_* variable an operator's env file can actually be consumed by.
 
     Two readers, not one. Scanning only `config.py` reported AUTOPOIESIS_ENVBIN as a dead knob
-    on a host where it is the reason `minictrl install-service` finds the environment at all -
+    on a host where it is the reason `autopoiesis install-service` finds the environment at all -
     the same "looks configurable, does nothing" failure this file exists to catch, pointed the
     other way, and the obvious response to a red gate of that kind is to delete the line from
     the env file and break the install. The sibling gate `tools/verify.py::
@@ -108,7 +108,7 @@ def test_every_operator_knob_is_actually_read_by_the_loader():
     configured = _env_vars_in_the_shipped_config()
     unknown = sorted(configured - read)
     assert not unknown, (
-        f"set in the runtime env but read by neither config.py nor minictrl: {unknown}. "
+        f"set in the runtime env but read by neither config.py nor autopoiesis: {unknown}. "
         "Either wire them up or remove them - an ignored setting is worse than "
         "an absent one, because it looks like it is working"
     )

@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # risk limit, rewrite a lifecycle, or force-enable a strategy - still hold, and are now
 # asserted over the one ops script that remains. The tuple is the *current* set, so a new
 # ops script must be added here deliberately rather than audited by accident.
-OPS_SCRIPTS = ("minictrl",)
+OPS_SCRIPTS = ("autopoiesis",)
 
 # Any write of these keys, from a script outside Guardian, is a forbidden
 # automatic risk relaxation.
@@ -146,7 +146,7 @@ def test_ops_scripts_do_not_write_runtime_state(script):
 
 def test_ops_scripts_use_an_absolute_conda_path():
     """`conda` is not on PATH here; bare `conda` silently produced exit 0."""
-    # minictrl only. The four shell wrappers this used to cover are deleted, and
+    # autopoiesis only. The four shell wrappers this used to cover are deleted, and
     # `_source` skips a missing file - so listing them made the loop body run zero
     # times and the assertion pass without ever reading a file. A governance check
     # that cannot fail is a comment wearing a test's clothes.
@@ -156,11 +156,11 @@ def test_ops_scripts_use_an_absolute_conda_path():
         assert not bare, f"{script} invokes bare `conda run` {len(bare)} time(s); use CONDA_BIN"
 
 
-def test_minictrl_propagates_real_exit_codes():
+def test_autopoiesis_operator_propagates_real_exit_codes():
     """The bug this project spent a review cycle hiding: `set -e` without
     `pipefail` means a `| tee` pipeline reports tee's status, so a missing
     interpreter or an unreachable broker printed a green banner and exited 0."""
-    text = _source("minictrl")
+    text = _source("autopoiesis")
     assert "set -uo pipefail" in text
     assert "esac" in text
     # No `|| true` or `|| echo` swallowing a subcommand's status.
@@ -175,7 +175,7 @@ def test_every_ops_shell_script_uses_pipefail():
     """`set -e` alone lets a `| tee` pipeline report success."""
     import glob
 
-    for path in sorted(glob.glob("*.sh")) + ["minictrl"]:
+    for path in sorted(glob.glob("*.sh")) + ["autopoiesis"]:
         text = _source(path)
         assert "pipefail" in text, f"{path} does not enable pipefail"
 
@@ -190,10 +190,10 @@ def test_the_service_unit_bounds_its_restarts():
         assert secret not in text, f"{secret} must come from an EnvironmentFile, not the unit"
 
 
-def test_minictrl_and_doctor_exist_for_fast_iteration():
+def test_autopoiesis_operator_and_doctor_exist_for_fast_iteration():
     import os
 
-    assert os.access("minictrl", os.X_OK), "minictrl must be executable"
+    assert os.access("autopoiesis", os.X_OK), "autopoiesis must be executable"
     text = _source("src/autopoiesis/cli.py")
     assert '"--doctor"' in text
     assert "run_doctor" in text

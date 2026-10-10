@@ -112,7 +112,7 @@ def test_config_rejects_invalid_learning_cadence(monkeypatch):
 
 def test_the_model_is_pinned_in_the_same_three_places_everywhere():
     """The model was switched in config.py alone and the health check went on
-    reporting the old one: minictrl exported AUTOPOIESIS_MODEL=deepseek-r1:8b and
+    reporting the old one: autopoiesis exported AUTOPOIESIS_MODEL=deepseek-r1:8b and
     the systemd unit pinned it too, so both overrode the default. A model upgrade
     that the operator cannot see in `doctor` is not an upgrade."""
     import pathlib
@@ -124,7 +124,7 @@ def test_the_model_is_pinned_in_the_same_three_places_everywhere():
 
     expected = C.from_env().model
     pinned = set()
-    for name in ("minictrl", "tools/autopoiesis.service.in"):
+    for name in ("autopoiesis", "tools/autopoiesis.service.in"):
         text = (root / name).read_text()
         for match in re.findall(r'AUTOPOIESIS_MODEL[^"\n]*?([a-z0-9.]+:[a-z0-9.-]+)', text):
             pinned.add(match)

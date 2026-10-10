@@ -1443,13 +1443,13 @@ def _check_proof(report: DoctorReport, config: AgentConfig) -> None:
     journal = JsonlJournal(config.journal_path)
     records = journal.read_all()
     if not records:
-        report.add("end-to-end proof", WARN, "no cycles recorded; nothing proven yet", "run one: minictrl once")
+        report.add("end-to-end proof", WARN, "no cycles recorded; nothing proven yet", "run one: autopoiesis once")
         for name, detail in (
             ("proof: submitted>0", "unknown: no cycles recorded"),
             ("proof: filled>0", "unknown: no cycles recorded"),
             ("proof: per-strategy pnl", "unknown: no cycles recorded"),
         ):
-            report.add(name, WARN, detail, "run one: minictrl once")
+            report.add(name, WARN, detail, "run one: autopoiesis once")
         return
 
     fills: dict[str, float] = {}

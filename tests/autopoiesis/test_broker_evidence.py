@@ -230,7 +230,7 @@ def test_a_full_page_of_activities_is_reported_as_the_fragment_it_is():
     had, and the same response: say so rather than fetch a wider buffer in anticipation.
 
     Paging is deliberately not done. Every window this repository asks for is well under
-    the limit - the daemon's 24 hours returns 0-20, `minictrl evidence ingest`'s 30 days
+    the limit - the daemon's 24 hours returns 0-20, `autopoiesis evidence ingest`'s 30 days
     returns 43, four months returns 66 - so a second page would be built for a window
     nobody requests.
     """

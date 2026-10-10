@@ -32,7 +32,7 @@ credentials. Everything below it runs offline against that cache. On a fresh clo
 once.
 
 The same API is what `broker_evidence` reads for PnL, and it caps a page at 100. Measured on
-this account: the daemon's 24-hour window returns 0-20 fills, `minictrl evidence ingest`'s
+this account: the daemon's 24-hour window returns 0-20 fills, `autopoiesis evidence ingest`'s
 30 days returns 43, four months 66 — and a nine-month window holds 279, of which one request
 returns 100. A full page is therefore reported in `missing_reasons` so a caller asking for
 more than the limit gets a stated partial rather than a fragment presented as the window.
@@ -167,13 +167,13 @@ at zero" are different claims. `make status-page` writes four pages to
 
 `autopoiesis.service.in`, `watchdog.service.in`, `ollama.service.in`, `research.service.in`,
 `report.service.in` (the timer units ship as files, `tools/watchdog.timer`, `tools/research.timer`
-and `tools/report.timer`, which `minictrl` copies into place) —
-substituted by `minictrl install-service`, which uses `systemd_unit_dir.sh` to ask
+and `tools/report.timer`, which `autopoiesis` copies into place) —
+substituted by `autopoiesis install-service`, which uses `systemd_unit_dir.sh` to ask
 the systemd user manager where it actually searches rather than trusting the shell's
 `XDG_CONFIG_HOME`. Installing to the latter produces files systemd never opens, while
 `systemctl is-enabled` still answers "enabled".
 
-The timers are `watchdog.timer` and `research.timer`. They ship as files and `minictrl` copies
+The timers are `watchdog.timer` and `research.timer`. They ship as files and `autopoiesis` copies
 them into place, rather than being templated inline, because a timer has no `ExecStart` to
 substitute into. That makes them the units here that are not `.in` templates.
 
