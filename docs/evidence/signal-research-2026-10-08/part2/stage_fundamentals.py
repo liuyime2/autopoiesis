@@ -30,9 +30,10 @@ Usage:
 from __future__ import annotations
 
 import json
+import statistics
 import sys
 import warnings
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 warnings.filterwarnings("ignore")
@@ -110,12 +111,41 @@ def fetch(symbol: str) -> dict:
     events.sort(key=lambda e: e["date"], reverse=True)
     out["earnings_events"] = events[:12]
 
-    # The next report date, read off the events rather than from a field that may not exist. An
+    # The next report date. Read off the events rather than from a field that may not exist: an
     # event with no `reported` and a date at or after today is the one that has not happened.
     today = datetime.now(timezone.utc).date().isoformat()
     upcoming = [e for e in out["earnings_events"] if e["upcoming"] and e["date"] >= today]
     upcoming.sort(key=lambda e: e["date"])
     out["next_earnings_date"] = upcoming[0]["date"] if upcoming else None
+
+    # --- whether the earnings history is worth anything at all -----------------------------
+    #
+    # Measured 2026-10-09, and it is a trap rather than a detail: `yf.Ticker(s).earnings_dates`
+    # for INTC returned 2026-07-23 and a future 2026-10-29 in one call, and twelve rows ending
+    # 2025-04-24 in the next. It is a bounded window whose contents vary between calls, so a
+    # symbol whose newest event is eighteen months old looks exactly like one that reports rarely.
+    # `next_earnings_date` is None in that case, which is honest - but a silent None is
+    # indistinguishable from "reports on no schedule", so the staleness is recorded beside it.
+    if out["earnings_events"]:
+        newest = max(e["date"] for e in out["earnings_events"])
+        age_days = (datetime.now(timezone.utc).date() - date.fromisoformat(newest)).days
+        out["earnings_history_age_days"] = age_days
+        out["earnings_history_stale"] = age_days > 120
+    else:
+        out["earnings_history_age_days"] = None
+        out["earnings_history_stale"] = True
+
+    # The cadence, from the intervals between the last few reports. Stated as a cadence and not as
+    # a date, because that is what the data supports: a free source that reliably publishes *future*
+    # earnings dates was not found, and inventing one from the cadence while calling it a date is
+    # the kind of figure that gets retracted. A consumer can say "roughly every N days", which is
+    # both true and actionable for holding through an event.
+    past = sorted(e["date"] for e in out["earnings_events"] if not e["upcoming"])
+    intervals = [
+        (date.fromisoformat(b) - date.fromisoformat(a)).days for a, b in zip(past, past[1:], strict=False)
+    ]
+    intervals = [i for i in intervals if 0 < i < 400]
+    out["earnings_cadence_days"] = round(statistics.median(intervals)) if len(intervals) >= 2 else None
     # The most recent surprise, which is history and is labelled as such.
     past = [e for e in out["earnings_events"] if e["reported"] is not None]
     past.sort(key=lambda e: e["date"], reverse=True)
