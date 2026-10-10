@@ -643,7 +643,7 @@ def _durable_unit_dir() -> str | None:
         return None
     try:
         proc = subprocess.run(
-            ["systemctl", "--user", "show", "min-agent.service", "-p", "FragmentPath", "--value"],
+            ["systemctl", "--user", "show", "autopoiesis.service", "-p", "FragmentPath", "--value"],
             capture_output=True, text=True, timeout=15,
         )
     except Exception:
@@ -1730,9 +1730,9 @@ def check_tools_readme_names_real_files() -> Result:
         return Result("tools-readme-accurate", FAIL, "tools/README.md is missing")
     text = readme.read_text(encoding="utf-8")
     # The hyphen leads the class. Written as [a-z0-9_-] the trailing hyphen becomes a
-    # range, and `min-agent.service.in` matches nothing - which is how the gate first
+    # range, and `autopoiesis.service.in` matches nothing - which is how the gate first
     # reported three present-but-undocumented files that the README named in plain sight.
-    # The character class allows a dot so that `min-agent.service.in` matches: the
+    # The character class allows a dot so that `autopoiesis.service.in` matches: the
     # extension is preceded by a name that itself contains dots. An earlier version
     # allowed only [-a-z0-9_] and silently matched none of the .in templates, which is
     # why the gate first reported three files as "present but undocumented" that the
@@ -1962,19 +1962,21 @@ def check_config_example_covers_every_variable() -> Result:
     from autopoiesis.config import AgentConfig
     documented = set(re.findall(r"^\s*#?\s*([A-Z][A-Z0-9_]+)=", example.read_text(encoding="utf-8"), re.M))
     # The dataclass field names and the env var names differ by prefix and word order
-    # (`max_position_value` reads MIN_AGENT_MAX_POSITION_VALUE), so the names are taken from
+    # (`max_position_value` reads AUTOPOIESIS_MAX_POSITION_VALUE), so the names are taken from
     # the loader's own read sites rather than derived from the fields. An earlier version
     # computed the field set and then never used it - ruff caught the dead assignment, which
     # is the check working - so `fields` is gone and the scan below stands on its own.
     loader = (SRC / "autopoiesis" / "config.py").read_text(encoding="utf-8")
-    # The loader names its settings with the legacy `MIN_AGENT_` prefix because `env()` maps that
-    # onto the current `AUTOPOIESIS_` prefix at read time, so a scan of the loader sees only the old
-    # names. The example documents the current ones. Both spellings count as documented, and the
-    # example's own header says the fallback exists - a check that only accepted one of the two
-    # would fail a correct file and pass a half-migrated one.
-    read = set(re.findall(r'"(MIN_AGENT_[A-Z0-9_]+)"', loader)) | set(
-        re.findall(r'"(AUTOPOIESIS_[A-Z0-9_]+)"', loader)
-    ) | set(re.findall(r'"(ALPACA_[A-Z0-9_]+)"', loader)
+    # The loader names its settings with the current prefix, so a scan of the loader sees the
+    # names the example must document. The retired `MIN_AGENT_` prefix is accepted as documented
+    # too - it is read for the migration window and `config.assert_not_legacy_only` refuses a
+    # half-migration - but it is no longer what the loader's read sites say, so scanning for it
+    # alone was what this check did while the loader had already moved: it derived its "read"
+    # set from a prefix the code no longer contained and passed a file documenting names nothing
+    # reads. An earlier version of the opposite mapping (`documented |= {name.replace(...)}`)
+    # had the same shape of bug.
+    read = set(re.findall(r'"(AUTOPOIESIS_[A-Z0-9_]+)"', loader)) | set(
+        re.findall(r'"(ALPACA_[A-Z0-9_]+)"', loader)
     ) | set(re.findall(r'"(APCA_[A-Z0-9_]+)"', loader)) | set(re.findall(r'"(OLLAMA_[A-Z0-9_]+)"', loader))
     documented |= {name.replace("AUTOPOIESIS_", "MIN_AGENT_") for name in documented}
     missing = sorted(read - documented)
@@ -2314,7 +2316,7 @@ def check_shadow_stage_has_actually_run() -> Result:
 
     The gap this exists to close: PHASES.md marked Phase 5 MET citing
     `status=SHADOWED` from the live journal, and the journal has never contained
-    one. `MIN_AGENT_SHADOW` is off, the sink is implemented and proven not to leak,
+    one. `AUTOPOIESIS_SHADOW` is off, the sink is implemented and proven not to leak,
     and none of that is evidence that the stage ran. Reading a phase exit criterion
     off code that exists rather than code that executed is how a gate ends up
     certifying a phase nobody has walked through.
@@ -2761,7 +2763,7 @@ def check_shadow_live_consistency() -> Result:
     **not** verify that the shadow *stage* has ever been run, and it must not be
     cited as if it did: `docs/history/PHASES.md` recorded Phase 5 as MET with
     "status=SHADOWED" quoted from the live journal, while the journal contains zero
-    `SHADOWED` executions and `MIN_AGENT_SHADOW` is off. Unit tests that the sink
+    `SHADOWED` executions and `AUTOPOIESIS_SHADOW` is off. Unit tests that the sink
     does not leak are evidence about the mechanism, not about the stage, and
     conflating the two is how a phase exit criterion gets marked satisfied by code
     that has never executed.
@@ -2774,7 +2776,14 @@ def check_shadow_live_consistency() -> Result:
     rc, out = _run([sys.executable, "-c", (
         "import os, sys\n"
         "sys.path.insert(0, 'src')\n"
-        "os.environ['MIN_AGENT_MODE'] = 'live'\n"
+        # Set under the current prefix, and clear the retired one. Setting only the legacy name
+        # used to work because the loader read it first; it does not any more, so a check that
+        # set only `MIN_AGENT_MODE` was measuring nothing while looking like it measured
+        # something - and it went red on a healthy system, which is the failure mode that
+        # teaches people to ignore a red gate. Clearing both directions keeps the test about
+        # one variable.
+        "os.environ.pop('MIN_AGENT_MODE', None)\n"
+        "os.environ['AUTOPOIESIS_MODE'] = 'live'\n"
         "from autopoiesis.config import AgentConfig\n"
         "try:\n"
         "    AgentConfig.from_env()\n"
@@ -2809,17 +2818,17 @@ def check_shadow_live_consistency() -> Result:
     rc, out = _run([sys.executable, "-c", (
         "import os, sys; sys.path.insert(0, 'src')\n"
         "os.environ.update(ALPACA_API_KEY='k', ALPACA_SECRET_KEY='s',\n"
-        "                  MIN_AGENT_SHADOW='1')\n"
+        "                  AUTOPOIESIS_SHADOW='1')\n"
         "from autopoiesis.config import AgentConfig\n"
         "from autopoiesis.shadow import ShadowExecutor\n"
         "from autopoiesis.executor import AlpacaPaperExecutor\n"
         "from autopoiesis.cli import _execution_sink\n"
         "cfg = AgentConfig.from_env()\n"
-        "assert cfg.shadow is True, 'MIN_AGENT_SHADOW=1 did not enable shadow'\n"
+        "assert cfg.shadow is True, 'AUTOPOIESIS_SHADOW=1 did not enable shadow'\n"
         "sink = _execution_sink(cfg, object(), None)\n"
         "assert isinstance(sink, ShadowExecutor), type(sink)\n"
         "assert not isinstance(sink, AlpacaPaperExecutor)\n"
-        "os.environ['MIN_AGENT_SHADOW'] = '0'\n"
+        "os.environ['AUTOPOIESIS_SHADOW'] = '0'\n"
         "assert AgentConfig.from_env().shadow is False\n"
         "print('shadow reachable and off-by-default')\n"
     )])
@@ -2827,7 +2836,7 @@ def check_shadow_live_consistency() -> Result:
         problems.append(f"shadow mode not reachable from config: {_tail(out)}")
 
     # A boolean switch that decides whether real orders reach a broker must not be
-    # read by truthiness: MIN_AGENT_SHADOW=0 has to mean off.
+    # read by truthiness: AUTOPOIESIS_SHADOW=0 has to mean off.
     rc, out = _run([sys.executable, "-c", (
         "import os, sys; sys.path.insert(0, 'src')\n"
         "from autopoiesis.config import AgentConfig, _flag\n"
@@ -2849,7 +2858,7 @@ def check_shadow_live_consistency() -> Result:
 
     detail = "; ".join(problems) if problems else (
         "live mode hard-blocked; probation gate enforced; shadow implemented, "
-        "reachable by MIN_AGENT_SHADOW=1, off by default, strict boolean"
+        "reachable by AUTOPOIESIS_SHADOW=1, off by default, strict boolean"
     )
     return Result(
         "shadow-live-consistency", FAIL if problems else PASS, detail,

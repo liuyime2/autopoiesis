@@ -417,6 +417,14 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         trade_counter=TradeCounter(journal=journal),
         manage_account=config.whole_account,
     )
+    # Before anything else: a configuration that cannot be read must stop the process, not
+    # quietly become the defaults. See `config.assert_not_legacy_only` for why this is a refusal
+    # rather than a warning - an agent running on limits it was never given looks perfectly
+    # healthy while trading a different configuration from the one that was approved.
+    from autopoiesis.config import assert_not_legacy_only
+
+    assert_not_legacy_only()
+
     daemon = AgentDaemon(
         config=config,
         loop=loop,

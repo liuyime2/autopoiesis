@@ -1,8 +1,8 @@
 import json, bisect, sys
 from datetime import datetime, timedelta
-from min_agent.journal import JsonlJournal
+from autopoiesis.journal import JsonlJournal
 rows=json.load(open(sys.argv[1]))
-j=JsonlJournal("runtime/min_agent/journal.jsonl")
+j=JsonlJournal("runtime/autopoiesis/journal.jsonl")
 series=sorted((r.snapshot.timestamp, r.snapshot.last_price) for r in j.read_all() if r.snapshot.symbol=="SPY")
 ts=[t for t,_ in series]
 def fwd(t, hours):

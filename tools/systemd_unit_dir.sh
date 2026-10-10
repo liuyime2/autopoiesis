@@ -33,7 +33,7 @@ manager_config_home() {
 runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/systemd/user"
 
 candidates=(
-  "${MIN_AGENT_UNIT_DIR:-}"
+  "${AUTOPOIESIS_UNIT_DIR:-}"
   "$(manager_config_home)/systemd/user"
 )
 
@@ -52,7 +52,7 @@ done
 
 # Nothing durable worked. Say so, and name the tmpfs fallback explicitly instead
 # of silently producing a configuration that dies at the next reboot.
-if [ "${MIN_AGENT_ALLOW_RUNTIME_UNITS:-0}" = "1" ] && [ -d "$runtime_dir" ] && [ -w "$runtime_dir" ]; then
+if [ "${AUTOPOIESIS_ALLOW_RUNTIME_UNITS:-0}" = "1" ] && [ -d "$runtime_dir" ] && [ -w "$runtime_dir" ]; then
   echo "$runtime_dir" >&2
   echo "$runtime_dir"
   exit 0
@@ -62,7 +62,7 @@ cat >&2 <<MSG
 FATAL: no durable writable systemd user unit directory.
 
 Checked, in order:
-  \${MIN_AGENT_UNIT_DIR}
+  \${AUTOPOIESIS_UNIT_DIR}
   $(manager_config_home)/systemd/user   <- where the manager actually looks
   $runtime_dir                            <- REJECTED: tmpfs, dies on reboot
 
@@ -77,8 +77,8 @@ to \$XDG_CONFIG_HOME produces files systemd never reads.
 Fix one of:
   1. free a few MB under \$HOME so $HOME/.config/systemd/user can be created
      (this is the only location a reboot-persistent *user* unit can live)
-  2. export MIN_AGENT_UNIT_DIR=/some/writable/path before installing
-  3. export MIN_AGENT_ALLOW_RUNTIME_UNITS=1 to accept tmpfs units that will NOT
+  2. export AUTOPOIESIS_UNIT_DIR=/some/writable/path before installing
+  3. export AUTOPOIESIS_ALLOW_RUNTIME_UNITS=1 to accept tmpfs units that will NOT
      survive a reboot
   4. run without systemd: minictrl daemon              # foreground, exits on error
 MSG

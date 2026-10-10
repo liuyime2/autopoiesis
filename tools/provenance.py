@@ -33,7 +33,7 @@ RUNTIME = ROOT / "runtime" / "autopoiesis"
 def _journal_path() -> str:
     """The journal path, resolved through AgentConfig rather than written out again.
 
-    `MIN_AGENT_JOURNAL` is a documented setting; spelling the path out here made it a lie
+    `AUTOPOIESIS_JOURNAL` is a documented setting; spelling the path out here made it a lie
     for this tool even though the agent honoured it.
     """
     sys.path.insert(0, str(ROOT / "src"))

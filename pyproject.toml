@@ -21,7 +21,7 @@ license = { text = "Apache-2.0" }
 # `pydantic` in models.py, `requests` in the three Alpaca call sites that use it
 # directly. There is no implicit dependency, no vendored copy and no import of a
 # stdlib-adjacent backport - this list was derived by scanning every `import` in
-# src/min_agent rather than by reading an existing manifest, because there wasn't one.
+# src/autopoiesis rather than by reading an existing manifest, because there wasn't one.
 dependencies = [
     "alpaca-trade-api>=3.2,<4",
     "pydantic>=2.9,<3",

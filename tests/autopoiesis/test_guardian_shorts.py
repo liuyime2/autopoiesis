@@ -138,9 +138,9 @@ def test_short_and_cover_are_submitted_as_sell_and_buy():
 def test_the_shorts_setting_refuses_a_value_it_does_not_know(monkeypatch):
     from autopoiesis.config import _choice
 
-    monkeypatch.setenv("MIN_AGENT_SHORTS", "yes")
+    monkeypatch.setenv("AUTOPOIESIS_SHORTS", "yes")
     with pytest.raises(ValueError, match="off, shadow, paper"):
-        _choice("MIN_AGENT_SHORTS", ("off", "shadow", "paper"), "off")
+        _choice("AUTOPOIESIS_SHORTS", ("off", "shadow", "paper"), "off")
 
 
 def test_a_short_position_from_the_broker_parses():

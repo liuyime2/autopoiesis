@@ -12,7 +12,7 @@ All three are measured, and all three were found in the same working session (20
 
 **F1 — the agent cannot say what it is trading.** `data_gateway` exposes no instrument identity at
 all: a symbol is a bare string everywhere from `DataSnapshot` to the decision context. Under
-`MIN_AGENT_UNIVERSE=tradable` with `ATTENTION_SLOTS=4`, `AgentDaemon._round_symbols()` returns ten
+`AUTOPOIESIS_UNIVERSE=tradable` with `ATTENTION_SLOTS=4`, `AgentDaemon._round_symbols()` returns ten
 symbols, and two of them are products the research never examined:
 
 ```
@@ -31,14 +31,14 @@ reason to exclude product classes on a hunch. The fix is to **say it out loud**:
 asset record and a measured behaviour profile into the context, so the model is deciding about a
 *known* instrument.
 
-**F2 — the agent sees no tape and no news.** `grep news src/min_agent/*.py` returns nothing. The
+**F2 — the agent sees no tape and no news.** `grep news src/autopoiesis/*.py` returns nothing. The
 decision context carries `last_price`, account, positions, the selected strategy's parameters and
 the `risk` block — no bar history, no return series, and no headlines. Verified reachable from this
 broker: `GET /v1beta1/news?symbols=INTC&limit=2` returns real Benzinga headlines, and
 `GET /v2/assets/SOXS` returns the full name and attributes. The capability simply is not wired.
 
 **F3 — the multiplicity bar has become the whole answer, and it is now too strict to detect anything
-real.** `runtime/min_agent/signal_trials.jsonl` holds 161 rows for 119 distinct hypotheses, so
+real.** `runtime/autopoiesis/signal_trials.jsonl` holds 161 rows for 119 distinct hypotheses, so
 `threshold()` sets the bar at `0.05/161 = 3.1e-4`. Two effects that are real and behave as the
 literature predicts cannot clear it:
 
@@ -128,7 +128,7 @@ judge(name, selection, test, *, family, control=None, kind="confirmatory"|"explo
    and saw nothing" and "we could not have seen anything".
 
 Reads `read_ledger` for the family count; the ledger path stays
-`runtime/min_agent/signal_trials.jsonl`.
+`runtime/autopoiesis/signal_trials.jsonl`.
 
 ### 1.4 Attention: label, do not block
 
@@ -151,8 +151,8 @@ is strictly better than a blocklist that would go stale and would have hidden th
 ## 3. Explicitly not in scope
 
 - Any change to the Guardian, to `min_confidence`, to the position/exposure/loss limits, or to the
-  paper-only refusal. `MIN_AGENT_UNIVERSE=tradable` and `MIN_AGENT_MANAGE_ACCOUNT=true` are already
-  recorded as the account holder's decisions in `runtime/min_agent/risk_baseline.json`.
+  paper-only refusal. `AUTOPOIESIS_UNIVERSE=tradable` and `AUTOPOIESIS_MANAGE_ACCOUNT=true` are already
+  recorded as the account holder's decisions in `runtime/autopoiesis/risk_baseline.json`.
 - Removing `SOXS`/`BITO`-class products from the pool. See 1.4.
 - New signals. Nothing here claims a direction; the research ledger's verdicts are unchanged by this
   work except for the family correction.

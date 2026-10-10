@@ -4,9 +4,9 @@ from later data) and the realised forward returns. No outside data."""
 import bisect, json, sys
 from datetime import timedelta
 from unittest import mock
-import min_agent.cli as cli
-from min_agent.config import AgentConfig
-from min_agent.journal import JsonlJournal
+import autopoiesis.cli as cli
+from autopoiesis.config import AgentConfig
+from autopoiesis.journal import JsonlJournal
 
 c = AgentConfig.from_env(); journal = JsonlJournal(c.journal_path)
 cap = {}

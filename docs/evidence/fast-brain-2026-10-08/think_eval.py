@@ -5,9 +5,9 @@ engine), three calls each: thinking twice (the model's own run-to-run noise) and
 once. Read-only: nothing is submitted, nothing is journalled."""
 import json, sys, time, requests
 from unittest import mock
-import min_agent.cli as cli
-from min_agent.config import AgentConfig
-from min_agent.journal import JsonlJournal
+import autopoiesis.cli as cli
+from autopoiesis.config import AgentConfig
+from autopoiesis.journal import JsonlJournal
 
 c = AgentConfig.from_env(); journal = JsonlJournal(c.journal_path)
 cap = {}

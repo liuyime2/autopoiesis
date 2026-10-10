@@ -68,7 +68,7 @@ class AgentConfig:
     #: applies - allowlist, position and exposure caps, daily loss, trade count, paper only.
     manage_account: bool = False
     #: Which symbols the agent may trade, a decision of the account holder made in the env file.
-    #: `allowlist` (default): only `MIN_AGENT_ALLOWLIST`. `account`: that list plus every symbol
+    #: `allowlist` (default): only `AUTOPOIESIS_ALLOWLIST`. `account`: that list plus every symbol
     #: the account holds, so nothing in the account is out of reach. `tradable`: that, plus any
     #: active US equity on a major exchange priced at least `min_price`. Under `account` and
     #: `tradable` the exposure cap measures the whole account and a SELL is bounded by the
@@ -106,13 +106,13 @@ class AgentConfig:
 
     @classmethod
     def from_env(cls) -> AgentConfig:
-        allowlist = _split_symbols(_env_required("MIN_AGENT_ALLOWLIST", "SPY,QQQ,AAPL,MSFT,NVDA"))
-        symbols = _split_symbols(_env_required("MIN_AGENT_SYMBOLS", "SPY"))
-        mode = _env_required("MIN_AGENT_MODE", "paper").strip().lower()
+        allowlist = _split_symbols(_env_required("AUTOPOIESIS_ALLOWLIST", "SPY,QQQ,AAPL,MSFT,NVDA"))
+        symbols = _split_symbols(_env_required("AUTOPOIESIS_SYMBOLS", "SPY"))
+        mode = _env_required("AUTOPOIESIS_MODE", "paper").strip().lower()
         if mode == "live":
             raise ValueError("live mode is not allowed in phase 1")
 
-        max_position_value = _positive_float("MIN_AGENT_MAX_POSITION_VALUE", 5000.0)
+        max_position_value = _positive_float("AUTOPOIESIS_MAX_POSITION_VALUE", 5000.0)
 
         return cls(
             mode=mode,
@@ -124,42 +124,42 @@ class AgentConfig:
             or os.getenv("APCA_API_BASE_URL")
             or "https://paper-api.alpaca.markets",
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/"),
-            model=_env_required("MIN_AGENT_MODEL", "qwen3.8:27b"),
-            gpu_devices=_env_required("MIN_AGENT_GPU_DEVICES", "0"),
-            journal_path=Path(_env_required("MIN_AGENT_JOURNAL", "runtime/autopoiesis/journal.jsonl")),
+            model=_env_required("AUTOPOIESIS_MODEL", "qwen3.8:27b"),
+            gpu_devices=_env_required("AUTOPOIESIS_GPU_DEVICES", "0"),
+            journal_path=Path(_env_required("AUTOPOIESIS_JOURNAL", "runtime/autopoiesis/journal.jsonl")),
             max_position_value=max_position_value,
-            max_daily_loss=_positive_float("MIN_AGENT_MAX_DAILY_LOSS", 500.0),
-            max_total_exposure=_positive_float("MIN_AGENT_MAX_TOTAL_EXPOSURE", max_position_value * 4.0),
-            stale_after_seconds=_positive_int("MIN_AGENT_STALE_AFTER_SECONDS", 900),
-            daemon_interval_seconds=_positive_int("MIN_AGENT_DAEMON_INTERVAL_SECONDS", 300),
-            max_trades_per_day=_positive_int("MIN_AGENT_MAX_TRADES_PER_DAY", 10),
-            min_confidence=_bounded_float("MIN_AGENT_MIN_CONFIDENCE", 0.5, 0.0, 1.0),
-            max_account_value=_optional_float("MIN_AGENT_MAX_ACCOUNT_VALUE"),
+            max_daily_loss=_positive_float("AUTOPOIESIS_MAX_DAILY_LOSS", 500.0),
+            max_total_exposure=_positive_float("AUTOPOIESIS_MAX_TOTAL_EXPOSURE", max_position_value * 4.0),
+            stale_after_seconds=_positive_int("AUTOPOIESIS_STALE_AFTER_SECONDS", 900),
+            daemon_interval_seconds=_positive_int("AUTOPOIESIS_DAEMON_INTERVAL_SECONDS", 300),
+            max_trades_per_day=_positive_int("AUTOPOIESIS_MAX_TRADES_PER_DAY", 10),
+            min_confidence=_bounded_float("AUTOPOIESIS_MIN_CONFIDENCE", 0.5, 0.0, 1.0),
+            max_account_value=_optional_float("AUTOPOIESIS_MAX_ACCOUNT_VALUE"),
             assumed_round_trip_cost_pct=_positive_float(
-                "MIN_AGENT_ASSUMED_ROUND_TRIP_COST_PCT", 0.05),
+                "AUTOPOIESIS_ASSUMED_ROUND_TRIP_COST_PCT", 0.05),
             counterfactual_horizon_hours=_positive_float(
-                "MIN_AGENT_COUNTERFACTUAL_HORIZON_HOURS", 24.0),
-            shadow=_flag("MIN_AGENT_SHADOW", False),
-            shorts=_choice("MIN_AGENT_SHORTS", ("off", "shadow", "paper"), "off"),
-            manage_account=_choice("MIN_AGENT_MANAGE_ACCOUNT", ("false", "true"), "false") == "true",
-            universe=_choice("MIN_AGENT_UNIVERSE", ("allowlist", "account", "tradable"), "allowlist"),
-            min_price=_bounded_float("MIN_AGENT_MIN_PRICE", 5.0, 0.0, 10_000.0),
-            attention_slots=_bounded_int("MIN_AGENT_ATTENTION_SLOTS", 0, 0, 25),
-            max_daily_cycles=_positive_int("MIN_AGENT_MAX_DAILY_CYCLES", 288),
-            llm_timeout_seconds=_positive_int("MIN_AGENT_LLM_TIMEOUT_SECONDS", 240),
-            heartbeat_path=Path(_env_required("MIN_AGENT_HEARTBEAT", "runtime/autopoiesis/heartbeat.json")),
-            pidfile_path=Path(_env_required("MIN_AGENT_PIDFILE", "runtime/autopoiesis/daemon.pid")),
-            strategy_dir=Path(_env_required("MIN_AGENT_STRATEGY_DIR", "runtime/autopoiesis/strategies")),
-            knowledge_dir=Path(_env_required("MIN_AGENT_KNOWLEDGE_DIR", "runtime/autopoiesis/knowledge")),
-            reflection_window=_positive_int("MIN_AGENT_REFLECTION_WINDOW", 50),
-            curriculum_enabled=_bool_env("MIN_AGENT_CURRICULUM_ENABLED", False),
-            reflect_every=_positive_int("MIN_AGENT_REFLECT_EVERY", 10),
-            curriculum_every=_positive_int("MIN_AGENT_CURRICULUM_EVERY", 50),
-            maintenance_interval_seconds=_positive_int("MIN_AGENT_MAINTENANCE_INTERVAL_SECONDS", 900),
-            evidence_interval_seconds=_positive_int("MIN_AGENT_EVIDENCE_INTERVAL_SECONDS", 3600),
-            reflection_interval_seconds=_positive_int("MIN_AGENT_REFLECTION_INTERVAL_SECONDS", 1800),
-            curriculum_interval_seconds=_positive_int("MIN_AGENT_CURRICULUM_INTERVAL_SECONDS", 3600),
-            profit_target_return_pct=_positive_float("MIN_AGENT_PROFIT_TARGET_RETURN_PCT", 0.10),
+                "AUTOPOIESIS_COUNTERFACTUAL_HORIZON_HOURS", 24.0),
+            shadow=_flag("AUTOPOIESIS_SHADOW", False),
+            shorts=_choice("AUTOPOIESIS_SHORTS", ("off", "shadow", "paper"), "off"),
+            manage_account=_choice("AUTOPOIESIS_MANAGE_ACCOUNT", ("false", "true"), "false") == "true",
+            universe=_choice("AUTOPOIESIS_UNIVERSE", ("allowlist", "account", "tradable"), "allowlist"),
+            min_price=_bounded_float("AUTOPOIESIS_MIN_PRICE", 5.0, 0.0, 10_000.0),
+            attention_slots=_bounded_int("AUTOPOIESIS_ATTENTION_SLOTS", 0, 0, 25),
+            max_daily_cycles=_positive_int("AUTOPOIESIS_MAX_DAILY_CYCLES", 288),
+            llm_timeout_seconds=_positive_int("AUTOPOIESIS_LLM_TIMEOUT_SECONDS", 240),
+            heartbeat_path=Path(_env_required("AUTOPOIESIS_HEARTBEAT", "runtime/autopoiesis/heartbeat.json")),
+            pidfile_path=Path(_env_required("AUTOPOIESIS_PIDFILE", "runtime/autopoiesis/daemon.pid")),
+            strategy_dir=Path(_env_required("AUTOPOIESIS_STRATEGY_DIR", "runtime/autopoiesis/strategies")),
+            knowledge_dir=Path(_env_required("AUTOPOIESIS_KNOWLEDGE_DIR", "runtime/autopoiesis/knowledge")),
+            reflection_window=_positive_int("AUTOPOIESIS_REFLECTION_WINDOW", 50),
+            curriculum_enabled=_bool_env("AUTOPOIESIS_CURRICULUM_ENABLED", False),
+            reflect_every=_positive_int("AUTOPOIESIS_REFLECT_EVERY", 10),
+            curriculum_every=_positive_int("AUTOPOIESIS_CURRICULUM_EVERY", 50),
+            maintenance_interval_seconds=_positive_int("AUTOPOIESIS_MAINTENANCE_INTERVAL_SECONDS", 900),
+            evidence_interval_seconds=_positive_int("AUTOPOIESIS_EVIDENCE_INTERVAL_SECONDS", 3600),
+            reflection_interval_seconds=_positive_int("AUTOPOIESIS_REFLECTION_INTERVAL_SECONDS", 1800),
+            curriculum_interval_seconds=_positive_int("AUTOPOIESIS_CURRICULUM_INTERVAL_SECONDS", 3600),
+            profit_target_return_pct=_positive_float("AUTOPOIESIS_PROFIT_TARGET_RETURN_PCT", 0.10),
         )
 
     def is_paper_endpoint(self) -> bool:
@@ -189,25 +189,38 @@ class AgentConfig:
         return missing
 
 
-#: The environment prefix this project used before it was renamed to `autopoiesis`, and the reason
-#: it is still read.
+#: The prefix this project was renamed away from, and why it is still *detected*.
 #:
-#: A prefix rename is not a find-and-replace. `MIN_AGENT_MAX_POSITION_VALUE` and `MIN_AGENT_ALLOWLIST`
-#: live in an operator's env file outside the repository, so renaming the constant would have made
-#: every one of them silently unread - and the defaults underneath are *narrower* than what this
-#: account is authorised to trade (SPY alone, $5,000 a position). The agent would have started, looked
-#: healthy, and been trading a smaller universe under smaller limits than the account holder approved,
-#: with nothing in any log saying so. So the old prefix is read as a fallback and `doctor` reports
-#: which one is in use, rather than the rename quietly narrowing the risk envelope.
+#: A prefix rename is not a find-and-replace. `MIN_AGENT_MAX_POSITION_VALUE` and
+#: `MIN_AGENT_ALLOWLIST` live in an operator's env file outside the repository, so renaming the
+#: constant outright would have made every one of them silently unread - and the defaults
+#: underneath are *narrower* than what this account is authorised to trade (SPY alone, $5,000 a
+#: position). The agent would have started, looked healthy, and been trading a smaller universe
+#: under smaller limits than the account holder approved, with nothing in any log saying so.
+#:
+#: That is why the first version kept reading the old prefix forever. It was the wrong fix: a
+#: fallback that is live forever means the rename never completes, and `doctor` reporting "14
+#: settings still use the legacy prefix" on every run is a warning nobody reads the hundredth time.
+#: The old prefix is now read only long enough to say a migration is unfinished, and
+#: `assert_not_legacy_only` refuses to start on one - because a process that cannot read its
+#: configuration and then runs on defaults is more dangerous than one that refuses to start, and
+#: `AGENTS.md` 9 requires the environment to be explicit rather than implicit.
+#:
+#: The migration is one command, and this code never rewrites the operator's file:
+#: `sed 's/^MIN_AGENT_/AUTOPOIESIS_/'` into the new path, then remove the old one. Both files
+#: existing at once is the intended intermediate state - the new one wins, so it can be verified
+#: before the old one is deleted.
 LEGACY_ENV_PREFIX = "MIN_AGENT_"
 ENV_PREFIX = "AUTOPOIESIS_"
 
 
 def env(name: str, default: str | None = None) -> str | None:
-    """One configuration value, read under the current prefix and then the legacy one.
+    """One configuration value. `AUTOPOIESIS_*` first, and only for the migration window, then
+    `MIN_AGENT_*`.
 
     The current prefix wins when both are set, so an operator migrating one variable at a time is
-    not half-migrated in a way that depends on file order.
+    not half-migrated in a way that depends on file order. `assert_not_legacy_only` is what stops
+    the window becoming permanent.
     """
     if name.startswith(LEGACY_ENV_PREFIX):
         legacy, current = name, ENV_PREFIX + name[len(LEGACY_ENV_PREFIX) :]
@@ -220,13 +233,58 @@ def env(name: str, default: str | None = None) -> str | None:
 
 
 def legacy_env_names_in_use() -> list[str]:
-    """Every legacy-prefixed variable that is actually set, so `doctor` can say the rename is
-    incomplete instead of the operator discovering it when a limit stops applying."""
+    """Every legacy-prefixed variable that is actually set, so the migration can be reported and
+    refused rather than silently depended on."""
     out = []
     for key, value in os.environ.items():
         if key.startswith(LEGACY_ENV_PREFIX) and value.strip() and not key.startswith(ENV_PREFIX):
             out.append(key)
     return sorted(out)
+
+
+def assert_not_legacy_only() -> None:
+    """Refuse to run when the only configuration on offer uses the retired prefix.
+
+    Not a warning. An agent that starts on defaults it was never given is the failure this whole
+    mechanism exists to prevent: it would look healthy, pass the gate, and trade a narrower universe
+    under tighter limits than the account holder approved, with nothing anywhere saying so.
+
+    Two conditions are refused, and they are different:
+
+    * **no** `AUTOPOIESIS_*` set but `MIN_AGENT_*` is - the operator has not migrated, and every
+      limit is about to come from the defaults;
+    * both set, for names the current prefix does not cover - a half-migration, where which
+      variable wins depends on the order they were renamed, which is exactly the ambiguity a risk
+      setting must not contain.
+    """
+    legacy = legacy_env_names_in_use()
+    if not legacy:
+        return
+    current = [k for k in os.environ if k.startswith(ENV_PREFIX)]
+    migrate = (
+        f"migrate with:  mkdir -p \"${{XDG_CONFIG_HOME:-$HOME/.config}}/autopoiesis\" && \\\n"
+        f"    sed 's/^{LEGACY_ENV_PREFIX}/{ENV_PREFIX}/' "
+        f"\"${{XDG_CONFIG_HOME:-$HOME/.config}}/min-agent/env\" "
+        f"> \"${{XDG_CONFIG_HOME:-$HOME/.config}}/autopoiesis/env\" "
+        f"&& chmod 600 \"${{XDG_CONFIG_HOME:-$HOME/.config}}/autopoiesis/env\""
+    )
+    if not current:
+        raise SystemExit(
+            f"REFUSING TO START: only {len(legacy)} retired {LEGACY_ENV_PREFIX}* variable(s) are set "
+            f"and no {ENV_PREFIX}* one is. Running anyway would use the built-in defaults, which are "
+            f"narrower than what this account is authorised to trade (SPY alone, $5,000 a position, "
+            f"10 trades a day) - so the agent would look healthy while quietly trading a different "
+            f"configuration from the one you approved.\n  {migrate}\n  then re-run. The old file "
+            f"can stay until you have verified the new one."
+        )
+    raise SystemExit(
+        f"REFUSING TO START: {len(legacy)} retired {LEGACY_ENV_PREFIX}* variable(s) are still set "
+        f"alongside {len(current)} {ENV_PREFIX}* one(s): "
+        + ", ".join(legacy[:6]) + (f" and {len(legacy) - 6} more" if len(legacy) > 6 else "")
+        + f".\n  A half-migrated configuration makes which limit wins depend on the order you "
+          f"renamed them, which is not ambiguity a risk setting may contain.\n  {migrate}\n  "
+          f"then re-run."
+    )
 
 
 def _split_symbols(raw: str) -> tuple[str, ...]:

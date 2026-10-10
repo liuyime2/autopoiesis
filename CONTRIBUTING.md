@@ -22,7 +22,7 @@ edit  ->  make check  ->  make verify  ->  commit
 ```
 
 `make verify CLASS=<name>` re-runs one check class; `make classes` lists them. Every new
-`tests/min_agent/test_*.py` must be added to `TEST_CLASS_MAP` in `tools/verify.py`, or the
+`tests/autopoiesis/test_*.py` must be added to `TEST_CLASS_MAP` in `tools/verify.py`, or the
 gate fails with `test-coverage-map`.
 
 ## What a change must carry

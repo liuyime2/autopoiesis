@@ -167,7 +167,7 @@ def test_raising_a_risk_limit_after_the_baseline_fails(tmp_path):
 
 
 def test_widening_the_allowlist_after_the_baseline_fails(tmp_path):
-    """`MIN_AGENT_ALLOWLIST` was never read by doctor at all, so a symbol the agent
+    """`AUTOPOIESIS_ALLOWLIST` was never read by doctor at all, so a symbol the agent
     had no mandate for could be added invisibly."""
 
     config = _config(tmp_path)

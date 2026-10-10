@@ -56,7 +56,7 @@ yourself. Autopoiesis is built around that second part:
 | **Honest screening** | A strategy is compared with what its trading days alone would have scored, so a rising market does not pass as skill. It is rejected only when worse by two standard errors. |
 | **Lessons with an ablation** | Each lesson in the prompt is shown on half the cycles. One with no measured effect after 10 trading days is retired. |
 | **Constrained strategy DSL** | New strategies are parameter-only rules (`RULE`, `TREND_FOLLOW`, …) checked by a schema. The model never writes code. |
-| **Bounded short selling** | SHORT/COVER sit behind `MIN_AGENT_SHORTS` (`off` / `shadow` / `paper`), with their own Guardian rule. Off by default. |
+| **Bounded short selling** | SHORT/COVER sit behind `AUTOPOIESIS_SHORTS` (`off` / `shadow` / `paper`), with their own Guardian rule. Off by default. |
 | **Broker-verified accounting** | FIFO lot ledger, realised and unrealised PnL, attribution to model vs baseline, and a SPY buy-and-hold benchmark on the same capital and window. |
 | **Self-checking** | `make verify` runs 52 check classes over code *and* the running system; `make verify-self-test` breaks the gate on purpose to prove it can fail. A watchdog restarts the daemon, and a report is written after every close. |
 | **Reproducible** | One script clones the committed tree into a new venv with no credentials and runs everything; its log is committed. |
@@ -173,7 +173,7 @@ targets use an active venv first, then conda, and need neither.
 
 1. Create a free [Alpaca](https://alpaca.markets/) **paper** account and an API key.
 2. Install [Ollama](https://ollama.com/) and pull a model (default: `qwen3.8:27b`; set
-   `MIN_AGENT_MODEL` to use another). Without a model, the deterministic policy engine decides
+   `AUTOPOIESIS_MODEL` to use another). Without a model, the deterministic policy engine decides
    and every decision is labelled `fallback_policy_engine`.
 3. Put the credentials in `${XDG_CONFIG_HOME:-$HOME/.config}/autopoiesis/env`, mode 600. They are
    never read from the repository. [`configs/paper.env.example`](configs/paper.env.example)
@@ -252,27 +252,27 @@ that can submit an order:
 
 | Limit | Env var | Default |
 |---|---|---|
-| max position value | `MIN_AGENT_MAX_POSITION_VALUE` | $5,000 |
-| max total exposure | `MIN_AGENT_MAX_TOTAL_EXPOSURE` | 4× position value |
-| max daily loss | `MIN_AGENT_MAX_DAILY_LOSS` | $500 |
-| max trades per day | `MIN_AGENT_MAX_TRADES_PER_DAY` | 10 |
-| min confidence | `MIN_AGENT_MIN_CONFIDENCE` | 0.5 |
-| short selling | `MIN_AGENT_SHORTS` | `off` |
-| manage the whole account | `MIN_AGENT_MANAGE_ACCOUNT` | `false` |
-| universe | `MIN_AGENT_UNIVERSE` | `allowlist`; `account` adds every held symbol; `tradable` adds any active US stock on a major exchange priced at least `MIN_AGENT_MIN_PRICE` ($5) |
-| extra symbols looked at per round | `MIN_AGENT_ATTENTION_SLOTS` | 0 (the broker's most-active liquid names, filtered) |
+| max position value | `AUTOPOIESIS_MAX_POSITION_VALUE` | $5,000 |
+| max total exposure | `AUTOPOIESIS_MAX_TOTAL_EXPOSURE` | 4× position value |
+| max daily loss | `AUTOPOIESIS_MAX_DAILY_LOSS` | $500 |
+| max trades per day | `AUTOPOIESIS_MAX_TRADES_PER_DAY` | 10 |
+| min confidence | `AUTOPOIESIS_MIN_CONFIDENCE` | 0.5 |
+| short selling | `AUTOPOIESIS_SHORTS` | `off` |
+| manage the whole account | `AUTOPOIESIS_MANAGE_ACCOUNT` | `false` |
+| universe | `AUTOPOIESIS_UNIVERSE` | `allowlist`; `account` adds every held symbol; `tradable` adds any active US stock on a major exchange priced at least `AUTOPOIESIS_MIN_PRICE` ($5) |
+| extra symbols looked at per round | `AUTOPOIESIS_ATTENTION_SLOTS` | 0 (the broker's most-active liquid names, filtered) |
 
 - **Paper only.** `config.is_paper_endpoint` is the single definition, and both the CLI and the
   executor go through it.
 - **The universe is the account holder's decision.** By default only the allowlist can be
-  traded. `MIN_AGENT_UNIVERSE=account` adds everything the account holds, and `tradable` adds
+  traded. `AUTOPOIESIS_UNIVERSE=account` adds everything the account holds, and `tradable` adds
   any active US stock on a major exchange priced at least $5 (never a warrant, unit or right).
   Widening changes which symbols pass and nothing else: paper only, market open, a fresh
   snapshot, the position and exposure caps (the exposure cap then measures the whole account),
   daily loss, trades per day and confidence all still apply.
 - **By default the agent only sells what it bought.** A SELL is bounded by the agent's own
   confirmed fills, not by what the account holds. An account holder who wants the agent to
-  manage every position sets `MIN_AGENT_MANAGE_ACCOUNT=true`, and a SELL is then bounded by the
+  manage every position sets `AUTOPOIESIS_MANAGE_ACCOUNT=true`, and a SELL is then bounded by the
   account's position. Every other limit still applies. A SHORT is refused while the account holds any long
   in that symbol, and a COVER may only buy back what the agent itself shorted.
 - **Limits only get tighter.** Nothing in the code raises a limit. A higher limit is the

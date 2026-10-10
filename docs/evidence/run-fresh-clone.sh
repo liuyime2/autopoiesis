@@ -113,7 +113,7 @@ run_step lint    "$PYTHON -m ruff check src/ tools/ tests/ examples/"
 # operator's conda environment and proving nothing about the clone.
 run_step make-check "source .venv/bin/activate && make check"
 # The no-credentials entry point, which is the first thing a contributor without a paper
-# account runs. It was invoking the deleted `min_agent.cli` module, so it failed outright while
+# account runs. It was invoking the deleted `autopoiesis.cli` module, so it failed outright while
 # every other step in this script was green.
 run_step smoke-offline "source .venv/bin/activate && make smoke-offline"
 run_step test    "$PYTHON -m pytest -q"

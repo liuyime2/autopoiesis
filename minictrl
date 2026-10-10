@@ -41,14 +41,14 @@ cd "$ROOT_DIR" || exit 2
 # The operator's configuration is loaded once, here, before anything is looked up - and it is
 # exported so subprocesses see the same values. It used to be read ~60 lines later, purely to
 # fill @ENVFILE@ into the unit templates, which meant every discovery below ran against a
-# process that had not yet seen the file: `MIN_AGENT_ENVBIN` named in the file was ignored, so a
+# process that had not yet seen the file: the envbin setting named in the file was ignored, so a
 # host whose environment lives outside conda's default envs root could not be installed at all.
 # Values already present in the real environment win, because `set -a` re-exports an assignment
 # rather than replacing an inherited one.
 # The credential file moved with the project. Both names are honoured, the new one first, so
 # an operator who has not moved their file gets a working daemon rather than an auth error
 # with nothing pointing at the rename.
-ENV_FILE="${MIN_AGENT_ENV_FILE:-${AUTOPOIESIS_ENV_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/autopoiesis/env}}"
+ENV_FILE="${AUTOPOIESIS_ENV_FILE:-${MIN_AGENT_ENV_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/autopoiesis/env}}"
 # The legacy name is still honoured when the operator has not moved their file. Tested rather than
 # assumed, because the default above points at the new path whether or not it exists.
 if [ ! -f "$ENV_FILE" ] && [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env" ]; then
@@ -59,16 +59,21 @@ if [ -f "$ENV_FILE" ]; then
   # shellcheck disable=SC1090
   . "$ENV_FILE"
   set +a
-elif [ -z "${ALPACA_API_KEY:-}" ] && [ "${MIN_AGENT_REQUIRE_CREDENTIALS:-0}" = "1" ]; then
+elif [ -z "${ALPACA_API_KEY:-}" ] && [ "${AUTOPOIESIS_REQUIRE_CREDENTIALS:-${MIN_AGENT_REQUIRE_CREDENTIALS:-0}}" = "1" ]; then
   echo "FATAL: no credentials at $ENV_FILE" >&2
   exit 2
 fi
 
 export PYTHONPATH="$ROOT_DIR/src:${PYTHONPATH:-}"
-export MIN_AGENT_MODE="${MIN_AGENT_MODE:-paper}"
+# Exported under the current prefix. These are names minictrl *writes* into the environment for
+# the processes it starts, and writing the retired prefix defeats the rename at the last step: an
+# env file already migrated to AUTOPOIESIS_* would have MIN_AGENT_MODE put back alongside it, and
+# `config.assert_not_legacy_only` would then refuse to start on the half-migration this created.
+# The old name is still accepted when it is the only one set.
+export AUTOPOIESIS_MODE="${AUTOPOIESIS_MODE:-${MIN_AGENT_MODE:-paper}}"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
-export MIN_AGENT_MODEL="${MIN_AGENT_MODEL:-qwen3.8:27b}"
-export MIN_AGENT_CURRICULUM_ENABLED="${MIN_AGENT_CURRICULUM_ENABLED:-true}"
+export AUTOPOIESIS_MODEL="${AUTOPOIESIS_MODEL:-${MIN_AGENT_MODEL:-qwen3.8:27b}}"
+export AUTOPOIESIS_CURRICULUM_ENABLED="${AUTOPOIESIS_CURRICULUM_ENABLED:-${MIN_AGENT_CURRICULUM_ENABLED:-true}}"
 # The paper URL is set by default, never forced. It used to be assigned unconditionally,
 # which silently overrode an operator's own ALPACA_BASE_URL for every minictrl subcommand
 # including the ones the gate runs. cli.py already refuses to build a client against a
@@ -85,7 +90,7 @@ SERVICE_NAME="autopoiesis.service"
 # `make install` puts the package in whatever environment is active, so an operator who
 # followed the README has one and does not need to name it.
 
-ENVBIN="${MIN_AGENT_ENVBIN:-}"
+ENVBIN="${AUTOPOIESIS_ENVBIN:-${MIN_AGENT_ENVBIN:-}}"
 if [ -z "$ENVBIN" ] && [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then
   ENVBIN="$VIRTUAL_ENV/bin"
 fi

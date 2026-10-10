@@ -79,7 +79,7 @@ def client_from_env():
     if not key or not secret:
         raise SystemExit(
             "no Alpaca credentials; they live in "
-            "${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env and not in this repository"
+            "${XDG_CONFIG_HOME:-$HOME/.config}/autopoiesis/env and not in this repository"
         )
     return tradeapi.REST(key, secret, "https://paper-api.alpaca.markets")
 

@@ -1,6 +1,6 @@
 [Unit]
 Description=autopoiesis paper-trading daemon
-Documentation=file://@ROOT@/docs/history/specs/2026-09-28-min-agent-runbook.md
+Documentation=file://@ROOT@/docs/history/specs/2026-09-28-autopoiesis-runbook.md
 After=network-online.target
 Wants=network-online.target
 # Without these a permanently broken daemon restarts forever. run_forever.sh
@@ -18,17 +18,17 @@ Environment=PYTHONPATH=@ROOT@/src
 # The env's own interpreter, not `conda run`: a service should not spawn a
 # wrapper process on every start, and systemd needs a real executable.
 Environment=PATH=@ENVBIN@:/usr/local/bin:/usr/bin:/bin
-Environment=MIN_AGENT_MODE=paper
+Environment=AUTOPOIESIS_MODE=paper
 Environment=ALPACA_BASE_URL=https://paper-api.alpaca.markets
 Environment=APCA_API_BASE_URL=https://paper-api.alpaca.markets
 Environment=OLLAMA_BASE_URL=http://127.0.0.1:11434
-Environment=MIN_AGENT_MODEL=qwen3.8:27b
-Environment=MIN_AGENT_GPU_DEVICES=0
-Environment=MIN_AGENT_CURRICULUM_ENABLED=true
-Environment=MIN_AGENT_MAINTENANCE_INTERVAL_SECONDS=900
-Environment=MIN_AGENT_EVIDENCE_INTERVAL_SECONDS=3600
-Environment=MIN_AGENT_REFLECTION_INTERVAL_SECONDS=1800
-Environment=MIN_AGENT_CURRICULUM_INTERVAL_SECONDS=3600
+Environment=AUTOPOIESIS_MODEL=qwen3.8:27b
+Environment=AUTOPOIESIS_GPU_DEVICES=0
+Environment=AUTOPOIESIS_CURRICULUM_ENABLED=true
+Environment=AUTOPOIESIS_MAINTENANCE_INTERVAL_SECONDS=900
+Environment=AUTOPOIESIS_EVIDENCE_INTERVAL_SECONDS=3600
+Environment=AUTOPOIESIS_REFLECTION_INTERVAL_SECONDS=1800
+Environment=AUTOPOIESIS_CURRICULUM_INTERVAL_SECONDS=3600
 # Credentials are never baked into a unit file. %h is $HOME, which is at
 # user quota on this host, so the path is templated by `minictrl
 # install-service` to whichever location actually has room.

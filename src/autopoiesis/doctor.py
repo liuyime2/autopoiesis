@@ -1114,7 +1114,7 @@ def _check_config(report: DoctorReport, config: AgentConfig) -> None:
     if config.mode == "paper":
         report.add("mode", OK, "paper")
     else:
-        report.add("mode", FAIL, f"mode={config.mode!r}; only paper is permitted", "unset AUTOPOIESIS_MODE (or the legacy MIN_AGENT_MODE)")
+        report.add("mode", FAIL, f"mode={config.mode!r}; only paper is permitted", "unset AUTOPOIESIS_MODE")
     if config.is_paper_endpoint():
         report.add("paper endpoint", OK, config.alpaca_base_url)
     else:

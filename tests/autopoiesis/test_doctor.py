@@ -214,11 +214,11 @@ def test_quiet_mode_is_one_line(monkeypatch, tmp_path, capsys):
     for key in list(os.environ):
         if key.startswith(("ALPACA", "APCA", "MIN_AGENT", "OLLAMA")):
             monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("MIN_AGENT_JOURNAL", str(tmp_path / "journal.jsonl"))
-    monkeypatch.setenv("MIN_AGENT_HEARTBEAT", str(tmp_path / "heartbeat.json"))
-    monkeypatch.setenv("MIN_AGENT_STRATEGY_DIR", str(tmp_path / "strategies"))
-    monkeypatch.setenv("MIN_AGENT_KNOWLEDGE_DIR", str(tmp_path / "knowledge"))
-    monkeypatch.setenv("MIN_AGENT_PIDFILE", str(tmp_path / "daemon.pid"))
+    monkeypatch.setenv("AUTOPOIESIS_JOURNAL", str(tmp_path / "journal.jsonl"))
+    monkeypatch.setenv("AUTOPOIESIS_HEARTBEAT", str(tmp_path / "heartbeat.json"))
+    monkeypatch.setenv("AUTOPOIESIS_STRATEGY_DIR", str(tmp_path / "strategies"))
+    monkeypatch.setenv("AUTOPOIESIS_KNOWLEDGE_DIR", str(tmp_path / "knowledge"))
+    monkeypatch.setenv("AUTOPOIESIS_PIDFILE", str(tmp_path / "daemon.pid"))
 
     rc = main(["--doctor", "--quiet", "--skip-broker"])
     out = capsys.readouterr().out.strip()
@@ -245,11 +245,11 @@ def test_quiet_mode_exit_code_matches_the_reported_result(monkeypatch, tmp_path,
         if key.startswith(("ALPACA", "APCA", "MIN_AGENT", "OLLAMA")):
             monkeypatch.delenv(key, raising=False)
     for name, value in (
-        ("MIN_AGENT_JOURNAL", "journal.jsonl"),
-        ("MIN_AGENT_HEARTBEAT", "heartbeat.json"),
-        ("MIN_AGENT_STRATEGY_DIR", "strategies"),
-        ("MIN_AGENT_KNOWLEDGE_DIR", "knowledge"),
-        ("MIN_AGENT_PIDFILE", "daemon.pid"),
+        ("AUTOPOIESIS_JOURNAL", "journal.jsonl"),
+        ("AUTOPOIESIS_HEARTBEAT", "heartbeat.json"),
+        ("AUTOPOIESIS_STRATEGY_DIR", "strategies"),
+        ("AUTOPOIESIS_KNOWLEDGE_DIR", "knowledge"),
+        ("AUTOPOIESIS_PIDFILE", "daemon.pid"),
     ):
         monkeypatch.setenv(name, str(tmp_path / value))
 

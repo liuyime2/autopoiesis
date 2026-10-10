@@ -48,7 +48,7 @@ class TradingLoop:
         #: which is the difference between testing the real risk path and testing a
         #: system that nobody ships.
         self.now = now
-        #: With the account holder's consent (`MIN_AGENT_MANAGE_ACCOUNT=true`) a SELL is
+        #: With the account holder's consent (`AUTOPOIESIS_MANAGE_ACCOUNT=true`) a SELL is
         #: bounded by the account's position rather than by the agent's own fills.
         self.manage_account = manage_account
 

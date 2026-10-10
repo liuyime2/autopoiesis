@@ -1,4 +1,4 @@
-"""`MIN_AGENT_MANAGE_ACCOUNT`: what a SELL may reach.
+"""`AUTOPOIESIS_MANAGE_ACCOUNT`: what a SELL may reach.
 
 Off (the default), a SELL is bounded by the shares the agent itself bought, so an account
 holder's pre-existing position is never sold. On, the account holder has handed the agent the
@@ -41,11 +41,11 @@ def test_managing_the_account_the_account_s_position_may_be_sold():
 
 
 def test_the_setting_is_off_unless_set_and_refuses_anything_but_true_or_false(monkeypatch):
-    monkeypatch.delenv("MIN_AGENT_MANAGE_ACCOUNT", raising=False)
+    monkeypatch.delenv("AUTOPOIESIS_MANAGE_ACCOUNT", raising=False)
     assert AgentConfig.from_env().manage_account is False
-    monkeypatch.setenv("MIN_AGENT_MANAGE_ACCOUNT", "true")
+    monkeypatch.setenv("AUTOPOIESIS_MANAGE_ACCOUNT", "true")
     assert AgentConfig.from_env().manage_account is True
-    monkeypatch.setenv("MIN_AGENT_MANAGE_ACCOUNT", "yes")
+    monkeypatch.setenv("AUTOPOIESIS_MANAGE_ACCOUNT", "yes")
     with pytest.raises(ValueError):
         AgentConfig.from_env()
 
@@ -63,10 +63,10 @@ def test_a_long_round_shortens_the_sleep_and_a_closed_market_sleep_is_kept():
 
 
 def test_the_decision_timeout_is_configurable_and_defaults_above_the_slowest_measured_answer(monkeypatch):
-    monkeypatch.delenv("MIN_AGENT_LLM_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("AUTOPOIESIS_LLM_TIMEOUT_SECONDS", raising=False)
     assert AgentConfig.from_env().llm_timeout_seconds == 240
-    monkeypatch.setenv("MIN_AGENT_LLM_TIMEOUT_SECONDS", "90")
+    monkeypatch.setenv("AUTOPOIESIS_LLM_TIMEOUT_SECONDS", "90")
     assert AgentConfig.from_env().llm_timeout_seconds == 90
-    monkeypatch.setenv("MIN_AGENT_LLM_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("AUTOPOIESIS_LLM_TIMEOUT_SECONDS", "0")
     with pytest.raises(ValueError):
         AgentConfig.from_env()

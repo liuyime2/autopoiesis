@@ -42,7 +42,7 @@ def _journal_path() -> Path:
     """The journal path, resolved through AgentConfig rather than written out again.
 
     Six sites in this repository spelled out `runtime/autopoiesis/journal.jsonl`, which made
-    `MIN_AGENT_JOURNAL` a setting that changed nothing for the tools - a documented option
+    `AUTOPOIESIS_JOURNAL` a setting that changed nothing for the tools - a documented option
     that was silently ignored by half the code that reads the file it names. One resolver,
     and the tools agree with the agent.
     """

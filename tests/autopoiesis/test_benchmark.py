@@ -31,7 +31,7 @@ def test_an_empty_journal_exits_nothing_to_measure(tmp_path):
     env = {
         **os.environ,
         "PYTHONPATH": str(REPO / "src"),
-        "MIN_AGENT_JOURNAL": str(journal),
+        "AUTOPOIESIS_JOURNAL": str(journal),
     }
     proc = subprocess.run(
         [sys.executable, str(BENCHMARK)],

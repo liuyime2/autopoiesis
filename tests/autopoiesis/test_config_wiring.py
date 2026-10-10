@@ -32,7 +32,7 @@ def _entry_point_reads() -> str:
     """`minictrl`'s executable code, whole-line comments dropped.
 
     The env file is dual-purpose: `minictrl` sources the same file the loader reads and then
-    does its own shell work before it ever invokes `python -m autopoiesis.cli`. MIN_AGENT_ENVBIN
+    does its own shell work before it ever invokes `python -m autopoiesis.cli`. AUTOPOIESIS_ENVBIN
     is the live case - it names the environment's bin directory and nothing in Python reads it.
 
     Scanning the file whole would be worthless, because its header documents every shell knob
@@ -48,24 +48,24 @@ def _entry_point_reads() -> str:
 
 
 def _env_vars_read() -> set[str]:
-    """Every MIN_AGENT_* variable an operator's env file can actually be consumed by.
+    """Every AUTOPOIESIS_* variable an operator's env file can actually be consumed by.
 
-    Two readers, not one. Scanning only `config.py` reported MIN_AGENT_ENVBIN as a dead knob
+    Two readers, not one. Scanning only `config.py` reported AUTOPOIESIS_ENVBIN as a dead knob
     on a host where it is the reason `minictrl install-service` finds the environment at all -
     the same "looks configurable, does nothing" failure this file exists to catch, pointed the
     other way, and the obvious response to a red gate of that kind is to delete the line from
     the env file and break the install. The sibling gate `tools/verify.py::
     check_config_example_names_are_real` had the same blind spot in the other direction.
     """
-    return set(re.findall(r"MIN_AGENT_[A-Z0-9_]+", CONFIG_SRC + _entry_point_reads()))
+    return set(re.findall(r"AUTOPOIESIS_[A-Z0-9_]+", CONFIG_SRC + _entry_point_reads()))
 
 
 def _env_vars_in_the_shipped_config() -> set[str]:
-    """Every MIN_AGENT_* variable an operator could actually set."""
+    """Every AUTOPOIESIS_* variable an operator could actually set."""
     path = Path(os.environ.get("XDG_CONFIG_HOME", "")) / "autopoiesis" / "env"
     if not path.exists():
         pytest.skip("no runtime env file on this host")
-    return set(re.findall(r"MIN_AGENT_[A-Z0-9_]+", path.read_text()))
+    return set(re.findall(r"AUTOPOIESIS_[A-Z0-9_]+", path.read_text()))
 
 
 @pytest.mark.parametrize("name", FIELDS)
@@ -117,16 +117,16 @@ def test_every_operator_knob_is_actually_read_by_the_loader():
 def test_the_config_loader_refuses_live_mode():
     """Not a wiring check, but it belongs with the others: the one setting that
     must never take effect is the one that would risk real money."""
-    previous = os.environ.get("MIN_AGENT_MODE")
-    os.environ["MIN_AGENT_MODE"] = "live"
+    previous = os.environ.get("AUTOPOIESIS_MODE")
+    os.environ["AUTOPOIESIS_MODE"] = "live"
     try:
         with pytest.raises(ValueError):
             AgentConfig.from_env()
     finally:
         if previous is None:
-            os.environ.pop("MIN_AGENT_MODE", None)
+            os.environ.pop("AUTOPOIESIS_MODE", None)
         else:
-            os.environ["MIN_AGENT_MODE"] = previous
+            os.environ["AUTOPOIESIS_MODE"] = previous
 
 
 def test_paper_endpoint_is_a_host_check_not_a_substring():

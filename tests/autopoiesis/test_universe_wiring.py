@@ -55,19 +55,19 @@ def test_attention_symbols_drop_pennies_warrants_otc_and_whatever_is_already_cov
 
 def test_the_universe_setting_is_validated_and_a_wider_universe_means_the_whole_account(monkeypatch):
     # isolate from the operator's own env file, which sets every one of these
-    for name in ("MIN_AGENT_UNIVERSE", "MIN_AGENT_MANAGE_ACCOUNT", "MIN_AGENT_ATTENTION_SLOTS", "MIN_AGENT_MIN_PRICE"):
+    for name in ("AUTOPOIESIS_UNIVERSE", "AUTOPOIESIS_MANAGE_ACCOUNT", "AUTOPOIESIS_ATTENTION_SLOTS", "AUTOPOIESIS_MIN_PRICE"):
         monkeypatch.delenv(name, raising=False)
     c = AgentConfig.from_env()
     assert (c.universe, c.min_price, c.attention_slots, c.whole_account) == ("allowlist", 5.0, 0, False)
-    monkeypatch.setenv("MIN_AGENT_UNIVERSE", "tradable")
-    monkeypatch.setenv("MIN_AGENT_ATTENTION_SLOTS", "4")
+    monkeypatch.setenv("AUTOPOIESIS_UNIVERSE", "tradable")
+    monkeypatch.setenv("AUTOPOIESIS_ATTENTION_SLOTS", "4")
     c = AgentConfig.from_env()
     assert c.universe == "tradable" and c.attention_slots == 4 and c.whole_account
-    monkeypatch.setenv("MIN_AGENT_UNIVERSE", "everything")
+    monkeypatch.setenv("AUTOPOIESIS_UNIVERSE", "everything")
     with pytest.raises(ValueError):
         AgentConfig.from_env()
-    monkeypatch.setenv("MIN_AGENT_UNIVERSE", "account")
-    monkeypatch.setenv("MIN_AGENT_ATTENTION_SLOTS", "99")
+    monkeypatch.setenv("AUTOPOIESIS_UNIVERSE", "account")
+    monkeypatch.setenv("AUTOPOIESIS_ATTENTION_SLOTS", "99")
     with pytest.raises(ValueError):
         AgentConfig.from_env()
 

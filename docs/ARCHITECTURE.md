@@ -55,12 +55,12 @@ broker fill and cannot reach the PnL ledger even by accident.
    Every decision records `rule_action` beside the action taken, so the model's
    contribution is a paired comparison on identical inputs. If the model cannot be reached
    the policy engine decides, labelled `fallback_policy_engine` - recorded, not disguised.
-   Actions are BUY, SELL (reduce a long), HOLD, and - behind `MIN_AGENT_SHORTS`, off by
+   Actions are BUY, SELL (reduce a long), HOLD, and - behind `AUTOPOIESIS_SHORTS`, off by
    default - SHORT and COVER.
 4. **Gate.** Guardian refuses on: per-symbol position value, total exposure (gross), daily
    loss, trades per day, confidence below minimum, a stale snapshot, a symbol outside
    the mandate (the allowlist by default; the account's holdings, or any active US stock on a
-   major exchange at a price floor, when the account holder widens `MIN_AGENT_UNIVERSE`), a sell
+   major exchange at a price floor, when the account holder widens `AUTOPOIESIS_UNIVERSE`), a sell
    the agent does not own, or any mode that is not paper. A SHORT is
    refused while the account holds any long in the symbol (Alpaca would sell that long
    first) and is capped like a long; a COVER only up to what the agent itself shorted.

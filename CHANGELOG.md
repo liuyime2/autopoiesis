@@ -34,8 +34,8 @@ the commit message; the long-form record is in [`docs/history/`](docs/history/RE
   counterfactual row per cycle; corrected to 26.5% SELL vs 66.2% BUY.
 
 ### Added (2026-10-08, night)
-- `MIN_AGENT_UNIVERSE` (`allowlist` | `account` | `tradable`), `MIN_AGENT_MIN_PRICE`,
-  `MIN_AGENT_ATTENTION_SLOTS`: the account holder can widen what the Guardian lets through to
+- `AUTOPOIESIS_UNIVERSE` (`allowlist` | `account` | `tradable`), `AUTOPOIESIS_MIN_PRICE`,
+  `AUTOPOIESIS_ATTENTION_SLOTS`: the account holder can widen what the Guardian lets through to
   every held symbol, or to any active US stock on a major exchange priced at least $5, with the
   broker's most-active liquid names looked at each round. Default unchanged. The risk baseline now
   records the universe and the price floor, so a widening is flagged until a human re-approves it.
@@ -52,7 +52,7 @@ the commit message; the long-form record is in [`docs/history/`](docs/history/RE
   real bars (intraday, daily, cross-sectional), the news event study, the volatility result.
 
 ### Added (2026-10-08)
-- `MIN_AGENT_MANAGE_ACCOUNT` (default `false`): the agent may manage every position in the
+- `AUTOPOIESIS_MANAGE_ACCOUNT` (default `false`): the agent may manage every position in the
   account, a SELL then bounded by the account's position instead of the agent's own fills.
 - During the session the daemon sleeps only the rest of the interval after a round, so trading
   several symbols does not stretch the interval.
@@ -65,7 +65,7 @@ the commit message; the long-form record is in [`docs/history/`](docs/history/RE
 - Each lesson is shown on half of cycles; a lesson with no measured effect after 10 trading
   days is retired.
 - PAUSED strategies are re-examined on evidence, one per pass, never into immediate re-pause.
-- SHORT and COVER, behind `MIN_AGENT_SHORTS` (default off) and a Guardian rule with its own
+- SHORT and COVER, behind `AUTOPOIESIS_SHORTS` (default off) and a Guardian rule with its own
   limits; short lots in the ledger; shorts in the counterfactual and the backtest.
 - A `RULE` strategy kind: a constrained, parameter-only DSL the curriculum may propose.
 - `minictrl owner-history`: prices an agent sale beyond its own lots against the account

@@ -1,6 +1,6 @@
 [Unit]
 Description=autopoiesis unattended health watchdog
-Documentation=file://@ROOT@/docs/history/specs/2026-09-28-min-agent-runbook.md
+Documentation=file://@ROOT@/docs/history/specs/2026-09-28-autopoiesis-runbook.md
 After=autopoiesis.service
 
 [Service]
@@ -10,7 +10,7 @@ Environment=PYTHONPATH=@ROOT@/src
 Environment=PATH=@ENVBIN@:/usr/local/bin:/usr/bin:/bin
 Environment=OLLAMA_BASE_URL=http://127.0.0.1:11434
 # Rendered by minictrl from the same variable as autopoiesis.service. This was a
-# hardcoded -%h/.config/min-agent/env, which resolves to $HOME - a directory
+# hardcoded -%h/.config/autopoiesis/env, which resolves to $HOME - a directory
 # this account's credentials are not in - so the watchdog started with no
 # credentials and its review reported "alpaca credentials" as a failure on
 # every run, 275 of 453 doctor runs in total, and the leading `-` told systemd

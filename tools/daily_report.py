@@ -75,7 +75,7 @@ def day_summary(records, day: date) -> dict:
 
 
 def render(day: date, summary: dict, checks: list[tuple[str, str, str]], verdict: str) -> str:
-    lines = [f"min-agent daily validation report - {day.isoformat()} (New York)", "=" * 78]
+    lines = [f"autopoiesis daily validation report - {day.isoformat()} (New York)", "=" * 78]
     if summary["cycles"]:
         lines.append(
             f"trading      {summary['cycles']} cycle(s), first {summary['first']}, last "

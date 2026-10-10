@@ -587,7 +587,7 @@ def test_a_split_fill_reported_as_several_activities_is_one_order():
     sold = make_record(cycle_id="sell", action="SELL", quantity=52, strategy_id="closer")
 
     journal_view = BrokerFillActivity(
-        activity_id="min-agent-coid", order_id="oid-sell", client_order_id="min-agent-coid",
+        activity_id="autopoiesis-coid", order_id="oid-sell", client_order_id="autopoiesis-coid",
         symbol="SPY", side="SELL", quantity=52, price=766.57,
         transaction_time=datetime(2026, 9, 28, 15, 1, 4, tzinfo=timezone.utc),
     )
@@ -610,8 +610,8 @@ def test_a_split_fill_reported_as_several_activities_is_one_order():
 
     seeded = (journal_view,) + tuple(
         BrokerFillActivity(
-            activity_id=f"min-agent-buy-{i}", order_id=f"oid-buy-{i}",
-            client_order_id=f"min-agent-buy-{i}", symbol="SPY", side="BUY",
+            activity_id=f"autopoiesis-buy-{i}", order_id=f"oid-buy-{i}",
+            client_order_id=f"autopoiesis-buy-{i}", symbol="SPY", side="BUY",
             quantity=1, price=742.03, strategy_id="opener",
             transaction_time=datetime(2026, 6, 11, 14, 30, tzinfo=timezone.utc),
         )
@@ -660,7 +660,7 @@ def test_a_split_fill_at_two_prices_is_volume_weighted():
     )
     seeded = (
         BrokerFillActivity(
-            activity_id="min-agent-buy", order_id="oid-buy", client_order_id="min-agent-buy",
+            activity_id="autopoiesis-buy", order_id="oid-buy", client_order_id="autopoiesis-buy",
             symbol="SPY", side="BUY", quantity=2, price=50.0, strategy_id="opener",
             transaction_time=datetime(2026, 6, 11, 14, 30, tzinfo=timezone.utc),
         ),
