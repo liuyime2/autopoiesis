@@ -160,3 +160,30 @@ Python 3.10、3.11、3.12 三个 job 全部安装成功、lint 失败；type、p
 107 个可配对 LLM 决策，60 次 override，42 次局部探针优于规则；探针累计约 +18.320% 是单股 24h 动作比较，不是资金组合收益率。1077/2060 个决策无法归因，约 52%。账户所有者历史 29 股收益 +2821.65 单列排除。运行中的数据会继续变化；本轮不是冻结样本实验。
 
 完成判断：**核心 paper 原型存在并运行；整体目标与可复现开源发布尚未完成。接下来先把风险、CI、测量与后台任务变成可信闭环，再交付完整前端和发布。**
+
+## 11. 自本审查以来的整改（2026-10-10 晚，提交 `9ed0534`..`b989614`）
+
+以下只记录运行过并留下输出的事实。每条给出命令与其实际结果；不能运行的写"未做"。
+**本审计的原始发现与技术表未改写**，它们是那一轮的证据。
+
+| 项 | 原状态 | 现在 | 证据 |
+|---|---|---|---|
+| 1 非有限值与 Guardian 不变量 | 待修，已复现 | 已修 | 离线合成夹具：限额 5000 拒单、同一单换 NaN 后被批；修后 NaN/±inf 在 loader 与 `Guardian.__init__` 均被拒，合法大限额仍批准。5 个测试钉双向 |
+| 2 Ruff / CI | 待修，已复现 | 已修 | `benchmark.py` 的 `os.path.commonprefix` 在 ruff 0.17 上报 RUF071；改为显式最长公共前缀，3008 个生成用例零差异后删调用。CI 3.10/3.11/3.12 |
+| 3 成本口径 | 部分实现 | 已修，方向对 agent 不利 | evaluator 的 `/200` 把往返成本又除一半：账本上 0.18 对应应付 35.82；benchmark 另用 `realized×pct` 得 0.379。现统一取 evaluator 的 35.818876，净额 820.771124。agent 从 +1.85% 变为 **+1.81%** |
+| 3 日报 | 命令与 service 均 TypeError | 已修 | `make daily-report DATE=2026-10-09` exit 0 |
+| 4 混合缓存 | 待修，服务实际失败 | 已修，且发现第二处 | driver 与 `fetch_replay_bars.cached_last_bar` 都崩在同一份混合目录；`KeyError` 不是 `ValueError`，异常元组根本抓不住。谓词收进 `replay.bar_files` 一处。实测：31 个可用、3 个研究缓存被点名忽略 |
+| 4 fetch→research→trial 闭环 | 未成功 | **已成功** | `quant-research.service` 打印 `cached 24287 real 5Min SPY bars 2026-04-10 .. 2026-10-09`（修复前崩在 `KeyError: 'bars'`，缓存从未更新）；driver 在 134425 根 SPY bars 上搜索；ledger 新行带 `symbol: SPY` |
+| 5 部署残留 | 待清 | 已清 | systemd 用户单元、operator 配置目录均已 autopoiesis。`minictrl`（旧名紧凑形）仍在使用中，已改名为 `autopoiesis`，18 个文件 116 处引用同步；两处日期散文按既有约定不改 |
+| 6 journal 归档与恢复 | 仅热轮转 | 已修 | 轮转出界的一代改为 `os.replace` 进 `runtime/autopoiesis/journal-archive/` 而非 unlink；`history_paths()` 读归档最先，顺序即追加序。归档写不进去则追加失败，绝不回退成删除。`audit_defects`/`replay_audit`/status_page 三处手写的"哪些文件是 journal"改为共用 `history_paths()` |
+| 7 面板 | 四页初版 | 修四处，缺两页仍未做 | 每页各自读 journal → 改为一次快照；只读 live 一代 → 实测旧页报 **881 cycles 而记录有 2060**；heartbeat 只看 `status` 字段 → 加年龄与 pid 判定；`PAUSED` 被写成终态 → 改为与 `_maybe_unpause` 一致的"holding pattern"；逐文件非原子写出 → 原子写。新增 7 个测试。**Portfolio & Risk、System 两页仍未做** |
+| — | — | 新发现 | 研究缓存增长到 17 个标的、988704 根 bars 后，driver 按 timestamp 单键去重把不同标的同时刻的 bar 互相覆盖：**丢 852937 根（86%）**，剩下的 135767 根是 17 个标的的混合体，不是任何资产的序列。改为按标的搜，标的并进 trial 身份。旧行无 `symbol` 字段，因此不被复用——全部重估，`required_trades` 相应从 61-84 升到 100 |
+
+**仍未做的（诚实清单）**：
+
+- **Portfolio & Risk、System 两个面板页**。头寸敞口、回撤、按策略盈亏仍来自 `make benchmark` / `make doctor`；README 已明确说没有这两页。
+- **60 个交易日**：19/60，时间不足，无法由本轮推进。
+- **公共项目站与视觉设计**、**alpha release 可复现性**、**journal 的异地副本**：未做。
+- journal 归档目前只保证同机不删。轮转 horizon 已被归档取代，但没有任何副本离开这台机器；README 与 ARCHITECTURE 都写明了这一点，没有把它说成已解决。
+
+**门禁**：`make verify` 52/52，1848 次执行、80 个文件；`pytest` 1172 passed；ruff 与 mypy 干净。已推送 `9ed0534`..`b989614`。
