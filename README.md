@@ -126,6 +126,12 @@ cannot be attributed to a model at all; `make benchmark` prints that coverage wi
 reports. Where paired comparison is possible, the model's most common override of the
 deterministic rule is to refuse a trade the rule would have taken.
 
+A read-only snapshot of the same numbers is generated as static HTML — `make status-page` writes
+`runtime/autopoiesis/report/site/` with an overview, the decision trace (the rule's decision, the
+model's override and its reason, the Guardian's refusal), the strategy lifecycle transitions with
+their reasons, and an evidence page carrying the signal ledger's verdict counts. It has no order
+path and reads no credentials; a value that cannot be computed reads UNKNOWN rather than zero.
+
 ### The VIX floor, stated as what it measured
 
 The decision context carries a `risk` block whose volatility forecast can be raised — never
@@ -210,6 +216,7 @@ Every task is a `make` target.
 | `make doctor` | health of the running system | yes |
 | `make benchmark` | each strategy against SPY buy-and-hold, same capital and window; exit 0 ahead / 1 behind / 2 nothing to measure | journal |
 | `make daily-report` | one trading day's validation report (`DATE=YYYY-MM-DD`) | journal |
+| `make status-page` | a read-only static snapshot: overview, decisions, strategies, evidence | journal |
 | `make pipeline` | validate-data → test → evaluate → reproduce | journal |
 | `make reproduce` | record commit, config, versions and metrics for a run | no |
 
@@ -309,6 +316,9 @@ minictrl                operator script: services, logs, owner history
 - [`CHANGELOG.md`](CHANGELOG.md): what changed.
 - [`docs/history/`](docs/history/README.md): the running log, the defect audit and one plan per
   change. It records why decisions were made, including claims that were later retracted.
+- [`docs/history/plans/2026-10-09-remaining-work.md`](docs/history/plans/2026-10-09-remaining-work.md):
+  the roadmap - what is done with the command that proves it, what is measured and deliberately not
+  fused, and what is open. It is a short index rather than a running log: the log lives above.
 
 ## License
 
