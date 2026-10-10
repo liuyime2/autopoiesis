@@ -318,9 +318,13 @@ def main() -> int:
         config = None
         print(f"# config unavailable ({type(exc).__name__}: {exc}); using documented defaults")
     if config is None:
-        from autopoiesis.config import AgentConfig as _AgentConfig
-
-        config = _AgentConfig()
+        # `AgentConfig()` has eleven fields with no default, so it raised TypeError: the
+        # benchmark crashed on the one path written to survive a configuration it could not
+        # read. mypy reported it for five months and nothing caught it at runtime, because this
+        # machine has a readable config. The documented defaults are read the same way
+        # `from_env` reads them - from an empty mapping, not a second list of literals that
+        # could drift from the first and change what the benchmark measures.
+        config = AgentConfig.documented_defaults()
 
     print("=" * 78)
     print("QuantGroup benchmark - does the system beat SPY buy-and-hold?")

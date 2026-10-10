@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from autopoiesis.config import _finite, _positive_float
+from autopoiesis.config import AgentConfig, _finite, _positive_float
 from autopoiesis.guardian import Guardian
 from autopoiesis.models import (
     AccountSnapshot,
@@ -61,3 +61,28 @@ def test_a_nan_limit_cannot_silently_approve_an_order_it_should_refuse():
         Guardian(allowlist=frozenset({"SPY"}), max_position_value=float("nan"),
                  max_daily_loss=500.0, max_total_exposure=20000.0,
                  max_trades_per_day=10, min_confidence=0.5)
+
+
+def test_documented_defaults_is_a_configuration_rather_than_a_crash():
+    """`benchmark` falls back to these when the operator's environment cannot be read.
+
+    It used to call `AgentConfig()`, which raises `TypeError` - eleven fields have no default -
+    so the benchmark crashed on the one path written to survive an unreadable configuration.
+    mypy reported it for five months and nothing caught it at runtime, because every machine
+    that runs it has a readable config.
+
+    The load-bearing part is that these are the *same* defaults `from_env` falls back to,
+    read from an empty mapping rather than restated. A second list of literals is a second
+    place for them to drift, and the drift is silent: a default that differs between the two
+    copies changes what the benchmark measures, without either number looking wrong.
+    """
+    defaults = AgentConfig.documented_defaults()
+    assert defaults.mode == "paper"
+    assert defaults.max_position_value > 0
+    assert defaults.max_daily_loss > 0
+    assert defaults.journal_path.parts[-1] == "journal.jsonl"
+    # Paper only, and no broker credentials: a default configuration must not be able to
+    # reach a live venue.
+    assert defaults.alpaca_api_key is None
+    assert defaults.is_paper_endpoint() is True
+    assert defaults == AgentConfig.from_env({})

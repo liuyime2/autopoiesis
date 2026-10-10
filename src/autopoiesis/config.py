@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -106,62 +107,81 @@ class AgentConfig:
         return self.manage_account or self.universe != "allowlist"
 
     @classmethod
-    def from_env(cls) -> AgentConfig:
-        allowlist = _split_symbols(_env_required("AUTOPOIESIS_ALLOWLIST", "SPY,QQQ,AAPL,MSFT,NVDA"))
-        symbols = _split_symbols(_env_required("AUTOPOIESIS_SYMBOLS", "SPY"))
-        mode = _env_required("AUTOPOIESIS_MODE", "paper").strip().lower()
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> AgentConfig:
+        """Read the operator's environment. `environ` defaults to the process environment."""
+        allowlist = _split_symbols(_env_required("AUTOPOIESIS_ALLOWLIST", "SPY,QQQ,AAPL,MSFT,NVDA", environ))
+        symbols = _split_symbols(_env_required("AUTOPOIESIS_SYMBOLS", "SPY", environ))
+        source = os.environ if environ is None else environ
+        mode = _env_required("AUTOPOIESIS_MODE", "paper", environ).strip().lower()
         if mode == "live":
             raise ValueError("live mode is not allowed in phase 1")
 
-        max_position_value = _positive_float("AUTOPOIESIS_MAX_POSITION_VALUE", 5000.0)
+        max_position_value = _positive_float("AUTOPOIESIS_MAX_POSITION_VALUE", 5000.0, environ)
 
         return cls(
             mode=mode,
             symbols=symbols,
             allowlist=frozenset(allowlist),
-            alpaca_api_key=os.getenv("ALPACA_API_KEY") or os.getenv("APCA_API_KEY_ID"),
-            alpaca_secret_key=os.getenv("ALPACA_SECRET_KEY") or os.getenv("APCA_API_SECRET_KEY"),
-            alpaca_base_url=os.getenv("ALPACA_BASE_URL")
-            or os.getenv("APCA_API_BASE_URL")
+            alpaca_api_key=source.get("ALPACA_API_KEY") or source.get("APCA_API_KEY_ID"),
+            alpaca_secret_key=source.get("ALPACA_SECRET_KEY") or source.get("APCA_API_SECRET_KEY"),
+            alpaca_base_url=source.get("ALPACA_BASE_URL")
+            or source.get("APCA_API_BASE_URL")
             or "https://paper-api.alpaca.markets",
-            ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/"),
-            model=_env_required("AUTOPOIESIS_MODEL", "qwen3.8:27b"),
-            gpu_devices=_env_required("AUTOPOIESIS_GPU_DEVICES", "0"),
-            journal_path=Path(_env_required("AUTOPOIESIS_JOURNAL", "runtime/autopoiesis/journal.jsonl")),
+            ollama_base_url=source.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/"),
+            model=_env_required("AUTOPOIESIS_MODEL", "qwen3.8:27b", environ),
+            gpu_devices=_env_required("AUTOPOIESIS_GPU_DEVICES", "0", environ),
+            journal_path=Path(_env_required("AUTOPOIESIS_JOURNAL", "runtime/autopoiesis/journal.jsonl", environ)),
             max_position_value=max_position_value,
-            max_daily_loss=_positive_float("AUTOPOIESIS_MAX_DAILY_LOSS", 500.0),
-            max_total_exposure=_positive_float("AUTOPOIESIS_MAX_TOTAL_EXPOSURE", max_position_value * 4.0),
-            stale_after_seconds=_positive_int("AUTOPOIESIS_STALE_AFTER_SECONDS", 900),
-            daemon_interval_seconds=_positive_int("AUTOPOIESIS_DAEMON_INTERVAL_SECONDS", 300),
-            max_trades_per_day=_positive_int("AUTOPOIESIS_MAX_TRADES_PER_DAY", 10),
-            min_confidence=_bounded_float("AUTOPOIESIS_MIN_CONFIDENCE", 0.5, 0.0, 1.0),
-            max_account_value=_optional_float("AUTOPOIESIS_MAX_ACCOUNT_VALUE"),
+            max_daily_loss=_positive_float("AUTOPOIESIS_MAX_DAILY_LOSS", 500.0, environ),
+            max_total_exposure=_positive_float("AUTOPOIESIS_MAX_TOTAL_EXPOSURE", max_position_value * 4.0, environ),
+            stale_after_seconds=_positive_int("AUTOPOIESIS_STALE_AFTER_SECONDS", 900, environ),
+            daemon_interval_seconds=_positive_int("AUTOPOIESIS_DAEMON_INTERVAL_SECONDS", 300, environ),
+            max_trades_per_day=_positive_int("AUTOPOIESIS_MAX_TRADES_PER_DAY", 10, environ),
+            min_confidence=_bounded_float("AUTOPOIESIS_MIN_CONFIDENCE", 0.5, 0.0, 1.0, environ),
+            max_account_value=_optional_float("AUTOPOIESIS_MAX_ACCOUNT_VALUE", environ),
             assumed_round_trip_cost_pct=_positive_float(
-                "AUTOPOIESIS_ASSUMED_ROUND_TRIP_COST_PCT", 0.05),
+                "AUTOPOIESIS_ASSUMED_ROUND_TRIP_COST_PCT", 0.05, environ),
             counterfactual_horizon_hours=_positive_float(
-                "AUTOPOIESIS_COUNTERFACTUAL_HORIZON_HOURS", 24.0),
-            shadow=_flag("AUTOPOIESIS_SHADOW", False),
-            shorts=_choice("AUTOPOIESIS_SHORTS", ("off", "shadow", "paper"), "off"),
-            manage_account=_choice("AUTOPOIESIS_MANAGE_ACCOUNT", ("false", "true"), "false") == "true",
-            universe=_choice("AUTOPOIESIS_UNIVERSE", ("allowlist", "account", "tradable"), "allowlist"),
-            min_price=_bounded_float("AUTOPOIESIS_MIN_PRICE", 5.0, 0.0, 10_000.0),
-            attention_slots=_bounded_int("AUTOPOIESIS_ATTENTION_SLOTS", 0, 0, 25),
-            max_daily_cycles=_positive_int("AUTOPOIESIS_MAX_DAILY_CYCLES", 288),
-            llm_timeout_seconds=_positive_int("AUTOPOIESIS_LLM_TIMEOUT_SECONDS", 240),
-            heartbeat_path=Path(_env_required("AUTOPOIESIS_HEARTBEAT", "runtime/autopoiesis/heartbeat.json")),
-            pidfile_path=Path(_env_required("AUTOPOIESIS_PIDFILE", "runtime/autopoiesis/daemon.pid")),
-            strategy_dir=Path(_env_required("AUTOPOIESIS_STRATEGY_DIR", "runtime/autopoiesis/strategies")),
-            knowledge_dir=Path(_env_required("AUTOPOIESIS_KNOWLEDGE_DIR", "runtime/autopoiesis/knowledge")),
-            reflection_window=_positive_int("AUTOPOIESIS_REFLECTION_WINDOW", 50),
-            curriculum_enabled=_bool_env("AUTOPOIESIS_CURRICULUM_ENABLED", False),
-            reflect_every=_positive_int("AUTOPOIESIS_REFLECT_EVERY", 10),
-            curriculum_every=_positive_int("AUTOPOIESIS_CURRICULUM_EVERY", 50),
-            maintenance_interval_seconds=_positive_int("AUTOPOIESIS_MAINTENANCE_INTERVAL_SECONDS", 900),
-            evidence_interval_seconds=_positive_int("AUTOPOIESIS_EVIDENCE_INTERVAL_SECONDS", 3600),
-            reflection_interval_seconds=_positive_int("AUTOPOIESIS_REFLECTION_INTERVAL_SECONDS", 1800),
-            curriculum_interval_seconds=_positive_int("AUTOPOIESIS_CURRICULUM_INTERVAL_SECONDS", 3600),
-            profit_target_return_pct=_positive_float("AUTOPOIESIS_PROFIT_TARGET_RETURN_PCT", 0.10),
+                "AUTOPOIESIS_COUNTERFACTUAL_HORIZON_HOURS", 24.0, environ),
+            shadow=_flag("AUTOPOIESIS_SHADOW", False, environ),
+            shorts=_choice("AUTOPOIESIS_SHORTS", ("off", "shadow", "paper"), "off", environ),
+            manage_account=_choice("AUTOPOIESIS_MANAGE_ACCOUNT", ("false", "true"), "false", environ) == "true",
+            universe=_choice("AUTOPOIESIS_UNIVERSE", ("allowlist", "account", "tradable"), "allowlist", environ),
+            min_price=_bounded_float("AUTOPOIESIS_MIN_PRICE", 5.0, 0.0, 10_000.0, environ),
+            attention_slots=_bounded_int("AUTOPOIESIS_ATTENTION_SLOTS", 0, 0, 25, environ),
+            max_daily_cycles=_positive_int("AUTOPOIESIS_MAX_DAILY_CYCLES", 288, environ),
+            llm_timeout_seconds=_positive_int("AUTOPOIESIS_LLM_TIMEOUT_SECONDS", 240, environ),
+            heartbeat_path=Path(_env_required("AUTOPOIESIS_HEARTBEAT", "runtime/autopoiesis/heartbeat.json", environ)),
+            pidfile_path=Path(_env_required("AUTOPOIESIS_PIDFILE", "runtime/autopoiesis/daemon.pid", environ)),
+            strategy_dir=Path(_env_required("AUTOPOIESIS_STRATEGY_DIR", "runtime/autopoiesis/strategies", environ)),
+            knowledge_dir=Path(_env_required("AUTOPOIESIS_KNOWLEDGE_DIR", "runtime/autopoiesis/knowledge", environ)),
+            reflection_window=_positive_int("AUTOPOIESIS_REFLECTION_WINDOW", 50, environ),
+            curriculum_enabled=_bool_env("AUTOPOIESIS_CURRICULUM_ENABLED", False, environ),
+            reflect_every=_positive_int("AUTOPOIESIS_REFLECT_EVERY", 10, environ),
+            curriculum_every=_positive_int("AUTOPOIESIS_CURRICULUM_EVERY", 50, environ),
+            maintenance_interval_seconds=_positive_int("AUTOPOIESIS_MAINTENANCE_INTERVAL_SECONDS", 900, environ),
+            evidence_interval_seconds=_positive_int("AUTOPOIESIS_EVIDENCE_INTERVAL_SECONDS", 3600, environ),
+            reflection_interval_seconds=_positive_int("AUTOPOIESIS_REFLECTION_INTERVAL_SECONDS", 1800, environ),
+            curriculum_interval_seconds=_positive_int("AUTOPOIESIS_CURRICULUM_INTERVAL_SECONDS", 3600, environ),
+            profit_target_return_pct=_positive_float("AUTOPOIESIS_PROFIT_TARGET_RETURN_PCT", 0.10, environ),
         )
+
+    @classmethod
+    def documented_defaults(cls) -> AgentConfig:
+        """The configuration `from_env` falls back to when the environment says nothing.
+
+        `tools/benchmark.py` reaches for this when the operator's environment cannot be read -
+        "a missing key file must not hide the benchmark". It used to call `AgentConfig()` there,
+        which raises `TypeError`: eleven fields have no default, so the benchmark crashed on the
+        one path written to survive a missing configuration. mypy reported it for five months and
+        nothing caught it at runtime, because this machine has a readable config.
+
+        The defaults live in one place - as the second argument of every `_env_required` above -
+        so this reads them from an empty mapping rather than restating them. A second list of
+        literals is a second place for them to drift, and the failure is silent: a default that
+        disagrees between the two copies changes what the benchmark measures.
+        """
+        return cls.from_env({})
 
     def is_paper_endpoint(self) -> bool:
         """Whether `alpaca_base_url` resolves to Alpaca's paper host.
@@ -202,9 +222,19 @@ class AgentConfig:
 ENV_PREFIX = "AUTOPOIESIS_"
 
 
-def env(name: str, default: str | None = None) -> str | None:
-    """One setting, under one prefix."""
-    found = os.getenv(name)
+def env(
+    name: str,
+    default: str | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> str | None:
+    """One setting, under one prefix.
+
+    `environ` defaults to the process environment. It is a parameter so the defaults below can
+    be read from an empty mapping - `documented_defaults()` needs exactly that, and without the
+    seam the only way to get it is a second, drifting copy of every literal in `from_env`.
+    """
+    source = os.environ if environ is None else environ
+    found = source.get(name)
     return found if found is not None else default
 
 
@@ -215,23 +245,36 @@ def _split_symbols(raw: str) -> tuple[str, ...]:
     return symbols
 
 
-def _env_required(name: str, default: str) -> str:
+def _env_required(
+    name: str,
+    default: str,
+    environ: Mapping[str, str] | None = None,
+) -> str:
     """`env()` narrowed to a value. The default argument is what makes it non-optional, so the
     callers below can read a float or an int without a None check they would otherwise have to
     write and forget."""
-    return env(name, default) or ""
+    return env(name, default, environ) or ""
 
 
-def _positive_int(name: str, default: int) -> int:
-    value = int(_env_required(name, str(default)))
+def _positive_int(
+    name: str,
+    default: int,
+    environ: Mapping[str, str] | None = None,
+) -> int:
+    value = int(_env_required(name, str(default), environ))
     if value <= 0:
         raise ValueError(f"{name} must be positive")
     return value
 
 
-def _choice(name: str, allowed: tuple[str, ...], default: str) -> str:
+def _choice(
+    name: str,
+    allowed: tuple[str, ...],
+    default: str,
+    environ: Mapping[str, str] | None = None,
+) -> str:
     """One of a fixed set of values; anything else is a configuration error, not a default."""
-    raw = env(name)
+    raw = env(name, None, environ)
     if raw is None or not raw.strip():
         return default
     value = raw.strip().lower()
@@ -240,14 +283,18 @@ def _choice(name: str, allowed: tuple[str, ...], default: str) -> str:
     return value
 
 
-def _flag(name: str, default: bool) -> bool:
+def _flag(
+    name: str,
+    default: bool,
+    environ: Mapping[str, str] | None = None,
+) -> bool:
     """A boolean setting.
 
     Only an exact `1` or `true` enables it. Truthiness is the wrong rule for a switch
     that decides whether real orders reach a broker: `AUTOPOIESIS_SHADOW=0` must not
     read as on, and a typo like `=flase` must not silently mean "on" either.
     """
-    raw = env(name)
+    raw = env(name, None, environ)
     if raw is None or not raw.strip():
         return default
     value = raw.strip().lower()
@@ -260,8 +307,14 @@ def _flag(name: str, default: bool) -> bool:
     )
 
 
-def _bounded_int(name: str, default: int, low: int, high: int) -> int:
-    value = int(_env_required(name, str(default)))
+def _bounded_int(
+    name: str,
+    default: int,
+    low: int,
+    high: int,
+    environ: Mapping[str, str] | None = None,
+) -> int:
+    value = int(_env_required(name, str(default), environ))
     if not low <= value <= high:
         raise ValueError(f"{name} must be between {low} and {high}")
     return value
@@ -283,16 +336,20 @@ def _finite(name: str, value: float) -> float:
     return value
 
 
-def _positive_float(name: str, default: float) -> float:
-    value = _finite(name, float(_env_required(name, str(default))))
+def _positive_float(
+    name: str,
+    default: float,
+    environ: Mapping[str, str] | None = None,
+) -> float:
+    value = _finite(name, float(_env_required(name, str(default), environ)))
     if value <= 0:
         raise ValueError(f"{name} must be positive")
     return value
 
 
-def _optional_float(name: str) -> float:
+def _optional_float(name: str, environ: Mapping[str, str] | None = None) -> float:
     """An optional cap: absent, or any positive value, meaning unset."""
-    raw = env(name)
+    raw = env(name, None, environ)
     if raw is None or not raw.strip():
         return 0.0
     value = _finite(name, float(raw))
@@ -301,15 +358,25 @@ def _optional_float(name: str) -> float:
     return value
 
 
-def _bounded_float(name: str, default: float, low: float, high: float) -> float:
-    value = float(_env_required(name, str(default)))
+def _bounded_float(
+    name: str,
+    default: float,
+    low: float,
+    high: float,
+    environ: Mapping[str, str] | None = None,
+) -> float:
+    value = float(_env_required(name, str(default), environ))
     if not low <= value <= high:
         raise ValueError(f"{name} must be between {low} and {high}")
     return value
 
 
-def _bool_env(name: str, default: bool) -> bool:
-    raw = env(name)
+def _bool_env(
+    name: str,
+    default: bool,
+    environ: Mapping[str, str] | None = None,
+) -> bool:
+    raw = env(name, None, environ)
     if raw is None:
         return default
     normalized = raw.strip().lower()
