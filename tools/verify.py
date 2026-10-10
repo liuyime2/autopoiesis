@@ -133,6 +133,9 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     # The price-freshness guard: it runs in `unit-integration` and is the class that would fail if
     # the Guardian ever stopped refusing a stale quote.
     "test_guardian_trade_freshness.py": ("unit-integration", "guardian-bypass-prevention"),
+    # Rotation is the one mechanism that can delete the only source of truth, so the
+    # reconstruction property across rotations is gated as a durability class, not just a unit test.
+    "test_journal_rotation_recovery.py": ("unit-integration", "crash-recovery", "pnl-accounting"),
     "test_universe.py": ("unit-integration", "guardian-bypass-prevention"),
     "test_universe_wiring.py": ("unit-integration",),
     "test_screen_direction_check.py": ("decision-outcome-counterfactual",),
