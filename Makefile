@@ -103,6 +103,7 @@ help:
 	@echo "make validate-data    parse and check the inputs before anything consumes them"
 	@echo "make evaluate         score the current paper record: strategies, PnL, counterfactuals"
 	@echo "make pipeline         validate-data -> test -> evaluate -> reproduce (run make install first)"
+	@echo "make status-page      a read-only static snapshot of current state"
 	@echo "make run|stop|restart the trading daemon"
 	@echo "make status           daemon and account status"
 	@echo ""
@@ -115,6 +116,16 @@ verify:
 
 # Must stay green. If this ever fails, the gate cannot be trusted and every other
 # result from it is meaningless.
+# --- status page ----------------------------------------------------------------------------
+#
+# A read-only static snapshot of the same numbers the CLI computes. It has no order path and
+# reads no credentials: a page that could trade would be a second execution path, and the
+# Guardian's single-path property is worth more than a button.
+
+status-page:
+	@$(PY) tools/status_page.py $(if $(SITE),$(SITE),)
+	@echo "wrote runtime/autopoiesis/report/site/index.html (read-only; no order path)"
+
 # --- research -------------------------------------------------------------------------------
 #
 # The research tree reads real bars, real filings and real headlines, and it needs numpy, pandas
@@ -154,6 +165,9 @@ research-six: research-install
 		runtime/autopoiesis/replay/YAHOO.pkl SPY
 
 # Staged fundamentals (earnings dates, surprises, sector, consensus) from Yahoo Finance.
+research-vix-ab: research-install
+	@PYTHONPATH=src $(CONDA_RUN) python $(RESEARCH_DIR)/part2/vix_ab.py runtime/autopoiesis/replay/YAHOO.pkl
+
 research-fundamentals: research-install
 	@PYTHONPATH=src $(CONDA_RUN) python $(RESEARCH_DIR)/part2/stage_fundamentals.py \
 		runtime/autopoiesis/replay/FUNDAMENTALS.json SPY QQQ AAPL MSFT NVDA
@@ -164,6 +178,7 @@ research-help:
 	@echo "  make research-long          the same hypotheses on 28 years of ETFs"
 	@echo "  make research-vix           the vol-fusion tests the VIX floor rests on"
 	@echo "  make research-six           the six-meridian resonance"
+	@echo "  make research-vix-ab        the VIX floor against itself, same basis"
 	@echo "  make research-fundamentals  earnings dates, surprises, sector, consensus"
 
 verify-self-test:
