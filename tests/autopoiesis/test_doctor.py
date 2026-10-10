@@ -191,10 +191,20 @@ def test_doctor_writes_a_bounded_history(config, monkeypatch):
     history = config.journal_path.parent / "doctor-history.jsonl"
     lines = history.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 3
-    # The fixture has credentials but an empty strategy directory, so the
-    # recorded failure is the untradeable library, not the credentials.
-    assert json.loads(lines[0])["ok"] is False
-    assert "strategy library" in json.loads(lines[0])["failures"]
+    # The contract is that the history is *faithful*, not that it holds one particular name. The
+    # earlier version asserted `ok is False` and `"strategy library" in failures`, which was true
+    # because the fixture's empty strategy directory was the only thing failing. Once an empty
+    # library on a record that never admitted anything became the initial-state warning it is,
+    # the fixture stopped failing at all - and the assertion would have carried on demanding a
+    # failure, pinning the old behaviour in the one place a reader would trust for what the
+    # history records.
+    first = json.loads(lines[0])
+    assert set(first) == {"at", "ok", "failures", "warnings"}
+    assert first["ok"] is (not first["failures"])
+    # This fixture has credentials and no runtime, so nothing has been admitted: the library is
+    # reported as the start it is rather than as a fault.
+    assert "strategy library" in first["warnings"], first["warnings"]
+    assert "strategy library" not in first["failures"], first["failures"]
 
 
 def test_quiet_mode_is_one_line(monkeypatch, tmp_path, capsys):
