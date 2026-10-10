@@ -141,9 +141,56 @@ def fetch_bars(symbol: str, start: str, end: str, *, client, interval: str = "5M
 
 
 def load_bars(path: str | Path) -> list[ReplayBar]:
-    """Read cached bars, so a replay is reproducible without a network."""
+    """Read cached bars, so a replay is reproducible without a network.
+
+    Assumes the caller has already established that `path` is a bar file - see `bar_files()`.
+    Called directly on one that is not, this raises `KeyError: 'bars'`, which is how the
+    research job and the bar fetch both died on a cache directory holding three research files
+    beside thirty-one real ones.
+    """
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     return [ReplayBar.from_dict(row) for row in payload["bars"]]
+
+
+def bar_files(cache_dir: str | Path) -> tuple[list[Path], list[str]]:
+    """The bar files in a cache directory, and the names of the files that are not bar files.
+
+    A replay cache is a mixed directory by design: the research scripts write their caches beside
+    the bars on purpose - the SEC ticker map, the staged fundamentals, the cross-sectional
+    sample. `glob("*.json")` picks up all of them, and `load_bars` then raises `KeyError: 'bars'`
+    on the first one, or `TypeError` on a file whose payload is a list.
+
+    That is how two scheduled jobs failed on the same directory for a full day.
+    `cached_last_bar` in `tools/fetch_replay_bars.py` and `_load_real_bars` in
+    `research/driver.py` each scanned `*.json`, and neither's exception tuple caught it:
+    `KeyError` is a `LookupError`, not a `ValueError`, so it sailed through as an unhandled
+    crash. The service that runs them survived only because its unit pipes the fetch failure
+    into "search the existing cache anyway", which turned a loud break into a silent one - the
+    cache stopped being refreshed while the search kept reporting it was current.
+
+    So the predicate lives here, once. A non-bar file is ordinary state and is skipped, but it
+    is *named* in the result, so a cache that changed shape is visible to whoever reads the run
+    rather than assumed. An empty directory, or one holding only non-bar files, is an error:
+    nothing to decide is not a cache.
+    """
+    directory = Path(cache_dir)
+    if not directory.exists():
+        return [], [f"{directory} (absent)"]
+    usable: list[Path] = []
+    ignored: list[str] = []
+    for path in sorted(directory.glob("*.json")):
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):  # json.JSONDecodeError is a ValueError
+            ignored.append(f"{path.name} (unreadable)")
+            continue
+        if isinstance(payload, dict) and "bars" in payload:
+            usable.append(path)
+        else:
+            ignored.append(f"{path.name} (no bars)")
+    return usable, ignored
 
 
 def save_bars(path: str | Path, symbol: str, bars: list[ReplayBar]) -> None:

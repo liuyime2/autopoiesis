@@ -213,40 +213,26 @@ def _load_real_bars(cache_dir: pathlib.Path = DEFAULT_CACHE_DIR) -> tuple[list[B
     cache means the driver has nothing to decide, which is an error worth stopping for - not a
     reason to invent a series and report verdicts on it.
     """
-    from autopoiesis.replay import load_bars
+    from autopoiesis.replay import bar_files, load_bars
 
     if not cache_dir.exists():
         raise SystemExit(
             f"no replay cache at {cache_dir}; fetch real bars first with "
             "tools/fetch_replay_bars.py. This driver never generates prices."
         )
-    files = sorted(cache_dir.glob("*.json"))
-    if not files:
-        raise SystemExit(f"no bar files in {cache_dir}; run tools/fetch_replay_bars.py first")
 
-    # Only files the fetch tool wrote carry `bars`. The same directory also holds the research
-    # caches - the SEC ticker map, the staged fundamentals, the cross-sectional sample - and
-    # `glob("*.json")` picks those up too. `load_bars` then raises `KeyError: 'bars'` on the first
-    # one, which is how the scheduled research job failed for a full day while every unit test
-    # passed: the tests point the driver at a directory holding only bar files, so nothing
-    # exercised the mixed directory the deployment actually has.
+    # The bar-file predicate lives in `replay.bar_files`, because this is the second place that
+    # needed it. `tools/fetch_replay_bars.py`'s `cached_last_bar` scanned the same directory the
+    # same way, and both crashed on the research caches that sit beside the bars deliberately;
+    # neither's exception tuple caught it, because `KeyError` is a `LookupError` and not a
+    # `ValueError`. A third copy of the predicate is a third place for it to be wrong.
     #
     # They are reported and skipped, not skipped silently and not treated as fatal. A non-bar
-    # file in the cache is an ordinary state - the research scripts write their caches beside the
-    # bars deliberately - so exiting would permanently block a working search over 31 real bar
-    # files because three caches sit next to them. What matters is that the run says which files
-    # it ignored, so a cache that changed shape is visible rather than assumed.
-    usable, ignored = [], []
-    for path in files:
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            ignored.append(f"{path.name} (unreadable)")
-            continue
-        if isinstance(payload, dict) and "bars" in payload:
-            usable.append(path)
-        else:
-            ignored.append(f"{path.name} (no bars)")
+    # file in the cache is an ordinary state - the research scripts write their caches beside
+    # the bars on purpose - so exiting would permanently block a working search over 31 real
+    # bar files because three caches sit next to them. What matters is that the run says which
+    # files it ignored, so a cache that changed shape is visible rather than assumed.
+    usable, ignored = bar_files(cache_dir)
     if not usable:
         raise SystemExit(f"no bar files in {cache_dir}; run tools/fetch_replay_bars.py first")
 
@@ -270,7 +256,7 @@ def _load_real_bars(cache_dir: pathlib.Path = DEFAULT_CACHE_DIR) -> tuple[list[B
     bars = [by_timestamp[key] for key in sorted(by_timestamp)]
     if not bars:
         raise SystemExit(f"no usable bars in {cache_dir}")
-    return bars, f"{len(files)} file(s): {', '.join(used)} [{'; '.join(sorted(provenance))}]", ignored
+    return bars, f"{len(used)} file(s): {', '.join(used)} [{'; '.join(sorted(provenance))}]", ignored
 
 
 def main(argv: list[str] | None = None) -> int:

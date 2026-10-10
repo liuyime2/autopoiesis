@@ -17,7 +17,6 @@ network and credentials; nothing else in the gate does.
 
 from __future__ import annotations
 
-import json
 import os
 import pathlib
 import sys
@@ -91,13 +90,19 @@ def cached_last_bar(symbol: str, interval: str = DEFAULT_INTERVAL) -> datetime |
     are exactly what stopped being trustworthy. `None` when the cache holds no usable bars,
     which callers treat as "fetch".
     """
-    from autopoiesis.replay import load_bars
+    from autopoiesis.replay import bar_files, load_bars
 
     newest: datetime | None = None
-    for path in sorted(OUT_DIR.glob("*.json")):
+    usable, ignored = bar_files(OUT_DIR)
+    # Named, not skipped quietly: the fetch decides whether the cache is current by reading it,
+    # and a cache that silently stopped being read is how the tape went stale for a day while
+    # every report said the search had run.
+    if ignored:
+        print(f"note: not bar files, ignored in {OUT_DIR}: {', '.join(ignored)}", file=sys.stderr)
+    for path in usable:
         try:
             bars = load_bars(path)
-        except (OSError, ValueError, json.JSONDecodeError):
+        except (OSError, ValueError):
             continue
         for bar in bars:
             if newest is None or bar.timestamp > newest:

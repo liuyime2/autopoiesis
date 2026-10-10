@@ -254,3 +254,39 @@ def test_a_window_ending_today_is_refused_by_the_broker_and_the_cache_is_unaffec
         assert "recent SIP data" in str(exc)
     else:
         raise AssertionError("the stub was expected to refuse the current day's tape")
+
+
+def test_cached_last_bar_reads_a_mixed_cache_without_dying_on_it(tmp_path, monkeypatch):
+    """The cache holds research files beside the bars, and the fetch must still read it.
+
+    `cached_last_bar` globbed `*.json` and called `load_bars` on each, with
+    `except (OSError, ValueError, json.JSONDecodeError)` around it. `KeyError` is a `LookupError`
+    and not a `ValueError`, so it sailed through as an unhandled crash: the scheduled research
+    job and the scheduled bar fetch both failed this way for a full day on a directory holding
+    thirty-one real bar files and three research caches. The service survived only because its
+    unit pipes the fetch failure into "search the existing cache anyway" - which turned a loud
+    break into a silent one, a tape that stopped being refreshed while every report said it was.
+
+    This is the same defect `research/driver.py` had, found by running the real service rather
+    than by reading it, which is the argument for the predicate living in one place
+    (`replay.bar_files`) instead of a third copy of it here.
+    """
+    import json as _json
+    import sys
+
+    from autopoiesis.replay import ReplayBar, save_bars
+
+    cache = tmp_path / "replay"
+    cache.mkdir()
+    newest = T0 + timedelta(minutes=5)
+    save_bars(cache / "SPY_5Min_rolling.json", "SPY",
+              [ReplayBar(timestamp=T0, open=100.0, high=100.0, low=100.0, close=100.0, volume=1.0),
+               ReplayBar(timestamp=newest, open=101.0, high=101.0, low=101.0, close=101.0, volume=1.0)])
+    # The three that broke it: a dict payload, another dict payload, and a list payload.
+    (cache / "CIK_MAP.json").write_text(_json.dumps({"SPY": 9999}), encoding="utf-8")
+    (cache / "FUNDAMENTALS.json").write_text(_json.dumps({"SPY": {"sector": "x"}}), encoding="utf-8")
+    (cache / "XS120.json").write_text(_json.dumps([{"a": 1}, {"b": 2}]), encoding="utf-8")
+
+    fetcher = _fetcher(tmp_path)
+    fetcher.OUT_DIR = cache  # type: ignore[attr-defined]
+    assert fetcher.cached_last_bar("SPY") == newest
