@@ -127,7 +127,13 @@ def main() -> int:
     sys.path.insert(0, str(ROOT / "tools"))
     import benchmark
 
-    verdict, _ = benchmark._headline(report)
+    # The agent-level block is what the verdict is now about, and the per-strategy rows are a
+    # diagnostic beside it - see `benchmark._headline`. Calling it with only the report leaves
+    # `agent` missing, which is how this entry point crashed while its unit tests stayed green:
+    # the test called the helper with the new signature and this caller did not. A caller a timer
+    # invokes and a test that does not call the caller are two different coverage claims.
+    agent = benchmark._agent_level()
+    verdict, _ = benchmark._headline(report, agent)
 
     text = render(day, summary, checks, verdict)
     out = config.journal_path.parent / "reports" / f"{day.isoformat()}.txt"

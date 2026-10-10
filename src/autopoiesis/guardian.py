@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from datetime import datetime, timezone
 
@@ -34,6 +35,23 @@ class Guardian:
         self.universe = universe
         self._tradable = tradable
         self.min_price = min_price
+        # A limit that is not a finite number is not a limit. Every comparison the Guardian makes
+        # against it is False, so a NaN position cap approves orders it exists to refuse - and
+        # nothing downstream reports it, because the refusals simply stop happening. `config`
+        # rejects the value where it is read; this is the same invariant where the Guardian is
+        # constructed, so a caller that does not go through the loader is covered too.
+        for _field, _value in (
+            ("max_position_value", max_position_value),
+            ("max_daily_loss", max_daily_loss),
+            ("max_total_exposure", max_total_exposure),
+            ("max_account_value", max_account_value),
+            ("min_confidence", min_confidence),
+            ("min_price", min_price),
+        ):
+            if _value is None:
+                continue
+            if not math.isfinite(float(_value)):
+                raise ValueError(f"{_field} must be a finite number; got {_value!r}")
         self.allowlist = frozenset(symbol.upper() for symbol in allowlist)
         self.max_position_value = max_position_value
         self.max_daily_loss = max_daily_loss

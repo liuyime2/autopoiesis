@@ -59,7 +59,6 @@ at all.
 from __future__ import annotations
 
 import importlib.util
-import os
 import pathlib
 import sys
 
@@ -155,7 +154,20 @@ def _pick(checks, name: str):
         return None, []
     rank = {"fail": 0, "warn": 1, "ok": 2, "skip": 3}
     ranked = sorted(matches, key=lambda check: rank.get(check.status.value, 4))
-    shared = os.path.commonprefix([check.detail for check in ranked]).strip()
+    # The longest leading run of characters all the details agree on, computed here rather than
+    # with `os.path.commonprefix`. That function is for paths: this compares doctor's prose, and
+    # `os.path.commonpath` would split on separators that are not there. `ruff` 0.17 flags the
+    # call as RUF071 and suggests the path version, which would change the meaning - so the
+    # intent is stated instead, in one place, and the lint rule is not globally disabled.
+    details = [check.detail for check in ranked]
+    shared = ""
+    if details:
+        limit = min(len(d) for d in details)
+        index = 0
+        while index < limit and len({d[index] for d in details}) == 1:
+            index += 1
+        shared = details[0][:index]
+    shared = shared.strip()
     extras: list[str] = []
     for check in ranked:
         clause = check.detail[len(shared):].lstrip("; ").strip()

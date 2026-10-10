@@ -172,7 +172,7 @@ def test_every_cache_file_is_merged_and_deduplicated(tmp_path):
     save_bars(cache / "SPY_5Min_2026-01-01_2026-01-02.json", "SPY", _rows(shared))
     save_bars(cache / "SPY_5Min_2026-01-01_2026-01-03.json", "SPY", _rows(shared + later))
 
-    bars, provenance = driver._load_real_bars(cache)
+    bars, provenance, _ignored = driver._load_real_bars(cache)
 
     assert len(bars) == 800, "400 + 400, with the 400 overlapping bars counted once"
     assert len({b.timestamp for b in bars}) == len(bars), "no timestamp appears twice"
@@ -236,6 +236,47 @@ def test_a_missing_cache_is_an_error_rather_than_generated_prices(tmp_path):
     empty.mkdir()
     with pytest.raises(SystemExit):
         driver._load_real_bars(empty)
+
+
+def test_a_mixed_cache_is_reported_not_fatal(tmp_path):
+    """The deployment's cache holds research files beside the bars, on purpose.
+
+    `glob("*.json")` picked those up, `load_bars` raised `KeyError: 'bars'`, and the scheduled
+    research job failed for a full day while every unit test passed - because the tests point the
+    driver at a directory holding only bar files, so nothing exercised the mixed directory the
+    deployment actually has. A non-bar file is ordinary now: the search must run, and it must name
+    what it skipped rather than skip silently.
+    """
+    from datetime import datetime, timedelta
+
+    from autopoiesis.replay import ReplayBar, save_bars
+
+    cache = tmp_path / "replay"
+    cache.mkdir()
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    prices = _oscillating(n=400, amplitude=0.01, period=12)
+    rows = [
+        ReplayBar(timestamp=t0 + timedelta(minutes=5 * i), open=p, high=p, low=p, close=p, volume=1000.0)
+        for i, p in enumerate(prices)
+    ]
+    save_bars(cache / "SPY_5Min_x.json", "SPY", rows)
+    (cache / "CIK_MAP.json").write_text('{"SPY": 9999}', encoding="utf-8")
+    (cache / "FUNDAMENTALS.json").write_text('{"SPY": {"sector": "x"}}', encoding="utf-8")
+
+    bars, _provenance, ignored = driver._load_real_bars(cache)
+    assert len(bars) == 400
+    assert ignored == ["CIK_MAP.json (no bars)", "FUNDAMENTALS.json (no bars)"]
+
+
+def test_a_cache_of_only_non_bar_files_is_still_an_error(tmp_path):
+    """Nothing to decide is not a cache. The message says which files were there, so a cache whose
+    shape changed entirely is distinguishable from one that is missing."""
+    cache = tmp_path / "replay"
+    cache.mkdir()
+    (cache / "CIK_MAP.json").write_text('{"SPY": 9999}', encoding="utf-8")
+    with pytest.raises(SystemExit) as excinfo:
+        driver._load_real_bars(cache)
+    assert "no bar files" in str(excinfo.value)
 
 
 def test_the_driver_writes_only_the_trials_ledger(tmp_path):

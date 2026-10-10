@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -266,8 +267,24 @@ def _bounded_int(name: str, default: int, low: int, high: int) -> int:
     return value
 
 
+def _finite(name: str, value: float) -> float:
+    """A risk setting must be a real number. NaN and both infinities are rejected.
+
+    Why this exists: `NaN <= 0` is False, so a NaN limit sailed through the positivity check and
+    reached the Guardian, where every comparison against it - `value > max_position_value`,
+    `exposure > max_total_exposure` - is also False. Measured with an offline synthetic fixture, no
+    broker and no order: a BUY of 10,000 that the configured 5,000 limit correctly refuses is
+    **approved** when the limit is NaN. The Guardian is not bypassed, which is what makes it
+    dangerous: the one component that "cannot be bypassed" silently stops comparing, and every
+    report stays green.
+    """
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be a finite number; got {value!r}")
+    return value
+
+
 def _positive_float(name: str, default: float) -> float:
-    value = float(_env_required(name, str(default)))
+    value = _finite(name, float(_env_required(name, str(default))))
     if value <= 0:
         raise ValueError(f"{name} must be positive")
     return value
@@ -278,7 +295,7 @@ def _optional_float(name: str) -> float:
     raw = env(name)
     if raw is None or not raw.strip():
         return 0.0
-    value = float(raw)
+    value = _finite(name, float(raw))
     if value <= 0:
         raise ValueError(f"{name} must be positive when set")
     return value

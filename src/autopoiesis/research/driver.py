@@ -198,7 +198,7 @@ def search(
     }
 
 
-def _load_real_bars(cache_dir: pathlib.Path = DEFAULT_CACHE_DIR) -> tuple[list[Bar], str]:
+def _load_real_bars(cache_dir: pathlib.Path = DEFAULT_CACHE_DIR) -> tuple[list[Bar], str, list[str]]:
     """Real bars from the fetch tool's cache, with the provenance it recorded.
 
     Every `*.json` in the cache is merged and deduplicated by timestamp, because a rolling fetch
@@ -224,10 +224,36 @@ def _load_real_bars(cache_dir: pathlib.Path = DEFAULT_CACHE_DIR) -> tuple[list[B
     if not files:
         raise SystemExit(f"no bar files in {cache_dir}; run tools/fetch_replay_bars.py first")
 
+    # Only files the fetch tool wrote carry `bars`. The same directory also holds the research
+    # caches - the SEC ticker map, the staged fundamentals, the cross-sectional sample - and
+    # `glob("*.json")` picks those up too. `load_bars` then raises `KeyError: 'bars'` on the first
+    # one, which is how the scheduled research job failed for a full day while every unit test
+    # passed: the tests point the driver at a directory holding only bar files, so nothing
+    # exercised the mixed directory the deployment actually has.
+    #
+    # They are reported and skipped, not skipped silently and not treated as fatal. A non-bar
+    # file in the cache is an ordinary state - the research scripts write their caches beside the
+    # bars deliberately - so exiting would permanently block a working search over 31 real bar
+    # files because three caches sit next to them. What matters is that the run says which files
+    # it ignored, so a cache that changed shape is visible rather than assumed.
+    usable, ignored = [], []
+    for path in files:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            ignored.append(f"{path.name} (unreadable)")
+            continue
+        if isinstance(payload, dict) and "bars" in payload:
+            usable.append(path)
+        else:
+            ignored.append(f"{path.name} (no bars)")
+    if not usable:
+        raise SystemExit(f"no bar files in {cache_dir}; run tools/fetch_replay_bars.py first")
+
     by_timestamp: dict[Any, Bar] = {}
     provenance: set[str] = set()
     used: list[str] = []
-    for path in files:
+    for path in usable:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -244,16 +270,20 @@ def _load_real_bars(cache_dir: pathlib.Path = DEFAULT_CACHE_DIR) -> tuple[list[B
     bars = [by_timestamp[key] for key in sorted(by_timestamp)]
     if not bars:
         raise SystemExit(f"no usable bars in {cache_dir}")
-    return bars, f"{len(files)} file(s): {', '.join(used)} [{'; '.join(sorted(provenance))}]"
+    return bars, f"{len(files)} file(s): {', '.join(used)} [{'; '.join(sorted(provenance))}]", ignored
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     cache_dir = pathlib.Path(argv[0]) if argv else DEFAULT_CACHE_DIR
-    bars, provenance = _load_real_bars(cache_dir)
+    bars, provenance, ignored = _load_real_bars(cache_dir)
     report = search(bars)
     summary = report["by_verdict"]
     print(f"bars: {report['bars']} from {provenance}")
+    if ignored:
+        # Named, not counted silently, so a cache whose shape changed is visible in the log the
+        # scheduled job writes rather than assumed away.
+        print(f"ignored (not bar files): {', '.join(ignored)}")
     print(
         f"candidates: {report['candidates']} "
         f"(cumulative: {report['already_recorded']} already in the ledger)  "
