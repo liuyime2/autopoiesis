@@ -13,6 +13,7 @@ anything is wrong. It is the loop to run after every change.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -165,7 +166,6 @@ def run_doctor(config: AgentConfig, *, client=None, skip_broker: bool = False) -
     _check_config(report, config)
     _check_broker(report, config, client, skip_broker)
     _check_risk_forecast(report, config, client, skip_broker)
-    _check_config_prefix(report, config, client, skip_broker)
     _check_ollama(report, config)
     _check_daemon(report, config)
     _check_journal(report, config)
@@ -292,6 +292,21 @@ def _check_risk_baseline(report: DoctorReport, config: AgentConfig) -> None:
     }
     path = Path(config.journal_path).parent / RISK_BASELINE_PATH
     if not path.exists():
+        # Record it only when an operator environment is actually loaded. Writing the defaults a
+        # clean checkout reads makes the baseline the narrow limits (5,000 / 20,000), and the next
+        # run on a machine that *does* load its env file then compares 25,000 against 5,000 and
+        # fails with "a risk limit was raised" - a limit the operator set once, at the start, and
+        # never touched. That is the check manufacturing its own red, which is the failure mode
+        # this project keeps finding elsewhere: a check whose first run creates the evidence for
+        # its second one.
+        if not any(k.startswith("AUTOPOIESIS_") for k in os.environ):
+            report.add(
+                "risk limits vs baseline", SKIP,
+                "no baseline on disk and no operator environment loaded, so there is no "
+                "deployment to record; the built-in defaults are not a baseline",
+                "run `make doctor` with the env file loaded to record one",
+            )
+            return
         try:
             write_json_atomic(path, {"recorded_at": _now_iso(), "limits": current})
             report.add(
@@ -1208,31 +1223,6 @@ def _check_risk_forecast(report: DoctorReport, config: AgentConfig, client, skip
         )
     else:
         report.add("risk forecast", OK, f"forecast vs realised 21-day volatility, whole history: {'; '.join(rows)}")
-
-
-def _check_config_prefix(report: DoctorReport, config: AgentConfig, client, skip: bool) -> None:
-    """Is the operator still setting the project's old environment prefix?
-
-    The rename to `autopoiesis` reads `AUTOPOIESIS_*` and, as a fallback, the `MIN_AGENT_*` names
-    that an operator's env file has always used. That fallback is why a rename could not silently
-    narrow the risk envelope - but it is a migration that can be left half-finished forever, and the
-    defaults underneath are *narrower* than what this account is authorised to trade. So the state
-    of the migration is reported, with the numbers that would change if the old names were dropped.
-    """
-    from autopoiesis.config import legacy_env_names_in_use
-
-    legacy = legacy_env_names_in_use()
-    if not legacy:
-        report.add("config prefix", OK, "every setting uses the AUTOPOIESIS_ prefix")
-        return
-    report.add(
-        "config prefix", WARN,
-        f"{len(legacy)} setting(s) still use the legacy MIN_AGENT_ prefix; they are read, and the "
-        f"current prefix wins where both are set: {', '.join(legacy[:6])}"
-        + (f" and {len(legacy) - 6} more" if len(legacy) > 6 else ""),
-        hint="rename them in your env file; dropping the fallback without renaming them would "
-             f"reset universe={config.universe} to allowlist and max_position_value to 5000",
-    )
 
 
 def _position_quantity(position) -> float:

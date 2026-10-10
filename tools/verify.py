@@ -304,7 +304,7 @@ def check_software_supply_chain() -> Result:
         if name in tracked:
             problems.append(f"{name} is tracked")
     if env_path and any(
-        t.endswith(("autopoiesis/env", "min-agent/env")) for t in tracked
+        t.endswith("autopoiesis/env") for t in tracked
     ):
         problems.append("the runtime env file is tracked")
 
@@ -382,7 +382,7 @@ def check_syntax_import() -> Result:
 #: test which file exists before choosing one. A literal-only pattern would report that entry point
 #: as never reading the credentials, which is the exact failure this check exists to catch - so the
 #: directory name counts with or without a variable in front of it.
-_CREDENTIAL_FILE_RE = re.compile(r"(?:\$\{?[\w:]+\}?/[\w${}.]*/|_[\w]+/)?(?:autopoiesis|min-agent)/env")
+_CREDENTIAL_FILE_RE = re.compile(r"(?:\$\{?[\w:]+\}?/[\w${}.]*/|_[\w]+/)?autopoiesis/env")
 
 DELETED_SCRIPT_NAMES = (
     "auto-fix.sh",
@@ -596,7 +596,7 @@ def check_unit_environment_files_exist() -> Result:
     reporting `ok=False exit=1 failures=[alpaca credentials]` on every run, 275 of 453
     doctor runs in total, while `minictrl doctor` was green from a shell with the
     environment sourced. The watchdog unit carried a hardcoded
-    `EnvironmentFile=-%h/.config/min-agent/env`, which resolves to $HOME - where this
+    `EnvironmentFile=-%h/.config/autopoiesis/env`, which resolves to $HOME - where this
     account's credentials are not - and the leading `-` told systemd to ignore the
     missing file instead of reporting it.
 
@@ -1505,12 +1505,23 @@ def check_status_only_states_what_does_not_change() -> Result:
     # checkout reads (no operator env file), a correct table is "wrong" - CI failed on exactly
     # that the first time the limits were scaled - so the comparison binds where the
     # deployment is.
-    env_file = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "autopoiesis" / "env"
-    if not env_file.exists():
+    # Bind where the *configuration* is, not where a file happens to be.
+    #
+    # The env file existing is not the same as its settings being in force: CI checks out into a
+    # fresh runner, never sources the operator's file, and reads the built-in defaults. So a host
+    # that has migrated its env file to `$XDG_CONFIG_HOME/autopoiesis/env` - which is what a
+    # completed rename looks like - made this check compare the file's absence against a table
+    # that states the deployed limits, and it failed on every clean checkout: the table says
+    # 25,000 / 90,000 and the defaults are 5,000 / 20,000.
+    #
+    # The condition is therefore the presence of a project setting *in the environment*, which is
+    # what `from_env()` reads, rather than the presence of a file on disk. A machine with no
+    # operator environment at all still skips, as it should.
+    if not any(k.startswith("AUTOPOIESIS_") for k in os.environ):
         return Result(
             "status-states-only-fixed-facts", PASS,
             "no counter that moves in STATUS.md; the fixed table is checked against the "
-            "configuration only where an operator env file exists",
+            "configuration only where an operator environment is loaded",
         )
 
     for symbol in sorted(config.allowlist):
@@ -1796,15 +1807,15 @@ def check_one_credentials_path_everywhere() -> Result:
     """Every entry point and document must resolve the credentials file the same way.
 
     Three destinations were documented and two of them were wrong on this host. The Makefile
-    used `$(XDG_CONFIG_HOME)/min-agent/env`, which becomes `/min-agent/env` when
+    used a path that became `/autopoiesis/env` when
     `XDG_CONFIG_HOME` is unset; `minictrl` used `${XDG_CONFIG_HOME:-$HOME/.config}/...`;
-    `configs/paper.env.example` and the operator runbook both hardcoded `~/.config/min-agent`.
+    `configs/paper.env.example` and the operator runbook both hardcoded an absolute path.
     Here `XDG_CONFIG_HOME` points at a non-default directory and
-    `~/.config/min-agent` does not exist - so following the example put the credentials
+    that path does not exist - so following the example put the credentials
     somewhere nothing reads them, and the operator's first symptom would be "no credentials"
     with no indication where they had been written.
 
-    The resolution is one expression, `$XDG_CONFIG_HOME/min-agent/env` with a `$HOME/.config`
+    The resolution is one expression, `$XDG_CONFIG_HOME/autopoiesis/env` with a `$HOME/.config`
     fallback, and this checks that all four agree on it.
     """
     patterns = {
@@ -1830,7 +1841,7 @@ def check_one_credentials_path_everywhere() -> Result:
         # `.` was in this list and matched every sentence containing a filename, so a prose line
 # describing the path satisfied the check on its own.
         # Either an instruction or the assignment that defines the path. The Makefile sets
-        # `ENVFILE ?= .../min-agent/env` and only `include`s the variable, so a version of
+        # `ENVFILE ?= .../autopoiesis/env` and only `include`s the variable, so a version of
         # this that required a shell verb found nothing in the Makefile and, once that was
         # made a failure rather than a pass, failed on the one entry point that is correct.
         verbs = re.compile(
@@ -1968,17 +1979,13 @@ def check_config_example_covers_every_variable() -> Result:
     # is the check working - so `fields` is gone and the scan below stands on its own.
     loader = (SRC / "autopoiesis" / "config.py").read_text(encoding="utf-8")
     # The loader names its settings with the current prefix, so a scan of the loader sees the
-    # names the example must document. The retired `MIN_AGENT_` prefix is accepted as documented
-    # too - it is read for the migration window and `config.assert_not_legacy_only` refuses a
-    # half-migration - but it is no longer what the loader's read sites say, so scanning for it
-    # alone was what this check did while the loader had already moved: it derived its "read"
-    # set from a prefix the code no longer contained and passed a file documenting names nothing
-    # reads. An earlier version of the opposite mapping (`documented |= {name.replace(...)}`)
-    # had the same shape of bug.
+    # The loader names its settings with the project prefix and nothing else, so the scan below
+    # sees the names the example must document. One prefix, one set of names: an earlier version
+    # also accepted a retired spelling as documented, and so passed a file documenting names
+    # nothing read.
     read = set(re.findall(r'"(AUTOPOIESIS_[A-Z0-9_]+)"', loader)) | set(
         re.findall(r'"(ALPACA_[A-Z0-9_]+)"', loader)
     ) | set(re.findall(r'"(APCA_[A-Z0-9_]+)"', loader)) | set(re.findall(r'"(OLLAMA_[A-Z0-9_]+)"', loader))
-    documented |= {name.replace("AUTOPOIESIS_", "MIN_AGENT_") for name in documented}
     missing = sorted(read - documented)
     if missing:
         return Result(
@@ -2002,8 +2009,8 @@ def check_config_example_names_are_real() -> Result:
 
     `config.py` is not the only reader, and assuming it was made this check host-dependent
     in the worst possible way. The env file is dual-purpose: `minictrl` sources the same file
-    before it ever calls `python -m autopoiesis.cli`, and reads MIN_AGENT_ENVBIN out of it to
-    find the environment's bin directory. `MIN_AGENT_ENVBIN` is set in the deployed env file
+    before it ever calls `python -m autopoiesis.cli`, and reads AUTOPOIESIS_ENVBIN out of it to
+    find the environment's bin directory. `AUTOPOIESIS_ENVBIN` is set in the deployed env file
     on this host and is absent from config.py, so documenting it made this check pass *only
     because the env file happened to be present* - and a fresh clone, which is exactly where
     someone reads the example, would have reported a live knob as dead and sent them to delete
@@ -2012,7 +2019,7 @@ def check_config_example_names_are_real() -> Result:
     example = ROOT / "configs" / "paper.env.example"
     if not example.exists():
         return Result("config-example-names", FAIL, "configs/paper.env.example is missing")
-    names = set(re.findall(r"^(MIN_AGENT_[A-Z_]+|ALPACA_[A-Z_]+|OLLAMA_BASE_URL)=", example.read_text(), re.M))
+    names = set(re.findall(r"^(AUTOPOIESIS_[A-Z_]+|ALPACA_[A-Z_]+|OLLAMA_BASE_URL)=", example.read_text(), re.M))
     if not names:
         return Result("config-example-names", FAIL, "no variable names found in the example")
     known = (ROOT / "src" / "autopoiesis" / "config.py").read_text(encoding="utf-8")
@@ -2148,7 +2155,7 @@ def check_the_running_daemon_matches_the_worktree() -> Result:
         return Result(
             "daemon-source-matches-worktree", FAIL,
             f"the daemon reports fingerprint {recorded} but src/autopoiesis is now {current}"
-            f" - it is running superseded code; systemctl --user restart min-agent.service",
+            f" - it is running superseded code; systemctl --user restart autopoiesis.service",
         )
     return Result(
         "daemon-source-matches-worktree", PASS,
@@ -2176,7 +2183,7 @@ def check_units_are_where_systemd_looks() -> Result:
     runtime = f"/run/user/{os.getuid()}"
     problems: list[str] = []
 
-    for unit in ("min-agent.service", "ollama.service", "quant-watchdog.timer"):
+    for unit in ("autopoiesis.service", "ollama.service", "quant-watchdog.timer"):
         try:
             proc = subprocess.run(
                 ["systemctl", "--user", "show", unit, "-p", "FragmentPath", "--value"],
@@ -2223,7 +2230,7 @@ def check_units_are_where_systemd_looks() -> Result:
     # So the path each unit will actually execute is resolved and checked for
     # existence, because a durable unit that cannot start is a reboot away from
     # discovering it.
-    for unit in ("min-agent.service", "ollama.service", "quant-watchdog.service"):
+    for unit in ("autopoiesis.service", "ollama.service", "quant-watchdog.service"):
         try:
             proc = subprocess.run(
                 ["systemctl", "--user", "show", unit, "-p", "ExecStart", "--value"],
@@ -2776,13 +2783,6 @@ def check_shadow_live_consistency() -> Result:
     rc, out = _run([sys.executable, "-c", (
         "import os, sys\n"
         "sys.path.insert(0, 'src')\n"
-        # Set under the current prefix, and clear the retired one. Setting only the legacy name
-        # used to work because the loader read it first; it does not any more, so a check that
-        # set only `MIN_AGENT_MODE` was measuring nothing while looking like it measured
-        # something - and it went red on a healthy system, which is the failure mode that
-        # teaches people to ignore a red gate. Clearing both directions keeps the test about
-        # one variable.
-        "os.environ.pop('MIN_AGENT_MODE', None)\n"
         "os.environ['AUTOPOIESIS_MODE'] = 'live'\n"
         "from autopoiesis.config import AgentConfig\n"
         "try:\n"
