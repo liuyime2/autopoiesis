@@ -41,8 +41,10 @@ STRATEGIES = ROOT / "runtime" / "autopoiesis" / "strategies"
 
 NAV = (
     ("index", "Overview"),
+    ("portfolio", "Portfolio & Risk"),
     ("decisions", "Decisions"),
     ("strategies", "Strategies"),
+    ("system", "System"),
     ("evidence", "Evidence"),
 )
 
@@ -118,7 +120,7 @@ def _page(title: str, current: str, body: list[str]) -> str:
             f"<h2>{html.escape(title)}</h2>",
             *body,
             "</main>",
-            f"<footer>generated {now} UTC from {html.escape(str(JOURNAL.relative_to(ROOT)))} and the "
+            f"<footer>generated {now} from {html.escape(str(JOURNAL.relative_to(ROOT)))} and the "
             "same evaluator the CLI uses. A number that cannot be computed reads UNKNOWN, which is a "
             "different claim from zero.</footer>",
             "</body></html>",
@@ -154,6 +156,9 @@ class Snapshot:
     heartbeat: dict
     agent: dict
     model_registry: str | None
+    positions: list[dict]
+    limits: dict
+    journal_state: dict
 
 
 def _read_journal_records() -> tuple[list[dict], list[dict]]:
@@ -201,8 +206,85 @@ def _read_strategies() -> list[dict]:
     return out
 
 
+def _open_positions() -> list[dict]:
+    """Open lots with the exposure they represent, from the same evaluator `make benchmark` uses.
+
+    Not re-derived in the browser, and not read from a broker: the panel is read-only and has no
+    order path, so what it shows is what the journal's own ledger says. The same evaluator call
+    backs the benchmark's headline, so a page cannot report an exposure the CLI disagrees with.
+    """
+    try:
+        from autopoiesis.broker_evidence import latest_evidence_batch
+        from autopoiesis.config import AgentConfig
+        from autopoiesis.evaluator import _pnl_evidence, confirmed_fill_activities
+        from autopoiesis.journal import JsonlJournal
+
+        config = AgentConfig.from_env()
+        journal = JsonlJournal(config.journal_path)
+        records = journal.read_all()
+        evidence = latest_evidence_batch(journal)
+        if not records or evidence is None:
+            return []
+        pnl = _pnl_evidence(records, evidence, confirmed_fill_activities(journal, records))
+        out: list[dict] = []
+        for strategy_id, peak in sorted(pnl.strategy_peak_exposure.items(), key=lambda kv: -kv[1]):
+            out.append({
+                "strategy_id": strategy_id,
+                "peak_exposure": peak,
+                "realized_pnl": pnl.strategy_realized_pnl.get(strategy_id, 0.0),
+                "fees": pnl.strategy_fees.get(strategy_id, 0.0),
+                "assumed_cost": pnl.assumed_cost.get(strategy_id, 0.0),
+            })
+        return out
+    except Exception:
+        return []
+
+
+def _limits() -> dict:
+    """The hard limits in force, which is the config the daemon is running with."""
+    try:
+        config = AgentConfig.from_env()
+        return {
+            "mode": config.mode,
+            "allowlist": sorted(config.allowlist),
+            "universe": config.universe,
+            "max_position_value": config.max_position_value,
+            "max_total_exposure": config.max_total_exposure,
+            "max_daily_loss": config.max_daily_loss,
+            "max_trades_per_day": config.max_trades_per_day,
+            "min_confidence": config.min_confidence,
+            "max_account_value": config.max_account_value,
+        }
+    except Exception:
+        return {}
+
+
+def _journal_state() -> dict:
+    """The size and the shape of the record, live file and archive alike.
+
+    Reportable here because it is the one number that decides whether every other number on
+    these pages is about the whole record or about a fragment of it. `stats()` carries the
+    archive count and bytes precisely so a reader of the live file's utilization knows most of
+    the record is one directory over.
+    """
+    try:
+        from autopoiesis.journal import JsonlJournal
+
+        stats = JsonlJournal(JOURNAL).stats()
+        return {
+            "generations": stats.get("archive_generations", 0),
+            "archive_dir": stats.get("archive_dir"),
+            "archive_bytes": stats.get("archive_bytes", 0),
+            "live_bytes": stats.get("bytes", 0),
+            "live_lines": stats.get("lines", 0),
+            "max_bytes": stats.get("max_bytes"),
+        }
+    except Exception:
+        return {}
+
+
 def load_snapshot() -> Snapshot:
-    """One read of everything the four pages need, taken at one instant."""
+    """One read of everything the six pages need, taken at one instant."""
     cycles, events = _read_journal_records()
     _verdict, agent = _benchmark_verdict()
     registry, _ = _pick_model_registry()
@@ -215,6 +297,9 @@ def load_snapshot() -> Snapshot:
         heartbeat=_heartbeat(),
         agent=agent,
         model_registry=registry,
+        positions=_open_positions(),
+        limits=_limits(),
+        journal_state=_journal_state(),
     )
 
 
@@ -271,7 +356,7 @@ def _benchmark_verdict() -> tuple[str | None, dict]:
         return None, {}
 
 
-# --- the four pages --------------------------------------------------------------------------
+# --- the pages --------------------------------------------------------------------------
 
 
 def _daemon_state(snapshot: Snapshot) -> str:
@@ -419,6 +504,153 @@ def strategies(snapshot: Snapshot) -> list[str]:
     return body
 
 
+
+def portfolio(snapshot: Snapshot) -> list[str]:
+    """What is exposed, against the limits that bound it.
+
+    The two missing pages the plan asked for. Exposure is drawn from the evaluator's own lot
+    ledger - the same numbers the benchmark headline uses - and each limit shown beside it is the
+    one in force, read from the config the daemon runs with. A limit printed without the value it
+    constrains is a claim that cannot be checked, which is what the overview page could only do.
+
+    No page here can place an order, and none of this is a broker read: the panel has no order
+    path and no credentials, so what it shows is the ledger's view of the account, not the
+    broker's.
+    """
+    limits = snapshot.limits
+    agent = snapshot.agent
+    body = ["<h2>Exposure against the limits in force</h2>"]
+    if not limits:
+        body.append('<p class="note">The configuration could not be read, so the limits in force '
+                    "are UNKNOWN. A page that prints a limit it did not read is worse than one "
+                    "printing nothing.</p>")
+    else:
+        rows = [
+            ("mode", limits.get("mode"), None),
+            ("universe", limits.get("universe"), None),
+            ("max position value", limits.get("max_position_value"), "per position"),
+            ("max total exposure", limits.get("max_total_exposure"), "all positions"),
+            ("max daily loss", limits.get("max_daily_loss"), "account"),
+            ("max trades per day", limits.get("max_trades_per_day"), "account"),
+            ("min confidence", limits.get("min_confidence"), "decision gate"),
+            ("max account value", limits.get("max_account_value"), "0 = off, set deliberately"),
+        ]
+        body.append("<table><tr><th>limit</th><th>value</th><th>applies to</th></tr>")
+        for label, value, scope in rows:
+            shown = "unset" if value == 0 else _cell(value)
+            # `--`, not UNKNOWN. UNKNOWN is the page's promise that a number could not be
+            # computed, and a scope that does not apply is a different statement: printing it as
+            # UNKNOWN would make "mode has no applicable scope" read as "this value is missing".
+            body.append(f"<tr><td>{label}</td><td>{shown}</td><td>{scope or '&mdash;'}</td></tr>")
+        body.append("</table>")
+        if limits.get("allowlist"):
+            body.append(f'<p class="note">allowlist: '
+                        f"{html.escape(', '.join(limits['allowlist']))}</p>")
+
+    body.append("<h2>Capital deployed, and what it returned</h2>")
+    positions = snapshot.positions
+    if not positions:
+        body.append('<p class="note">No lots on this record, so there is no exposure to report. '
+                    "That is UNKNOWN, not zero.</p>")
+    else:
+        body.append("<table><tr><th>strategy</th><th>peak exposure</th><th>realized</th>"
+                    "<th>assumed cost</th></tr>")
+        for row in positions:
+            body.append(
+                f"<tr><td>{_cell(row['strategy_id'])}</td>"
+                f"<td>{row['peak_exposure']:,.2f}</td>"
+                f"<td>{row['realized_pnl']:+,.2f}</td>"
+                f"<td>{row['assumed_cost']:,.2f}</td></tr>"
+            )
+        body.append("</table>")
+        total = sum(r["peak_exposure"] for r in positions)
+        body.append(f'<p class="note">Peak exposure across {len(positions)} strategies: '
+                    f"{total:,.2f}. This is the denominator the agent-level return uses, so the "
+                    f"two pages cannot disagree about the capital.</p>")
+        if agent:
+            body.append(f'<p class="note">Agent return on deployed capital, after cost: '
+                        f"{_cell(agent.get('return_pct'))}%</p>")
+
+    if limits and positions:
+        exposure_cap = float(limits.get("max_total_exposure") or 0)
+        if exposure_cap > 0:
+            used = sum(r["peak_exposure"] for r in positions)
+            body.append(f'<p class="note">Peak exposure {used:,.2f} against the configured cap '
+                        f"{exposure_cap:,.2f} - {used / exposure_cap:.0%} of it, on the worst "
+                        "peak of the record rather than on today.</p>")
+    body.append('<p class="note">Drawdown is not shown. The record has no equity curve to draw '
+                "down from - it is a set of discrete paper cycles - and a page that manufactured "
+                "one from realized PnL alone would be reporting a number that moves with the "
+                "timing of closes rather than with risk.</p>")
+    return body
+
+
+def system(snapshot: Snapshot) -> list[str]:
+    """Whether the system is actually running, and whether the record behind these pages is whole.
+
+    The other missing page. Everything on it is either a recorded fact from the heartbeat or a
+    measurement of the files, because a page that infers liveness from a status field is the
+    failure the overview's daemon row used to have.
+    """
+    beat = snapshot.heartbeat
+    state = snapshot.journal_state
+    body = ["<h2>Is it running?</h2>"]
+    body.append('<dl class="kv">')
+    body.append(f"<div><dt>daemon</dt><dd>{_badge(_daemon_state(snapshot))}</dd></div>")
+    body.append(f"<div><dt>daemon pid</dt><dd>{_cell(beat.get('pid'))}</dd></div>")
+    body.append(f"<div><dt>cycles recorded</dt><dd>{_cell(len(snapshot.cycles))}</dd></div>")
+    body.append(f"<div><dt>cycle errors</dt><dd>{_cell(beat.get('error_count'))}</dd></div>")
+    active = beat.get("active_strategy_id")
+    body.append(f"<div><dt>active strategy</dt><dd>{_cell(active)}</dd></div>" if active
+                else "<div><dt>active strategy</dt><dd>none selected</dd></div>")
+    body.append("</dl>")
+    body.append(f'<p class="note">Source fingerprint {_cell(beat.get("source_fingerprint"))} — the '
+                "hash of the code that wrote the last heartbeat, so a page generated by one "
+                "revision cannot be read as describing another.</p>")
+
+    body.append("<h2>Is the record whole?</h2>")
+    if not state:
+        body.append('<p class="note">The journal could not be measured, so its extent is '
+                    "UNKNOWN.</p>")
+    else:
+        generations = int(state.get("generations") or 0)
+        archived = int(state.get("archive_bytes") or 0)
+        live = int(state.get("live_bytes") or 0)
+        body.append("<table><tr><th>what</th><th>value</th></tr>")
+        body.append(f"<tr><td>cycles this page can see</td><td>{len(snapshot.cycles)}</td></tr>")
+        body.append(f"<tr><td>live journal</td><td>{live / 1e6:,.1f} MB over "
+                    f"{state.get('live_lines')} lines</td></tr>")
+        body.append(f"<tr><td>archived generations</td><td>{generations}</td></tr>"
+                    + (f" (+{archived / 1e6:,.1f} MB)" if archived else ""))
+        body.append("</table>")
+        if generations == 0 and archived == 0:
+            body.append('<p class="note">No generation has reached the rotation horizon yet on '
+                        "this host, so the archive is empty. When one does it is moved rather "
+                        "than deleted, and <code>history_paths()</code> reads it first.</p>")
+        else:
+            body.append(f'<p class="note">{archived / 1e6:,.1f} MB of the record sits in '
+                        f"{html.escape(str(state.get('archive_dir') or ''))}, read through the "
+                        "journal's own generation list rather than ignored.</p>")
+        body.append('<p class="note">There is no copy anywhere else. Everything above the '
+                    "journal lives on this machine only, and no page or test claims otherwise."
+                    "</p>")
+
+    body.append("<h2>What the timing units say</h2>")
+    body.append("<table><tr><th>unit</th><th>schedule</th></tr>")
+    for unit, schedule in (
+        ("autopoiesis.service", "the paper-trading daemon, always on"),
+        ("quant-watchdog.timer", "every 10 minutes"),
+        ("quant-report.timer", "Mon..Fri 16:30 America/New_York"),
+        ("quant-research.timer", "daily 06:30 UTC, jittered 30 minutes"),
+    ):
+        body.append(f"<tr><td>{html.escape(unit)}</td><td>{html.escape(schedule)}</td></tr>")
+    body.append("</table>")
+    body.append('<p class="note">State of these units is not read here: this page is generated '
+                "without a shell, so it cannot ask systemd, and a page that guessed would be "
+                "reporting a fact it did not check. Run <code>./autopoiesis service</code>."
+                "</p>")
+    return body
+
 def evidence(snapshot: Snapshot) -> list[str]:
     verdict = None
     if snapshot.agent:
@@ -486,8 +718,10 @@ def main(argv: list[str]) -> int:
     snapshot = load_snapshot()
     pages = {
         "index": ("Overview", "index", overview(snapshot)),
+        "portfolio": ("Portfolio & Risk", "portfolio", portfolio(snapshot)),
         "decisions": ("Decisions", "decisions", decisions(snapshot)),
         "strategies": ("Strategies", "strategies", strategies(snapshot)),
+        "system": ("System", "system", system(snapshot)),
         "evidence": ("Evidence", "evidence", evidence(snapshot)),
     }
     for name, (title, _current, body) in pages.items():

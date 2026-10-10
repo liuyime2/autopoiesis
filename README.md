@@ -155,9 +155,23 @@ the `status` word the file carries, which is a record of what it was rather than
 `PAUSED` is described as a holding pattern the loop reopens, because the daemon returns a paused
 strategy to probation on journalled evidence, and the page used to call it terminal.
 
-**What it does not have:** a portfolio-and-risk page and a system page. Position-level exposure,
-drawdown and the per-strategy PnL are available from `make benchmark` and `make doctor`, not from
-these pages, and no test claims otherwise.
+**Portfolio & Risk** prints the limits in force beside the exposure they bound — peak exposure
+45,233.90 against a configured 90,000, per strategy, with realized PnL and the assumed cost the
+evaluator charges — and the per-strategy capital is the denominator the agent-level return uses,
+so the page and `make benchmark` cannot disagree about the capital. It does **not** print a
+drawdown: the record is discrete paper cycles with no equity curve behind it, and a drawdown
+manufactured from realized PnL alone would move with the timing of closes rather than with risk.
+
+**System** prints whether the daemon is running judged by age and pid, the source fingerprint of
+the code that wrote the heartbeat, and how much of the record these pages can see — the live
+journal's size, the archive's generations and bytes, and the statement that there is no copy
+anywhere else. It does not print the state of the systemd units: the generator runs without a
+shell and cannot ask systemd, and a page that guessed would be reporting a fact it had not
+checked.
+
+**Not accepted as a front end.** There is no test in a browser, no accessibility audit and no
+responsive check beyond the stylesheet's media query; the pages are a snapshot, not a deployed
+site, and they are not published anywhere.
 
 ### The VIX floor, stated as what it measured
 
@@ -243,7 +257,7 @@ Every task is a `make` target.
 | `make doctor` | health of the running system | yes |
 | `make benchmark` | each strategy against SPY buy-and-hold, same capital and window; exit 0 ahead / 1 behind / 2 nothing to measure | journal |
 | `make daily-report` | one trading day's validation report (`DATE=YYYY-MM-DD`) | journal |
-| `make status-page` | a read-only static snapshot: overview, decisions, strategies, evidence | journal |
+| `make status-page` | a read-only static snapshot: overview, portfolio & risk, decisions, strategies, system, evidence | journal |
 | `make pipeline` | validate-data → test → evaluate → reproduce | journal |
 | `make reproduce` | record commit, config, versions and metrics for a run | no |
 

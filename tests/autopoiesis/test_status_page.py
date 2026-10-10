@@ -208,3 +208,105 @@ def test_pages_are_written_atomically(tmp_path):
         text = page.read_text(encoding="utf-8")
         assert text.rstrip().endswith("</html>")
         assert 'href="index.html"' in text and 'href="evidence.html"' in text
+
+
+def test_the_portfolio_page_shows_the_capital_the_benchmark_divides_by(tmp_path):
+    """The denominator, on a page, from the same evaluator the CLI uses.
+
+    Before these two pages existed, exposure and per-strategy return were available only by
+    running `make benchmark`, so a reader of the panel had the agent's return percentage and no
+    way to check what it was a return *on*. The number is the evaluator's own `strategy_peak_exposure`
+    sum, so a page and the CLI cannot disagree about the capital.
+    """
+    module = _load_module()
+    runtime = _scratch(tmp_path, rotations=1)
+    _point(module, runtime)
+
+    positions = module._open_positions()
+    limits = module._limits()
+    body = "".join(module.portfolio(module.load_snapshot()))
+
+    # The config is the one in force, not the example file's default.
+    assert limits["mode"] == "paper"
+    assert limits["max_position_value"] > 0
+    # A limit printed without the value it constrains is a claim that cannot be checked.
+    assert "max position value" in body and f"{limits['max_position_value']}" in body
+    # Whatever the record holds, the page says it rather than printing an empty table as a fact.
+    if positions:
+        total = sum(r["peak_exposure"] for r in positions)
+        assert f"{total:,.2f}" in body
+
+
+def test_the_portfolio_page_refuses_to_invent_a_drawdown(tmp_path):
+    """There is no equity curve, so there is nothing to draw down from.
+
+    The record is discrete paper cycles. Manufacturing a drawdown from realized PnL alone would
+    report a number that moves with the timing of closes rather than with risk - the same class
+    of error as charging cost on realized leg only, where the quantity exists and the meaning
+    does not.
+    """
+    module = _load_module()
+    runtime = _scratch(tmp_path, rotations=1)
+    _point(module, runtime)
+
+    body = "".join(module.portfolio(module.load_snapshot())).lower()
+    assert "drawdown" in body, "the page must say why it does not show one"
+    assert "no equity curve" in body
+    assert "max_drawdown" not in body and "drawdown:</" not in body
+
+
+def test_the_system_page_reports_the_record_extent_including_the_archive(tmp_path):
+    """How much of the record the other pages can see, said plainly.
+
+    `stats()` carries the archive count and bytes precisely so a reader of the live file's
+    utilization knows most of the record is one directory over.
+    """
+    module = _load_module()
+    runtime = _scratch(tmp_path, rotations=2)
+    _point(module, runtime)
+
+    snapshot = module.load_snapshot()
+    body = "".join(module.system(snapshot))
+    assert "cycles this page can see" in body
+    assert "archived generations" in body
+    # The daemon row is the same age-and-pid judgement as the overview's, not the status word.
+    assert module._daemon_state(snapshot) in body
+    # And it does not claim a systemd state it cannot read without a shell.
+    assert "not read here" in body
+
+
+def test_a_null_active_strategy_reads_as_none_selected_not_as_unknown(tmp_path):
+    """`active_strategy_id: null` is "no strategy is selected now", not a number that failed.
+
+    The page's footer promises that a value which cannot be computed reads UNKNOWN. A field the
+    daemon deliberately leaves null is a different statement, and printing it as UNKNOWN would
+    make "nothing is active" read as "this value is missing".
+    """
+    module = _load_module()
+    runtime = _scratch(tmp_path, rotations=1)
+    _point(module, runtime)
+    (runtime / "heartbeat.json").write_text(json.dumps({
+        "status": "RUNNING", "timestamp": datetime.now(timezone.utc).isoformat(),
+        "pid": os.getpid(), "active_strategy_id": None, "cycle_count": 3,
+    }), encoding="utf-8")
+
+    body = "".join(module.system(module.load_snapshot()))
+    assert "none selected" in body
+    assert "active strategy</dt><dd>UNKNOWN" not in body
+
+
+def test_all_six_pages_are_written_and_navigable(tmp_path):
+    module = _load_module()
+    runtime = _scratch(tmp_path, rotations=1)
+    _point(module, runtime)
+    assert module.main([]) == 0
+    site = module.OUT_DIR
+    assert sorted(p.name for p in site.glob("*.html")) == [
+        "decisions.html", "evidence.html", "index.html",
+        "portfolio.html", "strategies.html", "system.html",
+    ]
+    # Every page links every other page: nav is generated once from NAV, and a page whose nav
+    # pointed at a file that does not exist is what the atomic write fixed.
+    index_text = (site / "index.html").read_text(encoding="utf-8")
+    for target in ("index", "portfolio", "decisions", "strategies", "system", "evidence"):
+        assert f'href="{target}.html"' in index_text
