@@ -26,6 +26,33 @@ BEHAVIOUR_BARS = 120
 MIN_BEHAVIOUR_BARS = 40
 
 
+def _trade_time(trade) -> datetime | None:
+    """The trade's own timestamp, in UTC, or None if the broker did not send one.
+
+    Alpaca reports it under `t` (the raw field) with `timestamp` holding the same value on some
+    client versions; both are tried because guessing which one this client populates costs a cycle
+    and getting it wrong silently drops the check.
+    """
+    for attr in ("t", "timestamp"):
+        value = getattr(trade, attr, None)
+        if value is None and isinstance(trade, dict):
+            value = trade.get(attr)
+        if value is None:
+            continue
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        # alpaca's raw JSON uses epoch nanoseconds for `t`
+        if isinstance(value, (int, float)) and value > 1e17:
+            return datetime.fromtimestamp(value / 1e9, tz=timezone.utc)
+    return None
+
+
 class BrokerDataUnavailable(RuntimeError):
     """Broker state could not be read.
 
@@ -66,7 +93,7 @@ class AlpacaDataGateway:
         symbol = symbol.upper()
         clock = self.client.get_clock()
         account = self.client.get_account()
-        last_price = self._latest_price(symbol)
+        last_price, price_time = self._latest_price(symbol)
 
         equity = float(account.equity)
         portfolio_value = float(account.portfolio_value)
@@ -88,6 +115,10 @@ class AlpacaDataGateway:
             timestamp=timestamp,
             market_open=bool(clock.is_open),
             last_price=last_price,
+            # When the price itself printed, kept rather than discarded. The Guardian compares
+            # both this and the broker's clock, because a fresh clock over an hour-old quote used
+            # to pass the staleness check - and every risk figure is computed from that quote.
+            quote_time=price_time,
             source="alpaca",
             account=AccountSnapshot(
                 equity=equity,
@@ -374,12 +405,25 @@ class AlpacaDataGateway:
         self._news_cache[symbol] = tuple(out)
         return tuple(out)
 
-    def _latest_price(self, symbol: str) -> float:
+    def _latest_price(self, symbol: str) -> tuple[float, datetime | None]:
+        """The price and when it printed.
+
+        The timestamp used to be thrown away. That is not tidiness: the snapshot's own `timestamp`
+        comes from the broker's *clock*, so with the trade time discarded nothing downstream could
+        tell a fresh clock over a stale quote from a fresh quote - and the Guardian's staleness check
+        compared only the clock. Under a widened universe a thinly traded symbol's last print can lag
+        the clock by an hour, and every figure derived from it is then wrong in the flattering
+        direction.
+
+        Returns `None` for the time when the broker does not report one, which the Guardian treats as
+        "nothing to check" rather than as stale: a source without trade timestamps must not stop
+        trading.
+        """
         trade = self.client.get_latest_trade(symbol)
         price = getattr(trade, "price", None) or getattr(trade, "p", None)
         if price is None:
             raise BrokerDataUnavailable(f"Alpaca returned no latest trade price for {symbol}")
-        return float(price)
+        return float(price), _trade_time(trade)
 
     def _safe_float(self, obj, attr: str) -> float | None:
         value = getattr(obj, attr, None)

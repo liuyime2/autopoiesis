@@ -74,7 +74,9 @@ def test_widening_loosens_the_universe_and_nothing_else(universe):
     big = _buy(qty=600)  # 600 x 50 = 30,000 against a 25,000 position cap
     assert "max_position_value" in g.review(big, _snap(positions=held), mode="paper", agent_position_quantity=10).reason
     old = datetime(2000, 1, 1, tzinfo=timezone.utc)
-    assert g.review(_buy(), _snap(positions=held, timestamp=old), mode="paper", agent_position_quantity=10).reason == "data snapshot is stale"
+    # The reason names the leg that is stale rather than the generic phrase, so an operator can act
+    # on it; the refusal itself is what this assertion is about.
+    assert "stale" in g.review(_buy(), _snap(positions=held, timestamp=old), mode="paper", agent_position_quantity=10).reason
 
 
 def test_the_exposure_cap_measures_the_whole_account_once_the_universe_is_wider():

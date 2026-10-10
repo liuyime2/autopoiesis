@@ -67,7 +67,7 @@ class Guardian:
             return GuardianResult(approved=False, reason=outside)
 
         if self._is_stale(snapshot, now=now):
-            return GuardianResult(approved=False, reason="data snapshot is stale")
+            return GuardianResult(approved=False, reason=self._stale_reason(snapshot, now=now))
 
         if decision.action == "HOLD":
             return GuardianResult(approved=True, reason="approved")
@@ -246,11 +246,54 @@ class Guardian:
         return GuardianResult(approved=True, reason="approved")
 
     def _is_stale(self, snapshot: DataSnapshot, *, now: datetime | None) -> bool:
+        """Is *either* the clock or the price too old to trade on?
+
+        `snapshot.timestamp` is the broker's clock. `snapshot.quote_time` is when the price itself
+        was observed, and it is the one that matters for every risk figure computed from that price:
+        position value, exposure, the `min_price` floor, and the volatility forecast's input. A
+        snapshot with a fresh clock and an hour-old price used to pass this check, and under a
+        widened universe that is reachable - a thinly traded $6 symbol's last print can be forty
+        minutes behind the clock, and every number derived from it is then wrong in the direction
+        that flatters a trade.
+
+        The two are checked separately and the reason names which one failed, because "data snapshot
+        is stale" against a clock that reads now is unactionable for an operator.
+        """
         current = now or datetime.now(timezone.utc)
-        timestamp = snapshot.timestamp
-        if timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=timezone.utc)
-        return (current - timestamp).total_seconds() > self.max_snapshot_age_seconds
+        for label, value in (("snapshot", snapshot.timestamp), ("price quote", snapshot.quote_time)):
+            if value is None:
+                continue  # nothing reported to check, which is not the same as stale
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            age = (current - value).total_seconds()
+            if age > self.max_snapshot_age_seconds:
+                return True
+            if age < -self.max_snapshot_age_seconds:
+                # A quote the broker dates ahead of now is not a reason to be more confident in it.
+                return True
+        return False
+
+    def _stale_reason(self, snapshot: DataSnapshot, *, now: datetime | None) -> str:
+        """Which of the two is stale, so a refusal an operator can act on."""
+        current = now or datetime.now(timezone.utc)
+        aged = []
+        for label, value in (("snapshot", snapshot.timestamp), ("price quote", snapshot.quote_time)):
+            if value is None:
+                continue
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            age = (current - value).total_seconds()
+            if abs(age) > self.max_snapshot_age_seconds:
+                aged.append((abs(age), label, age))
+        if not aged:
+            return "data snapshot is stale"
+        # The worst offender is named, so a refusal points at the thing an operator can act on.
+        # Ordering by the label instead would report "snapshot" whenever the clock was also stale,
+        # which is the wrong answer when the price is the one that has moved.
+        _, label, age = max(aged)
+        direction = "stale" if age > 0 else "in the future"
+        return (f"the {label} is {abs(age):.0f}s {direction}, beyond the "
+                f"{self.max_snapshot_age_seconds}s limit")
 
     def _outside_mandate(self, decision: TradeDecision, snapshot: DataSnapshot) -> str | None:
         """Why this symbol may not be traded, or None. The one place the universe is decided."""

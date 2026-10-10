@@ -199,6 +199,15 @@ class DataSnapshot(BaseModel):
     day_start_equity: float | None = None
     positions: tuple[PositionSnapshot, ...] = Field(default_factory=tuple)
     open_orders: tuple[OpenOrderSnapshot, ...] = Field(default_factory=tuple)
+    #: When the price itself was observed, as the broker reported it. `timestamp` above is the
+    #: broker's *clock*, which is a different fact: a cycle taken while the market is open against a
+    #: quote that printed an hour ago has a fresh clock and a stale price, and measuring only the
+    #: clock passes it. Measured 2026-10-09 - `_latest_price` kept the price and discarded the trade's
+    #: own timestamp, so this did not exist and nothing downstream could check it.
+    #:
+    #: Optional, because not every source reports one. An absent value is "nothing to check", not
+    #: "stale": a broker without trade timestamps must not stop trading.
+    quote_time: datetime | None = None
 
     @field_validator("symbol")
     @classmethod
