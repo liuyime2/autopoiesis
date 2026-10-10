@@ -91,6 +91,20 @@ of state is derived from it and can be regenerated. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the execution path, the evolution loop and
 which module owns which fact.
 
+Rotation is what keeps it that way. At 64 MiB a generation, the live file and its backups used to
+hold about ten days of this host's record, and the rotation after that unlinked the oldest
+generation — so the journal stopped being the record of everything that happened and became the
+record of the last ten days, while every figure derived from it (model calibration, the
+experiment chain, the strategy ledger) kept reporting a number computed from the fragment. A
+generation leaving the rotation horizon is now moved into `runtime/autopoiesis/journal-archive/`
+instead, and `JsonlJournal.history_paths()` — the one place that knows what a generation is —
+reads the archive first, oldest-first, so the reconstructed sequence is the original one.
+
+What that does not give you is a copy anywhere else. Everything above the journal still lives on
+this machine only; nothing in the project has shipped the record off it, and no test claims
+otherwise. If a rotation cannot write to the archive the append fails with the error rather than
+deleting the history to keep trading.
+
 ## What it has shown, and what it has not
 
 Everything in this section is reproducible: each figure names the command that produces it. The

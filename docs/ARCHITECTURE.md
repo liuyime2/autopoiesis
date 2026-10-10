@@ -303,6 +303,7 @@ execution and must be kept, not "fixed" by wiring research into production.
 | Path | Role | Regenerable |
 | --- | --- | --- |
 | `runtime/autopoiesis/journal.jsonl` | **source of truth**, append-only | no |
+| `runtime/autopoiesis/journal-archive/*.jsonl` | generations the rotation horizon rotated out | no |
 | `runtime/autopoiesis/strategies/*.json` | strategy specs + lifecycle | from journal + admission |
 | `runtime/autopoiesis/reflection.json` | 50-cycle evaluation snapshot | yes |
 | `runtime/autopoiesis/heartbeat.json` | liveness + source fingerprint | yes |
@@ -321,6 +322,23 @@ as a Python `repr`, so each line carries price, positions and account state inli
 I grepped `rotate` in `journal.py`, saw no match in the first pass, and concluded there was
 none. `_rotate_if_needed` exists and is called from `append` at line 156, with a `backups`
 count. This is bounded, not a leak.
+
+### The rotation horizon is an archive, not a deletion
+
+The same `backups` count is what made "the journal is the only source of truth" false in
+practice. A generation leaving the horizon was unlinked, so the journal held a rolling window
+of about ten days on this host and every figure derived from it kept returning a number computed
+from that window while reporting it as a total. `retained_window` and the doctor's WARN named the
+truncation after it had already happened.
+
+It now moves the generation to `runtime/autopoiesis/journal-archive/` with an `os.replace` —
+same filesystem, so there is no copy that could fail half-written and no moment when the history
+exists in only one place. `history_paths()` reads the archive first, oldest-first, so every
+reader (`read_all`, `last_n`, `count_submitted_on`, `replay_audit`, `check_runtime_integrity`)
+sees the reconstructed sequence rather than the fragment. A rotation that cannot write the
+archive raises, and the append that triggered it fails: the alternative is to catch the error
+and unlink the generation, which turns a loud "the disk is full" into a quiet "forty percent of
+the record is gone". The archive is on this machine only; nothing ships the record off it.
 
 ### Runtime directory pollution
 

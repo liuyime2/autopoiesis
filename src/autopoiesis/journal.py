@@ -45,6 +45,7 @@ class JsonlJournal:
         max_bytes: int = 64 * 1024 * 1024,
         backups: int = 3,
         lock: bool = True,
+        archive_dir: Path | str | None = None,
     ):
         self.path = Path(path)
         self.max_bytes = max_bytes
@@ -52,6 +53,17 @@ class JsonlJournal:
         self.use_lock = lock
         self.last_dropped_lines = 0
         self.last_dropped_samples: list[str] = []
+        # Where a generation goes when the rotation horizon reaches it. Same filesystem as the
+        # journal on purpose, so the move is an `os.replace` and not a copy: there is no window
+        # in which the history exists in only one of the two places.
+        #
+        # `None` means no archive, which is what it used to be unconditionally: the oldest
+        # generation was unlinked and the history was gone. See `_rotate_if_needed`.
+        self.archive_dir = (
+            Path(archive_dir)
+            if archive_dir is not None
+            else self.path.parent / "journal-archive"
+        )
 
     def append(self, record: CycleRecord) -> None:
         self._append_json(record.model_dump_json())
@@ -161,6 +173,7 @@ class JsonlJournal:
         size = self.path.stat().st_size
         with self._read_lock(), self.path.open("rb") as handle:
             lines = sum(chunk.count(b"\n") for chunk in iter(lambda: handle.read(1 << 20), b""))
+        archived = self._archive_paths()
         return {
             "exists": True,
             "path": str(self.path),
@@ -168,6 +181,14 @@ class JsonlJournal:
             "lines": lines,
             "max_bytes": self.max_bytes,
             "utilization": round(size / self.max_bytes, 6) if self.max_bytes else None,
+            # Beside the live file rather than inside it: a reader looking at the live file's
+            # utilization needs to know that the record it is looking at is not the whole one.
+            # Without these two, the fact that 195 MiB of history sits one directory over is
+            # invisible to every operator-facing surface, which is how a journal gets described
+            # as "the record" while most of the record is elsewhere.
+            "archive_dir": str(self.archive_dir),
+            "archive_generations": len(archived),
+            "archive_bytes": sum(p.stat().st_size for p in archived),
         }
 
     # --- internals -----------------------------------------------------------
@@ -182,14 +203,20 @@ class JsonlJournal:
         `count_submitted_on`, `replay_audit.py`, `check_runtime_integrity.py` - concluded
         the agent had never run a cycle. That is the failure this method exists to prevent.
 
+        The archive is read first, for the same reason. A generation the rotation horizon
+        archived is still part of the record; a `history_paths` that ignored it would
+        reintroduce the failure above in a place where it is much harder to see - the
+        record would shrink, the doctor would keep reporting a window, and nothing would
+        say the shrink happened.
+
         The journal is append-only and generations are strictly ordered by age, so reading
         oldest-first and in file order reconstructs the original sequence. A limit applied
         across the whole history still yields the most recent records, because the deque is
         filled in chronological order.
         """
+        paths = self._archive_paths()
         # `.N` holds the oldest generation, so the backups read in descending index order
         # (oldest first) and the live file comes last because it is the newest.
-        paths = []
         for index in range(self.backups, 0, -1):
             candidate = self.path.with_suffix(self.path.suffix + f".{index}")
             if candidate.exists():
@@ -197,6 +224,24 @@ class JsonlJournal:
         if self.path.exists():
             paths.append(self.path)
         return paths
+
+    def _archive_paths(self) -> list:
+        """Archived generations, oldest first.
+
+        The sequence number in the name is the rotation count at which the file was archived,
+        so sorting by name sorts by age and the original append order is reconstructed without
+        reading a single line. `r000000` is the oldest thing the journal ever held.
+
+        It assumes the archive directory keeps its contents in order, which is true for
+        everything the journal itself writes. An operator who moves an archived file by hand
+        can break the order, which is why these files are named for their rotation rather
+        than for their mtime: a rename that alters a number is visible, a rename that alters
+        only a timestamp is not.
+        """
+        if not self.archive_dir.exists():
+            return []
+        archived = sorted(self.archive_dir.glob("*.jsonl"))
+        return [p for p in archived if p.is_file()]
 
     def _scan(self, model, *, limit, keep=None):
         paths = self.history_paths()
@@ -260,16 +305,67 @@ class JsonlJournal:
             return
         if self.path.stat().st_size + incoming <= self.max_bytes:
             return
-        if self.backups <= 0:
-            self.path.unlink()
-            return
         oldest = self.path.with_suffix(self.path.suffix + f".{self.backups}")
-        oldest.unlink(missing_ok=True)
+        if self.backups <= 0:
+            # `backups = 0` asks the journal to keep nothing but the live file. That is a
+            # retention choice, not permission to destroy what is about to leave the horizon,
+            # so the live file is archived and a fresh one starts. Deleting it here is how
+            # this setting once turned "keep only the recent window" into "throw the record
+            # away", which no caller that passes 0 has ever asked for.
+            self._archive_generation(self.path)
+            return
+        if oldest.exists():
+            self._archive_generation(oldest)
         for index in range(self.backups - 1, 0, -1):
             source = self.path.with_suffix(self.path.suffix + f".{index}")
             if source.exists():
                 os.replace(source, self.path.with_suffix(self.path.suffix + f".{index + 1}"))
         os.replace(self.path, self.path.with_suffix(self.path.suffix + ".1"))
+
+    def _archive_generation(self, generation: Path) -> None:
+        """Move a generation that is leaving the rotation horizon into the archive.
+
+        It used to be `oldest.unlink(missing_ok=True)`, which is the whole of why the journal
+        was not the record the README claimed. Rotation at 64 MiB x 3 generations holds about
+        ten days of this host's record; the rotation after that deleted the oldest ten, and
+        every derived figure - model calibration, the experiment chain, the strategy ledger -
+        silently recomputed itself from the fragment that was left. `retained_window` and the
+        doctor's WARN named the truncation after it had already happened.
+
+        The move is `os.replace` into the archive directory on the same filesystem, so it is
+        atomic: the history is in both places until the move commits, and in one place after.
+        There is no copy that could fail half-written, and no window in which the record exists
+        nowhere.
+
+        When the archive cannot be written this raises and the append that triggered the
+        rotation fails with it. That is deliberate and it is the most important line here: the
+        alternative is to catch the error and delete the generation instead, which converts a
+        loud "the disk is full" into a quiet "forty percent of the record is gone". A daemon
+        that stops appending is recoverable by its operator; a daemon that destroys its own
+        history to keep trading is not recoverable at all.
+        """
+        self.archive_dir.mkdir(parents=True, exist_ok=True)
+        sequence = len([p for p in self._archive_paths() if p.is_file()])
+        while True:
+            target = self.archive_dir / f"r{sequence:06d}.jsonl"
+            if not target.exists():
+                break
+            sequence += 1
+        os.replace(generation, target)
+        # Durability of the move, not just of the write: without the directory fsync the rename
+        # can be visible while the new name is not yet on disk, and a crash at that moment
+        # leaves the generation under neither name.
+        try:
+            fd = os.open(self.archive_dir, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        except OSError:
+            # A filesystem that cannot fsync a directory still holds the rename in its cache.
+            # The record moved; failing the append over it would trade a real loss for a
+            # hypothetical one.
+            pass
 
     def _locked(self):
         """Exclusive, for appends."""

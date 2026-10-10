@@ -1,5 +1,7 @@
 from datetime import date, datetime, timezone
 
+import pytest
+
 from autopoiesis.journal import JsonlJournal
 from autopoiesis.models import (
     AccountSnapshot,
@@ -305,3 +307,77 @@ def test_retained_window_reports_the_span_and_says_when_older_cycles_are_gone(tm
 
     # Already running only since the oldest retained cycle: nothing was lost.
     assert journal.retained_window(known_since=base)["truncated"] is False
+
+
+def test_a_rotation_past_the_retention_horizon_archives_instead_of_deleting(tmp_path):
+    """The generation leaving the rotation horizon is the beginning of the whole record.
+
+    Rotation at 64 MiB x 3 holds about ten days of this host's record; the rotation after that
+    unlinked the oldest generation, and every derived figure - model calibration, the experiment
+    chain, the strategy ledger - silently recomputed itself from the fragment left behind.
+    `retained_window` named the truncation only after it had happened.
+
+    So past the horizon, the data must still be readable, and it must be readable *through the
+    journal's own readers* - which is the only reason the archive counts. A reader that ignored
+    the archive would reintroduce the defect that `history_paths` exists to prevent, in a place
+    where nothing shows it: the record would shrink while the doctor kept reporting a window.
+    """
+    cap = 4096
+    journal = JsonlJournal(tmp_path / "journal.jsonl", max_bytes=cap, backups=2)
+    sample = make_record("cycle-0")
+    per_record = len(sample.model_dump_json().encode("utf-8")) + 1
+    per_generation = max(1, cap // per_record)
+
+    # Keep appending until the rotation horizon is actually crossed, rather than assuming how
+    # many records fill a generation. The horizon is three rotations with `backups=2`: the
+    # first two shift `.1` to `.2` and create the backup set, the third is the one that used
+    # to unlink the oldest generation and delete the beginning of the record.
+    appended = 0
+    for generation in range(per_generation * 3 + 1):
+        for _ in range(per_generation):
+            journal.append(make_record(f"cycle-{appended}"))
+            appended += 1
+
+    archived = [p for p in journal.history_paths() if p.parent.name == "journal-archive"]
+    assert archived, (
+        f"crossed the retention horizon ({appended} records, {per_generation} per generation) "
+        "and nothing was archived"
+    )
+
+    records = journal.read_all()
+    assert len(records) == appended, (
+        f"past the retention horizon the journal lost records: wrote {appended}, "
+        f"read {len(records)}"
+    )
+    assert [r.cycle_id for r in records] == [f"cycle-{i}" for i in range(appended)], (
+        "the archived generation must be read first, so the original append order survives"
+    )
+    assert sum(p.stat().st_size for p in archived) == sum(
+        p.stat().st_size for p in (tmp_path / "journal-archive").glob("*.jsonl")
+    )
+
+
+def test_an_unwritable_archive_fails_the_append_rather_than_deleting_the_history(tmp_path):
+    """A rotation that cannot preserve what it is rotating must stop, not discard.
+
+    The tempting implementation catches the archive error and unlinks the generation instead -
+    "keep trading". That converts a loud "the disk is full" into a quiet "forty percent of the
+    record is gone", and it is unrecoverable: the history exists nowhere, and nothing downstream
+    can tell the difference between a short record and a destroyed one. A daemon that stops
+    appending is a page its operator can read; a daemon that destroys its own history to keep
+    running is not recoverable at all.
+    """
+    journal = JsonlJournal(tmp_path / "journal.jsonl", max_bytes=200, backups=1)
+    journal.append(make_record("cycle-0"))
+    # The rotation horizon, crossed on the next append, with the archive directory unusable.
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    journal.archive_dir = blocker
+
+    with pytest.raises((OSError, ValueError)):
+        for index in range(1, 60):
+            journal.append(make_record(f"cycle-{index}"))
+
+    # Whatever happened, the history must not have been destroyed on the way through.
+    survivors = [p for p in journal.history_paths() if p.stat().st_size > 0]
+    assert survivors, "the append failed and the record went with it"

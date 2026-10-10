@@ -232,7 +232,18 @@ def test_journal_rotation_preserves_recent_records(tmp_path):
 
     ids = {r.cycle_id for r in journal.read_all()}
     assert "c79" in ids
-    assert "c0" not in ids
+
+    # It used to also assert `"c0" not in ids` - that the oldest record is gone. With
+    # `backups=1` the second rotation unlinked the only backup, so the assertion held, and it
+    # held because the journal had destroyed the beginning of its own record.
+    #
+    # A generation leaving the rotation horizon is archived instead, so `c0` is still readable
+    # through the journal's own readers. That is the contract now, and it is asserted rather
+    # than assumed: the archive that nobody reads is the same data loss with extra steps.
+    assert "c0" in ids
+    assert [r.cycle_id for r in journal.read_all()] == [f"c{i}" for i in range(80)], (
+        "the archived generation must be read first, so the original append order survives"
+    )
 
 
 def test_journal_counts_corrupt_lines_instead_of_dropping_them_silently(tmp_path):

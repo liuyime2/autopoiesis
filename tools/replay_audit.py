@@ -63,7 +63,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 def load(path: Path):
     """Split the two record shapes by structure, not by a field that may not exist.
 
-    Reads every generation, via the journal's own history_paths(). This function opened only
+    Reads every generation, through `JsonlJournal.history_paths()`. This function opened only
     `path` while `replay_independently` used `JsonlJournal`, so the same file produced two
     different answers: after a rotation the independent path saw 1,048 cycles and this one
     saw 17. The audit then reported a data-provenance mismatch - "reported={'alpaca': 0}" -
@@ -72,13 +72,18 @@ def load(path: Path):
 
     The split stays structural rather than relying on a schema field, and the generations are
     concatenated oldest-first, so the reconstruction matches the original append order.
+
+    The index arithmetic this once did for itself has now diverged twice - it read only the live
+    file, and later it read the backups but not the archive - so the list comes from the one
+    place that knows what a generation is. A hand-written list is one rotation change away from
+    under-reporting the record, and this function's whole purpose is comparing two paths that
+    are supposed to see the same one.
     """
     cycles, events = [], []
-    generations = [path.with_suffix(path.suffix + f".{i}") for i in range(3, 0, -1)]
-    generations = [g for g in generations if g.exists()]
-    if path.exists():
-        generations.append(path)
-    for generation in generations:
+    from autopoiesis.journal import JsonlJournal
+
+    journal = JsonlJournal(path)
+    for generation in journal.history_paths():
         for line in generation.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line:

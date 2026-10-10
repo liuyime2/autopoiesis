@@ -32,7 +32,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-JOURNAL_BACKUPS = 3  # matches JsonlJournal's default `backups`
+from autopoiesis.journal import JsonlJournal
+
 RUNTIME = ROOT / "runtime" / "autopoiesis"
 # An exception list for runtime-state discrepancies that are real, already happened and cannot
 # be reconstructed. It records *runtime* facts - a strategy the daemon admitted and whose file is
@@ -87,15 +88,18 @@ def main(runtime: Path | None = None, findings: Path | None = None) -> int:
     problems: list[str] = []
     notes: list[str] = []
     journal_path = runtime / "journal.jsonl"
-    # Every generation, not just the live file. Rotation moves the record to `.1`; reading
-    # only `journal.jsonl` reported 17 lines and 0 cycles immediately after a rotation that
-    # had in fact preserved all 1,048, which turned a healthy deployment into a page of
+    # Every generation, through the journal's own reader. Rotation moves the record to `.1`;
+    # reading only `journal.jsonl` reported 17 lines and 0 cycles immediately after a rotation
+    # that had in fact preserved all 1,048, which turned a healthy deployment into a page of
     # findings about missing history.
-    generations = [journal_path.with_suffix(journal_path.suffix + f".{i}")
-                   for i in range(JOURNAL_BACKUPS, 0, -1)]
-    generations = [g for g in generations if g.exists()]
-    if journal_path.exists():
-        generations.append(journal_path)
+    #
+    # The index arithmetic used to be written out here, which fixed that instance and left the
+    # next one open: when the rotation horizon started archiving the oldest generation instead
+    # of unlinking it, this list - and `replay_audit.py`'s copy of it - would have reported
+    # "2060 cycles" over a record that held 26,000. `JsonlJournal.history_paths()` is the one
+    # place that knows what a generation is and where they all are, and a caller that builds
+    # its own list is one rotation change away from under-reporting the record.
+    generations = JsonlJournal(journal_path).history_paths()
     records, torn = [], 0
     for generation in generations:
         part, part_torn = _read_lines(generation)
