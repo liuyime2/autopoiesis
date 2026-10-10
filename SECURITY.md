@@ -5,7 +5,7 @@
 autopoiesis places orders against an Alpaca **paper** account. The security properties it
 claims are:
 
-- credentials are read only from `${XDG_CONFIG_HOME:-$HOME/.config}/autopoiesis/env` (the retired `min-agent` path is recognised only to refuse an unfinished migration), never
+- credentials are read only from `${XDG_CONFIG_HOME:-$HOME/.config}/autopoiesis/env` — one path, one prefix; there is no retired spelling to fall back to, never
   from the repository, and are never written to the journal, logs, or `doctor` output;
 - no order reaches the broker except through the Guardian, which has no bypass;
 - a non-paper base URL is refused before a broker client is constructed;

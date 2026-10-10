@@ -3,7 +3,7 @@
 Date: 2026-10-03
 Status: **DONE - implemented, measured, verified live, gated**
 Baseline commit for rollback: `3aafc18`
-Scope: `src/min_agent/daemon.py`, `tests/min_agent/test_daemon.py`, plus the figures three
+Scope: `src/autopoiesis/daemon.py`, `tests/autopoiesis/test_daemon.py`, plus the figures three
 documents quote.
 
 ---
@@ -114,7 +114,7 @@ COUNTERFACTUAL_EVALUATED rows written since restart: 0
 The old code wrote 720 on that same pass. The last full-ledger event is timestamped
 `15:19:44Z`, before the restart.
 
-Tests added to `tests/min_agent/test_daemon.py`:
+Tests added to `tests/autopoiesis/test_daemon.py`:
 
 | Test | Pins |
 |---|---|

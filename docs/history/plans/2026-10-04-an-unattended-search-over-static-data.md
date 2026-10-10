@@ -5,7 +5,7 @@ Status: **DONE - the search fetches and runs on a daily timer; it still finds no
 
 Baseline commit for rollback: `b8eb9c5`
 Scope: `tools/research.service.in`, `tools/research.timer`, `minictrl install-service`, and
-`src/min_agent/research/driver.py`. No change to production code, the daemon, any risk limit, or
+`src/autopoiesis/research/driver.py`. No change to production code, the daemon, any risk limit, or
 the production/research separation.
 
 > **Scope correction, recorded after writing it.** The first draft of this plan scoped out the
@@ -14,14 +14,14 @@ the production/research separation.
 > daily rolling fetch writes a *new* dated file every run and `_load_real_bars` - which took the
 > single largest file - would have pinned the search to whatever window happened to be widest,
 > permanently ignoring the newest tape. The driver now merges every cache file and deduplicates by
-> timestamp. That is inside `src/min_agent/research/`, which is not production: no top-level
-> `src/min_agent/*.py` module is touched, and `check_production_research_separation` is unaffected.
+> timestamp. That is inside `src/autopoiesis/research/`, which is not production: no top-level
+> `src/autopoiesis/*.py` module is touched, and `check_production_research_separation` is unaffected.
 
 ---
 
 ## 0. The question
 
-`2622bb3` made exploration unattended: `src/min_agent/research/driver.py` runs, sweeps, records
+`2622bb3` made exploration unattended: `src/autopoiesis/research/driver.py` runs, sweeps, records
 trials and returns verdicts with nobody deciding anything. But unattended is not the same as
 continuous, and the difference here is the dataset.
 
@@ -84,7 +84,7 @@ mean a broker outage silently stops research, which is the coupling being avoide
 | --- | --- |
 | The dataset is manual | a scheduled run leaving the cache's bar count unchanged with the fetch succeeding |
 | The unit is real | `systemd-analyze verify` rejecting it, or `systemctl --user` not seeing it |
-| No production change | `git diff --name-only` touching `src/min_agent/**` |
+| No production change | `git diff --name-only` touching `src/autopoiesis/**` |
 | The search still refuses to invent data | the service succeeding with an empty or missing cache |
 
 ## 4. Verification
@@ -98,7 +98,7 @@ mean a broker outage silently stops research, which is the coupling being avoide
 
 ## 5. Explicitly not in scope
 
-- Any change under `src/min_agent/`. The driver and the fetcher are already correct; only their
+- Any change under `src/autopoiesis/`. The driver and the fetcher are already correct; only their
   scheduling is missing.
 - Making the daemon persist prices, for the reasons in §1.
 - Changing the fetch window. The service fetches a rolling window ending today, which is what

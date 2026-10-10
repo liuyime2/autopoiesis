@@ -5,7 +5,7 @@ reports what is missing is better than one that quietly passes over the gap.
 
 ## 2026-10-01: one research trial record deleted
 
-**What was lost.** The last line of `runtime/min_agent/research_trials.jsonl`, a
+**What was lost.** The last line of `runtime/autopoiesis/research_trials.jsonl`, a
 walk-forward trial recorded at `2026-09-29T13:25:57` between
 `trend-follow-buy-005` (`.805622`) and `trend-follow-sell-001` (`.836556`). The ledger went
 from 27 records to 26.

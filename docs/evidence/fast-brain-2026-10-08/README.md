@@ -179,7 +179,7 @@ the recent trend, the more it reverses. The first half of the days gives -0.38, 
 -0.31, and the day-block bootstrap interval is -0.61 to -0.07, so it is not one day's accident.
 The mean next-4h return after `TRENDING_DOWN` is +0.60% (n = 40) and after `TRENDING_UP` +0.18%
 (n = 17). This is in-sample, on 15 overlapping days, before costs: a hypothesis to put through
-the walk-forward harness in `src/min_agent/research/`, not a rule to trade.
+the walk-forward harness in `src/autopoiesis/research/`, not a rule to trade.
 
 ## Decision for the system
 

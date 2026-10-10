@@ -34,7 +34,7 @@ fetch，因此不据此断言 GitHub 当前状态。
 ### 2.1 改名迁移的最后一层（计划 §4 P0-1/2/3/4）
 
 计划审查时 `make check`、`make smoke-offline`、`make run/stop` 三条都失败在已删除的
-`min_agent` 模块上。本轮全部修完：
+`autopoiesis` 模块上。本轮全部修完：
 
 ```
 $ make check
@@ -51,7 +51,7 @@ EXIT=0
 
 `make run / stop / restart` 此前指向 `min-agent.service`，而 `minictrl install-service` 渲染并启用
 的是 `autopoiesis.service` —— 文档里的控制命令指向一个安装器从不创建的 unit。三处 systemctl、
-`Makefile` 的 12 处 `runtime/min_agent`、CI 的 mypy 路径与 import、`ruff.toml` 的
+`Makefile` 的 12 处 `runtime/autopoiesis`、CI 的 mypy 路径与 import、`ruff.toml` 的
 `known-first-party`，一并改正。
 
 `tools/verify.py` 的指纹告警此前告诉 operator"重启 min-agent.service"，已改。

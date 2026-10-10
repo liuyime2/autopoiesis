@@ -53,10 +53,10 @@ Alpaca 明确说明 paper 不模拟市场冲击、延迟滑点等真实交易因
 
 | 优先级 | 证据 / 问题 | 最小修改方向 | 验收 |
 |---|---|---|---|
-| P0 | `make check` 旧路径 `src/min_agent` 报错 | 修 Makefile 和 CI 的当前包引用 | 无凭证新 venv 的 make check 退出 0 |
+| P0 | `make check` 旧路径 `src/autopoiesis` 报错 | 修 Makefile 和 CI 的当前包引用 | 无凭证新 venv 的 make check 退出 0 |
 | P0 | `make smoke-offline` 旧包导入失败；后续检查用 `|| true` | 修当前入口；将“缺凭证”与导入/崩溃分开判定 | 缺凭证是预期状态；错误模块和崩溃必须非零 |
 | P0 | minictrl 使用 autopoiesis.service；make run/stop/restart 仍用 min-agent.service | 统一服务目标并保留显式迁移说明 | 安装、查看、启动、停止指向同一 unit；在隔离部署验证 |
-| P0 | evaluate / validate-data / reproduce 仍引用 runtime/min_agent | 统一当前运行目录，历史文档保留原样 | 读取真实 journal；迁移前后数量和账本一致 |
+| P0 | evaluate / validate-data / reproduce 仍引用 runtime/autopoiesis | 统一当前运行目录，历史文档保留原样 | 读取真实 journal；迁移前后数量和账本一致 |
 | P0 | fresh-clone 脚本未跑 make check / type，也未跑 Makefile 离线入口 | 让证据验证用户实际路径；只通过重新运行生成证据 | 当前提交的新克隆完整通过；不能手改日志 |
 | P0 | verify 的 type 门只查 Makefile 文本是否包含 mypy 和依赖连接，并不执行类型检查 | 把静态连接检查与实际执行区分；CI/新克隆必须真正运行 make check | 错目录、类型错误的隔离反例使实际检查失败；“配置正确”不能写成“类型通过” |
 | P1 | benchmark 从 doctor 文案解析；策略、总体目标、窗口、成本定义不一致 | 先明确计算合同，再共享结构化结果给 CLI/网页 | 固定快照中资金流、曲线、成本、窗口相同；不足窗口不能 PASS |

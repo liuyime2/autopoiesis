@@ -3,7 +3,7 @@
 Date: 2026-10-06
 Status: **DONE - the stranded candidate returns to probation with its budget restarted**
 Baseline commit for rollback: `2add047`
-Scope: `src/min_agent/strategy_engine.py` and its tests. No change to the Guardian, any risk
+Scope: `src/autopoiesis/strategy_engine.py` and its tests. No change to the Guardian, any risk
 limit, `PROBATION_CYCLES`, `min_promotion_scored_decisions`, or the promotion evidence bar.
 
 ---
@@ -52,7 +52,7 @@ Four facts compose into a deadlock:
    `lifecycle not in {"PAUSED", "RETIRED"}` — so it *would* pass that filter, but it is not in
    the probation queue it serves from.
 4. Its 8 trade attempts produced no submitted order because every one was a shadow intent while
-   `MIN_AGENT_SHADOW=1`, and the eight pre-shadow attempts were refused by the position cap.
+   `AUTOPOIESIS_SHADOW=1`, and the eight pre-shadow attempts were refused by the position cap.
 
 So the strategy is **budget-spent, evidence-less, and unreviewable**. It cannot be served, cannot
 be promoted, and cannot be retired. `review` returning `None` is the correct answer to "should this

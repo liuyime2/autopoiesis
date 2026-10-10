@@ -30,7 +30,7 @@ so the curriculum can only re-parameterise them.
    reduces a long, and the Guardian's existing SELL checks are unchanged.
 2. **Guardian: a new rule with its own limits; no existing limit is relaxed.** A SHORT is
    approved only if all hold:
-   - shorts are enabled (`MIN_AGENT_SHORTS` is `shadow` or `paper`; default `off`);
+   - shorts are enabled (`AUTOPOIESIS_SHORTS` is `shadow` or `paper`; default `off`);
    - the symbol is on the allowlist;
    - the account holds **no long position** in the symbol — owner's or agent's. Alpaca nets
      long and short in one account, so a short against a long sells the long first: the
@@ -55,7 +55,7 @@ so the curriculum can only re-parameterise them.
    `when_above`, `when_below` ∈ Action, `quantity`, `confidence`. Evaluated by
    `StrategyExecutor` on journal bars passed in; validated by pydantic at admission. The model
    proposes JSON parameters only — never code or shell (`AGENTS.md` §17).
-7. **Rollout.** `MIN_AGENT_SHORTS=shadow` first: SHORT/COVER decisions go through the Guardian
+7. **Rollout.** `AUTOPOIESIS_SHORTS=shadow` first: SHORT/COVER decisions go through the Guardian
    and are journalled as SHADOWED intents while long trading stays real. `paper` only after a
    session with SHORT intents and no new doctor failures — an operator change, recorded.
 
@@ -73,7 +73,7 @@ symbols outside the allowlist, and live trading.
 
 ## Rollback
 
-`MIN_AGENT_SHORTS=off` (the default) restores today's behaviour without a code change.
+`AUTOPOIESIS_SHORTS=off` (the default) restores today's behaviour without a code change.
 
 ## Outcome (2026-10-07)
 
@@ -83,10 +83,10 @@ symbols outside the allowlist, and live trading.
 | Ledger | `Book short lots in the ledger…` | live record unchanged: +757.95 over 47 lots and 29 unmatched shares, before and after |
 | Counterfactual and backtest | `Grade and backtest shorts…` | falsifier refuted: on a 40-bar downtrend TREND_FOLLOW earns 0 long-only and a positive net with shorts |
 | Rule DSL | `Add a RULE strategy kind…` | 16 tests; one signal function shared by executor, selector probe and backtest |
-| Rollout | operator env file, not the repository | `MIN_AGENT_SHORTS=shadow` set and the daemon restarted on 2026-10-07 |
+| Rollout | operator env file, not the repository | `AUTOPOIESIS_SHORTS=shadow` set and the daemon restarted on 2026-10-07 |
 
 **Not yet done, and why it cannot be done today.** The switch to `paper` is gated on a session
 with SHORT intents and no new doctor failures. No SHORT can be approved on this account until
 it is flat: it holds 6 SPY, and the Guardian refuses a short against any long. The switch is
-therefore an operator decision to be taken on evidence, by setting `MIN_AGENT_SHORTS=paper` in
+therefore an operator decision to be taken on evidence, by setting `AUTOPOIESIS_SHORTS=paper` in
 the env file once `minictrl doctor` and the journal show SHORT decisions reviewed in shadow.

@@ -36,26 +36,26 @@ export ALPACA_SECRET_KEY="..."
 export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
 
 export OLLAMA_BASE_URL="http://127.0.0.1:11434"
-export MIN_AGENT_MODEL="deepseek-r1:8b"
-export MIN_AGENT_GPU_DEVICES="0"
+export AUTOPOIESIS_MODEL="deepseek-r1:8b"
+export AUTOPOIESIS_GPU_DEVICES="0"
 export CUDA_VISIBLE_DEVICES="0"
 
-export MIN_AGENT_MODE="paper"
-export MIN_AGENT_SYMBOLS="SPY"
-export MIN_AGENT_ALLOWLIST="SPY,QQQ,AAPL,MSFT,NVDA"
+export AUTOPOIESIS_MODE="paper"
+export AUTOPOIESIS_SYMBOLS="SPY"
+export AUTOPOIESIS_ALLOWLIST="SPY,QQQ,AAPL,MSFT,NVDA"
 ```
 
 Optional daemon settings:
 
 ```bash
-export MIN_AGENT_DAEMON_INTERVAL_SECONDS="300"    # 5 min between cycles
-export MIN_AGENT_MAX_TRADES_PER_DAY="10"
-export MIN_AGENT_MAX_DAILY_CYCLES="288"
-export MIN_AGENT_HEARTBEAT="runtime/min_agent/heartbeat.json"
-export MIN_AGENT_PIDFILE="runtime/min_agent/daemon.pid"
-export MIN_AGENT_STRATEGY_DIR="runtime/min_agent/strategies"
-export MIN_AGENT_REFLECTION_WINDOW="50"
-export MIN_AGENT_CURRICULUM_ENABLED="true"
+export AUTOPOIESIS_DAEMON_INTERVAL_SECONDS="300"    # 5 min between cycles
+export AUTOPOIESIS_MAX_TRADES_PER_DAY="10"
+export AUTOPOIESIS_MAX_DAILY_CYCLES="288"
+export AUTOPOIESIS_HEARTBEAT="runtime/autopoiesis/heartbeat.json"
+export AUTOPOIESIS_PIDFILE="runtime/autopoiesis/daemon.pid"
+export AUTOPOIESIS_STRATEGY_DIR="runtime/autopoiesis/strategies"
+export AUTOPOIESIS_REFLECTION_WINDOW="50"
+export AUTOPOIESIS_CURRICULUM_ENABLED="true"
 ```
 
 `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` are also accepted for Alpaca compatibility.
@@ -77,7 +77,7 @@ Confirm `deepseek-r1:8b` is listed.
 ## Verify Environment
 
 ```bash
-PYTHONPATH=src conda run -n llm python -m min_agent.cli --check-env
+PYTHONPATH=src conda run -n llm python -m autopoiesis.cli --check-env
 ```
 
 The command must report:
@@ -92,7 +92,7 @@ The command must report:
 PYTHONPATH=src \
 OLLAMA_BASE_URL=http://127.0.0.1:11434 \
 CUDA_VISIBLE_DEVICES=0 \
-conda run -n llm python -m min_agent.cli --once
+conda run -n llm python -m autopoiesis.cli --once
 ```
 
 The cycle will stop before any order if:
@@ -108,21 +108,21 @@ The cycle will stop before any order if:
 
 ```bash
 PYTHONPATH=src \
-conda run -n llm python -m min_agent.cli --daemon
+conda run -n llm python -m autopoiesis.cli --daemon
 ```
 
 For a controlled smoke test with a cycle limit:
 
 ```bash
 PYTHONPATH=src \
-conda run -n llm python -m min_agent.cli --daemon --max-cycles 5
+conda run -n llm python -m autopoiesis.cli --daemon --max-cycles 5
 ```
 
 The daemon:
 
-- Writes heartbeat to `runtime/min_agent/heartbeat.json`.
-- Writes pidfile to `runtime/min_agent/daemon.pid`.
-- Journals every cycle to `runtime/min_agent/journal.jsonl`.
+- Writes heartbeat to `runtime/autopoiesis/heartbeat.json`.
+- Writes pidfile to `runtime/autopoiesis/daemon.pid`.
+- Journals every cycle to `runtime/autopoiesis/journal.jsonl`.
 - Reflects on recent cycles every 10 cycles (configurable).
 - Proposes curriculum tasks every 50 cycles when curriculum is enabled.
 - Survives single-cycle errors by journaling and backing off.
@@ -131,19 +131,19 @@ The daemon:
 ## Check Daemon Status
 
 ```bash
-PYTHONPATH=src conda run -n llm python -m min_agent.cli --status
+PYTHONPATH=src conda run -n llm python -m autopoiesis.cli --status
 ```
 
 ## Stop the Daemon
 
 ```bash
-PYTHONPATH=src conda run -n llm python -m min_agent.cli --stop
+PYTHONPATH=src conda run -n llm python -m autopoiesis.cli --stop
 ```
 
 Or directly:
 
 ```bash
-kill -TERM $(cat runtime/min_agent/daemon.pid)
+kill -TERM $(cat runtime/autopoiesis/daemon.pid)
 ```
 
 ## Reconcile Orders
@@ -151,7 +151,7 @@ kill -TERM $(cat runtime/min_agent/daemon.pid)
 After crash/restart, compare journal orders with Alpaca open orders:
 
 ```bash
-PYTHONPATH=src conda run -n llm python -m min_agent.cli --reconcile
+PYTHONPATH=src conda run -n llm python -m autopoiesis.cli --reconcile
 ```
 
 ## Use the Shell Wrapper
@@ -169,12 +169,12 @@ make stop
 supervisor provided. For a bounded run without systemd, `make run` followed by
 `make status` covers the same ground, and `min-agent --once` runs a single cycle
 in the foreground.bash
-conda run -n llm python -m pytest tests/min_agent -q
-grep -R --exclude-dir='__pycache__' "exec(" -n src/min_agent || true
-grep -R --exclude-dir='__pycache__' "shell=True\|return True" -n src/min_agent || true
+conda run -n llm python -m pytest tests/autopoiesis -q
+grep -R --exclude-dir='__pycache__' "exec(" -n src/autopoiesis || true
+grep -R --exclude-dir='__pycache__' "shell=True\|return True" -n src/autopoiesis || true
 ```
 
-These must find zero `exec(` calls and zero `shell=True` or forced `return True` in `src/min_agent`.
+These must find zero `exec(` calls and zero `shell=True` or forced `return True` in `src/autopoiesis`.
 
 ## Architecture Summary
 

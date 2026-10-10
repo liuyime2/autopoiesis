@@ -40,7 +40,7 @@ stage doing another stage's job.
 | **walk-forward** `research.walk_forward.run_walk_forward(…)` | bars | `WalkForwardResult` | scores only the out-of-sample leg; trial count is an output | `test_research_backtest.py` |
 | **trial ledger** `research.trials.record_trial(…)` | a trial result | an append-only line | a **separate sink**. Nothing in production reads it. | `test_research_trials.py` |
 
-`make verify` fails if any production module imports `min_agent.research`. That check
+`make verify` fails if any production module imports `autopoiesis.research`. That check
 has already caught a real violation: a `doctor` check was added that imported the
 trial ledger, and the gate refused it.
 

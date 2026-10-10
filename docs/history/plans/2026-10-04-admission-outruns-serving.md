@@ -3,7 +3,7 @@
 Date: 2026-10-04
 Status: **DONE - admission is refused when the queue is full; whether the backlog drains is a live measurement**
 Baseline commit for rollback: `e02a8ff`
-Scope: `src/min_agent/strategy_admission.py` and its tests, plus the daemon's wiring. No new
+Scope: `src/autopoiesis/strategy_admission.py` and its tests, plus the daemon's wiring. No new
 module, no queue manager, no scheduler.
 
 ---

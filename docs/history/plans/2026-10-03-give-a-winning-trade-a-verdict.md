@@ -3,9 +3,9 @@
 Date: 2026-10-03
 Status: **DONE for the missing primitive; the pass condition is the next need**
 Baseline commit for rollback: `bda625b`
-Scope: `src/min_agent/counterfactual.py`, `src/min_agent/offline_validation.py`,
-`tests/min_agent/test_counterfactual.py`, `tests/min_agent/test_offline_validation.py`,
-`tests/min_agent/test_replay_determinism.py`, plus the figures three documents quote.
+Scope: `src/autopoiesis/counterfactual.py`, `src/autopoiesis/offline_validation.py`,
+`tests/autopoiesis/test_counterfactual.py`, `tests/autopoiesis/test_offline_validation.py`,
+`tests/autopoiesis/test_replay_determinism.py`, plus the figures three documents quote.
 
 ---
 

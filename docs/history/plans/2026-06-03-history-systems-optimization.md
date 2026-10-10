@@ -1,4 +1,4 @@
-> **SUPERSEDED — historical plan, not current instructions.** This document describes a design that was never built: it references `history_version/*` modules that do not exist in `src/min_agent/`. It is kept as a record of what was considered, and nothing in it is a task to perform. The architecture that actually exists is in `docs/ARCHITECTURE.md`.
+> **SUPERSEDED — historical plan, not current instructions.** This document describes a design that was never built: it references `history_version/*` modules that do not exist in `src/autopoiesis/`. It is kept as a record of what was considered, and nothing in it is a task to perform. The architecture that actually exists is in `docs/ARCHITECTURE.md`.
 
 # History Systems Optimization Implementation Plan
 

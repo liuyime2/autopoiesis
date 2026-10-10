@@ -3,7 +3,7 @@
 Date: 2026-10-03
 Status: **DONE - implemented, measured, gated**
 Baseline commit for rollback: `3f62f11`
-Scope: `src/min_agent/strategy_engine.py`, `tests/min_agent/test_strategy_engine.py`,
+Scope: `src/autopoiesis/strategy_engine.py`, `tests/autopoiesis/test_strategy_engine.py`,
 plus the figures three documents quote.
 
 This is the `next need` recorded by
@@ -125,7 +125,7 @@ dangerous direction, so both are tested directly rather than argued.
 
 ## 5. Verification
 
-Four tests in `tests/min_agent/test_strategy_engine.py`:
+Four tests in `tests/autopoiesis/test_strategy_engine.py`:
 
 | Test | Pins |
 |---|---|

@@ -3,7 +3,7 @@
 Date: 2026-10-04
 Status: **DONE - the gate opens and returns real verdicts on 24,270 bars; required_trades unchanged at 52 for 27 trials**
 Baseline commit for rollback: `3407ebc`
-Scope: `src/min_agent/research/walk_forward.py` and its tests. No change to
+Scope: `src/autopoiesis/research/walk_forward.py` and its tests. No change to
 `required_trades`, `BASE_REQUIRED_TRADES`, the screen, or any production module.
 
 ---

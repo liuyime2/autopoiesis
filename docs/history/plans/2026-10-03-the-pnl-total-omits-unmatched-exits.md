@@ -4,9 +4,9 @@ Date: 2026-10-03
 Status: **DONE - the false claim deleted; the scope question answered by measurement a
 day later, and nothing built for it**
 Baseline commit for rollback: `ffc635e`
-Scope: `src/min_agent/doctor.py` (two strings and one comment), `STATUS.md`. No behaviour
+Scope: `src/autopoiesis/doctor.py` (two strings and one comment), `STATUS.md`. No behaviour
 change, no new field, no new check class: `unmatched_sell_quantity` already carries the
-number and `tests/min_agent/test_evaluator.py` already pins the semantics. What is wrong is
+number and `tests/autopoiesis/test_evaluator.py` already pins the semantics. What is wrong is
 the sentence the system tells the operator about it.
 
 ---
@@ -134,7 +134,7 @@ semantics. Adding `unpriced_exit_proceeds` would restate it.
 | The claim in the report is false | The ledger booking a basis-free PnL somewhere else in the code path |
 
 The first two are already checked against the record and against
-`tests/min_agent/test_evaluator.py:631-636`, which asserts `closed_lot_count == 23`,
+`tests/autopoiesis/test_evaluator.py:631-636`, which asserts `closed_lot_count == 23`,
 `unmatched_sell_quantity == {"closer": 29.0}` and `opener == (766.57 - 742.03) * 23` - the
 same 52-share sell, the same 29 shares. If that test were passing for a different reason, the
 claim would need re-measuring rather than rewriting.
@@ -172,7 +172,7 @@ recorded in `STATUS.md`.
 - The doctor run before and after: the WARN survives, the sentence changes, and the figure it
   describes does not move (`+594.33` before and after - nothing about the number changes,
   only the claim about it).
-- `tests/min_agent/test_evaluator.py` unchanged and green; the semantics it pins are what the
+- `tests/autopoiesis/test_evaluator.py` unchanged and green; the semantics it pins are what the
   new wording states.
 - `make verify` - the whole gate.
 

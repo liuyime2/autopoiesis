@@ -212,7 +212,7 @@ def test_quiet_mode_is_one_line(monkeypatch, tmp_path, capsys):
     from autopoiesis.cli import main
 
     for key in list(os.environ):
-        if key.startswith(("ALPACA", "APCA", "MIN_AGENT", "OLLAMA")):
+        if key.startswith(("ALPACA", "APCA", "AUTOPOIESIS", "OLLAMA")):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("AUTOPOIESIS_JOURNAL", str(tmp_path / "journal.jsonl"))
     monkeypatch.setenv("AUTOPOIESIS_HEARTBEAT", str(tmp_path / "heartbeat.json"))
@@ -242,7 +242,7 @@ def test_quiet_mode_exit_code_matches_the_reported_result(monkeypatch, tmp_path,
     from autopoiesis.cli import main
 
     for key in list(os.environ):
-        if key.startswith(("ALPACA", "APCA", "MIN_AGENT", "OLLAMA")):
+        if key.startswith(("ALPACA", "APCA", "AUTOPOIESIS", "OLLAMA")):
             monkeypatch.delenv(key, raising=False)
     for name, value in (
         ("AUTOPOIESIS_JOURNAL", "journal.jsonl"),

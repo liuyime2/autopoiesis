@@ -1,4 +1,4 @@
-# Fact-level system audit — QuantGroup `min_agent`
+# Fact-level system audit — QuantGroup `autopoiesis`
 
 > **This is a historical record, not documentation of the current system.**
 >
@@ -9,7 +9,7 @@
 >
 > For how the system works now, read [`../../README.md`](../../README.md) and
 > [`../ARCHITECTURE.md`](../ARCHITECTURE.md). For what changed during the infrastructure
-> refactor and what replaced what, read [`../MIGRATION.md`](../MIGRATION.md).
+> refactor and what replaced what, read [`../MIGRATION.md`](MIGRATION.md).
 >
 > What is still worth reading it for: the *reason* certain decisions are the way they are.
 > Several are non-obvious - why `research/` is quarantined from production, why a
@@ -18,7 +18,7 @@
 > where the code does not.
 
 Audited 2026-09-29 against the working tree at `ae7e78a`+ and the live runtime
-under `runtime/min_agent/`. Every claim below was checked against code or against
+under `runtime/autopoiesis/`. Every claim below was checked against code or against
 the real journal, not inferred from names.
 
 **Rule applied throughout:** existence ≠ effectiveness. A module, function, config
@@ -333,7 +333,7 @@ exist, each from inventing a schema instead of reading it:
 
 It also crashed with `ValueError` when the runtime tree sat outside the repo. Every
 rule is now named against the model field it derives from, and
-`tests/min_agent/test_runtime_integrity.py` plants each violation to prove the
+`tests/autopoiesis/test_runtime_integrity.py` plants each violation to prove the
 checker still fails — including a *new* admitted-without-file strategy, so the
 exception list cannot become a blanket disable.
 
@@ -501,7 +501,7 @@ been removing, caught here in the check that was supposed to prevent it.
 
 ### 11.2 Run entry points
 
-There is one: `minictrl` → `python -m min_agent.cli`. The systemd unit and the
+There is one: `minictrl` → `python -m autopoiesis.cli`. The systemd unit and the
 watchdog both go through the same module. `auto_reviewer.py` can write to the
 repository and was a genuine second control path while scheduled; it is now in
 neither crontab nor a systemd timer and is not running, and it has been changed to
@@ -626,7 +626,7 @@ recovered daemon.
 
 ## 17. Phase 4: offline validation, now real
 
-`src/min_agent/research/` implements the backtest the objective's Phase 4 requires.
+`src/autopoiesis/research/` implements the backtest the objective's Phase 4 requires.
 It is a separate package, and a `make verify` check **fails if any production module
 imports it** — the separation between production and research is machine-checked
 rather than conventional, because a convention erodes exactly when a backtest starts
@@ -710,7 +710,7 @@ semantic/behavioral duplicate" exists to catch.
 
 ## 19. Phase 5: shadow trading
 
-Withdrawn in §14, now built. `MIN_AGENT_SHADOW=1` replaces the final call to the
+Withdrawn in §14, now built. `AUTOPOIESIS_SHADOW=1` replaces the final call to the
 broker and nothing else. Real market data, the real model, the real Guardian, the
 real journal — only the submission is replaced. That is the whole design: a shadow
 mode with its own simplified decision path would be grading a different system from
@@ -774,7 +774,7 @@ cannot rot into a permanent no-op.
 The `shadow-live-consistency` check also reported "shadow mode NOT implemented" for
 the rest of this session, after shadow had been built, because the string in it was
 never updated. It now verifies that shadow is reachable from configuration, off by
-default, and that the switch is parsed strictly — `MIN_AGENT_SHADOW=flase` raises
+default, and that the switch is parsed strictly — `AUTOPOIESIS_SHADOW=flase` raises
 rather than silently enabling a flag that decides whether real orders reach a broker.
 
 ## 20. Phase 6: evidence-gated probation
@@ -1353,7 +1353,7 @@ The objective's success criterion is *after-cost* net PnL. Cost was implemented 
 research backtest and **absent from the live ledger**:
 
 ```
-grep -n "commission|slippage|cost_pct" src/min_agent/evaluator.py   ->  no matches
+grep -n "commission|slippage|cost_pct" src/autopoiesis/evaluator.py   ->  no matches
 lots=23  buy_fees=0.0  sell_fees=0.0  total=0.0
 realized (gross of any assumed cost): +564.39
 ```
@@ -1557,7 +1557,7 @@ is the first data the objective's criteria can be applied to.
 
 ### 32.4 Runtime debris, reported and not deleted
 
-Three files in `runtime/min_agent/` are referenced by **zero** source files:
+Three files in `runtime/autopoiesis/` are referenced by **zero** source files:
 `observable-smoke-journal.jsonl`, `observable-smoke2-journal.jsonl`, and
 `daemon.out.crashed-1324`, 7K each.
 
@@ -1830,7 +1830,7 @@ reboot-persistent.
 
 Fixed: `systemd_unit_dir.sh` now asks the manager (`show-environment`) instead of
 trusting the shell, and treats `$XDG_RUNTIME_DIR` as a last resort that is refused
-unless `MIN_AGENT_ALLOW_RUNTIME_UNITS=1`. Units installed to
+unless `AUTOPOIESIS_ALLOW_RUNTIME_UNITS=1`. Units installed to
 `$HOME/.config/systemd/user`; `FragmentPath` now points there; all three enablement
 links point at that durable path; zero links into `/run`.
 
@@ -2473,7 +2473,7 @@ writing - every number in these documents came from calling the production code,
 asserting that +564.39 is correct **by asking the code that computed +564.39** is
 the same mistake one level up.
 
-`tools/replay_audit.py` parses `journal.jsonl` as text, with no `min_agent` import
+`tools/replay_audit.py` parses `journal.jsonl` as text, with no `autopoiesis` import
 anywhere in its counting path, and re-derives each load-bearing number from first
 principles. It is deliberately naive: a naive check that agrees is weak evidence,
 and a naive check that disagrees is strong.
@@ -2729,7 +2729,7 @@ gate rather than against my own opinion turned up something worse than the wirin
 | "cycle count unchanged 920/920" | 987 cycles now; and a cycle count is not shadow activity |
 
 The execution-status census of all 987 cycles is `SKIPPED 908, REJECTED 45,
-SUBMITTED 34`. There is no `SHADOWED` in it. `MIN_AGENT_SHADOW` is off and the one
+SUBMITTED 34`. There is no `SHADOWED` in it. `AUTOPOIESIS_SHADOW` is off and the one
 `SHADOW_ORDER_INTENT` carries the rationale `"shadow stage smoke test"`.
 
 So the phase exit criterion was marked satisfied by **code existing**, not code
@@ -2955,7 +2955,7 @@ at that moment, so the failure had to be somewhere the gate does not reach - and
 `make test` found it immediately:
 
 ```
-FAILED tests/min_agent/test_cli_startup.py::test_no_function_loads_a_name_that_does_not_exist
+FAILED tests/autopoiesis/test_cli_startup.py::test_no_function_loads_a_name_that_does_not_exist
 assert not ["doctor._check_admission_provenance(): 'StrategySpec'",
             "doctor.accounted(): 'StrategySpec'"]
 ```
@@ -3557,7 +3557,7 @@ about me: I had reported the strategy restored, verified by reading the file, wh
 process that would overrule it was still executing rules I had already replaced.
 
 `daemon-source-matches-worktree` closes it. `HeartbeatPayload` gained
-`source_fingerprint`, hashed from the `min_agent` package as the running process
+`source_fingerprint`, hashed from the `autopoiesis` package as the running process
 imported it; the check recomputes the same digest from the worktree and compares. A
 mismatch names the remedy: `systemctl --user restart min-agent.service`. Proved both
 directions - appending a comment line to `evaluator.py` without restarting turned it red

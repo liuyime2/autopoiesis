@@ -79,7 +79,7 @@ than the fix does:
 - Success criterion: one authoritative verdict set; `GOOD_TRADE` is scored; `correct` is true
   for `GOOD_HOLD` and `GOOD_TRADE`; calibration admits 598/607; Brier is recomputed and the
   MIS-CALIBRATED verdict is restated against the corrected number, not the old one.
-- Verify: `pytest tests/min_agent/test_calibration.py`; a new test that a `GOOD_TRADE` row
+- Verify: `pytest tests/autopoiesis/test_calibration.py`; a new test that a `GOOD_TRADE` row
   scores as correct and is admitted as informative; `grep` proving one definition of the
   verdict set remains; `make verify`.
 
@@ -264,7 +264,7 @@ which is the plan working, not the plan stalling.
 was never recorded here. The instruction is now `DECISION_INSTRUCTION` at module level in
 `llm_decision.py:53`, it states the confidence bound in words
 (`llm_decision.py:58`: "a decimal number between 0 and 1 inclusive"), and
-`tests/min_agent/test_llm_decision.py` carries both halves of the demanded guard:
+`tests/autopoiesis/test_llm_decision.py` carries both halves of the demanded guard:
 `test_the_decision_instruction_lives_outside_the_method_body` (the literal is not duplicated back
 inside `decide`) and `test_the_instruction_states_every_constraint_the_validator_enforces`, which
 is a correspondence test against `TradeDecision.model_json_schema()` so a schema change without

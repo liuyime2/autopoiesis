@@ -6,7 +6,7 @@ by editing. Each says what produced it.
 | File | Produced by | What it is |
 | --- | --- | --- |
 | `fresh-clone.log` | `docs/evidence/run-fresh-clone.sh` | A clone of the committed tree, installed into a new venv and run with every credential removed: lint, tests, the example, the entry point, provenance, the gate's self-test and the gate |
-| `research_trials-2026-10-07.jsonl` | a copy of `runtime/min_agent/research_trials.jsonl` on 2026-10-07, written by `make research` / `tools/research.service.in` | Every walk-forward trial the research search has run on real Alpaca bars, failures included: 59 trials, **47 INSUFFICIENT, 12 OVERFIT, 0 PASS** |
+| `research_trials-2026-10-07.jsonl` | a copy of `runtime/autopoiesis/research_trials.jsonl` on 2026-10-07, written by `make research` / `tools/research.service.in` | Every walk-forward trial the research search has run on real Alpaca bars, failures included: 59 trials, **47 INSUFFICIENT, 12 OVERFIT, 0 PASS** |
 
 ## Why the research trials are here
 

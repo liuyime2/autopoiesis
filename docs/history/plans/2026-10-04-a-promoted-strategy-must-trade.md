@@ -3,7 +3,7 @@
 Date: 2026-10-04
 Status: **DONE - the incumbent is served 1 in 5; whether that is the right share is a live measurement**
 Baseline commit for rollback: `49ff013`
-Scope: `src/min_agent/strategy_engine.py` and its tests. No change to the admission cap, the
+Scope: `src/autopoiesis/strategy_engine.py` and its tests. No change to the admission cap, the
 probation budget, the screen, or the Guardian.
 
 ---

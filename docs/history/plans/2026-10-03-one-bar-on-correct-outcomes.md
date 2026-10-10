@@ -3,8 +3,8 @@
 Date: 2026-10-03
 Status: **DONE - implemented, measured on the shipped code, gated**
 Baseline commit for rollback: `7449ff3`
-Scope: `src/min_agent/offline_validation.py`,
-`tests/min_agent/test_offline_validation.py`, plus the figures three documents quote.
+Scope: `src/autopoiesis/offline_validation.py`,
+`tests/autopoiesis/test_offline_validation.py`, plus the figures three documents quote.
 
 Directly the `next need` recorded by
 [`2026-10-03-give-a-winning-trade-a-verdict.md`](2026-10-03-give-a-winning-trade-a-verdict.md).
@@ -140,7 +140,7 @@ non-zero false-trade count.
 
 ## 7. Verification
 
-Tests in `tests/min_agent/test_offline_validation.py`:
+Tests in `tests/autopoiesis/test_offline_validation.py`:
 
 - `test_a_strategy_whose_every_scored_decision_was_wrong_is_rejected` - 10 missed rallies,
   ratio 0.000, rejected. Guards the ratio from ever becoming optional.

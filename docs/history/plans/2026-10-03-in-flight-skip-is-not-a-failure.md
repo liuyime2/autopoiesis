@@ -3,8 +3,8 @@
 Date: 2026-10-03
 Status: **DONE - implemented, measured, gated**
 Baseline commit for rollback: `26c341d`
-Scope: `src/min_agent/loop.py`, `tests/min_agent/test_loop.py`,
-`tests/min_agent/test_score_latch.py`, plus the figures three documents quote.
+Scope: `src/autopoiesis/loop.py`, `tests/autopoiesis/test_loop.py`,
+`tests/autopoiesis/test_score_latch.py`, plus the figures three documents quote.
 
 Follows [`2026-10-03-refuse-untradeable-strategy.md`](2026-10-03-refuse-untradeable-strategy.md),
 which fixed the admission gate. This one fixes the lifecycle.

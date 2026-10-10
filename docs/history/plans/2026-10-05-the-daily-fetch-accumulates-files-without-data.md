@@ -121,7 +121,7 @@ in AGENTS.md 7, and leaving them is only harmless until there are 365 of them.
 ## Result
 
 Three changes to `tools/fetch_replay_bars.py`, one to `tools/research.service.in`, and seven tests
-in `tests/min_agent/test_replay_bar_fetch.py`. Gate: **52 classes, 0 failed, 1497 test executions
+in `tests/autopoiesis/test_replay_bar_fetch.py`. Gate: **52 classes, 0 failed, 1497 test executions
 across 64 files**, 941 pytest, ruff and mypy clean.
 
 1. **The cache path is named after the data.** `rolling_path()` writes one
@@ -174,7 +174,7 @@ measured numbers.
 ### Verified on the real system, end to end
 
 ```
-cached 24270 real 5Min SPY bars -> runtime/min_agent/replay/SPY_5Min_rolling.json
+cached 24270 real 5Min SPY bars -> runtime/autopoiesis/replay/SPY_5Min_rolling.json
 candidates: 59 (cumulative: 48 already in the ledger)  required_trades: 77  repeats: 0
 ```
 

@@ -3,7 +3,7 @@
 Date: 2026-10-03
 Status: **DONE for the offline screen; PnL evidence deliberately deferred**
 Baseline commit for rollback: `26ffc1c`
-Scope: `src/min_agent/daemon.py`, `tests/min_agent/test_daemon.py`, plus the figures three
+Scope: `src/autopoiesis/daemon.py`, `tests/autopoiesis/test_daemon.py`, plus the figures three
 documents quote.
 
 Second and third application of the principle fixed in
@@ -111,7 +111,7 @@ candidate, and the 56 strategies whose verdicts did not move wrote nothing. A re
 would have been the suspicious one; 1 with a new candidate in it is the shape the rule
 intends.
 
-Tests in `tests/min_agent/test_daemon.py`:
+Tests in `tests/autopoiesis/test_daemon.py`:
 
 | Test | Pins |
 |---|---|

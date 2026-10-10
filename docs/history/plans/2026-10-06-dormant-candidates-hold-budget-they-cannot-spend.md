@@ -3,7 +3,7 @@
 Date: 2026-10-06
 Status: **DONE - backlog 14 -> 8 at SPY 769.72; 78 cycles of unreachable budget released**
 Baseline commit for rollback: `a37fa87`
-Scope: `src/min_agent/strategy_admission.py`, `src/min_agent/strategy_engine.py`, and their
+Scope: `src/autopoiesis/strategy_admission.py`, `src/autopoiesis/strategy_engine.py`, and their
 tests. No change to the cap value, `PROBATION_CYCLES`, any Guardian check, or any risk limit.
 
 ---

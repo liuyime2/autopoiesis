@@ -6,7 +6,7 @@
     {
       "strategy_id": "strategy-20260610-002",
       "class": "admitted-then-absent",
-      "evidence": "STRATEGY_ADMISSION_REVIEWED accepted=true in runtime/min_agent/journal.jsonl; no file in runtime/min_agent/strategies/; no STRATEGY_LIFECYCLE_UPDATED with new_lifecycle=RETIRED naming it.",
+      "evidence": "STRATEGY_ADMISSION_REVIEWED accepted=true in runtime/autopoiesis/journal.jsonl; no file in runtime/autopoiesis/strategies/; no STRATEGY_LIFECYCLE_UPDATED with new_lifecycle=RETIRED naming it.",
       "cause": "UNKNOWN. runtime/ is gitignored, so there is no commit history to reconstruct when or why the file was removed. Recording a cause here would be a fabrication.",
       "cannot_recur_because": "strategy_admission.admit() writes the spec atomically (write_text_atomic under a file lock) BEFORE returning accepted=True, and the daemon journals the event only after admit() returns. A journalled acceptance therefore implies a durable file."
     },

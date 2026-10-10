@@ -21,7 +21,7 @@ what does not change:
 | mode | `paper` - `cli.py` refuses to build a client against any host but Alpaca's paper |
 | allowlist | AAPL, BIL, MSFT, NVDA, QQQ, SPY, TLT, XLB, XLE, XLF; universe `tradable`: any active US stock on a major exchange priced at least $5, 4 extra liquid names per round |
 | traded symbols | SPY, BIL, TLT, XLB, XLE, XLF - every position in the account |
-| account | managed whole (`MIN_AGENT_MANAGE_ACCOUNT=true`), the account holder's decision of 2026-10-07 |
+| account | managed whole (`AUTOPOIESIS_MANAGE_ACCOUNT=true`), the account holder's decision of 2026-10-07 |
 | hard limits | $25,000 per position, $90,000 total exposure, $500 daily loss, 100 trades/day |
 | model | `qwen3.8:27b` on Ollama at `127.0.0.1:11434` |
 | credentials | `$XDG_CONFIG_HOME/min-agent/env`, mode 600, outside the repository |
@@ -146,7 +146,7 @@ closed lot behind it. It needs a new round trip, not another fix.
 ## What was wrong, and what is fixed
 
 Full detail, with reproduction evidence, in
-[`docs/history/plans/2026-09-28-quantgroup-recovery-and-refactor.md`](docs/history/plans/2026-09-28-quantgroup-recovery-and-refactor.md).
+[`docs/history/plans/2026-09-28-quantgroup-recovery-and-refactor.md`](plans/2026-09-28-quantgroup-recovery-and-refactor.md).
 
 Fifteen defects were confirmed against the live code and the 16.9 MB journal.
 The ones that made the system structurally incapable of profiting:
@@ -358,7 +358,7 @@ retirement was written. It cannot recur — `admit()` writes the file atomically
 before returning `accepted=True`.
 
 **The shadow *mechanism* is implemented; the shadow *stage* has never run.** The
-sink is real and switchable by `MIN_AGENT_SHADOW`, and `shadow-not-executed`
+sink is real and switchable by `AUTOPOIESIS_SHADOW`, and `shadow-not-executed`
 proves no module counts a shadow order as a fill. But the journal holds **zero**
 `SHADOWED` executions, the flag is off, and the single `SHADOW_ORDER_INTENT` carries
 the rationale `"shadow stage smoke test"`. `PHASES.md` previously recorded Phase 5 as
@@ -378,7 +378,7 @@ Two earlier notes on shadow are **withdrawn as wrong**, and are kept here becaus
 withdrawn claim left standing is worse than one never made:
 
 1. *"Shadow appears only in docstrings and is recorded as missing."* True when
-   written, false now. `MIN_AGENT_SHADOW=1` swaps the final broker call and nothing
+   written, false now. `AUTOPOIESIS_SHADOW=1` swaps the final broker call and nothing
    else — real data, real model, real Guardian, real journal.
 2. *"Shadow is merged into probation, not missing."* The reasoning was sound and the
    conclusion was wrong: the objective names shadow trading as **Phase 5**, separate
@@ -690,7 +690,7 @@ the missing piece was never "connect to Alpaca"; it was a place to verify a chan
 alters which strategies trade.
 
 **The bars are real, not synthetic.** Fetched from Alpaca's own history and cached to
-`runtime/min_agent/replay/SPY_5min_2026-09-28_2026-10-02.json`: **847 real five-minute SPY
+`runtime/autopoiesis/replay/SPY_5min_2026-09-28_2026-10-02.json`: **847 real five-minute SPY
 bars**, 2026-09-28 to 2026-10-02, high 772.65 / low 758.79 — the same range the live journal
 saw, and the 766.57 exit falls inside it. A replay over invented prices can only show that
 code runs.
@@ -976,7 +976,7 @@ Running the whole gate rather than the parts of it that were being worked on:
 | | on HEAD | now |
 |---|---|---|
 | `ruff check src/ tools/ tests/ examples/` | **15 findings** | 0 |
-| `mypy src/min_agent` | **2 findings** | 0 |
+| `mypy src/autopoiesis` | **2 findings** | 0 |
 | `make verify` classes | red | 52 / 52 |
 
 `make lint` is the first step of `make check`, `make fast` and the inner loop this project
@@ -1013,7 +1013,7 @@ shares it had never bought on its own record. It is the same fact as `unmanaged 
 account, not of the trading path.
 
 Deleted the false claim; added no field. `unmatched_sell_quantity` is already the number, and
-`tests/min_agent/test_evaluator.py` already pins the semantics on this exact 52-share sell
+`tests/autopoiesis/test_evaluator.py` already pins the semantics on this exact 52-share sell
 (`closed_lot_count == 23`, `{"closer": 29.0}`, `opener == (766.57 − 742.03) × 23`). The
 figure did not move — only the claim about it.
 
@@ -1310,7 +1310,7 @@ decisions were never judged at all** — no lifecycle verdict was ever recorded 
 ## 2026-10-03 — correction: the previous entry read half the journal
 
 The lifecycle entry above is wrong, and so are parts of the `min_confidence` entry's
-framing of the same record. Both were measured by scanning `runtime/min_agent/journal.jsonl`
+framing of the same record. Both were measured by scanning `runtime/autopoiesis/journal.jsonl`
 directly. **That file is rotated** — `journal.jsonl.1` holds another 10,587 events, and
 `ARCHITECTURE.md` has said since the beginning that "rotations read as one history". The
 authoritative reader is `JsonlJournal.read_all()`, which spans both.
@@ -2130,7 +2130,7 @@ Three of the four properties do not hold. One holds and is narrower than "valida
 **Unattended 7x24 operation, and it is safe.** The daemon has produced 18,438 journal events
 across 116 days, every hour including overnight, and is currently up and writing. Paper-only is
 enforced at three layers rather than by convention: `ALPACA_BASE_URL` is the paper endpoint,
-`MIN_AGENT_MODE=paper`, and `Guardian.review`'s first statement refuses any mode that is not
+`AUTOPOIESIS_MODE=paper`, and `Guardian.review`'s first statement refuses any mode that is not
 paper. No risk limit was breached on this record.
 
 ### What is false
@@ -2360,7 +2360,7 @@ plan rather than in a threshold guard that would trade one permanent error for a
 a choice, not a limit. Fetching the window the gate actually needs:
 
 ```
-cached 20448 real 5Min SPY bars -> runtime/min_agent/replay/SPY_5Min_2026-05-01_2026-10-03.json
+cached 20448 real 5Min SPY bars -> runtime/autopoiesis/replay/SPY_5Min_2026-05-01_2026-10-03.json
   2026-05-01 13:30:00+00:00 .. 2026-10-02 23:55:00+00:00
   close 722.32 .. 769.86   high 779.37   low 714.99
 ```
@@ -2432,7 +2432,7 @@ has 382 `CURRICULUM_PROPOSED` events over months of operation, and **zero** even
 research stage, because `record_trial()` had no caller anywhere outside its own package:
 
 ```
-$ grep -rn "record_trial" src/ tools/ --include=*.py | grep -v "src/min_agent/research/"
+$ grep -rn "record_trial" src/ tools/ --include=*.py | grep -v "src/autopoiesis/research/"
 (no matches)
 ```
 
@@ -2445,7 +2445,7 @@ grepped the key `event` when the field is `event_type`.)
 
 ### The driver
 
-`src/min_agent/research/driver.py`, run as its own entry point so production never imports
+`src/autopoiesis/research/driver.py`, run as its own entry point so production never imports
 research - the separation `tools/verify.py` enforces would break otherwise, and a component that
 both searches and trades can grade itself. It sweeps the rule space that already exists, runs
 `run_walk_forward`, and records every trial with its figures.
@@ -2550,7 +2550,7 @@ bars: 20448 ...  candidates: 37 ... repeats: 11
 series at all (0 events with a price; only `ORDER_FILL_CONFIRMED` has one, 62 in total).
 
 `quant-research.timer` now fires daily at 06:30 UTC + up to 30 min jitter, after the close and
-before the next session, running `fetch_replay_bars.py` then `min_agent.research.driver`. It is a
+before the next session, running `fetch_replay_bars.py` then `autopoiesis.research.driver`. It is a
 separate unit rather than something the daemon invokes, because `check_production_research_separation`
 fails the gate when any production module imports the research package, and a component that both
 searches and trades can grade itself on its own output.
@@ -2706,7 +2706,7 @@ came out of it.
 | daemon | active/running, `NRestarts=0`, up since 11:21 EDT |
 | ollama | active/running, `qwen3.8:27b` present |
 | timers | watchdog active; `quant-research.timer` fires Mon 06:42 EDT |
-| paper mode | `MIN_AGENT_MODE=paper`, both endpoints paper, keys valid |
+| paper mode | `AUTOPOIESIS_MODE=paper`, both endpoints paper, keys valid |
 | broker | equity $99,432.81, status ACTIVE, **0 open orders** |
 | clock | closed; opens Mon 2026-10-05 09:30 ET |
 | library | 64 strategies, 18 selector-eligible, 1 ACTIVE and enabled |
@@ -2825,7 +2825,7 @@ refusals generally.
 
 ### Shadow mode, and what it means for the feedback loop
 
-`MIN_AGENT_SHADOW=1`, so the final broker call is replaced by a journalled intent. Every
+`AUTOPOIESIS_SHADOW=1`, so the final broker call is replaced by a journalled intent. Every
 `SHADOW_ORDER_INTENT` carries `shadowed: true` and `approved=True`; **no order has reached the
 broker**. The Guardian, the model, the selector and the journal above the sink are the real ones,
 so the decision path is genuinely being validated - but fills cannot happen yet, so broker-
@@ -2888,7 +2888,7 @@ population holding rather than firing, consistent with the search-space measurem
 
 ## What is still open, stated plainly
 
-1. **No fills.** `MIN_AGENT_SHADOW=1` replaces the final broker call with a journalled intent, so
+1. **No fills.** `AUTOPOIESIS_SHADOW=1` replaces the final broker call with a journalled intent, so
    broker-verified PnL stays empty and the 17-share position will not shrink on its own. Turning
    it off is a real decision about the account, gated on the paper-trading audit AGENTS.md 16
    requires. Not taken unilaterally.
@@ -2968,7 +2968,7 @@ running longer:
 - **The search finds nothing.** `OVERFIT` on every candidate clearing the bar, now on 24,270 real
   bars. Two trading rule kinds, both long-only, 15 of 16 eligible strategies dormant at typical
   SPY volatility.
-- **No fills.** `MIN_AGENT_SHADOW=1`; the decision path is validated (Guardian approved 47,
+- **No fills.** `AUTOPOIESIS_SHADOW=1`; the decision path is validated (Guardian approved 47,
   rejected 3 in one window) but nothing reaches the broker, so the 17-share over-cap position
   will not self-shrink.
 
@@ -3115,7 +3115,7 @@ a position without a prior buy — is new capability, not a fix, and needs its o
 | Problem | Diagnosis | Needs |
 | --- | --- | --- |
 | Research finds nothing | **Measured**: rule space is long-only and 2 kinds wide; the rules lose to holding on 36/52 folds | New capability — authorisation, not a bugfix |
-| No fills | `MIN_AGENT_SHADOW=1`; the decision path is validated but nothing reaches the broker | Operator decision, gated on the AGENTS.md 16 audit |
+| No fills | `AUTOPOIESIS_SHADOW=1`; the decision path is validated but nothing reaches the broker | Operator decision, gated on the AGENTS.md 16 audit |
 | BUY capacity zero | 17 SPY ($13.1k) against a $5k `max_position_value`; the Guardian correctly refuses every buy | Operator decision about the account; **do not raise the cap** |
 | 7x24 continuity qualified | 97 days undeployed (June→Sep); service runs unattended whenever deployed, 7 days on this host | Deployment continuity, not code |
 
@@ -3206,7 +3206,7 @@ long-only backtest: **the design space, not the plumbing.**
 
 ## 2026-10-06 11:45 EDT — 开启真实执行后的首次实盘观察：又发现两个缺陷
 
-启用 paper 执行（`MIN_AGENT_SHADOW=0`，备份 `/tmp/opencode/env.bak`）后的第一个交易日。10 个周期、
+启用 paper 执行（`AUTOPOIESIS_SHADOW=0`，备份 `/tmp/opencode/env.bak`）后的第一个交易日。10 个周期、
 1 次 BUY 被上限拒绝、9 次 HOLD，**持仓纹丝不动**。查下来是两个真实缺陷，而不是"今天没信号"。
 
 ### 缺陷一：不可服务的策略被计为能力路线
@@ -3431,13 +3431,13 @@ journal、没有券商证据、没有已平仓 lot，工具会如实说无可测
 `make test` 红了 1 条（此前就红，与本次改动无关）：
 
 ```
-set in the runtime env but never read by the loader: ['MIN_AGENT_ENVBIN']
+set in the runtime env but never read by the loader: ['AUTOPOIESIS_ENVBIN']
 ```
 
 根因是一个**错误的门**，不是死旋钮。env 文件是双用途的：`minictrl` 在调用
-`python -m min_agent.cli` 之前先 source 同一个文件，并从中读 `MIN_AGENT_ENVBIN`
+`python -m autopoiesis.cli` 之前先 source 同一个文件，并从中读 `AUTOPOIESIS_ENVBIN`
 （env 的 bin 目录）。而 `tools/verify.py::check_config_example_names_are_real`
-的 `known` 只含 `config.py` 源码 **加上 env 文件本身**——所以把 `MIN_AGENT_ENVBIN`
+的 `known` 只含 `config.py` 源码 **加上 env 文件本身**——所以把 `AUTOPOIESIS_ENVBIN`
 写进 `configs/paper.env.example` 之后，这台机器会过，**而新克隆（那里没有 env 文件）
 会把一个活着的旋钮报成死的**，并诱导人删掉那行让 install 失效的配置。
 
@@ -3466,7 +3466,7 @@ set in the runtime env but never read by the loader: ['MIN_AGENT_ENVBIN']
 - **benchmark 口径**：改为同资金、同时间窗口后，fixed-size-probe-0001 从 -4.29 变为 +0.49，跑赢 SPY；总体仍 FAIL（5 个里 4 个落后）。
 - **守护进程代码指纹一直在读磁盘文件**，所以“守护进程在跑旧代码”的检查从未能失败过；已修，之后每次改动都重启并核对指纹。
 - **规则优先，LLM 改判必须给理由**：首次实盘改判在 11:00，规则 BUY，模型 HOLD，理由是仓位上限已无空间。配对比较（`llm vs rule`）需要 24 小时后才有第一批结果。
-- **做空**：代码、Guardian 规则、账本、回测都已就绪，部署处于 `MIN_AGENT_SHORTS=shadow`。账户目前持有 6 股 SPY，Guardian 不允许对持有多头的标的做空，所以要等账户空仓后才可能出现 SHORT 决策；切到 `paper` 需要先看到一个 shadow 交易日的证据。
+- **做空**：代码、Guardian 规则、账本、回测都已就绪，部署处于 `AUTOPOIESIS_SHORTS=shadow`。账户目前持有 6 股 SPY，Guardian 不允许对持有多头的标的做空，所以要等账户空仓后才可能出现 SHORT 决策；切到 `paper` 需要先看到一个 shadow 交易日的证据。
 - **29 股**：按账户所有者自己的成交记录 FIFO 定价——成本 19,408.88，卖出所得 22,230.53，所有者收益 +2,821.65，不计入任何策略的盈亏。
 - **未做的一项**：给全新克隆准备的合成 journal（P3.1）。数据模型拒绝 `synthetic` 这类来源，要让它能解析就只能换个名字，这等于绕过“禁止伪造数据”的规则，因此记录为刻意不做。
 - **推送失败**：GitHub 对本仓库的每次推送都返回 Internal Server Error（包括只推一个提交），PR 未能创建，提交都在本地 `master`。

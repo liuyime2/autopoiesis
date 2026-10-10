@@ -4,8 +4,8 @@ Date: 2026-10-03
 Status: **DONE - the report now controls for the day; the lesson it feeds is gated on the
 controlled number**
 Baseline commit for rollback: `bba8b79`
-Scope: `src/min_agent/calibration.py`, the two call sites that read its verdict
-(`src/min_agent/doctor.py`, `src/min_agent/daemon.py`), and the figures three documents
+Scope: `src/autopoiesis/calibration.py`, the two call sites that read its verdict
+(`src/autopoiesis/doctor.py`, `src/autopoiesis/daemon.py`), and the figures three documents
 quote. No new check class; no new module.
 
 ---
@@ -202,4 +202,4 @@ day on which nothing was right — expectation exactly 0.0 — had its margin di
 the bucket that matters most on a bad day. Counted, not truthiness-tested.
 
 `make verify`: 52 classes, 0 failed, 1395 test executions across 62 files; 886 tests pass;
-ruff clean; `mypy src/min_agent` 0 findings. The daemon was restarted onto the new code.
+ruff clean; `mypy src/autopoiesis` 0 findings. The daemon was restarted onto the new code.

@@ -1,4 +1,4 @@
-> **SUPERSEDED — historical plan, not current instructions.** This document describes a design that was never built: it references `src/min_agent/modes.py` and `src/min_agent/reflector.py`, neither of which exists. It is kept as a record of what was considered, and nothing in it is a task to perform. The architecture that actually exists is in `docs/ARCHITECTURE.md`.
+> **SUPERSEDED — historical plan, not current instructions.** This document describes a design that was never built: it references `src/autopoiesis/modes.py` and `src/autopoiesis/reflector.py`, neither of which exists. It is kept as a record of what was considered, and nothing in it is a task to perform. The architecture that actually exists is in `docs/ARCHITECTURE.md`.
 
 # Minimum Trading Agent Implementation Plan
 
@@ -14,10 +14,10 @@
 
 ## File Structure
 
-Create a new implementation under `src/min_agent/`.
+Create a new implementation under `src/autopoiesis/`.
 
 ```text
-src/min_agent/
+src/autopoiesis/
   __init__.py
   modes.py
   models.py
@@ -30,7 +30,7 @@ src/min_agent/
   loop.py
   config.py
 
-tests/min_agent/
+tests/autopoiesis/
   test_modes.py
   test_models.py
   test_guardian.py
@@ -54,18 +54,18 @@ Responsibilities:
 ## Task 1: Mode Contract
 
 **Files:**
-- Create: `src/min_agent/__init__.py`
-- Create: `src/min_agent/modes.py`
-- Test: `tests/min_agent/test_modes.py`
+- Create: `src/autopoiesis/__init__.py`
+- Create: `src/autopoiesis/modes.py`
+- Test: `tests/autopoiesis/test_modes.py`
 
 - [ ] **Step 1: Write failing mode tests**
 
-Create `tests/min_agent/test_modes.py`:
+Create `tests/autopoiesis/test_modes.py`:
 
 ```python
 import pytest
 
-from src.min_agent.modes import TradingMode, validate_data_allowed
+from src.autopoiesis.modes import TradingMode, validate_data_allowed
 
 
 def test_paper_rejects_non_real_data():
@@ -91,20 +91,20 @@ def test_demo_mode_allows_fixture_data():
 Run:
 
 ```bash
-python -m pytest tests/min_agent/test_modes.py -q
+python -m pytest tests/autopoiesis/test_modes.py -q
 ```
 
-Expected: import failure because `src.min_agent.modes` does not exist.
+Expected: import failure because `src.autopoiesis.modes` does not exist.
 
 - [ ] **Step 3: Implement modes**
 
-Create `src/min_agent/__init__.py`:
+Create `src/autopoiesis/__init__.py`:
 
 ```python
 """Minimum autonomous paper-trading agent."""
 ```
 
-Create `src/min_agent/modes.py`:
+Create `src/autopoiesis/modes.py`:
 
 ```python
 from enum import StrEnum
@@ -127,7 +127,7 @@ def validate_data_allowed(mode: TradingMode, is_real: bool) -> None:
 Run:
 
 ```bash
-python -m pytest tests/min_agent/test_modes.py -q
+python -m pytest tests/autopoiesis/test_modes.py -q
 ```
 
 Expected: all tests pass.
@@ -135,18 +135,18 @@ Expected: all tests pass.
 ## Task 2: Core Typed Models
 
 **Files:**
-- Create: `src/min_agent/models.py`
-- Test: `tests/min_agent/test_models.py`
+- Create: `src/autopoiesis/models.py`
+- Test: `tests/autopoiesis/test_models.py`
 
 - [ ] **Step 1: Write failing model tests**
 
-Create `tests/min_agent/test_models.py`:
+Create `tests/autopoiesis/test_models.py`:
 
 ```python
 import pytest
 from pydantic import ValidationError
 
-from src.min_agent.models import (
+from src.autopoiesis.models import (
     DataSnapshot,
     LLMDecision,
     GuardianResult,
@@ -187,14 +187,14 @@ def test_guardian_rejection_requires_reason():
 Run:
 
 ```bash
-python -m pytest tests/min_agent/test_models.py -q
+python -m pytest tests/autopoiesis/test_models.py -q
 ```
 
-Expected: import failure because `src.min_agent.models` does not exist.
+Expected: import failure because `src.autopoiesis.models` does not exist.
 
 - [ ] **Step 3: Implement models**
 
-Create `src/min_agent/models.py`:
+Create `src/autopoiesis/models.py`:
 
 ```python
 from typing import Any, Literal
@@ -246,7 +246,7 @@ class GuardianResult(BaseModel):
 Run:
 
 ```bash
-python -m pytest tests/min_agent/test_models.py -q
+python -m pytest tests/autopoiesis/test_models.py -q
 ```
 
 Expected: all tests pass.
@@ -254,16 +254,16 @@ Expected: all tests pass.
 ## Task 3: Guardian Risk Gate
 
 **Files:**
-- Create: `src/min_agent/guardian.py`
-- Test: `tests/min_agent/test_guardian.py`
+- Create: `src/autopoiesis/guardian.py`
+- Test: `tests/autopoiesis/test_guardian.py`
 
 - [ ] **Step 1: Write failing Guardian tests**
 
-Create `tests/min_agent/test_guardian.py`:
+Create `tests/autopoiesis/test_guardian.py`:
 
 ```python
-from src.min_agent.guardian import Guardian, RiskLimits
-from src.min_agent.models import DataSnapshot, LLMDecision
+from src.autopoiesis.guardian import Guardian, RiskLimits
+from src.autopoiesis.models import DataSnapshot, LLMDecision
 
 
 def decision(action="BUY", symbol="SPY", pct=0.1):
@@ -336,19 +336,19 @@ def test_guardian_approves_hold():
 Run:
 
 ```bash
-python -m pytest tests/min_agent/test_guardian.py -q
+python -m pytest tests/autopoiesis/test_guardian.py -q
 ```
 
-Expected: import failure because `src.min_agent.guardian` does not exist.
+Expected: import failure because `src.autopoiesis.guardian` does not exist.
 
 - [ ] **Step 3: Implement Guardian**
 
-Create `src/min_agent/guardian.py`:
+Create `src/autopoiesis/guardian.py`:
 
 ```python
 from dataclasses import dataclass, field
 
-from src.min_agent.models import DataSnapshot, GuardianResult, LLMDecision
+from src.autopoiesis.models import DataSnapshot, GuardianResult, LLMDecision
 
 
 @dataclass(frozen=True)
@@ -392,7 +392,7 @@ class Guardian:
 Run:
 
 ```bash
-python -m pytest tests/min_agent/test_guardian.py -q
+python -m pytest tests/autopoiesis/test_guardian.py -q
 ```
 
 Expected: all tests pass.
@@ -400,17 +400,17 @@ Expected: all tests pass.
 ## Task 4: Append-Only Decision Journal
 
 **Files:**
-- Create: `src/min_agent/journal.py`
-- Test: `tests/min_agent/test_journal.py`
+- Create: `src/autopoiesis/journal.py`
+- Test: `tests/autopoiesis/test_journal.py`
 
 - [ ] **Step 1: Write failing journal tests**
 
-Create `tests/min_agent/test_journal.py`:
+Create `tests/autopoiesis/test_journal.py`:
 
 ```python
 import json
 
-from src.min_agent.journal import DecisionJournal
+from src.autopoiesis.journal import DecisionJournal
 
 
 def test_journal_appends_jsonl_record(tmp_path):
@@ -430,14 +430,14 @@ def test_journal_appends_jsonl_record(tmp_path):
 Run:
 
 ```bash
-python -m pytest tests/min_agent/test_journal.py -q
+python -m pytest tests/autopoiesis/test_journal.py -q
 ```
 
-Expected: import failure because `src.min_agent.journal` does not exist.
+Expected: import failure because `src.autopoiesis.journal` does not exist.
 
 - [ ] **Step 3: Implement journal**
 
-Create `src/min_agent/journal.py`:
+Create `src/autopoiesis/journal.py`:
 
 ```python
 import json
@@ -460,7 +460,7 @@ class DecisionJournal:
 Run:
 
 ```bash
-python -m pytest tests/min_agent/test_journal.py -q
+python -m pytest tests/autopoiesis/test_journal.py -q
 ```
 
 Expected: all tests pass.
@@ -468,20 +468,20 @@ Expected: all tests pass.
 ## Task 5: One-Cycle Orchestrator
 
 **Files:**
-- Create: `src/min_agent/loop.py`
-- Test: `tests/min_agent/test_loop.py`
+- Create: `src/autopoiesis/loop.py`
+- Test: `tests/autopoiesis/test_loop.py`
 
 - [ ] **Step 1: Write failing loop test**
 
-Create `tests/min_agent/test_loop.py`:
+Create `tests/autopoiesis/test_loop.py`:
 
 ```python
 import json
 
-from src.min_agent.guardian import Guardian, RiskLimits
-from src.min_agent.journal import DecisionJournal
-from src.min_agent.loop import TradingCycle
-from src.min_agent.models import DataSnapshot, LLMDecision
+from src.autopoiesis.guardian import Guardian, RiskLimits
+from src.autopoiesis.journal import DecisionJournal
+from src.autopoiesis.loop import TradingCycle
+from src.autopoiesis.models import DataSnapshot, LLMDecision
 
 
 class FakeDataGateway:
@@ -547,14 +547,14 @@ def test_cycle_journals_decision(tmp_path):
 Run:
 
 ```bash
-python -m pytest tests/min_agent/test_loop.py -q
+python -m pytest tests/autopoiesis/test_loop.py -q
 ```
 
-Expected: import failure because `src.min_agent.loop` does not exist.
+Expected: import failure because `src.autopoiesis.loop` does not exist.
 
 - [ ] **Step 3: Implement cycle orchestrator**
 
-Create `src/min_agent/loop.py`:
+Create `src/autopoiesis/loop.py`:
 
 ```python
 from datetime import datetime, timezone
@@ -598,7 +598,7 @@ class TradingCycle:
 Run:
 
 ```bash
-python -m pytest tests/min_agent/test_loop.py -q
+python -m pytest tests/autopoiesis/test_loop.py -q
 ```
 
 Expected: all tests pass.
@@ -613,7 +613,7 @@ Expected: all tests pass.
 Run:
 
 ```bash
-python -m pytest tests/min_agent -q
+python -m pytest tests/autopoiesis -q
 ```
 
 Expected: all tests pass.
@@ -623,7 +623,7 @@ Expected: all tests pass.
 Run:
 
 ```bash
-grep -R "return True\\|mock\\|shell=True\\|live" -n src/min_agent tests/min_agent
+grep -R "return True\\|mock\\|shell=True\\|live" -n src/autopoiesis tests/autopoiesis
 ```
 
 Expected: no `return True` market shortcut, no `shell=True`, and no live execution path.
@@ -634,8 +634,8 @@ Add the exact test command and result to the session progress notes before claim
 
 ## Completion Criteria
 
-- `src/min_agent` exists with focused modules.
-- `tests/min_agent` covers mode separation, schemas, Guardian, journal, and one-cycle orchestration.
+- `src/autopoiesis` exists with focused modules.
+- `tests/autopoiesis` covers mode separation, schemas, Guardian, journal, and one-cycle orchestration.
 - Paper/live paths reject non-real data.
 - The minimal cycle journals every decision.
 - No broker live execution exists in Phase 1.

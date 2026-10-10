@@ -14,7 +14,7 @@ Read with `docs/history/plans/2026-10-06-a-falsifiable-target-and-the-llm-increm
 
 **How the evidence in this document was produced.** Every number carries one of three marks:
 
-- **[measured]** — recomputed from `runtime/min_agent/journal.jsonl*` or from a command run in
+- **[measured]** — recomputed from `runtime/autopoiesis/journal.jsonl*` or from a command run in
   this repository while writing this document. The command is given.
 - **[recorded]** — quoted from an existing project document, whose own measurement is trusted.
 - **[unverified]** — believed, not re-measured here.
@@ -64,7 +64,7 @@ strategies are any good, using broker evidence, and retires the ones that are no
 
 So: one symbol, a five-minute cadence, a local 27B model asked to emit
 `{action, quantity, confidence, rationale}` from a context containing **one price and no
-bar history** (`src/min_agent/llm_decision.py:302-361`), a hard risk check, and a maintenance
+bar history** (`src/autopoiesis/llm_decision.py:302-361`), a hard risk check, and a maintenance
 pass every fifteen minutes that scores decisions after the fact, screens strategies on those
 scores, and moves lifecycle states.
 
@@ -75,7 +75,7 @@ grade is allowed to delete the strategy.* It is wired end to end — 941 REJECT 
 `selection-pressure-reaches-the-rules` class.
 
 **The gap between claimed and actual** **[measured]**: the strategies are not executable rules.
-`src/min_agent/offline_validation.py:9-15` states it plainly — `parameters["action"]` is never
+`src/autopoiesis/offline_validation.py:9-15` states it plainly — `parameters["action"]` is never
 read on the execution path, and `TREND_FOLLOW`'s `reference_price`/`threshold_pct` are read
 only by admission and validation. `StrategyExecutor.decide()` (`strategy_engine.py:781`) exists
 and does execute those parameters, but its only callers are the admission/selector capability
@@ -188,16 +188,16 @@ This is the finding that changes the priority order, so it is stated with its re
 > ```python
 > """Recompute PLAN_RSI_KERNEL section 3 with the LATEST counterfactual row per cycle.
 >
-> Read-only over runtime/min_agent/journal.jsonl{,.1,.2}. A cycle's counterfactual is
+> Read-only over runtime/autopoiesis/journal.jsonl{,.1,.2}. A cycle's counterfactual is
 > re-emitted by every COUNTERFACTUAL_EVALUATED pass, so the row to keep is the one from the
 > event with the greatest timestamp - not whichever file happened to be read last.
 > """
 > import collections, glob, json
 > from pathlib import Path
-> from min_agent.models import DataSnapshot, StrategySpec
-> from min_agent.strategy_engine import StrategyExecutor
+> from autopoiesis.models import DataSnapshot, StrategySpec
+> from autopoiesis.strategy_engine import StrategyExecutor
 >
-> paths = sorted(glob.glob("runtime/min_agent/journal.jsonl*"))
+> paths = sorted(glob.glob("runtime/autopoiesis/journal.jsonl*"))
 > paths = [p for p in paths if not p.endswith(".lock")]
 > latest, cycles = {}, {}
 > for p in paths:
@@ -211,7 +211,7 @@ This is the finding that changes the priority order, so it is stated with its re
 >         elif "event_type" not in e and "decision" in e and "snapshot" in e:
 >             cycles[e["cycle_id"]] = e
 > rows = {k: r for k, (_, r) in latest.items()}
-> from min_agent.counterfactual import CORRECT, INFORMATIVE as SCORED  # the screen's own sets
+> from autopoiesis.counterfactual import CORRECT, INFORMATIVE as SCORED  # the screen's own sets
 >
 > print(f"files {paths}\ncycles with a counterfactual row {len(rows)}; cycle records {len(cycles)}\n")
 > print("3.1 by action (latest row per cycle)")
@@ -244,7 +244,7 @@ This is the finding that changes the priority order, so it is stated with its re
 >     if rec["decision"].get("decision_source") != "llm":
 >         continue
 >     sid = rec.get("strategy_id") or rec["decision"].get("strategy_id")
->     f = Path("runtime/min_agent/strategies") / f"{sid}.json"
+>     f = Path("runtime/autopoiesis/strategies") / f"{sid}.json"
 >     if not sid or not f.exists():
 >         skipped += 1; continue
 >     rule = ex.decide(StrategySpec.model_validate_json(f.read_text()), DataSnapshot.model_validate(rec["snapshot"])).action
@@ -571,7 +571,7 @@ one number the project exists to move.
 - `AGENTS.md` §5 permits labelled synthetic data in tests; this must never appear on a path
   that produces evidence.
 
-**P3.2 Move `runtime/min_agent/research_trials.jsonl` out of the ignored tree.**
+**P3.2 Move `runtime/autopoiesis/research_trials.jsonl` out of the ignored tree.**
 59 recorded trials — 47 INSUFFICIENT, 12 OVERFIT, 0 PASS — are the search space the system has
 already proven does not work. It is the single most useful thing an outside contributor could
 be handed, and it is invisible because `runtime/` is gitignored.
@@ -659,7 +659,7 @@ into a public issue without checking it for credentials first.
 **Recommendation: repository name `min-agent`.** The distribution name in
 `pyproject.toml:6`, the README H1, the CLI entry point (`pyproject.toml:45`), the credential
 path, and the config directory all say `min-agent`. Only `STATUS.md:1` says `QuantGroup`.
-`min-agent` -> `min_agent` is the normal PEP 503 normalisation and is not a problem.
+`min-agent` -> `autopoiesis` is the normal PEP 503 normalisation and is not a problem.
 
 `QuantGroup` as the public name is worth avoiding for three reasons: it is an organisation
 name, not a software name; it is a common-enough string that the PyPI name is almost certainly
@@ -775,7 +775,7 @@ those in `docs/` and keep the internal workflow wording out of the public copy.
 There is also a live contradiction to fix while reorganising, because it is visible on arrival:
 the check-class count is 52 everywhere except `docs/ARCHITECTURE.md:339`, which says 29;
 test-file count is 62 (`README.md:118`), 60 (`ARCHITECTURE.md:339`) and 64 (actual); module
-count is 40 (`README.md:106`) against 38 (`src/min_agent/*.py`) or 43 including `research/`;
+count is 40 (`README.md:106`) against 38 (`src/autopoiesis/*.py`) or 43 including `research/`;
 realised PnL is `+563.41` (`README.md:260`) and `+564.39` (`STATUS.md`, several places);
 `README.md:281` says the fresh-clone script runs seven steps and `run-fresh-clone.sh:5` says six.
 `make verify` already has a `gate-class-count-consistent` class — it passes, so the check does
@@ -851,7 +851,7 @@ so the stale-code check could never fail (`561fc64`).
 | P1.2 market context | **Done** `f63a08f`. Regime, trend, volatility, 1h/1d returns; ~40 tokens. Whether it helps waits on the paired comparison |
 | P2.2 knowledge channel | **Done** `9bd1d04` (dedup: 5 copies of one lesson → 4 distinct), `683fe1b` (each lesson shown on half of cycles), `ad595fe` (retire after 10 trading days with no effect). **Waits on data**: inert until 10 days of ablation |
 | P2.3 re-open PAUSED | **Done** `bfcbdc7`, bounded. Today the queue is over its cap (16/13), so nothing reopens; with room, 1 of 6 eligible strategies would, the other 5 being re-paused at once by the existing rules |
-| Short selling and a rule DSL (from the first review) | **Built** — `docs/history/plans/2026-10-07-bounded-short-and-rule-dsl.md`. Rollout at `MIN_AGENT_SHORTS=shadow`; `paper` waits on a shadow session, and no SHORT can be approved until the account is flat |
+| Short selling and a rule DSL (from the first review) | **Built** — `docs/history/plans/2026-10-07-bounded-short-and-rule-dsl.md`. Rollout at `AUTOPOIESIS_SHORTS=shadow`; `paper` waits on a shadow session, and no SHORT can be approved until the account is flat |
 
 ### Evidence base (P3)
 

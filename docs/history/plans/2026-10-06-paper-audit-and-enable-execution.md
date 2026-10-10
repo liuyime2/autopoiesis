@@ -3,7 +3,7 @@
 Date: 2026-10-06
 Status: **APPROVED BY OPERATOR - audit complete; enabling execution is a one-line config change**
 Baseline commit for rollback: `ffd6595`
-Scope: `${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env` (`MIN_AGENT_SHADOW`), and this document.
+Scope: `${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env` (`AUTOPOIESIS_SHADOW`), and this document.
 No change to any risk limit, the Guardian, the strategy library, or the account's positions.
 
 ---
@@ -12,7 +12,7 @@ No change to any risk limit, the Guardian, the strategy library, or the account'
 
 AGENTS.md 16: *"The minimum viable system must start with paper trading and a complete feedback
 loop. Live trading is forbidden until paper-trading behavior is audited and hard risk controls
-are verified."* `MIN_AGENT_SHADOW=1` currently replaces the final broker call with a journalled
+are verified."* `AUTOPOIESIS_SHADOW=1` currently replaces the final broker call with a journalled
 intent, so:
 
 - 0 orders have reached the broker since it was enabled;
@@ -134,7 +134,7 @@ So the position returns inside the cap on the second session, without any limit 
 One line in the env file:
 
 ```
-MIN_AGENT_SHADOW=1   ->   MIN_AGENT_SHADOW=0
+AUTOPOIESIS_SHADOW=1   ->   AUTOPOIESIS_SHADOW=0
 ```
 
 Followed by `make restart`, because `daemon-source-matches-worktree` compares a fingerprint of the
@@ -166,7 +166,7 @@ No limit, no Guardian change, no strategy change, no position change.
 
 ## 5. Rollback
 
-Set `MIN_AGENT_SHADOW=1` and `make restart`. That restores the previous state exactly, and the
+Set `AUTOPOIESIS_SHADOW=1` and `make restart`. That restores the previous state exactly, and the
 intents it journals are not submissions, so no order is left dangling.
 
 ## 6. Explicitly not in scope
@@ -181,7 +181,7 @@ intents it journals are not submissions, so no order is left dangling.
 
 ## Result
 
-`MIN_AGENT_SHADOW=1 -> 0` in `${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env`, backup at
+`AUTOPOIESIS_SHADOW=1 -> 0` in `${XDG_CONFIG_HOME:-$HOME/.config}/min-agent/env`, backup at
 `/tmp/opencode/env.bak`, then `make restart`.
 
 ```
@@ -195,7 +195,7 @@ source_fingerprint  faa9e19bd135c8d6   (与工作树一致)
 
 Gate **52 classes, 0 failed, 1510 executions across 64 files**, and the three shadow-specific
 classes all still pass — including `shadow-live-consistency`, which asserts the mode is "reachable
-by MIN_AGENT_SHADOW=1, off by default", so the capability remains tested while being off.
+by AUTOPOIESIS_SHADOW=1, off by default", so the capability remains tested while being off.
 
 ### The first real orders are reductions, and only reductions
 
@@ -214,7 +214,7 @@ the cap. That is the cap doing its job, not a workaround.
 
 ### Rollback
 
-`MIN_AGENT_SHADOW=1` and `make restart`. Intents are not submissions, so nothing is left dangling.
+`AUTOPOIESIS_SHADOW=1` and `make restart`. Intents are not submissions, so nothing is left dangling.
 
 ## Open: the rule space is still long-only, and the broker is not the obstacle
 

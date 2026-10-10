@@ -76,7 +76,7 @@ never risked, and an unvalidated path would look like the best one on record.
 2. **Its fills are unfalsifiable.** Replay execution reports `status="REPLAYED"`, which is
    not in the set the evaluator treats as executed — the same technique `shadow.py` uses for
    `SHADOWED`, and for the same reason.
-3. **Its journal is a different file.** Configured by `MIN_AGENT_JOURNAL` / the harness, never
+3. **Its journal is a different file.** Configured by `AUTOPOIESIS_JOURNAL` / the harness, never
    the live path.
 4. **A gate check asserts it.** `make verify` gains a class proving the replay modules do not
    import the paper/live executor and that `REPLAYED` cannot be read as a fill. This is the

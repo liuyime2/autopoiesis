@@ -3,8 +3,8 @@
 Date: 2026-10-05
 Status: **DONE - the cadence advances per cycle; the incumbent is served 1 in 5, unclustered**
 Baseline commit for rollback: `e3ce2c9`
-Scope: `src/min_agent/strategy_engine.py`, `src/min_agent/llm_decision.py`,
-`src/min_agent/policy_engine.py`, `src/min_agent/daemon.py`, and their tests. No change to
+Scope: `src/autopoiesis/strategy_engine.py`, `src/autopoiesis/llm_decision.py`,
+`src/autopoiesis/policy_engine.py`, `src/autopoiesis/daemon.py`, and their tests. No change to
 `INCUMBENT_SHARE`, the admission cap, the probation budget, any risk limit, or the Guardian.
 
 ---
@@ -46,7 +46,7 @@ policy_engine.decide_snapshot() -> the same two calls
 ```
 
 So `cumulative_cycles` is read out of **reflection.json**, which is rewritten only on the
-reflection interval (`MIN_AGENT_REFLECTION_INTERVAL_SECONDS=1800`, 30 minutes). The sum is
+reflection interval (`AUTOPOIESIS_REFLECTION_INTERVAL_SECONDS=1800`, 30 minutes). The sum is
 therefore **frozen for the whole window**, and `served % 5 == 0` is a constant condition across
 the ~6 cycles it covers.
 
@@ -93,7 +93,7 @@ comment explicitly claims and which is the reason to read a journal-derived coun
 
 ## 4. Verification
 
-- New tests in `tests/min_agent/test_strategy_engine.py`: with `served` stepping 1..20, exactly 4
+- New tests in `tests/autopoiesis/test_strategy_engine.py`: with `served` stepping 1..20, exactly 4
   selections are the incumbent, and they are not clustered. This is the property the current
   implementation cannot produce, so it is the test that would have caught the defect.
 - A test that `served=None` reproduces the old behaviour, so the default path is pinned.
@@ -103,7 +103,7 @@ comment explicitly claims and which is the reason to read a journal-derived coun
 
 ## 5. Note on the other live finding
 
-`MIN_AGENT_SHADOW=1` is set, and the shadow flag replaces the final broker call with a journalled
+`AUTOPOIESIS_SHADOW=1` is set, and the shadow flag replaces the final broker call with a journalled
 intent. Both of today's `SHADOW_ORDER_INTENT` events carry `shadowed: true`, so no order reached
 the broker. That is the flag working as documented and it is not part of this plan; it is
 recorded in `STATUS.md` because it means approved decisions cannot yet produce fills.

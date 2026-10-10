@@ -28,9 +28,16 @@ def _load_benchmark():
 def test_an_empty_journal_exits_nothing_to_measure(tmp_path):
     journal = tmp_path / "journal.jsonl"
     journal.write_text("")
+    # `src` is *prepended*, not substituted. Replacing whatever the caller had drops every other
+    # site-packages directory the interpreter needs, which is how this test fails on an
+    # interpreter whose dependencies are not installed into the default path - it asserted exit
+    # 2 and got exit 1, and the traceback it printed was `ModuleNotFoundError: pydantic`, not
+    # anything about the benchmark.
     env = {
         **os.environ,
-        "PYTHONPATH": str(REPO / "src"),
+        "PYTHONPATH": os.pathsep.join(
+            [str(REPO / "src"), *os.environ.get("PYTHONPATH", "").split(os.pathsep)]
+        ),
         "AUTOPOIESIS_JOURNAL": str(journal),
     }
     proc = subprocess.run(

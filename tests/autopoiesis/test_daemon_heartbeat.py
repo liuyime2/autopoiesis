@@ -15,6 +15,7 @@ pin both halves of that reasoning.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from autopoiesis.models import HeartbeatPayload
 
@@ -27,6 +28,9 @@ class _Sleeper:
 
     def __call__(self, status, message, *_a, **_k):
         self.beats.append((status, message))
+
+
+SRC = Path(__file__).resolve().parents[2] / "src"
 
 
 def test_maintenance_signals_before_it_starts():
@@ -91,6 +95,7 @@ def test_the_heartbeat_fingerprint_is_the_code_loaded_not_the_code_on_disk(tmp_p
     once, at import, and an edit afterwards must not change it.
     """
     import inspect
+    import os
     import shutil
     import subprocess
     import sys
@@ -108,8 +113,19 @@ def test_the_heartbeat_fingerprint_is_the_code_loaded_not_the_code_on_disk(tmp_p
         "p.write_text(p.read_text() + '\\n# edited after import\\n')\n"
         "print(d.LOADED_SOURCE_FINGERPRINT, d.source_fingerprint())\n"
     )
+    # `src/` first, then the caller's, then the scratch directory. Substituting the environment
+    # outright - which is what `env={"PYTHONPATH": str(tmp_path)}` did - drops the package and
+    # every dependency directory, so this test failed on `ModuleNotFoundError` from an
+    # interpreter whose site-packages are not on the default path rather than on anything to do
+    # with fingerprints.
     out = subprocess.run(
-        [sys.executable, "-c", script], cwd=tmp_path, env={"PYTHONPATH": str(tmp_path)},
+        [sys.executable, "-c", script], cwd=tmp_path,
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join(
+                [str(SRC), *os.environ.get("PYTHONPATH", "").split(os.pathsep), str(tmp_path)]
+            ),
+        },
         capture_output=True, text=True, timeout=120, check=True,
     ).stdout.split()
     loaded, on_disk = out

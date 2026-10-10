@@ -3,7 +3,7 @@
 Date: 2026-10-04
 Status: **DONE - the driver runs unattended on real bars and recorded 48 trials; nothing passes**
 Baseline commit for rollback: `112731f`
-Scope: `src/min_agent/research/driver.py`, its tests, and a scheduler hook. No change to
+Scope: `src/autopoiesis/research/driver.py`, its tests, and a scheduler hook. No change to
 `required_trades`, the admission cap, the probation budget, the screen, the Guardian, the
 production journal, or the production/research separation.
 
@@ -31,7 +31,7 @@ $ grep -rn "record_trial" src/ tools/ --include=*.py | grep -v tests/
 (no matches)
 ```
 
-The 26 rows in `runtime/min_agent/research_trials.jsonl` were written by hand-running probes.
+The 26 rows in `runtime/autopoiesis/research_trials.jsonl` were written by hand-running probes.
 Every verdict this project has ever reported - including the `OVERFIT` in `112731f` - was produced
 by a person typing a script, not by the system working.
 
@@ -56,7 +56,7 @@ caller and the last three are reached only through the LLM curriculum path inste
 ## 2. The constraint that decides the shape
 
 `tools/verify.py: check_production_research_separation` fails the gate if **any** production module
-under `src/min_agent/*.py` mentions `min_agent.research`. So a driver invoked by the daemon would
+under `src/autopoiesis/*.py` mentions `autopoiesis.research`. So a driver invoked by the daemon would
 break a gate that exists for a stated reason: a backtest that can reach production state can grade
 itself.
 
@@ -69,7 +69,7 @@ gate, and because a component that both searches and trades can eventually grade
 
 ## 3. What the driver does
 
-One function, `run_search()`, in `src/min_agent/research/driver.py`:
+One function, `run_search()`, in `src/autopoiesis/research/driver.py`:
 
 1. Load real bars from the replay cache. **Never a generator, never synthetic** - the same rule
    `replay.py` already states. An empty or missing cache is an error, not a zero-result run.
@@ -81,7 +81,7 @@ One function, `run_search()`, in `src/min_agent/research/driver.py`:
 4. Return `summarise(read_trials())` merged with this run's rows.
 
 The driver writes only to `research_trials.jsonl`. It reads bars through the existing read-only
-`min_agent.replay.load_bars` rather than re-implementing a parser - a research module reading
+`autopoiesis.replay.load_bars` rather than re-implementing a parser - a research module reading
 real data is harmless, because the separation that matters runs the other way. What it must never
 reach is anything that *writes* production state, so the test asserts that `driver.py` imports
 none of `journal`, `guardian`, `executor`, `strategy_engine` or `strategy_admission` - asserted
@@ -112,7 +112,7 @@ for a single trial, or the search's own selection bias is hidden - which is the 
 - New test: the separation - `driver.py` imports no production module that writes state.
 - `python3 tools/verify.py` - 52/52 classes, and the `production-research-separation` class must
   still read `no production import of research`.
-- `pytest tests/min_agent/test_research_driver.py -q` - the driver test.
+- `pytest tests/autopoiesis/test_research_driver.py -q` - the driver test.
 - A **real run** on the 20448-bar cache, reported with its actual verdicts. Whatever they are is
   the result; an `OVERFIT` search is a correct search.
 
@@ -128,8 +128,8 @@ for a single trial, or the search's own selection bias is hidden - which is the 
 
 ## Result
 
-Implemented in `src/min_agent/research/driver.py` (213 lines) with
-`tests/min_agent/test_research_driver.py` (11 tests). Gate: **52 classes, 0 failed, 1475 test
+Implemented in `src/autopoiesis/research/driver.py` (213 lines) with
+`tests/autopoiesis/test_research_driver.py` (11 tests). Gate: **52 classes, 0 failed, 1475 test
 executions across 63 files**.
 
 The real run, unattended, on the 20448-bar cache:

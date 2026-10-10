@@ -3,7 +3,7 @@
 Date: 2026-10-03
 Status: **DONE - measured; the gate is kept at 0.5 and its measured value disclosed**
 Baseline commit for rollback: `5f434aa`
-Scope: `configs/paper.env.example`, the docstring in `src/min_agent/calibration.py` that
+Scope: `configs/paper.env.example`, the docstring in `src/autopoiesis/calibration.py` that
 says the gate decides whether an order may be sent, and `STATUS.md`. **No change to the
 Guardian, no new test.**
 

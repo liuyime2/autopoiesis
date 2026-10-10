@@ -4,7 +4,7 @@ Date: 2026-10-05
 Status: **DONE - the cap refusal is the system's state again; the incumbent is no longer retired for it**
 
 Baseline commit for rollback: `906f104`
-Scope: `src/min_agent/evaluator.py` and its tests. No change to the cap itself, the Guardian,
+Scope: `src/autopoiesis/evaluator.py` and its tests. No change to the cap itself, the Guardian,
 `INCUMBENT_SHARE`, the admission cap, or the probation budget.
 
 ---
@@ -116,7 +116,7 @@ account state in every case.
 
 ## Result
 
-One prefix added to `SYSTEM_REJECTION_REASON_PREFIXES` in `src/min_agent/evaluator.py`:
+One prefix added to `SYSTEM_REJECTION_REASON_PREFIXES` in `src/autopoiesis/evaluator.py`:
 
 ```python
 "this buy would leave ",

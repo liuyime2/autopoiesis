@@ -163,14 +163,6 @@ at zero" are different claims. `make status-page` writes four pages to
 (lifecycle transitions with their reasons — what the self-evolution actually changed), and Evidence
 (the agent-level claim, the attribution coverage, and the signal ledger's verdict counts).
 
-**`migrate_state_dir.py`** moves the state directory across the rename from
-`runtime/min_agent/` to `runtime/autopoiesis/`, and refuses rather than guessing.
-That directory holds the journal, which is this project's only source of truth
-(everything else in it is derived and regenerable), and two directories both
-holding a real journal cannot be merged without inventing a history. `check`
-(default) only reports; `apply` moves, and prints the command to undo it. Run it
-with the daemon stopped.
-
 ## Service templates
 
 `autopoiesis.service.in`, `watchdog.service.in`, `ollama.service.in`, `research.service.in`,

@@ -4,7 +4,7 @@ Date: 2026-10-03
 Status: **DONE - the 5/13 split is closed; whether a candidate now clears the screen is a
 live measurement, not a claim this document can close**
 Baseline commit for rollback: `0f141dd`
-Scope: `src/min_agent/strategy_engine.py` and its tests. No config, no new module, no new event.
+Scope: `src/autopoiesis/strategy_engine.py` and its tests. No config, no new module, no new event.
 
 ---
 
@@ -180,7 +180,7 @@ a separate defect with a separate baseline, and it is where the next measurement
 
 ## 9. Correction: this plan read half the journal
 
-Measured by scanning `runtime/min_agent/journal.jsonl`, which is **rotated** —
+Measured by scanning `runtime/autopoiesis/journal.jsonl`, which is **rotated** —
 `journal.jsonl.1` holds another 10,587 events. `JsonlJournal.read_all()` spans both and is
 the reader to use. Corrected figures:
 

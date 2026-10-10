@@ -20,7 +20,7 @@ Scope: `<repo-root>`
 > | plan item | reality |
 > | --- | --- |
 > | `pytest.ini` `testpaths` | done |
-> | `MIN_AGENT_MAX_TOTAL_EXPOSURE` | done, and scoped to the allowlist |
+> | `AUTOPOIESIS_MAX_TOTAL_EXPOSURE` | done, and scoped to the allowlist |
 > | `CYCLE_FAILED` event | done |
 > | `test_data_gateway.py`, `test_health.py` | done |
 > | `tools/alpaca_smoke.py` | done |
@@ -37,7 +37,7 @@ Scope: `<repo-root>`
 
 ## 0. TL;DR
 
-The Python domain layer (`src/min_agent/`) is structurally sound and has 175 passing
+The Python domain layer (`src/autopoiesis/`) is structurally sound and has 175 passing
 unit tests. The system is nonetheless **dead since 2026-06-23** and, if restarted today,
 would still never trade profitably, because of four independent defects that each
 individually make profitability structurally impossible.
@@ -64,7 +64,7 @@ independently revertable.
 
 ### Non-Goals (explicitly out of scope)
 
-- **No live trading.** `MIN_AGENT_MODE=live` stays rejected in `config.py:46-47`.
+- **No live trading.** `AUTOPOIESIS_MODE=live` stays rejected in `config.py:46-47`.
   Guardian and executor paper-URL guards are unchanged and not weakened.
 - **No strategy alpha work.** Designing a profitable strategy is out of scope. This plan
   makes the *measurement and feedback machinery* honest so alpha can be measured at all.
@@ -87,11 +87,11 @@ Every item below was reproduced against the live code and the on-disk 16.9 MB jo
 | **D3** | The reward function **pays the maximum score for doing nothing**, and selection is a deterministic `argmax` on it. `evaluator.py:463-470` returns `1 - (errors+rejected)/cycles` with **no PnL evidence needed**, so a strategy that never trades scores `1.0`. `strategy_engine.py:139` then picks it forever. | `reflection.json`: `trend-follow-sell-001` = 36 cycles, 0 submitted, 0 rejected, `{HOLD: 36}`, **score 1.0** — beats `fixed-size-buy-001` (5 real orders, score 0.833). 800/851 journal cycles are HOLD. |
 | **D4** | The only guard against D3 is disabled twice: `strategy_engine.py:103` returns `False` for any `kind != "FIXED_SIZE"` (the latch winner is `TREND_FOLLOW`), and `:107` requires `lifecycle == "PROBATION"` (permanently false once promoted to ACTIVE). | The latch winner is `ACTIVE`. |
 | **D5** | Health reporting is a **replay of a file**. `health.py:17-20` only parses `heartbeat.json`; `cli.py:61-63` prints it and **always returns 0**. No `os.kill(pid, 0)`, no timestamp comparison. | `heartbeat.json` = `"status": "RUNNING"`, `pid 2590767`, `ts 2026-06-23T13:02:59Z`; `ps -p 2590767` → no such process. **97 days stale.** 112 of 113 `reviews/*.json` are byte-identical `{"ok": true, "issues": [], "tests_ok": true}` |
-| **D6** | Any Alpaca blip **kills the daemon**. `scheduler.py:31-34` has no `try/except`; `daemon.py:100` calls it unguarded. `run_forever.sh:28` masks the crash with `\|\| true` → infinite 30 s crash loop. | Real traceback in `runtime/min_agent/daemon.out`: `requests.exceptions.ConnectTimeout` at `scheduler.py:34` |
+| **D6** | Any Alpaca blip **kills the daemon**. `scheduler.py:31-34` has no `try/except`; `daemon.py:100` calls it unguarded. `run_forever.sh:28` masks the crash with `\|\| true` → infinite 30 s crash loop. | Real traceback in `runtime/autopoiesis/daemon.out`: `requests.exceptions.ConnectTimeout` at `scheduler.py:34` |
 | **D7** | The LLM makes **zero** trade decisions. `cli.py:189` injects `PolicyEngine` (static JSON lookup + arithmetic). `OllamaDecisionEngine.decide` is reachable only from `--once`. Meanwhile `curriculum.py:127-135` catches **every** LLM failure and returns a hard-coded `_fallback_task()`, which `daemon.py:249-262` then journals as `status="SUCCESS"`. | 42 `CURRICULUM_FAILED`; 30 are disguised fallbacks. `cli.py:232,238` hard-code `created_at` and `reference_price: 100.0` into the prompt → 9 admitted strategies carry `reference_price ∈ {100…200}` against SPY ≈ $735. |
 | **D8** | Guardian's **correct** rejections are fed to the lifecycle manager as strategy defects, causing PAUSE/RETIRE for compliance, which `auto-fix.sh:36-39` / `auto_reviewer.py:133-135` then silently re-enable — bypassing `StrategyAdmission` and `Guardian.review_strategy`. `auto-fix.sh:41-44` additionally **raises** `max_position_value` to a hard-coded `5000.0`. | **Direct violation of AGENTS.md §6** ("no automatic weakening of hard risk limits"). `auto-fix.log:18` reports `fixed-size-sell-001` as `✓ 正常` while it is `lifecycle=RETIRED` and therefore unselectable (`strategy_engine.py:126`). |
 | **D9** | `conda` is not on `PATH` (`~/.bashrc` is 1 byte). Every ops entrypoint hard-codes bare `conda`. Combined with `set -e` (not `pipefail`) + `| tee`, a `command not found` exits **0** and prints `✅ 无需修复`. | `auto-fix.log:31-39` and `market-check.log:63-72` are dated **today** and contain the banner and footer but none of the `[1/3][2/3][3/3]` body. |
-| **D10** | No supervision of any kind. `crontab -l` → none. `systemctl --user` → no service units. `ps` → no `min_agent`, no `ollama`. The "cron" in `AUTO_REVIEW_README.md:44-50` is a table of **Claude session IDs**. `final_check_and_summary.py:66` prints a hard-coded `"✅ 每小时监控: Cron任务已设置"` that is never checked. | Verified live. |
+| **D10** | No supervision of any kind. `crontab -l` → none. `systemctl --user` → no service units. `ps` → no `autopoiesis`, no `ollama`. The "cron" in `AUTO_REVIEW_README.md:44-50` is a table of **Claude session IDs**. `final_check_and_summary.py:66` prints a hard-coded `"✅ 每小时监控: Cron任务已设置"` that is never checked. | Verified live. |
 | **D11** | Journal: no rotation, no size cap, no `fsync`, and **every** reader silently drops unparseable lines with no counter (`journal.py:28-31, 42-46, 60-63`). `trade_counter.py:16` does a full `read_all()` **every trading cycle**; maintenance does 6 full passes. Cost is O(file size). | 16.9 MB / 5 385 lines, ~1.2 MB/day, `read_all()` = 0.73 s today. `P&L_EVIDENCE_RECORDED` alone is 9.7 MB (58%). |
 | **D12** | Non-atomic, unlocked writes to the live strategy library, which the daemon re-reads **every cycle** (`policy_engine.py:23`). A torn read makes `strategy_engine.py:38-39 except: continue` drop the strategy for that cycle → a phantom HOLD. | 9 write sites; `grep` for `os.replace|flock|fcntl|tempfile` in `src/` → **zero hits**. `auto-fix.sh:46` and `auto_reviewer.py:135` write the same 4 files with no lock against each other or the daemon. |
 | **D13** | No fill feedback. `executor.py:63` reads `filled_qty` from the *submit* response (always 0 for a market order). Nothing re-polls. The 23 SUBMITTED orders fill, but the journal never learns it. | `reflection.json`: `submitted_orders: 5, filled_quantity: 0.0, fill_quantity_ratio: 0.0, pnl_evidence: "missing_fill_price_and_broker_activity"` |
@@ -107,7 +107,7 @@ Every item below was reproduced against the live code and the on-disk 16.9 MB jo
 Introduce a typed error. **Never degrade broker data to an empty result.**
 
 ```python
-# src/min_agent/data_gateway.py
+# src/autopoiesis/data_gateway.py
 class BrokerDataUnavailable(RuntimeError):
     """Broker state could not be read. Never degrade to an empty result: a
     risk check that reads 'no positions' when the API is down is unsound."""
@@ -223,7 +223,7 @@ instead of silently idling.
 
 ### 3.8 One command to run and to iterate (fixes D9, D10, D15)
 
-`min_agent.cli doctor` is the new fast-iteration primitive. It checks credentials, Alpaca
+`autopoiesis.cli doctor` is the new fast-iteration primitive. It checks credentials, Alpaca
 paper reachability, Ollama + model presence, heartbeat **liveness**, journal size/growth,
 strategy-library state, and reconciliation — printing a table and **returning non-zero on
 any fault**. `minictrl` wraps it so iteration is one line.
@@ -253,7 +253,7 @@ Each phase ends with a **verification gate**. Phases 0–2 are the blockers.
       `reasoning_engine.py` (`_trade`/`_create_strategy` return `True`;
       `_reconcile` returns a fabricated `{"matched": True}`), `reflector.py`, `modes.py`
 
-**Gate:** `git status` clean; `pytest tests/min_agent -q` still 175 passed; working tree
+**Gate:** `git status` clean; `pytest tests/autopoiesis -q` still 175 passed; working tree
 < 20 MB.
 
 ### Phase 1 — Make it runnable and honest (D1, D2, D5, D6)
@@ -261,7 +261,7 @@ Each phase ends with a **verification gate**. Phases 0–2 are the blockers.
       `AccountSnapshot.day_start_equity_known`
 - [ ] `guardian.py`: fail closed on `not day_start_equity_known`; expose
       `max_total_exposure` audit
-- [ ] `config.py`: add `MIN_AGENT_MAX_TOTAL_EXPOSURE` (default = `max_position_value × 4`);
+- [ ] `config.py`: add `AUTOPOIESIS_MAX_TOTAL_EXPOSURE` (default = `max_position_value × 4`);
       add `stale_after_seconds`
 - [ ] `cli.py:177-182`: **pass** `max_total_exposure`
 - [ ] `loop.py`: move `snapshot()` inside try; journal `CYCLE_FAILED`
@@ -269,10 +269,10 @@ Each phase ends with a **verification gate**. Phases 0–2 are the blockers.
 - [ ] `health.py`: liveness + staleness (3.5)
 - [ ] `cli.py:61-63`: `--status` returns non-zero when not live
 - [ ] `scheduler.py`: fail-closed `_clock` + `last_error`
-- [ ] New `tests/min_agent/test_data_gateway.py` — asserts the exact client method names
+- [ ] New `tests/autopoiesis/test_data_gateway.py` — asserts the exact client method names
       exist, and that a raising client surfaces `BrokerDataUnavailable` rather than `()`
-- [ ] Extend `tests/min_agent/test_health.py` — stale heartbeat and dead pid must be detected
-- [ ] Extend `tests/min_agent/test_scheduler.py` — a raising clock must not propagate
+- [ ] Extend `tests/autopoiesis/test_health.py` — stale heartbeat and dead pid must be detected
+- [ ] Extend `tests/autopoiesis/test_scheduler.py` — a raising clock must not propagate
 
 **Gate:** all tests pass, and **the 97-day-stale heartbeat is now reported unhealthy**
 (prove it before fixing anything else).
@@ -294,7 +294,7 @@ Each phase ends with a **verification gate**. Phases 0–2 are the blockers.
 can no longer modify any risk limit (verified by a test that greps its own source).
 
 ### Phase 3 — Close the loop (D13, D14, D11, D12)
-- [ ] New `src/min_agent/atomicio.py`: `write_text_atomic`, `write_json_atomic`, `FileLock`
+- [ ] New `src/autopoiesis/atomicio.py`: `write_text_atomic`, `write_json_atomic`, `FileLock`
 - [ ] Route all 9 write sites through it; `fcntl.flock` on the strategy dir and the journal
 - [ ] `strategy_engine.py:38-39`: log parse failures instead of `continue`
 - [ ] `journal.py`: size-based rotation + `fsync` + a **dropped-line counter** exposed on
@@ -374,7 +374,7 @@ One full paper session must produce, verified from the journal:
 | `git init` + move `history_version/` | Already done / reversible `mv` | The move is a `mv`; the path is recorded here |
 
 **Never do without a new decision:** place a real (non-paper) order; lower a risk limit;
-`git push`; delete `runtime/min_agent/journal.jsonl`.
+`git push`; delete `runtime/autopoiesis/journal.jsonl`.
 
 ---
 
@@ -386,23 +386,23 @@ cd <repo-root>
 export PYTHONPATH=src
 
 # unit + regression suite (must stay green throughout)
-conda run -n llm python -m pytest tests/min_agent -q
+conda run -n llm python -m pytest tests/autopoiesis -q
 
 # fast health check — the primary iteration loop
-conda run -n llm python -m min_agent.cli doctor ; echo "exit=$?"
+conda run -n llm python -m autopoiesis.cli doctor ; echo "exit=$?"
 
 # proves a dead daemon is now detected (currently it is NOT)
-conda run -n llm python -m min_agent.cli --status ; echo "exit=$?"
+conda run -n llm python -m autopoiesis.cli --status ; echo "exit=$?"
 
 # no exec / shell / forced-success in the trading path
-grep -R --exclude-dir='__pycache__' -nE "exec\(|shell=True" src/min_agent || echo OK
-grep -R --exclude-dir='__pycache__' -n "return True" src/min_agent || echo OK
+grep -R --exclude-dir='__pycache__' -nE "exec\(|shell=True" src/autopoiesis || echo OK
+grep -R --exclude-dir='__pycache__' -n "return True" src/autopoiesis || echo OK
 
 # no auto-relaxation of risk limits outside Guardian
 grep -RIn "max_position_value.*=.*5000" auto-fix.sh auto_reviewer.py || echo OK
 
 # no fabricated data in the paper path
-grep -RIn --exclude-dir='__pycache__' -E "mock|fake|fabricat|synthes|random\." src/min_agent || echo OK
+grep -RIn --exclude-dir='__pycache__' -E "mock|fake|fabricat|synthes|random\." src/autopoiesis || echo OK
 ```
 
 **End-to-end success proof (Phase 6), read from the journal — not from any status file:**

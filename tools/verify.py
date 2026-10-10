@@ -263,11 +263,22 @@ class Result:
     counts: dict = field(default_factory=dict)
 
 
+def _src_path() -> str:
+    """`src/` first, then whatever the caller already had.
+
+    The same reason the gate's own test collects: replacing the caller's `PYTHONPATH` outright
+    drops the site-packages the interpreter needs, so a check run from an environment whose
+    dependencies live elsewhere fails on an import rather than on what it was checking.
+    """
+    parts = [str(SRC), *os.environ.get("PYTHONPATH", "").split(os.pathsep)]
+    return os.pathsep.join(p for p in parts if p)
+
+
 def _run(cmd: list[str], timeout: int = 1800) -> tuple[int, str]:
     try:
         proc = subprocess.run(
             cmd, cwd=ROOT, capture_output=True, text=True, timeout=timeout,
-            env={**os.environ, "PYTHONPATH": str(SRC)},
+            env={**os.environ, "PYTHONPATH": _src_path()},
         )
     except subprocess.TimeoutExpired:
         return 124, f"timed out after {timeout}s"

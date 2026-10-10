@@ -1,4 +1,4 @@
-# min_agent runbook
+# autopoiesis runbook
 
 Supersedes `2026-06-09-min-agent-daemon-runbook.md`, which promised things the
 code did not do: it described `data_gateway.py` as having "no fallbacks" when it
@@ -13,7 +13,7 @@ check, and it exits non-zero on any fault.
 Live trading is rejected in three independent places and none of them may be
 relaxed:
 
-- `config.py` — `MIN_AGENT_MODE=live` raises
+- `config.py` — `AUTOPOIESIS_MODE=live` raises
 - `Guardian.review` — non-paper mode is rejected before any other check
 - `AlpacaPaperExecutor.__init__` — a non-paper base URL refuses to construct
 - `cli.py` — `--once` and `--daemon` both verify the URL before wiring anything
@@ -79,29 +79,29 @@ thin wrapper kept for muscle memory.
 
 ## Tuning
 
-All values are environment variables; see `src/min_agent/config.py`.
+All values are environment variables; see `src/autopoiesis/config.py`.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `MIN_AGENT_SYMBOLS` | `SPY` | instruments to trade |
-| `MIN_AGENT_ALLOWLIST` | `SPY,QQQ,AAPL,MSFT,NVDA` | Guardian allowlist |
-| `MIN_AGENT_MAX_POSITION_VALUE` | `5000` | per-order cap |
-| `MIN_AGENT_MAX_TOTAL_EXPOSURE` | `4 × position` | **aggregate** cap; was never wired before |
-| `MIN_AGENT_MAX_DAILY_LOSS` | `500` | daily loss kill switch |
-| `MIN_AGENT_MAX_TRADES_PER_DAY` | `10` | daily order cap |
-| `MIN_AGENT_STALE_AFTER_SECONDS` | `900` | heartbeat is dead past this |
-| `MIN_AGENT_CURRICULUM_ENABLED` | `false` | turn the LLM curriculum on |
+| `AUTOPOIESIS_SYMBOLS` | `SPY` | instruments to trade |
+| `AUTOPOIESIS_ALLOWLIST` | `SPY,QQQ,AAPL,MSFT,NVDA` | Guardian allowlist |
+| `AUTOPOIESIS_MAX_POSITION_VALUE` | `5000` | per-order cap |
+| `AUTOPOIESIS_MAX_TOTAL_EXPOSURE` | `4 × position` | **aggregate** cap; was never wired before |
+| `AUTOPOIESIS_MAX_DAILY_LOSS` | `500` | daily loss kill switch |
+| `AUTOPOIESIS_MAX_TRADES_PER_DAY` | `10` | daily order cap |
+| `AUTOPOIESIS_STALE_AFTER_SECONDS` | `900` | heartbeat is dead past this |
+| `AUTOPOIESIS_CURRICULUM_ENABLED` | `false` | turn the LLM curriculum on |
 
 Risk limits may only be changed here, in config, or through
 `Guardian` + `StrategyAdmission` as a journaled operation. A test in
-`tests/min_agent/test_governance.py` enforces that no ops script may assign one.
+`tests/autopoiesis/test_governance.py` enforces that no ops script may assign one.
 
 ## Reading the journal
 
 ```bash
 ./minictrl report                       # broker-backed PnL evidence
 ./minictrl evidence                     # re-ingest broker activities
-grep '"event_type":"ORDER_FILL_CONFIRMED"' runtime/min_agent/journal.jsonl | tail
+grep '"event_type":"ORDER_FILL_CONFIRMED"' runtime/autopoiesis/journal.jsonl | tail
 ```
 
 The journal rotates at 64 MB with 3 backups, and reports how many unparseable

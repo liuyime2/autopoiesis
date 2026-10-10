@@ -3,7 +3,7 @@
 Date: 2026-10-06
 Status: **PLAN - measured on the first live session after enabling execution**
 Baseline commit for rollback: `564a946`
-Scope: `src/min_agent/strategy_engine.py` and its tests. No change to the Guardian, any risk
+Scope: `src/autopoiesis/strategy_engine.py` and its tests. No change to the Guardian, any risk
 limit, the strategy library, the lifecycle rules, or the admission gate.
 
 ---

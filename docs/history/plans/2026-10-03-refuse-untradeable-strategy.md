@@ -3,8 +3,8 @@
 Date: 2026-10-03
 Status: **DONE - implemented, measured, gated**
 Baseline commit for rollback: `b40e947`
-Scope: `src/min_agent/strategy_admission.py`, `src/min_agent/curriculum.py`,
-`tests/min_agent/test_llm_provenance.py`, plus the figures three documents quote. No new
+Scope: `src/autopoiesis/strategy_admission.py`, `src/autopoiesis/curriculum.py`,
+`tests/autopoiesis/test_llm_provenance.py`, plus the figures three documents quote. No new
 check class: the rule is guarded by unit tests, because the replay that measures it reads
 `runtime/` and cannot run on a fresh clone.
 
@@ -21,8 +21,8 @@ and it is not selecting, because most of what it selects cannot be judged.
 
 ## 1. The baseline, as a measurement
 
-Everything below is counted from `runtime/min_agent/journal.jsonl` (1179 cycle records,
-16317 typed events, 2026-06-10 to 2026-10-03) and from `runtime/min_agent/strategies/`.
+Everything below is counted from `runtime/autopoiesis/journal.jsonl` (1179 cycle records,
+16317 typed events, 2026-06-10 to 2026-10-03) and from `runtime/autopoiesis/strategies/`.
 None of it is estimated.
 
 ### 1.1 The library cannot be fed

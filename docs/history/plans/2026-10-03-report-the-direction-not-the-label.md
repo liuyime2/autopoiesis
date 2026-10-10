@@ -3,7 +3,7 @@
 Date: 2026-10-03
 Status: **DONE - implemented, measured, gated**
 Baseline commit for rollback: `34f56d8`
-Scope: `src/min_agent/doctor.py`, `tests/min_agent/test_doctor_proof_checks.py`, plus
+Scope: `src/autopoiesis/doctor.py`, `tests/autopoiesis/test_doctor_proof_checks.py`, plus
 the figures three documents quote.
 
 ---
@@ -138,7 +138,7 @@ the honest outcome available while the market is shut.
 
 ## 6. Verification
 
-Two tests in `tests/min_agent/test_doctor_proof_checks.py`, stubbing `calibrate` with the
+Two tests in `tests/autopoiesis/test_doctor_proof_checks.py`, stubbing `calibrate` with the
 live journal's figures because the property under test is what `doctor` does with the
 verdict it is handed:
 

@@ -118,7 +118,7 @@ Each of these reported success while something real was wrong.
   real bar is the 10 informative decisions named in the verdicts. These counts
   grow while the market is open, so treat them as of this commit.
 - The figures here are now **independently reproduced**: `tools/replay_audit.py`
-  parses the jsonl as text, with no `min_agent` import in its counting path, and
+  parses the jsonl as text, with no `autopoiesis` import in its counting path, and
   re-derives 13 load-bearing numbers from first principles - including the FIFO
   lot arithmetic that produces the +564.39. It runs as the `replay-audit` gate
   class. It covers the numbers quoted here, not every field of every record.

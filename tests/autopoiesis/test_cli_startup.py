@@ -126,7 +126,7 @@ def test_watchdog_restarts_a_dead_daemon_and_leaves_a_live_one_alone(tmp_path, m
     def fake_run(args, **_kwargs):
         calls.append(tuple(args))
         # `systemctl --user <verb> <unit>`: the verb is args[2]. Reading args[-1] looked at
-        # the unit name, so the first version of this test asserted against 'min-agent.service'
+        # the unit name, so the first version of this test asserted against a unit that no longer exists
         # four times and reported that reset-failed was never called.
         verb = args[2]
         if verb == "is-active":

@@ -3,7 +3,7 @@
 Date: 2026-10-05
 Status: **DONE - degraded folds 46/52 -> 15/52; the OVERFIT verdict is now a real signal**
 Baseline commit for rollback: `35acc7c`
-Scope: `src/min_agent/research/walk_forward.py` and its tests. No change to
+Scope: `src/autopoiesis/research/walk_forward.py` and its tests. No change to
 `required_trades`, `BASE_REQUIRED_TRADES`, `DEGRADATION_LIMIT`, the search space, the driver, the
 daemon, or any risk limit.
 

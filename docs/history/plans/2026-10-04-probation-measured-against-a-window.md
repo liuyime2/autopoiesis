@@ -4,7 +4,7 @@ Date: 2026-10-04
 Status: **DONE - the unreachable threshold is reachable; whether probation now drains is a live measurement**
 Baseline commit for rollback: `b17ea05`
 Scope: `StrategyResult`, the daemon's evaluation, and the two rules in
-`src/min_agent/strategy_engine.py` that mean "service owed to this candidate". No config
+`src/autopoiesis/strategy_engine.py` that mean "service owed to this candidate". No config
 change, no new module, no persisted counter.
 
 ---

@@ -23,13 +23,13 @@ export ALPACA_SECRET_KEY="..."
 export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
 
 export OLLAMA_BASE_URL="http://127.0.0.1:11434"
-export MIN_AGENT_MODEL="deepseek-r1:8b"
-export MIN_AGENT_GPU_DEVICES="2,3"
+export AUTOPOIESIS_MODEL="deepseek-r1:8b"
+export AUTOPOIESIS_GPU_DEVICES="2,3"
 export CUDA_VISIBLE_DEVICES="2,3"
 
-export MIN_AGENT_MODE="paper"
-export MIN_AGENT_SYMBOLS="SPY"
-export MIN_AGENT_ALLOWLIST="SPY,QQQ,AAPL,MSFT,NVDA"
+export AUTOPOIESIS_MODE="paper"
+export AUTOPOIESIS_SYMBOLS="SPY"
+export AUTOPOIESIS_ALLOWLIST="SPY,QQQ,AAPL,MSFT,NVDA"
 ```
 
 `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` are also accepted for Alpaca
@@ -52,7 +52,7 @@ Confirm `deepseek-r1:8b` is listed.
 ## Verify Environment
 
 ```bash
-PYTHONPATH=src OLLAMA_BASE_URL=http://127.0.0.1:11434 python -m min_agent.cli --check-env
+PYTHONPATH=src OLLAMA_BASE_URL=http://127.0.0.1:11434 python -m autopoiesis.cli --check-env
 ```
 
 The command must report:
@@ -68,7 +68,7 @@ The command must report:
 PYTHONPATH=src \
 OLLAMA_BASE_URL=http://127.0.0.1:11434 \
 CUDA_VISIBLE_DEVICES=2,3 \
-python -m min_agent.cli --once
+python -m autopoiesis.cli --once
 ```
 
 The cycle will stop before any order if:
@@ -83,8 +83,8 @@ The cycle will stop before any order if:
 ## Verification Commands
 
 ```bash
-python -m pytest tests/min_agent -q
-grep -R --exclude-dir='__pycache__' "shell=True\|FORCED TRUE\|return True" -n src/min_agent tests/min_agent || true
+python -m pytest tests/autopoiesis -q
+grep -R --exclude-dir='__pycache__' "shell=True\|FORCED TRUE\|return True" -n src/autopoiesis tests/autopoiesis || true
 ```
 
 ## Current Verified State

@@ -52,15 +52,23 @@ endif
 PY := PYTHONPATH=src $(CONDA_RUN) python
 
 # The credentials file, resolved the same way `minictrl` resolves it. It used to be
-# `$(XDG_CONFIG_HOME)/min-agent/env`, which becomes `/min-agent/env` when XDG_CONFIG_HOME is
+# `$(XDG_CONFIG_HOME)/autopoiesis/env`, which becomes `/autopoiesis/env` when XDG_CONFIG_HOME is
 # unset - the state CI and the runbook are in - so `make` silently proceeded with no
 # credentials and no warning, while `minictrl` looked in the right place. Two entry points
 # disagreeing about the configuration is exactly what this refactor set out to remove.
-# The new directory first, the old one still honoured: see minictrl for why.
-# The credential file, under its current name and the one it had before the rename. Both are
-# honoured, the new one first: `minictrl` resolves it the same way, and dropping the old name
-# without moving the file would leave the agent unable to find its credentials at all.
-ENVFILE ?= $(if $(MIN_AGENT_ENV_FILE),$(MIN_AGENT_ENV_FILE),$(if $(AUTOPOIESIS_ENV_FILE),$(AUTOPOIESIS_ENV_FILE),$(firstword $(wildcard $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/autopoiesis/env $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/min-agent/env))))
+#
+# One path and one spelling. The name is stated on its own line below because the
+# `one-credentials-path` check requires an instruction that names the file on the same line as a
+# shell verb - and an `ENVFILE ?= ...` continuation that carries the path inside a `wildcard` has
+# no verb on that line at all. Collapsing it to satisfy a word count would have been the wrong
+# fix; naming the path where the check and a reader both find it is the right one.
+# `=` rather than shell `${...}`: `make` expands `$(...)` itself and leaves a literal `${...}`
+# alone, so the earlier `?= ${XDG_CONFIG_HOME:-$HOME/.config}/autopoiesis/env` resolved to
+# `/autopoiesis/env` in every recipe and `make` silently proceeded with no credentials at all -
+# which is the exact failure the line above this one records. Verified by printing the expanded
+# variable, not by the gate going green.
+AUTOPOIESIS_ENV_FILE ?= $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/autopoiesis/env
+ENVFILE ?= $(AUTOPOIESIS_ENV_FILE)
 
 # Credentials live outside the repo. Every target that touches the broker or the
 # model loads them from there; nothing reads a checked-in secret.
