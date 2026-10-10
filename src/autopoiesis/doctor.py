@@ -169,7 +169,9 @@ def run_doctor(config: AgentConfig, *, client=None, skip_broker: bool = False) -
     _check_ollama(report, config)
     _check_daemon(report, config)
     _check_journal(report, config)
-    _check_strategy_library(report, config)
+    _check_strategy_library(
+        report, config, JsonlJournal(config.journal_path) if config.journal_path.exists() else None
+    )
     _check_knowledge(report, config)
     _check_proof(report, config)
     _check_governance(report, config)
@@ -1393,11 +1395,63 @@ def _check_journal(report: DoctorReport, config: AgentConfig) -> None:
         )
 
 
-def _check_strategy_library(report: DoctorReport, config: AgentConfig) -> None:
+def _admitted_on_record(journal: JsonlJournal | None) -> set[str]:
+    """Strategy ids the journal records as admitted, read the way `check_runtime_integrity` reads it.
+
+    Two places already derive this set from `STRATEGY_ADMISSION_REVIEWED`; a third derivation
+    here would be a third place for the event name to be wrong, so it mirrors the one that is
+    checked against a live deployment.
+    """
+    if journal is None:
+        return set()
+    try:
+        events = journal.read_events("STRATEGY_ADMISSION_REVIEWED")
+    except Exception:
+        return set()
+    return {
+        event.strategy_id
+        for event in events
+        if event.strategy_id and (event.payload or {}).get("accepted")
+    }
+
+
+def _check_strategy_library(
+    report: DoctorReport, config: AgentConfig, journal: JsonlJournal | None = None
+) -> None:
+    """The library must hold a tradable strategy, or say honestly that it does not yet.
+
+    An empty library is a fault only when this deployment *had* strategies and lost them. On a
+    fresh clone `runtime/` does not exist, every other check here reports "the record has nothing
+    in it yet" as a warning, and this one failed - which made `make verify` red on a clean
+    checkout, and made the README's "no broker account, model or credentials are needed for any of
+    this" false, because `make verify` is in that list. The claim and the gate disagreed about the
+    same thing, and the gate was wrong.
+
+    So the two cases are separated by the journal, which is the record of what was ever admitted:
+    a deployment that has admissions and no files has lost them, and a deployment with neither has
+    not started. The distinction is the same one `_check_experiment_chain` already draws, and it
+    is the one `check_runtime_integrity` draws when it excuses six strategies whose files are
+    absent.
+    """
     library = StrategyLibrary(config.strategy_dir)
     strategies = library.list()
     if not strategies:
-        report.add("strategy library", FAIL, f"no readable strategies in {config.strategy_dir}")
+        ever_admitted = _admitted_on_record(journal)
+        if ever_admitted:
+            report.add(
+                "strategy library", FAIL,
+                f"no readable strategies in {config.strategy_dir}, but the journal records "
+                f"{len(ever_admitted)} admission(s)",
+                "a strategy the daemon admitted has no file; `admit()` writes the file before it "
+                "returns, so this is a loss rather than a start",
+            )
+        else:
+            report.add(
+                "strategy library", WARN,
+                f"no readable strategies in {config.strategy_dir}",
+                "nothing has been admitted on this record yet; run ./autopoiesis once, or see "
+                "the quick start in README.md",
+            )
         return
     selectable = [
         s for s in strategies
