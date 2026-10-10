@@ -173,7 +173,7 @@ Python 3.10、3.11、3.12 三个 job 全部安装成功、lint 失败；type、p
 | 3 成本口径 | 部分实现 | 已修，方向对 agent 不利 | evaluator 的 `/200` 把往返成本又除一半：账本上 0.18 对应应付 35.82；benchmark 另用 `realized×pct` 得 0.379。现统一取 evaluator 的 35.818876，净额 820.771124。agent 从 +1.85% 变为 **+1.81%** |
 | 3 日报 | 命令与 service 均 TypeError | 已修 | `make daily-report DATE=2026-10-09` exit 0 |
 | 4 混合缓存 | 待修，服务实际失败 | 已修，且发现第二处 | driver 与 `fetch_replay_bars.cached_last_bar` 都崩在同一份混合目录；`KeyError` 不是 `ValueError`，异常元组根本抓不住。谓词收进 `replay.bar_files` 一处。实测：31 个可用、3 个研究缓存被点名忽略 |
-| 4 fetch→research→trial 闭环 | 未成功 | **已成功** | `quant-research.service` 打印 `cached 24287 real 5Min SPY bars 2026-04-10 .. 2026-10-09`（修复前崩在 `KeyError: 'bars'`，缓存从未更新）；driver 在 134425 根 SPY bars 上搜索；ledger 新行带 `symbol: SPY` |
+| 4 fetch→research→trial 闭环 | 未成功 | **已成功** | `quant-research.service` 打印 `cached 24287 real 5Min SPY bars 2026-04-10 .. 2026-10-09`（修复前崩在 `KeyError: 'bars'`，缓存从未更新）；driver 在 134425 根 SPY bars 上搜索、23 个非 SPY 文件被点名忽略；11 个 trial 全部记入 ledger 且带 `symbol: SPY`；unit `Result=success`，耗时 1h47m |
 | 5 部署残留 | 待清 | 已清 | systemd 用户单元、operator 配置目录均已 autopoiesis。`minictrl`（旧名紧凑形）仍在使用中，已改名为 `autopoiesis`，18 个文件 116 处引用同步；两处日期散文按既有约定不改 |
 | 6 journal 归档与恢复 | 仅热轮转 | 已修 | 轮转出界的一代改为 `os.replace` 进 `runtime/autopoiesis/journal-archive/` 而非 unlink；`history_paths()` 读归档最先，顺序即追加序。归档写不进去则追加失败，绝不回退成删除。`audit_defects`/`replay_audit`/status_page 三处手写的"哪些文件是 journal"改为共用 `history_paths()` |
 | 7 面板 | 四页初版 | 修四处，缺两页仍未做 | 每页各自读 journal → 改为一次快照；只读 live 一代 → 实测旧页报 **881 cycles 而记录有 2060**；heartbeat 只看 `status` 字段 → 加年龄与 pid 判定；`PAUSED` 被写成终态 → 改为与 `_maybe_unpause` 一致的"holding pattern"；逐文件非原子写出 → 原子写。新增 7 个测试。**Portfolio & Risk、System 两页仍未做** |
