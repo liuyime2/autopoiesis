@@ -97,14 +97,22 @@ def candidates(
 
 
 def _already_evaluated(
-    recorded: list[dict[str, Any]], spec: dict[str, Any], bars: int
+    recorded: list[dict[str, Any]], spec: dict[str, Any], bars: int, symbol: str | None = None
 ) -> bool:
     """Whether this exact evaluation is already on the ledger.
 
-    Identity is the rule *and* the amount of data it was judged on, because those two together
-    determine the result. Re-running the sweep over an unchanged cache re-derives the same verdict
-    for the same candidate, and recording it again would inflate `trials_run` - which is the
-    denominator `required_trades` divides by - so the evidence bar would climb on a static dataset
+    Identity is the rule, the amount of data, and the instrument those bars are of, because all
+    three together determine the result. Re-running the sweep over an unchanged cache re-derives
+    the same verdict for the same candidate, and recording it again would inflate `trials_run` -
+    which is the denominator `required_trades` divides by - so the evidence bar would climb on a
+    static dataset
+
+    The instrument is part of identity because it was not, for five days. Trials recorded while
+    the merge interleaved seventeen symbols carry only a bar count that happens to be close to
+    the count a single-symbol tape produces, so without this a verdict judged over a tape of
+    nothing would be reused as a verdict over the real instrument. Re-evaluating them is the
+    correct outcome, and the trial count rising with it is the direction the multiple-testing
+    control wants: a bigger search raises its own bar.
     without any new candidate ever having been tried. That is the gate in `tools/verify.py`
     correctly refusing 11 duplicate `strategy_id`s, and the fix belongs here rather than in the
     gate: a repeat is not a trial.
@@ -117,7 +125,11 @@ def _already_evaluated(
             continue
         if row.get("kind") != spec["kind"] and row.get("strategy_kind") != spec["kind"]:
             continue
-        if row.get("bars") == bars and row.get("parameters") == spec["parameters"]:
+        if (
+            row.get("bars") == bars
+            and row.get("parameters") == spec["parameters"]
+            and (row.get("symbol") or None) == symbol
+        ):
             return True
     return False
 
@@ -129,6 +141,7 @@ def search(
     path: pathlib.Path | None = None,
     now: datetime | None = None,
     n_folds: int | None = None,
+    symbol: str | None = None,
 ) -> dict[str, Any]:
     """Run the whole search and record every trial.
 
@@ -156,7 +169,7 @@ def search(
     # cannot be known until the count is fixed. Counting repeats here is what made a no-op run
     # raise the bar: `already + len(space)` went from 2 to 4 on a second identical run and moved
     # `required_trades` from 15 to 20 without a single new candidate being tried.
-    fresh = [s for s in space if not _already_evaluated(recorded, s, len(bars))]
+    fresh = [s for s in space if not _already_evaluated(recorded, s, len(bars), symbol)]
     repeats = len(space) - len(fresh)
     trials = already + len(fresh)
     stamp = now or datetime.now(timezone.utc)
@@ -176,10 +189,11 @@ def search(
             "search_id": f"driver-{stamp.date().isoformat()}",
             "parameters": spec["parameters"],
             "source": "alpaca historical bars; not synthetic",
+            "symbol": symbol,
             **result.trial_payload(),
         }
         rows.append(payload)
-        if _already_evaluated(recorded, spec, len(bars)):
+        if _already_evaluated(recorded, spec, len(bars), symbol):
             continue
         recorded.append(payload)
         if not record_trial(payload, path=path, now=stamp):
@@ -188,6 +202,7 @@ def search(
     return {
         "searched_at": stamp.isoformat(),
         "bars": len(bars),
+        "symbol": symbol,
         "candidates": trials,
         "already_recorded": already,
         "repeats": repeats,
@@ -198,15 +213,50 @@ def search(
     }
 
 
-def _load_real_bars(cache_dir: pathlib.Path = DEFAULT_CACHE_DIR) -> tuple[list[Bar], str, list[str]]:
-    """Real bars from the fetch tool's cache, with the provenance it recorded.
+def _default_symbol() -> str:
+    """The instrument the search is about, from the same config the daemon trades.
 
-    Every `*.json` in the cache is merged and deduplicated by timestamp, because a rolling fetch
+    The question this driver exists to answer is "does a threshold rule have an edge on what we
+    trade". It is not "does one have an edge on a tape built by interleaving seventeen
+    instruments" - that tape is not a price series of anything, so it answers neither question.
+    """
+    try:
+        from autopoiesis.config import AgentConfig
+
+        symbols = AgentConfig.from_env().symbols
+        if symbols:
+            return symbols[0]
+    except Exception:
+        pass
+    return "SPY"
+
+
+def _load_real_bars(
+    cache_dir: pathlib.Path = DEFAULT_CACHE_DIR,
+    symbol: str | None = None,
+) -> tuple[list[Bar], str, list[str]]:
+    """Real bars for **one symbol**, with the provenance it recorded.
+
+    Every file for that symbol is merged and deduplicated by timestamp, because a rolling fetch
     names its file after the window it fetched - `SPY_5Min_2026-05-01_2026-10-03.json` - so a
     scheduled search accumulates one file per fetch and any single one of them is a partial view.
     Picking the largest file instead would silently prefer whichever window happened to be widest
     rather than whichever covers the most recent tape, and picking the newest would throw away
     everything before it.
+
+    **One symbol, not the whole cache.** This used to merge every bar file it found and key the
+    deduplication on the timestamp alone. That was right when the cache held five SPY files - the
+    comment above still describes that world - and the cache now holds 17 symbols and 988,704
+    rows. The timestamp-only key collapsed every instrument's five-minute bar at the same instant
+    into whichever file was read first, so **852,937 of 988,704 bars were silently dropped** and
+    the 135,767 that survived are not a series of any asset: they are fragments of seventeen
+    different ones, interleaved. Every verdict recorded against that tape - all OVERFIT or
+    INSUFFICIENT so far - is a measurement of a price series that never existed. A search over
+    invented data can only show that code runs.
+
+    So the merge is scoped to one symbol, deduplicated inside it, and every file left out is
+    named with the reason. A cache holding another symbol is ordinary state - the fetch tool
+    fetches what it is asked for - so it is reported rather than fatal.
 
     Fails loudly rather than falling back to a generator: `replay.py`'s rule is that a run over
     invented prices can only show that code runs, and the same is true of a search. An absent
@@ -215,6 +265,7 @@ def _load_real_bars(cache_dir: pathlib.Path = DEFAULT_CACHE_DIR) -> tuple[list[B
     """
     from autopoiesis.replay import bar_files, load_bars
 
+    symbol = (symbol or _default_symbol()).strip().upper()
     if not cache_dir.exists():
         raise SystemExit(
             f"no replay cache at {cache_dir}; fetch real bars first with "
@@ -229,9 +280,9 @@ def _load_real_bars(cache_dir: pathlib.Path = DEFAULT_CACHE_DIR) -> tuple[list[B
     #
     # They are reported and skipped, not skipped silently and not treated as fatal. A non-bar
     # file in the cache is an ordinary state - the research scripts write their caches beside
-    # the bars on purpose - so exiting would permanently block a working search over 31 real
-    # bar files because three caches sit next to them. What matters is that the run says which
-    # files it ignored, so a cache that changed shape is visible rather than assumed.
+    # the bars on purpose - so exiting would permanently block a working search over 31 real bar
+    # files because three caches sit next to them. What matters is that the run says which files
+    # it ignored, so a cache that changed shape is visible rather than assumed.
     usable, ignored = bar_files(cache_dir)
     if not usable:
         raise SystemExit(f"no bar files in {cache_dir}; run tools/fetch_replay_bars.py first")
@@ -243,33 +294,58 @@ def _load_real_bars(cache_dir: pathlib.Path = DEFAULT_CACHE_DIR) -> tuple[list[B
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            ignored.append(f"{path.name} (unreadable)")
+            continue
+        file_symbol = str(payload.get("symbol") or path.name.split("_", 1)[0]).strip().upper()
+        if file_symbol != symbol:
+            ignored.append(f"{path.name} (symbol {file_symbol}, not {symbol})")
             continue
         rows = load_bars(path)
         if not rows:
+            ignored.append(f"{path.name} (no bars)")
             continue
         provenance.add(str(payload.get("provenance", "unstated")))
         used.append(f"{path.name} ({len(rows)})")
         for row in rows:
+            # Keyed on the timestamp only *within one symbol*, where it is the right key: one
+            # symbol's windows genuinely overlap. Across symbols it is the wrong key, and it was
+            # the whole of the defect described above.
             bar = Bar(timestamp=row.timestamp, price=row.close)
             by_timestamp.setdefault(row.timestamp, bar)
 
     bars = [by_timestamp[key] for key in sorted(by_timestamp)]
     if not bars:
-        raise SystemExit(f"no usable bars in {cache_dir}")
-    return bars, f"{len(used)} file(s): {', '.join(used)} [{'; '.join(sorted(provenance))}]", ignored
+        raise SystemExit(
+            f"no bars for {symbol} in {cache_dir}; the cache holds: "
+            f"{', '.join(ignored) or 'nothing'}. Fetch some with tools/fetch_replay_bars.py."
+        )
+    return (
+        bars,
+        f"{symbol}: {len(used)} file(s): {', '.join(used)} [{'; '.join(sorted(provenance))}]",
+        ignored,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
+    """`[cache_dir] [symbol]`. The symbol defaults to what the daemon trades.
+
+    It is an argument because the cache holds more than one instrument, and because the answer to
+    "which instrument am I searching" must be visible in the invocation rather than inferred
+    from a directory listing.
+    """
     argv = sys.argv[1:] if argv is None else argv
     cache_dir = pathlib.Path(argv[0]) if argv else DEFAULT_CACHE_DIR
-    bars, provenance, ignored = _load_real_bars(cache_dir)
-    report = search(bars)
+    symbol = argv[1] if len(argv) > 1 else None
+    bars, provenance, ignored = _load_real_bars(cache_dir, symbol)
+    searched = symbol or _default_symbol()
+    report = search(bars, symbol=searched)
     summary = report["by_verdict"]
     print(f"bars: {report['bars']} from {provenance}")
     if ignored:
         # Named, not counted silently, so a cache whose shape changed is visible in the log the
         # scheduled job writes rather than assumed away.
-        print(f"ignored (not bar files): {', '.join(ignored)}")
+        label = "ignored (not this symbol's bar files)" if symbol else "ignored (not bar files)"
+        print(f"{label}: {', '.join(ignored)}")
     print(
         f"candidates: {report['candidates']} "
         f"(cumulative: {report['already_recorded']} already in the ledger)  "

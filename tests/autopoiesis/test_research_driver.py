@@ -293,3 +293,79 @@ def test_the_driver_writes_only_the_trials_ledger(tmp_path):
     )
     written = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     assert written and all("recorded_at" in row for row in written)
+
+
+def test_the_merge_does_not_collapse_two_symbols_into_one_series(tmp_path):
+    """The defect that was measured on the real cache, not imagined about it.
+
+    The merge keyed its deduplication on the timestamp alone, which was right when the cache held
+    five SPY files (54,089 raw bars to 24,162 unique, and the code comment still describes that
+    world). The cache now holds 17 symbols and 988,704 rows, so the same key collapsed every
+    instrument's five-minute bar at the same instant into whichever file was read first:
+    **852,937 of 988,704 bars dropped**, and the 135,767 that survived were fragments of
+    seventeen instruments interleaved - a price series of nothing. Every verdict recorded against
+    it was a measurement of a series that never existed.
+
+    Two symbols with the same timestamps is the smallest thing that shows it: the merged tape
+    would hold one symbol's closes, chosen by which file `sorted()` happened to put first.
+    """
+    from autopoiesis.replay import ReplayBar, save_bars
+
+    def _rows(base):
+        return [ReplayBar(timestamp=base + timedelta(minutes=5 * i),
+                          open=100.0 + i, high=100.0 + i, low=100.0 + i,
+                          close=100.0 + i, volume=1000.0)
+                for i in range(5)]
+
+    cache = tmp_path / "replay"
+    cache.mkdir()
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    save_bars(cache / "SPY_5Min_a.json", "SPY", _rows(t0))
+    save_bars(cache / "QQQ_5Min_a.json", "QQQ", _rows(t0))
+
+    bars, provenance, ignored = driver._load_real_bars(cache, "SPY")
+
+    assert len(bars) == 5, "one symbol's five bars, not one bar chosen between two symbols"
+    assert [b.price for b in bars] == [100.0, 101.0, 102.0, 103.0, 104.0]
+    assert provenance.startswith("SPY:"), provenance
+    # The other symbol is named, not merged away.
+    assert any("QQQ" in note and "not SPY" in note for note in ignored), ignored
+
+
+def test_a_cache_holding_only_another_symbol_is_an_error_that_names_it(tmp_path):
+    """Nothing to decide is not a cache. The message says which symbol was wanted.
+
+    Silently falling back to the other symbol would make the search answer a question nobody
+    asked, and the report would not show it.
+    """
+    from autopoiesis.replay import ReplayBar, save_bars
+
+    cache = tmp_path / "replay"
+    cache.mkdir()
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    save_bars(cache / "QQQ_5Min_a.json", "QQQ",
+              [ReplayBar(timestamp=t0 + timedelta(minutes=5 * i), open=100.0, high=100.0,
+                         low=100.0, close=100.0, volume=1.0) for i in range(5)])
+
+    with pytest.raises(SystemExit) as excinfo:
+        driver._load_real_bars(cache, "SPY")
+    message = str(excinfo.value)
+    assert "no bars for SPY" in message, message
+    assert "QQQ_5Min_a.json" in message, "the file that was there is named"
+
+
+def test_a_symbol_argument_reaches_the_loader(tmp_path):
+    """The searched instrument comes from the invocation, not from a directory listing."""
+    from autopoiesis.replay import ReplayBar, save_bars
+
+    cache = tmp_path / "replay"
+    cache.mkdir()
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for symbol in ("SPY", "QQQ"):
+        save_bars(cache / f"{symbol}_5Min_a.json", symbol,
+                  [ReplayBar(timestamp=t0 + timedelta(minutes=5 * i), open=10.0, high=10.0,
+                             low=10.0, close=10.0, volume=1.0) for i in range(5)])
+
+    bars, provenance, _ = driver._load_real_bars(cache, "qqq")
+    assert provenance.startswith("QQQ:"), provenance
+    assert len(bars) == 5
