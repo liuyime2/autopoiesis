@@ -135,6 +135,8 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_guardian_trade_freshness.py": ("unit-integration", "guardian-bypass-prevention"),
     # A non-finite limit is the one way the Guardian stops comparing while nothing reports it.
     "test_config_finiteness.py": ("unit-integration", "guardian-bypass-prevention"),
+    # The read-only panel is a public surface; it described a system it had not read.
+    "test_status_page.py": ("unit-integration", "data-integrity"),
     # Rotation is the one mechanism that can delete the only source of truth, so the
     # reconstruction property across rotations is gated as a durability class, not just a unit test.
     "test_journal_rotation_recovery.py": ("unit-integration", "crash-recovery", "pnl-accounting"),

@@ -23,12 +23,17 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+
+from autopoiesis.atomicio import write_text_atomic
+from autopoiesis.config import AgentConfig
 
 OUT_DIR = ROOT / "runtime" / "autopoiesis" / "report" / "site"
 JOURNAL = ROOT / "runtime" / "autopoiesis" / "journal.jsonl"
@@ -124,14 +129,51 @@ def _page(title: str, current: str, body: list[str]) -> str:
 # --- the data, read once ---------------------------------------------------------------------
 
 
-def _read_cycles(limit: int) -> list[dict]:
-    """The most recent `limit` cycle records, by file order — the journal is append-only, so the
-    tail of the live file is the newest."""
-    if not JOURNAL.exists():
-        return []
-    out: list[dict] = []
-    with open(JOURNAL, encoding="utf-8") as handle:
-        for line in handle:
+@dataclass
+class Snapshot:
+    """Everything the pages read, read once, at one instant.
+
+    Each page used to open the journal for itself. A run that landed between two appends
+    therefore produced pages from two different data versions - the overview said 2,060 cycles
+    while the decisions page showed a cycle the overview's count did not include - and nothing
+    looked wrong, because both pages were individually correct. The same instant being wrong in
+    two places consistently is the failure the phrase "read once" is here to prevent.
+
+    It is also why the readers below go through `JsonlJournal.history_paths()`. They used to open
+    the live file, so after one rotation this panel reported the newest fragment of the record
+    and nothing on the page indicated that most of it was one directory over in the archive.
+    That is the fourth place the file list was hand-rolled, and the only reason it is a paragraph
+    here rather than a bug report is that the panel is not consulted by anything.
+    """
+
+    taken_at: datetime
+    source: str
+    cycles: list[dict]
+    events: list[dict]
+    strategies: list[dict]
+    heartbeat: dict
+    agent: dict
+    model_registry: str | None
+
+
+def _read_journal_records() -> tuple[list[dict], list[dict]]:
+    """(cycles, events) over every generation, oldest first.
+
+    Split by structure, not by a field that may be absent the way `replay_audit` and
+    `check_runtime_integrity` both do: a cycle record carries `execution` and never `event_id`,
+    a journal event is the other way round.
+    """
+    from autopoiesis.journal import JsonlJournal
+
+    journal = JsonlJournal(JOURNAL)
+    cycles: list[dict] = []
+    events: list[dict] = []
+    for path in journal.history_paths():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
             line = line.strip()
             if not line:
                 continue
@@ -139,27 +181,8 @@ def _read_cycles(limit: int) -> list[dict]:
                 record = json.loads(line)
             except Exception:
                 continue
-            if "event_type" not in record:  # a cycle record, not a journalled event
-                out.append(record)
-    return out[-limit:]
-
-
-def _read_events(kind: str, limit: int) -> list[dict]:
-    if not JOURNAL.exists():
-        return []
-    out: list[dict] = []
-    with open(JOURNAL, encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except Exception:
-                continue
-            if record.get("event_type") == kind:
-                out.append(record)
-    return out[-limit:]
+            (events if "event_type" in record else cycles).append(record)
+    return cycles, events
 
 
 def _read_strategies() -> list[dict]:
@@ -178,9 +201,34 @@ def _read_strategies() -> list[dict]:
     return out
 
 
-def _lifecycle_history(limit: int = 40) -> list[dict]:
+def load_snapshot() -> Snapshot:
+    """One read of everything the four pages need, taken at one instant."""
+    cycles, events = _read_journal_records()
+    _verdict, agent = _benchmark_verdict()
+    registry, _ = _pick_model_registry()
+    return Snapshot(
+        taken_at=datetime.now(timezone.utc),
+        source=str(JOURNAL.relative_to(ROOT)),
+        cycles=cycles,
+        events=events,
+        strategies=_read_strategies(),
+        heartbeat=_heartbeat(),
+        agent=agent,
+        model_registry=registry,
+    )
+
+
+def _recent(snapshot: Snapshot, limit: int) -> list[dict]:
+    return snapshot.cycles[-limit:]
+
+
+def _events_of_kind(snapshot: Snapshot, kind: str, limit: int) -> list[dict]:
+    return [e for e in snapshot.events if e.get("event_type") == kind][-limit:]
+
+
+def _lifecycle_history(snapshot: Snapshot, limit: int = 40) -> list[dict]:
     rows = []
-    for event in _read_events("STRATEGY_LIFECYCLE_UPDATED", 10_000):
+    for event in _events_of_kind(snapshot, "STRATEGY_LIFECYCLE_UPDATED", 10_000):
         payload = event.get("payload") or {}
         rows.append(
             {
@@ -226,20 +274,69 @@ def _benchmark_verdict() -> tuple[str | None, dict]:
 # --- the four pages --------------------------------------------------------------------------
 
 
-def overview() -> list[str]:
-    beat = _heartbeat()
-    cycles = _read_cycles(500)
-    verdict, agent = _benchmark_verdict()
+def _daemon_state(snapshot: Snapshot) -> str:
+    """Whether the daemon is running *now*, which is not what the heartbeat's own field says.
+
+    The field was read and printed on its own, so this page said RUNNING over a heartbeat file
+    three days old: the process that wrote it was long gone and nothing had replaced the word.
+    The heartbeat carries a timestamp and a pid, so both are checked - a file older than the
+    staleness bound, or whose process is no longer alive, is reported as what it is rather than
+    as a state the system no longer has.
+
+    The recorded value is kept inside the string rather than swallowed, because it is still a
+    fact worth showing; it is just not the answer to "is it running".
+    """
+    beat = snapshot.heartbeat
+    recorded = beat.get("status")
+    if not recorded:
+        return "UNKNOWN"
+    stamp = beat.get("timestamp")
+    age = None
+    if stamp:
+        try:
+            moment = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+            age = (snapshot.taken_at - moment).total_seconds()
+        except ValueError:
+            age = None
+    pid = beat.get("pid")
+    alive = True
+    if isinstance(pid, int):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            alive = False
+        except PermissionError:
+            alive = True  # running as someone else: alive, and not this process's business
+    stale_after = 900
+    try:
+        stale_after = AgentConfig.from_env().stale_after_seconds
+    except Exception:
+        pass
+    if age is not None and age > stale_after:
+        return f"{recorded} (stale, {int(age // 60)} min old)"
+    if not alive:
+        return f"{recorded} (pid {pid} is not running)"
+    return str(recorded)
+
+
+def overview(snapshot: Snapshot) -> list[str]:
+    cycles = _recent(snapshot, 500)
+    agent = snapshot.agent
+    verdict = None
+    if agent:
+        verdict = (f"{agent['return_pct']:+.2f}% vs SPY {agent['spy_pct']:+.2f}% "
+                   f"({agent['excess']:+.2f})")
     return [
         '<dl class="kv">',
         "<div><dt>mode</dt><dd>paper</dd></div>",
-        f"<div><dt>daemon</dt><dd>{_badge(beat.get('status'))}</dd></div>",
-        f"<div><dt>cycles recorded</dt><dd>{_cell(beat.get('cycle_count'))}</dd></div>",
-        f"<div><dt>cycle errors</dt><dd>{_cell(beat.get('error_count'))}</dd></div>",
+        f"<div><dt>daemon</dt><dd>{_badge(_daemon_state(snapshot))}</dd></div>",
+        f"<div><dt>cycles recorded</dt><dd>{_cell(len(snapshot.cycles))}</dd></div>",
+        f"<div><dt>cycle errors</dt><dd>{_cell(snapshot.heartbeat.get('error_count'))}</dd></div>",
         "</dl>",
         "<h2>Can it be trusted to be running?</h2>",
-        f'<p class="note">Last heartbeat {_cell(beat.get("timestamp"))}. The market-open and '
-        "staleness checks cannot be skipped, and a stale snapshot is refused rather than traded on.</p>",
+        f'<p class="note">Last heartbeat {_cell(snapshot.heartbeat.get("timestamp"))}. The '
+        "market-open and staleness checks cannot be skipped, and a stale snapshot is refused "
+        "rather than traded on.</p>",
         "<h2>Does the result hold up?</h2>",
         "<table><tr><th>what</th><th>value</th></tr>",
         f"<tr><td>the agent after cost, vs SPY on the same window</td><td>{_cell(verdict)}</td></tr>",
@@ -253,8 +350,8 @@ def overview() -> list[str]:
     ]
 
 
-def decisions() -> list[str]:
-    cycles = _read_cycles(25)
+def decisions(snapshot: Snapshot) -> list[str]:
+    cycles = _recent(snapshot, 25)
     body = ["<h2>Why this decision, and why not another?</h2>"]
     if not cycles:
         body.append('<p class="note">No journal on this checkout, so there are no decisions to show. '
@@ -264,7 +361,7 @@ def decisions() -> list[str]:
                 "<th>source</th><th>why</th></tr>")
     for record in reversed(cycles):
         decision = record.get("decision") or {}
-        snapshot = record.get("snapshot") or {}
+        market = record.get("snapshot") or {}
         guardian = record.get("guardian") or {}
         action = decision.get("action")
         rationale = (decision.get("rationale") or "")[:120]
@@ -273,8 +370,8 @@ def decisions() -> list[str]:
             rationale = f"refused: {guardian['reason'][:120]}"
         body.append(
             "<tr>"
-            f'<td class="mono">{_cell((snapshot.get("timestamp") or "")[:16])}</td>'
-            f"<td>{_cell(snapshot.get('symbol'))}</td>"
+            f'<td class="mono">{_cell((market.get("timestamp") or "")[:16])}</td>'
+            f"<td>{_cell(market.get('symbol'))}</td>"
             f"<td class=\"mono\">{_cell(decision.get('rule_action'))}</td>"
             f"<td>{_badge(action)}</td>"
             f"<td>{_cell(decision.get('decision_source'))}</td>"
@@ -289,9 +386,9 @@ def decisions() -> list[str]:
     return body
 
 
-def strategies() -> list[str]:
-    specs = _read_strategies()
-    history = _lifecycle_history()
+def strategies(snapshot: Snapshot) -> list[str]:
+    specs = snapshot.strategies
+    history = _lifecycle_history(snapshot)
     body = ["<h2>What has the self-evolution actually changed?</h2>"]
     counts: dict[str, int] = {}
     for spec in specs:
@@ -313,14 +410,21 @@ def strategies() -> list[str]:
             )
         body.append("</table>")
     body.append('<p class="note">A strategy is retired on its own recorded decisions, and the reason '
-                "travels with the transition. <code>PAUSED</code> is terminal in these rules — it is "
-                "a graveyard the loop cannot reopen, not a holding pattern.</p>")
+                "travels with the transition. <code>PAUSED</code> is a holding pattern, not a "
+                "graveyard: the daemon returns at most one paused strategy to probation per pass, "
+                "and only after it has been paused for <code>PAUSED_REVIEW_DAYS</code> and only on "
+                "evidence from the journalled transition. This page used to call it terminal, which "
+                "contradicted the code that reopens it; the state is read from the journal, and so "
+                "is the sentence about it.</p>")
     return body
 
 
-def evidence() -> list[str]:
-    verdict, _agent = _benchmark_verdict()
-    registry, _ = _pick_model_registry()
+def evidence(snapshot: Snapshot) -> list[str]:
+    verdict = None
+    if snapshot.agent:
+        verdict = (f"{snapshot.agent['return_pct']:+.2f}% vs SPY "
+                   f"{snapshot.agent['spy_pct']:+.2f}% ({snapshot.agent['excess']:+.2f})")
+    registry = snapshot.model_registry
     body = ["<h2>Do the results hold up?</h2>"]
     body.append("<table><tr><th>claim</th><th>what the record says</th></tr>")
     body.append(f"<tr><td>the agent beats holding, after cost</td><td>{_cell(verdict)}</td></tr>")
@@ -379,14 +483,18 @@ def _pick_model_registry() -> tuple[str | None, list[str]]:
 def main(argv: list[str]) -> int:
     out = Path(argv[1]) if len(argv) > 1 else OUT_DIR
     out.mkdir(parents=True, exist_ok=True)
+    snapshot = load_snapshot()
     pages = {
-        "index": ("Overview", "index", overview()),
-        "decisions": ("Decisions", "decisions", decisions()),
-        "strategies": ("Strategies", "strategies", strategies()),
-        "evidence": ("Evidence", "evidence", evidence()),
+        "index": ("Overview", "index", overview(snapshot)),
+        "decisions": ("Decisions", "decisions", decisions(snapshot)),
+        "strategies": ("Strategies", "strategies", strategies(snapshot)),
+        "evidence": ("Evidence", "evidence", evidence(snapshot)),
     }
     for name, (title, _current, body) in pages.items():
-        (out / f"{name}.html").write_text(_page(title, name, body), encoding="utf-8")
+        # Atomic, because a reader opening the page mid-generation used to see a half-written
+        # file: these are written one at a time, and a browser landing between two of them got
+        # a page whose nav pointed at files that did not exist yet.
+        write_text_atomic(out / f"{name}.html", _page(title, name, body))
     for name in pages:
         print(f"wrote {out / (name + '.html')}")
     print("read-only: no order path, no credential read, nothing here can change a setting")

@@ -146,6 +146,19 @@ model's override and its reason, the Guardian's refusal), the strategy lifecycle
 their reasons, and an evidence page carrying the signal ledger's verdict counts. It has no order
 path and reads no credentials; a value that cannot be computed reads UNKNOWN rather than zero.
 
+The pages are one snapshot: the journal is read once per run and every page is rendered from that
+read, so a page cannot be from a different instant than the page next to it. It is read through
+`JsonlJournal.history_paths()`, so it sees the archived generations too — before that it read only
+the live file and reported **881 cycles where the record holds 2,060**, because 1,179 of them sit
+in the rotated generations. The daemon row judges the heartbeat by its age and its pid, not by
+the `status` word the file carries, which is a record of what it was rather than what it is.
+`PAUSED` is described as a holding pattern the loop reopens, because the daemon returns a paused
+strategy to probation on journalled evidence, and the page used to call it terminal.
+
+**What it does not have:** a portfolio-and-risk page and a system page. Position-level exposure,
+drawdown and the per-strategy PnL are available from `make benchmark` and `make doctor`, not from
+these pages, and no test claims otherwise.
+
 ### The VIX floor, stated as what it measured
 
 The decision context carries a `risk` block whose volatility forecast can be raised — never
@@ -314,7 +327,7 @@ src/autopoiesis/          the package (import name autopoiesis). 43 modules, 3 e
   models.py             shared schema, imported by 23 modules
   research/             walk-forward backtests; production may not import it
 tools/                  the gate (verify.py), benchmark, daily report, probes, systemd templates
-tests/autopoiesis/        79 test files
+tests/autopoiesis/        80 test files
 examples/               the smallest runnable example, no broker needed
 configs/                paper.env.example: every environment variable with its default
 docs/                   ARCHITECTURE.md, evidence/, history/
