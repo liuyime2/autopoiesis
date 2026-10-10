@@ -30,12 +30,17 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-HISTORY = ROOT / "docs" / "history"
 sys.path.insert(0, str(ROOT / "src"))
 
 JOURNAL_BACKUPS = 3  # matches JsonlJournal's default `backups`
 RUNTIME = ROOT / "runtime" / "autopoiesis"
-FINDINGS = HISTORY / "known_state_findings.json"
+# An exception list for runtime-state discrepancies that are real, already happened and cannot
+# be reconstructed. It records *runtime* facts - a strategy the daemon admitted and whose file is
+# now absent - so it belongs beside the runtime state it describes, not in the archive: moving it
+# into `docs/history/` (when that directory stopped being published) silently dropped every
+# exemption and turned `data-integrity` red on a healthy deployment. That is a check failing
+# because a file moved, which is the failure mode this class exists to prevent.
+FINDINGS = RUNTIME / "known_state_findings.json"
 
 #: From models.StrategyLifecycle. Getting this wrong flagged three healthy
 #: strategies as having an unknown lifecycle.

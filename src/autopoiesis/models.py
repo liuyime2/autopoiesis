@@ -9,7 +9,8 @@ from autopoiesis import coerce
 
 Action = Literal["BUY", "SELL", "HOLD", "SHORT", "COVER"]
 #: Actions that place an order. SELL reduces a long; SHORT opens or adds to a short; COVER
-#: buys a short back. See docs/history/plans/2026-10-07-bounded-short-and-rule-dsl.md.
+#: buys a short back. The design and its measurements were written up when the rule DSL
+#: landed; that record is kept outside the repository with the rest of the archive.
 ORDER_ACTIONS = frozenset({"BUY", "SELL", "SHORT", "COVER"})
 #: The broker side each order action is submitted as.
 BROKER_SIDE = {"BUY": "buy", "SELL": "sell", "SHORT": "sell", "COVER": "buy"}
@@ -537,7 +538,8 @@ class PnLEvidence(BaseModel):
     #: that ledger cannot see this number by construction - a trade's return there
     #: is holding from the same instant less cost, so every decision shows an excess
     #: of exactly the assumed cost over holding. See
-    #: `docs/history/plans/2026-10-04-report-the-holding-benchmark.md`.
+    #: The holding benchmark's denominator was corrected in the archive's dated log; the
+    #: current definition is in `evaluator.py`.
     strategy_excess_vs_market_pct: dict[str, float] = Field(default_factory=dict)
     unattributed_pnl: float | None = None
     window_start: datetime | None = None

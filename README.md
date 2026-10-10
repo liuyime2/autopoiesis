@@ -314,11 +314,10 @@ minictrl                operator script: services, logs, owner history
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): how to propose a change, and the rules a change must keep.
 - [`AGENTS.md`](AGENTS.md): the working principles every change follows, human or AI.
 - [`CHANGELOG.md`](CHANGELOG.md): what changed.
-- [`docs/history/`](docs/history/README.md): the running log, the defect audit and one plan per
-  change. It records why decisions were made, including claims that were later retracted.
-- [`docs/history/plans/2026-10-09-remaining-work.md`](docs/history/plans/2026-10-09-remaining-work.md):
-  the roadmap - what is done with the command that proves it, what is measured and deliberately not
-  fused, and what is open. It is a short index rather than a running log: the log lives above.
+- [`CHANGELOG.md`](CHANGELOG.md): what changed, by release.
+- The dated record — what was found, measured and retracted, one plan per change — is not part
+  of the repository. It is kept outside it, on the operator's machine, because it describes the
+  system's argument trail rather than the system. `git log` carries the same history.
 
 ## License
 

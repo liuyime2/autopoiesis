@@ -1,6 +1,6 @@
 """The RULE strategy kind: parameters only, validated, executed and backtested by one signal.
 
-See docs/history/plans/2026-10-07-bounded-short-and-rule-dsl.md.
+The rule DSL's design is in the archive (kept outside the repository).
 """
 
 from __future__ import annotations

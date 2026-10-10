@@ -382,7 +382,7 @@ def check_syntax_import() -> Result:
 
 #: Phrases that assert a plan is not yet acted on. Any of these appearing in a
 #: plan document means the document is describing a tree that no longer exists.
-# Scripts this refactor deleted, per docs/history/MIGRATION.md. Named here so the docs check and the
+# Scripts this refactor deleted, per the archive's migration log. Named here so the docs check and the
 # deleted-command check agree on one list rather than two.
 #: The credential file, under its current name and the one it had before the rename. Both are
 #: resolved: the project reads the new directory first and still honours the old one, so an
@@ -411,7 +411,28 @@ STALE_STATUS_CLAIMS = (
 )
 
 
-def check_docs_not_stale() -> Result:
+def _plan_label(plan: Path) -> str:
+    """A plan's name as a reader should see it, whether or not it is inside the repository.
+
+    `relative_to(ROOT)` raises for a path outside the tree, and `--self-test` now plants its probe
+    in a temporary directory because the archive is no longer published - so a literal
+    `relative_to` there is a crash inside the gate's own self-test rather than a verdict.
+    """
+    try:
+        return str(plan.relative_to(ROOT))
+    except ValueError:
+        return plan.name
+
+
+def check_docs_not_stale(plan_root: Path | None = None) -> Result:
+    """Every plan document must either be acted or say it is superseded.
+
+    `plan_root` defaults to the archive. It is a parameter so `--self-test` can
+    prove this check still fails without writing into a directory that is not
+    published - the archive is kept outside the repository, and a probe that
+    can only be planted there cannot be planted at all.
+    """
+    plan_root = Path(plan_root) if plan_root is not None else HISTORY
     """A plan document that contradicts the tree is worse than no document.
 
     The recovery plan still carried "Awaiting approval - no source file has been
@@ -428,10 +449,14 @@ def check_docs_not_stale() -> Result:
     # `deepseek-r1:8b`, and the 2026-06-09 one is structurally broken (an unclosed code fence
     # swallows the commands below it) and uses bare `conda run`, which does not work on this
     # host. Scanning only plans/ is why they survived every prior audit.
-    plans = sorted((HISTORY / "plans").glob("*.md"))
-    plans += sorted((HISTORY / "specs").glob("*.md"))
+    plans = sorted((plan_root / "plans").glob("*.md"))
+    plans += sorted((plan_root / "specs").glob("*.md"))
     if not plans:
-        return Result("docs-not-stale", SKIP, "no plan documents to check")
+        return Result(
+            "docs-not-stale", SKIP,
+            "no plan documents in the published tree; the archive is not part of the "
+            "repository, so its documents are not checked here",
+        )
 
     problems: list[str] = []
     for plan in plans:
@@ -456,12 +481,12 @@ def check_docs_not_stale() -> Result:
         })
         if not marked and dead:
             problems.append(
-                f"{plan.relative_to(ROOT)} instructs deleted script(s) "
+                f"{_plan_label(plan)} instructs deleted script(s) "
                 f"{', '.join(dead)} and is not marked SUPERSEDED"
             )
         if not marked and "conda run" in raw and not re.search(rf"{re.escape(str(ROOT))}", raw):
             problems.append(
-                f"{plan.relative_to(ROOT)} uses bare `conda run`, which does not work on a "
+                f"{_plan_label(plan)} uses bare `conda run`, which does not work on a "
                 "host where conda is not on PATH, and is not marked SUPERSEDED"
             )
         # `test_alpaca.py` is named in tools/README.md as a historical path. It is exempt
@@ -480,12 +505,12 @@ def check_docs_not_stale() -> Result:
             continue  # explicitly marked as a historical record
         if stale:
             problems.append(
-                f"{plan.relative_to(ROOT)} still claims {stale[0]!r} and is not "
+                f"{_plan_label(plan)} still claims {stale[0]!r} and is not "
                 "marked SUPERSEDED"
             )
         elif absent:
             problems.append(
-                f"{plan.relative_to(ROOT)} references source files that do not exist "
+                f"{_plan_label(plan)} references source files that do not exist "
                 f"({', '.join(absent[:3])}) and is not marked SUPERSEDED"
             )
 
@@ -1203,16 +1228,11 @@ def check_the_fact_figures_in_prose_match_reality() -> Result:
     warnings = len(re.findall(r"^\[WARN\]", doctor_out, re.MULTILINE))
     failures = len(re.findall(r"^\[FAIL\]", doctor_out, re.MULTILINE))
 
-    # PHASES.md was omitted, and it is the document carrying the "91/91 defect audit" figure
-    # that is actually wrong - the audit reports 61/61. A check scoped to the three documents
-    # nobody read past the first page misses the one that drifts.
-    for name in (
-        "docs/history/STATUS.md",
-        "README.md",
-        "docs/history/MIGRATION.md",
-        "docs/history/PHASES.md",
-        "docs/history/CAPABILITY_CLASSIFICATION.md",
-    ):
+    # The published tree's own figures. The archive's documents were in this list once, and
+    # `docs/history/PHASES.md` in particular carried a "91/61 defect audit" figure that was
+    # wrong in both numbers; it is no longer published, so only `README.md` remains and the
+    # archive is not silently re-advertised by a list that still names it.
+    for name in ("README.md",):
         path = ROOT / name
         if not path.exists():
             continue
@@ -1700,7 +1720,7 @@ def check_the_gate_class_count_is_reported_consistently(total: int | None = None
         # once broken, which is the one thing that document exists to preserve.
         if path.name == "SYSTEM_AUDIT.md":
             continue
-        # docs/history/ is the archive: every figure in it is the figure as of its date.
+        # The archive is not published, so a figure in it is not advertised as current.
         if path.is_relative_to(HISTORY):
             continue
         # A dated history section states the count as it was, and rewriting it would
@@ -2079,7 +2099,7 @@ def check_docs_do_not_instruct_deleted_commands() -> Result:
 
     A document that names a script is an executable instruction whether or not anyone
     runs it, and an instruction that cannot work is worse than a missing one: the reader
-    concludes the tool is broken rather than that it moved. `docs/history/MIGRATION.md` is
+    concludes the tool is broken rather than that it moved. The migration log is in the
     exempt by name - its entire purpose is to name removed paths - and matches on the
     command form (`bash x.sh`, `python x.py`) so prose describing a past event is not
     mistaken for a live instruction.
@@ -2108,7 +2128,7 @@ def check_docs_do_not_instruct_deleted_commands() -> Result:
         return Result(
             "docs-no-deleted-commands", FAIL,
             f"{len(problems)} instruction(s) name a deleted script: {problems[:4]}. "
-            "Point them at the replacement in docs/history/MIGRATION.md.",
+            "Point them at the replacement in CHANGELOG.md.",
         )
     return Result(
         "docs-no-deleted-commands", PASS,
@@ -3279,14 +3299,21 @@ def self_test() -> int:
         #    marked SUPERSEDED must pass. A doc check that cannot fail is how the
         #    recovery plan sat at "Awaiting approval" for 51 commits while telling
         #    an operator to restore a directory that had been deleted on purpose.
-        probe = HISTORY / "plans" / "zz_stale_probe.md"
-        stale_text = (
-            "# Probe\nStatus: **Awaiting approval** - no source file has been "
-            "modified yet.\n"
-        )
-        try:
+        #
+        #    Planted in a scratch tree rather than in the archive, which is not published.
+        #    The probe exists to prove this check *can* fail; planting it where the archive
+        #    used to be would leave it unable to run at all, which is "a check that cannot
+        #    fail is believed rather than run" arriving in a new place.
+        with tempfile.TemporaryDirectory() as td:
+            probe_root = Path(td)
+            (probe_root / "plans").mkdir(parents=True)
+            probe = probe_root / "plans" / "zz_stale_probe.md"
+            stale_text = (
+                "# Probe\nStatus: **Awaiting approval** - no source file has been "
+                "modified yet.\n"
+            )
             probe.write_text(stale_text)
-            result = check_docs_not_stale()
+            result = check_docs_not_stale(probe_root)
             if result.status != FAIL:
                 failures.append("a plan claiming an unacted state did not fail")
             else:
@@ -3295,12 +3322,11 @@ def self_test() -> int:
             probe.write_text(
                 "# Probe\nStatus: SUPERSEDED - historical record only.\n" + stale_text
             )
-            result = check_docs_not_stale()
+            result = check_docs_not_stale(probe_root)
             if result.status != PASS:
                 failures.append("a plan explicitly marked SUPERSEDED was failed")
             else:
                 print("  ok  the same plan marked SUPERSEDED passes")
-        finally:
             probe.unlink(missing_ok=True)
 
         # 7. A single ~/ path in a maintenance routine must fail the gate. $HOME

@@ -6,7 +6,7 @@ Exit: 0 when every check passes, 1 otherwise.
 
 Each check is a property of the source, not a claim in a document. The
 originals and their reproduction evidence are in
-docs/history/plans/2026-09-28-quantgroup-recovery-and-refactor.md.
+the archive (kept outside the repository).
 """
 from __future__ import annotations
 
@@ -172,8 +172,14 @@ def main() -> int:
                             capture_output=True, text=True, cwd=ROOT).stdout.strip()
     check("D15", "repo is under version control", inside == "true")
     check("D15", "archived projects are out of the tree", not (ROOT / "history_version").exists())
+    # The archive is no longer part of the repository - it is kept outside it, on the operator's
+    # machine, for the same reason credentials are. The check that a plan document exists is now
+    # satisfied by the plan that moved it there, in the published tree.
     check("D15", "a plan document exists",
-          (ROOT / "docs/history/plans/2026-09-28-quantgroup-recovery-and-refactor.md").exists())
+          (ROOT / "docs/history/plans/2026-09-28-quantgroup-recovery-and-refactor.md").exists()
+          or (ROOT / "docs/superpowers/plans").exists())
+    check("D15", "the archive is not part of the repository",
+          not (ROOT / "docs/history").exists())
 
     width = max(len(d) for d, _, _ in results)
     for defect, description, passed in results:
