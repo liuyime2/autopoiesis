@@ -54,3 +54,12 @@ venv/
 # there. `.opencode/goals/` above was already excluded for the same reason; this is the same
 # rule applied to the rest of it.
 .opencode/loop-history/
+# --- build artefacts ---------------------------------------------------------------------
+# `build/` is setuptools' scratch directory. It is not source, but it is not covered by
+# `*.egg-info/` either, and 45 of its files were committed by a `pip install --target` that ran
+# from the repository root - so the gate's own home-independence check passed while the tree
+# carried a second copy of every module.
+build/
+dist/
+*.egg
+wheels/
