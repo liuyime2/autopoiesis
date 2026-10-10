@@ -1007,12 +1007,19 @@ def _assumed_cost_for_lots(
     Separate from the broker's observed fees, which are 0.00 on paper. On a live venue
     both would apply, and reporting one number for "net" would hide which of them did
     the work.
+
+    `pct` is a **round-trip** percentage, per the config it is read from, so the cost is the
+    notional times `pct / 100` and no more. The `/200` this once had halved the round trip a
+    second time - 0.18 against 17.91 on the live record, a factor of a hundred - and the figure
+    the benchmark reported as "after cost" was therefore gross by almost all of it. The
+    `counterfactual` module uses the same number as `gross - pct` for a one-share probe, which is
+    a round trip on that probe; one definition, two call sites, one divisor.
     """
     out: dict[str, float] = {}
     for lot in closed_lots:
         notional = (float(lot.buy_price) + float(lot.sell_price)) * float(lot.quantity)
         key = lot.strategy_id or "unattributed"
-        out[key] = round(out.get(key, 0.0) + notional * pct / 200.0, 6)
+        out[key] = round(out.get(key, 0.0) + notional * pct / 100.0, 6)
     return out
 
 

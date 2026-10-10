@@ -80,6 +80,8 @@ def _load_doctor():
     spec = importlib.util.spec_from_file_location(
         "doctor_under_benchmark", ROOT / "src" / "autopoiesis" / "doctor.py"
     )
+    if spec is None or spec.loader is None:  # a path that is not a module is a config error, not a None
+        raise SystemExit(f"cannot load doctor from {ROOT / 'src' / 'autopoiesis' / 'doctor.py'}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -267,11 +269,14 @@ def _agent_level() -> dict | None:
     # Realized plus unrealized, which is what the strategy rows also compare.
     realized = sum(pnl.strategy_realized_pnl.values())
     unrealized = pnl.unrealized_pnl or 0.0
-    # Cost is charged on the realized leg only. An open lot has not paid its exit, and charging
-    # it a round trip it has not taken understates the agent's position - the first version of
-    # this did exactly that and disagreed with the increment block by ten dollars on the same
-    # record, which is the kind of small disagreement that makes a reader distrust both numbers.
-    net = realized + unrealized - realized * (config.assumed_round_trip_cost_pct / 100.0)
+    # The cost comes from the evaluator, which charges the configured rate on the notional
+    # **actually traded, both sides** (`_assumed_cost_for_lots`). Computing it here as
+    # `realized * pct` is a second formula, and it is wrong in the direction that flatters the
+    # result: a round trip costs its two sides, so charging one side of the PnL understates the
+    # cost. Measured on this record, 0.180 against 0.379 - and the two numbers disagreeing by
+    # two tenths is what makes a reader distrust both. One formula, in one place.
+    cost = sum(pnl.assumed_cost.values())
+    net = realized + unrealized - cost
     if not pnl.market_return_pct:
         return None
     return_pct = net / capital * 100.0
@@ -283,6 +288,9 @@ def _agent_level() -> dict | None:
         "return_pct": round(return_pct, 2),
         "spy_pct": round(pnl.market_return_pct, 2),
         "excess": round(return_pct - pnl.market_return_pct, 2),
+        # Reported so the headline and the increment block cannot drift apart again: they use one
+        # formula now, and this is the number that formula produced.
+        "assumed_cost": round(cost, 4),
     }
 
 
@@ -377,7 +385,8 @@ def main() -> int:
     if agent is not None:
         print("the agent itself, after cost, over the record window")
         print("-" * 78)
-        print(f"  agent PnL (realized + unrealized, after cost)   {agent['pnl']:>+12.2f}")
+        print(f"  agent PnL (realized + unrealized, after cost)   {agent['pnl']:>+12.2f}"
+              f"   (cost {agent['assumed_cost']:.4f}, from the evaluator)")
         print(f"    of which realized {agent['realized']:>+.2f}, unrealized {agent['unrealized']:>+.2f}")
         print(f"  on capital deployed (sum of peak exposures)     {agent['capital']:>12.2f}")
         print(f"  return on deployed capital                      {agent['return_pct']:>+11.2f}%")

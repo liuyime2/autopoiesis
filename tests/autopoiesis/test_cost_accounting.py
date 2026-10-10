@@ -33,11 +33,17 @@ def test_cost_is_charged_on_both_sides_of_a_round_trip():
     lots = [_Lot(100.0, 110.0, 10)]
     cost = _assumed_cost_for_lots(lots, 0.05)
 
-    # notional = (100 + 110) * 10 = 2100. A 0.05% round-trip cost split across the
-    # two sides is 0.05/200 = 0.00025 of notional, so 2100 * 0.00025 = 0.525.
-    # The first version of this test expected 1.05 - the arithmetic was wrong, not
-    # the formula.
-    assert cost["s1"] == pytest.approx(0.525)
+    # notional = (100 + 110) * 10 = 2100. The setting is a **round-trip percentage of the
+    # notional actually traded** - "as a percent of notional", per the config it comes from and
+    # the docstring of the function it enters - so 0.05% of 2100 is 1.05, and the two sides are
+    # already inside that notional: (buy + sell) x quantity. Dividing by a further 200 charges
+    # half a round trip, which is what this did for five months and what made the headline
+    # "after cost" figure gross by almost all of it (0.18 against 35.82 on the live record).
+    #
+    # The first version of this test expected 1.05 and was "corrected" to 0.525 on the grounds
+    # that the arithmetic was wrong; the arithmetic was right and the correction was wrong, which
+    # is the failure mode where a passing test protects the defect it was written to pin.
+    assert cost["s1"] == pytest.approx(1.05)
 
 
 def test_a_higher_cost_assumption_charges_more():
@@ -52,8 +58,11 @@ def test_cost_is_attributed_to_the_strategy_that_opened_the_lot():
     cost = _assumed_cost_for_lots(lots, 0.05)
 
     assert set(cost) == {"alpha", "beta"}
-    assert cost["alpha"] == pytest.approx(0.2625)
-    assert cost["beta"] == pytest.approx(0.2625)
+    # notional = (100 + 110) * 5 = 1050 per lot; 0.05% of that is 0.525. The 0.2625 this
+    # once asserted came from dividing the round trip by a second 200, which charged half a
+    # trip and made the live "after cost" headline gross by almost all of it.
+    assert cost["alpha"] == pytest.approx(0.525)
+    assert cost["beta"] == pytest.approx(0.525)
 
 
 def test_an_unattributed_lot_is_labelled_rather_than_dropped():
