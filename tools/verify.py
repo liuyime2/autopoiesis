@@ -1803,7 +1803,13 @@ def check_the_gate_class_count_is_reported_consistently(total: int | None = None
     problems = []
     for path in sorted(ROOT.rglob("*.md")):
         parts = path.relative_to(ROOT).parts
-        if parts[0] in {"runtime", ".git", ".opencode", "node_modules", "plans"}:
+        # A worktree is a different checkout with a different HEAD. `.worktrees/rsi-execution`
+        # carries branch `codex/rsi-execution`, and its own README and CHANGELOG state the class
+        # count that branch had at its last commit - which is correct there and stale here. A
+        # document check running over somebody else's tree fails this repository for a number
+        # that describes somebody else's code, and there is no fix a commit here can make. The
+        # same reason `.opencode` is excluded: it is state, not this repository's content.
+        if parts[0] in {"runtime", ".git", ".opencode", "node_modules", "plans", ".worktrees"}:
             continue
         # SYSTEM_AUDIT.md is a historical record in its entirety and opens by saying so;
         # every figure in it is point-in-time. Its per-section markers are sparse, and

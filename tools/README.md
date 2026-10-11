@@ -157,11 +157,34 @@ and fails silently.
 one HTML file. It has no order path and reads no credentials: a page that could trade would be a
 second execution path, and the Guardian's single-path property is worth more than a button. A
 number that cannot be computed reads UNKNOWN rather than 0, because "not measurable" and "measured
-at zero" are different claims. `make status-page` writes four pages to
-`runtime/autopoiesis/report/site/`: Overview (is it running, does the result hold up), Decisions
-(the rule's decision, the model's override and its reason, the Guardian's refusal), Strategies
-(lifecycle transitions with their reasons — what the self-evolution actually changed), and Evidence
-(the agent-level claim, the attribution coverage, and the signal ledger's verdict counts).
+at zero" are different claims. `make status-page` writes six pages to
+`runtime/autopoiesis/report/site/`: Overview, Portfolio & Risk (the limits in force beside the
+exposure they bound, and the capital the agent-level return divides by), Decisions (the rule's
+decision, the model's override and its reason, the Guardian's refusal), Strategies (lifecycle
+transitions with their reasons — what the self-evolution actually changed), System (whether the
+daemon is running judged by age and pid, and how much of the record these pages can see), and
+Evidence (the agent-level claim, the attribution coverage, and the signal ledger's verdict
+counts). All six are rendered from one snapshot, so a page cannot be from a different instant than
+the page next to it, and the journal is read through `JsonlJournal.history_paths()` so the archive
+is part of the record rather than something one directory over.
+
+## The public site — `project_site.py`
+
+**`figures.py`** runs the five collectors and writes `docs/site/figures.json`. **`gate_summary.py`**,
+**`test_summary.py`**, **`record_summary.py`**, **`signal_summary.py`** and **`benchmark_json.py`**
+each run one real command and print one JSON object; `benchmark_json.py` wraps
+`benchmark.py --json`, whose prose goes to a sink so a parser sees one thing. A collector that
+fails is recorded as an error rather than omitted, so a page with a missing figure is
+distinguishable from a project with nothing to report.
+
+**`project_site.py`** renders that file into `docs/site/` — Overview, Evidence, Architecture,
+Safety, Build. It reads nothing else, which is why the site builds on a fresh clone where
+`runtime/` does not exist, and why it publishes an aggregate rather than one deployment's
+numbers. There are no screenshots: a reader can re-run a command and cannot re-derive a PNG.
+
+`make refresh-figures` runs the collectors and regenerates the pages; `make site` renders only.
+Both are committed together, and the date field in `figures.json` is what tells a reader how old a
+published measurement is.
 
 ## Service templates
 

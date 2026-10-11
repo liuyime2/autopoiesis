@@ -63,3 +63,4 @@ build/
 dist/
 *.egg
 wheels/
+.worktrees/
