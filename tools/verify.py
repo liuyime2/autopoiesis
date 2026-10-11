@@ -1481,6 +1481,34 @@ def check_figures_quoted_in_config_comments() -> Result:
     )
 
 
+def check_workflow_jobs_are_reachable() -> Result:
+    """Every workflow file's `jobs:` contains the jobs it defines.
+
+    A `release` job was appended to `ci.yml` at column 0 instead of under `jobs:`. The file is
+    valid YAML either way - `release` becomes a sibling of `jobs` rather than a child - so the
+    workflow ran only `gate`, reported failure with zero jobs, and nothing on this host could see
+    the difference, because the only thing that reads these files is GitHub. A reader of the file
+    sees a release job.
+
+    The check runs `tools/check_workflow_jobs.py` rather than re-deriving it, and that script's
+    own failure is the reason it exists. It also asserts the reverse direction: a job that is
+    reachable but has neither `steps` nor `uses` cannot do anything either.
+    """
+    script = ROOT / "tools" / "check_workflow_jobs.py"
+    if not script.exists():
+        return Result("workflow-jobs-reachable", SKIP,
+                      "tools/check_workflow_jobs.py is absent")
+    import subprocess as _sp
+
+    proc = _sp.run([sys.executable, str(script)], capture_output=True, text=True, timeout=120)
+    if proc.returncode == 0:
+        return Result("workflow-jobs-reachable", PASS,
+                      "every top-level key in every workflow is one Actions accepts, and every "
+                      "job is reachable from jobs:")
+    return Result("workflow-jobs-reachable", FAIL,
+                  f"the workflow files describe jobs that will not run: {_tail(proc.stdout, 300)}")
+
+
 def check_release_is_declarable() -> Result:
     """The version in `pyproject.toml` is a legal PEP 440 version, is a pre-release, and has a
     CHANGELOG entry that names the same number.
@@ -3105,6 +3133,9 @@ BESPOKE_CHECK_NAMES = (
     "config-comment-figures-true",
     # The published artefacts: a legal PEP 440 pre-release version that CHANGELOG.md names.
     "release-is-declarable",
+    # The workflow files' jobs are reachable from `jobs:` - a job that lost its parent runs
+    # nowhere and fails nothing locally.
+    "workflow-jobs-reachable",
     "unit-templates-portable",
     "fact-figures-match",
     "list-count-matches-run",
@@ -3569,6 +3600,7 @@ def main() -> int:
     results.append(_safe(check_software_supply_chain, "software-supply-chain"))
     results.append(_safe(check_docs_not_stale, "docs-not-stale"))
     results.append(_safe(check_release_is_declarable, "release-is-declarable"))
+    results.append(_safe(check_workflow_jobs_are_reachable, "workflow-jobs-reachable"))
     results.append(_safe(check_production_research_separation, "production-research-separation"))
     results.append(_safe(check_home_independence, "home-independence"))
     results.append(_safe(check_units_are_where_systemd_looks, "units-where-systemd-looks"))

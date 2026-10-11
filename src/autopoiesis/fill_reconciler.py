@@ -111,6 +111,20 @@ class FillReconciler:
             return None
         if order is None:
             return None
+        # The order must be the one that was asked for. The lookup is by `client_order_id`, and a
+        # broker that answers it with a *different* order - a loose match, a stale index, a
+        # different account's fill - would have that order's quantity and price confirmed against
+        # this pending order, and the journal would record a fill that never happened to this
+        # order. Nothing downstream can tell: the confirmation is well-formed, the order id is
+        # the pending one, and only the numbers are somebody else's.
+        #
+        # Only a reported, different id is refused. A broker that does not report `client_order_id`
+        # at all must not break reconciliation - the query was made with the pending id, so a
+        # silent answer is a missing field rather than a contradiction. Refusing on absence would
+        # turn one wrong fill into zero fills, which is a worse failure than the one being fixed.
+        reported = getattr(order, "client_order_id", None)
+        if reported is not None and str(reported).strip() and str(reported) != pending.client_order_id:
+            return None
         filled = _float(getattr(order, "filled_qty", 0))
         status = str(getattr(order, "status", "") or "unknown")
         if filled <= 0 and status.lower() not in TERMINAL_STATUSES:

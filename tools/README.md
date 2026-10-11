@@ -13,7 +13,7 @@ this refactor removed.
 
 ## The gate — `verify.py`
 
-**`python tools/verify.py`** is the project gate: 53 check classes, non-zero exit on any
+**`python tools/verify.py`** is the project gate: 54 check classes, non-zero exit on any
 failure. `make verify` runs it. Three modes:
 
 - `--self-test` breaks the gate on purpose and asserts it reports failure, because a
@@ -185,6 +185,12 @@ numbers. There are no screenshots: a reader can re-run a command and cannot re-d
 `make refresh-figures` runs the collectors and regenerates the pages; `make site` renders only.
 Both are committed together, and the date field in `figures.json` is what tells a reader how old a
 published measurement is.
+
+**`check_workflow_jobs.py`** asserts every workflow file's `jobs:` contains the jobs it defines.
+It exists because a `release` job appended to `ci.yml` at column 0 instead of under `jobs:` is
+valid YAML with `release` as a sibling of `jobs` - the workflow ran only `gate`, reported failure
+with zero jobs, and nothing on this host could see the difference, because the only thing that
+reads those files is GitHub. `make verify` runs it as `workflow-jobs-reachable`.
 
 ## Service templates
 

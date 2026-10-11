@@ -20,12 +20,16 @@ was produced by running a command on this host, and the command is named so it c
 
 ### Verified on this build
 
-- The gate: `make verify` reports **53 check classes, 0 failed**, over 1853 test executions in 80
-  files. `pytest` reports **1177 passed**; `ruff check src/ tools/ tests/ examples/` and
+- The gate: `make verify` reports **54 check classes, 0 failed**, over 1859 test executions in 81
+  files. `pytest` reports **1183 passed**; `ruff check src/ tools/ tests/ examples/` and
   `mypy src/autopoiesis` are clean.
-- The credential-free path claimed by the README quick start. In a fresh clone with no broker
-  credentials, no `runtime/` and no env file: `make install`, `make check`, `make smoke-offline`,
-  `examples/minimal_cycle.py` and `make verify` all exit 0.
+- The credential-free path claimed by the README quick start. In a fresh clone at this tag, with
+  no broker credentials, no `runtime/` and no env file: `make install`, `make check`,
+  `make smoke-offline`, `examples/minimal_cycle.py`, `make release-check`, the site generation and
+  `make verify` all exit 0.
+- The public site is deployed. `docs/site/` is generated from committed figures and published at
+  <https://liuyime2.github.io/autopoiesis/> by the `pages` workflow: five pages, all HTTP 200,
+  carrying the same numbers the CLI prints and no account data.
 - The package installs and runs. `python -m build --sdist --wheel` succeeds; the sdist carries
   the package, `examples/` and `configs/`; installing that sdist in a clean virtualenv imports
   `autopoiesis`, runs `examples/minimal_cycle.py` and exposes the `autopoiesis` console script.
@@ -73,6 +77,15 @@ was produced by running a command on this host, and the command is named so it c
   generation, judged by age and pid, with atomic writes and tests.
 - An empty strategy library failed the gate on a fresh clone, contradicting the README's own
   claim that no credentials are needed for the quick start.
+- `FillReconciler` confirmed a broker order's quantity and price against a pending order without
+  checking that the order was the one asked for. A broker answering a `client_order_id` lookup
+  with a different order would have that order's fill recorded against this one, and nothing
+  downstream could tell: the confirmation is well-formed and only the numbers are somebody else's.
+  A reported, different id is now refused; an absent one is not, because refusing on absence would
+  turn one wrong fill into none.
+- A workflow's `release` job appended at column 0 instead of under `jobs:` is valid YAML, ran
+  nowhere, and failed nothing locally. `workflow-jobs-reachable` checks it, and it caught the
+  mistake it was written for.
 - The operator script was still named `minictrl` after the project renamed to `autopoiesis`.
 
 ### Known gaps
@@ -83,8 +96,12 @@ was produced by running a command on this host, and the command is named so it c
   provenance capture.
 - No off-machine copy of the journal exists. The archive keeps the record from being deleted on
   this host; nothing has shipped it anywhere else, and no test claims otherwise.
-- No browser, accessibility or responsive acceptance of the static panel. It is a snapshot, not
-  a deployed site, and it is published nowhere.
+- The public site asserts the properties an accessible page needs - landmarks, one `h1`,
+  `aria-current`, a skip link, a visible focus ring, `prefers-reduced-motion`, both colour
+  schemes - but has not been opened in a browser, checked with a screen reader, or measured for
+  contrast by a tool. It is published and unaccepted.
+- `runtime/` is not published. The site's figures are aggregates over the record; the record
+  itself, and any position, is not on the site and not in the repository.
 
 ### Added
 - `make benchmark`: the falsifiable target - beat SPY buy-and-hold within the risk budget,
@@ -98,7 +115,7 @@ was produced by running a command on this host, and the command is named so it c
   rewritten.
 - `autopoiesis` and `make` run in a plain venv; conda is optional.
 - CI runs mypy, matching `make check`.
-- The gate has 53 check classes. `fact-docs-current`, which made archived audit documents
+- The gate has 54 check classes. `fact-docs-current`, which made archived audit documents
   restate live counts, is retired; `screen-direction-neutral` is new.
 - The offline screen reads each strategy against what its days alone would have scored,
   rejecting only when it is worse beyond noise.

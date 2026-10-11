@@ -126,6 +126,15 @@ def test_a_broker_outage_does_not_fabricate_a_fill(journal):
     assert FillReconciler(client=client, journal=journal).resolve() == []
 
 
+def test_fill_lookup_rejects_mismatched_client_order_id(journal):
+    journal.append(_submitted_cycle("coid-1"))
+    order = BrokerOrder(filled_qty=2.0, status="filled", filled_avg_price=500.0)
+    order.client_order_id = "different-order"
+    client = FakeClient({"coid-1": order})
+
+    assert FillReconciler(client=client, journal=journal).resolve() == []
+
+
 def test_an_already_confirmed_fill_is_not_polled_twice(journal):
     journal.append(_submitted_cycle("coid-1"))
     journal.append_event(
