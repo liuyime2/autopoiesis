@@ -4,6 +4,12 @@
 计划基线：提交 `c32f41176cc47ab46b017d705edaec45aab0cc8e`。
 范围：研究和判断可交易信号、决策质量、递归改进研究过程，以及支撑这些工作的可靠运行基础设施。本文件是计划，不表示下述目标已实现。
 
+## 执行进度记录（2026-10-11）
+
+已完成并有证据的基础设施工作：隔离工作树中的 watchdog stale-heartbeat 恢复修复已提交（`ed51c55`），当时完整测试为 1195 passed / 3 skipped、verify 为 52 类零失败；优雅停机审计已记录为独立结论（`505449d`），确认 30 秒 SIGKILL 记录无法归因具体阶段，且 Alpaca 请求没有有限 timeout，因此不能据此直接加大 `TimeoutStopSec`；只读 paper broker 延迟样本已真实执行一次：SDK 3.2.0、20 次 clock + 20 次 account、40 次请求成功、0 失败，合并 p50 25.036ms / p95 27.248ms / max 90.247ms。采样器、精确 SDK pin、此次测试/verify 和结果限制见 `docs/superpowers/plans/2026-10-10-broker-latency-baseline.md`：最终 make check 为 1209 passed / 3 skipped，verify 为 52 类 0 失败、1906 次测试执行，mypy 45 个源文件零问题。
+
+这些交付只完成阶段 A 的一个 watchdog 修复和 broker 延迟基线，不代表 broker deadline、歧义订单对账、备份恢复、provenance、alpha、决策质量或 RSI control/treatment 已完成。当前 paper 观察窗仍需满足原定连续 60 个有效交易日；不能把测试/verify 的绿色代替运行时、收益或 RSI 证据。
+
 ## 1. 问题、基线、成功标准、验证
 
 ### 问题

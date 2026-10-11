@@ -78,7 +78,7 @@ export
 endif
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install check lint type test smoke smoke-offline fast fast-no-broker daily-report benchmark \
+.PHONY: help setup install check lint type test smoke smoke-offline fast fast-no-broker daily-report benchmark broker-latency-sample \
         verify verify-self-test doctor audit integrity classes classes-list \
         run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc
 
@@ -100,6 +100,7 @@ help:
 	@echo "make check            lint + test (no broker, no credentials)"
 	@echo "make test             unit and integration tests only"
 	@echo "make smoke            one real cycle against the paper broker"
+	@echo "make broker-latency-sample COUNT=20 read-only clock/account operation latency against paper"
 	@echo "make smoke-offline    the widest check needing no broker and no credentials"
 	@echo "make fast             lint + test + smoke + verify"
 	@echo "make fast-no-broker   lint + test + smoke-offline, no credentials needed"
@@ -192,8 +193,9 @@ research-help:
 verify-self-test:
 	@$(PY) tools/verify.py --self-test
 
+TEST_ARGS ?=
 test:
-	@$(PY) -m pytest -q
+	@$(PY) -m pytest -q $(TEST_ARGS)
 
 doctor:
 	@./autopoiesis doctor
@@ -202,6 +204,12 @@ doctor:
 # The falsifiable target the whole project is measured against. No credentials needed.
 benchmark:
 	@$(PY) tools/benchmark.py
+
+# Read-only request timing against the configured Alpaca paper host. COUNT is the
+# number of iterations, capped at 50; each makes one clock and one account operation.
+COUNT ?= 20
+broker-latency-sample:
+	@$(PY) tools/broker_latency_sample.py --count "$(COUNT)"
 
 # One trading day's validation report: did it start at the open, who decided, where the model
 # overrode the rule and why, shorts, and the benchmark. Reads only. DATE=YYYY-MM-DD for another day.

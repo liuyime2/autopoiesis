@@ -52,6 +52,7 @@ WARN = "WARN"
 #: than one class is allowed; leaving one unassigned fails the gate.
 TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_broker_evidence.py": ("broker-reconciliation", "crash-recovery"),
+    "test_broker_latency_sample.py": ("unit-integration",),
     "test_cli.py": ("unit-integration",),
     # Was mapped only to `syntax-import`, which imports the 35 production
     # modules and runs none of this file's assertions - so its one failing

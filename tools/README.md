@@ -146,6 +146,14 @@ decision, and every file in the library must have a recorded admission verdict.
 account, positions, orders. `make smoke` runs it. It was originally `test_alpaca.py` at
 the repository root, where pytest imported a network-calling module on every run.
 
+**`broker_latency_sample.py`** samples clock/account SDK operation latency against the
+configured paper endpoint only. Run `make broker-latency-sample COUNT=20`; each iteration
+makes one clock and one account read, and COUNT is capped at 50. It prints summary timings
+and SDK version, not response data or error text. Only source-audited
+`alpaca-trade-api 3.2.0` is accepted; SDK retries are disabled so one operation makes
+one HTTP attempt. There is no request deadline yet; do not run it unattended or treat
+observed latency as a stop-time guarantee.
+
 **`provenance.py`** prints what `make reproduce` records: commit, dirty state, the
 resolved configuration, package versions, the seed and dataset version (both reported as
 absent, with the reason, rather than invented), the output paths, and the metrics at that
