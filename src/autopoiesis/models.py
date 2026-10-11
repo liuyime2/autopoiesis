@@ -55,6 +55,10 @@ JournalEventType = Literal[
     "ORDER_SUBMISSION_UNKNOWN",
     "ORDER_SUBMISSION_RESOLVED",
     "ORDER_SUBMISSION_MANUALLY_RESOLVED",
+    # A replaced order's replacement chain was walked to its end and the end was not a
+    # verifiable fill. Recorded so the walk's result is on the record rather than in a log, and
+    # so the block stays with a reason attached instead of as an unexplained obstacle.
+    "ORDER_REPLACEMENT_CHAIN_UNVERIFIED",
     "ORDER_FILL_SNAPSHOT",
 ]
 JournalEventStatus = Literal["SUCCESS", "FAILED", "ACCEPTED", "REJECTED", "SKIPPED"]
