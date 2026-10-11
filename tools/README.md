@@ -13,7 +13,7 @@ this refactor removed.
 
 ## The gate — `verify.py`
 
-**`python tools/verify.py`** is the project gate: 54 check classes, non-zero exit on any
+**`python tools/verify.py`** is the project gate: 55 check classes, non-zero exit on any
 failure. `make verify` runs it. Three modes:
 
 - `--self-test` breaks the gate on purpose and asserts it reports failure, because a
@@ -195,6 +195,22 @@ numbers. There are no screenshots: a reader can re-run a command and cannot re-d
 `make refresh-figures` runs the collectors and regenerates the pages; `make site` renders only.
 Both are committed together, and the date field in `figures.json` is what tells a reader how old a
 published measurement is.
+
+**`shutdown_budget.py`** derives the service's stop window instead of letting it be picked. It
+enumerates the stages that can be in flight when SIGTERM arrives - broker HTTP, the curriculum
+generation, the model decision, the doctor probes, the watchdog's systemctl subprocess - reads the
+timeout each one *declares* from the source, takes the largest, adds a stated buffer, and compares
+the result with the unit template. `tools/autopoiesis.service.in` carries
+`TimeoutStopSec=@STOP_BUDGET_SECONDS@` rather than a number, and `autopoiesis install-service`
+substitutes the derived one, so a stage timeout that grows leaves the template untouched and only
+the budget moves - which `shutdown-budget-covers-every-stage` detects.
+
+The number on this host is 630s: the curriculum generation's 600s ceiling plus a 30s buffer, and
+the deployed unit had 30s. That gap is the historical evidence's two SIGKILLs, and it is now a
+derived value checked by the gate rather than a number nobody could defend. The stages with no
+declared ceiling - the journal write, the atomic file writes - are named in the output, because the
+budget is a lower bound and calling it the daemon's maximum would be a guess formatted as a
+measurement.
 
 **`journal_snapshot.py`** snapshots the whole journal record - live file, rotated generations,
 the archived ones and the archive manifest, each under its runtime-relative path - and restores it

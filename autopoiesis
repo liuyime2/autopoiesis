@@ -211,6 +211,17 @@ case "$cmd" in
         echo "       'autopoiesis install-service', or export it for this run." >&2
         exit 2
       fi
+      # The stop window is derived, not declared: `tools/shutdown_budget.py` adds a stated buffer
+      # to the largest synchronous stage that can be in flight at SIGTERM and prints the total.
+      # Substituting it here rather than leaving a number in the template is what keeps the two
+      # from drifting - a stage timeout that grows leaves the template untouched and only the
+      # derived budget moves, so a unit installed before the change is stale in a way
+      # `shutdown-budget-covers-every-stage` detects.
+      STOP_BUDGET="$(PYTHONPATH="$ROOT_DIR/src$${PYTHONPATH:+:$$PYTHONPATH}" \
+        "$PYTHON_BIN" "$ROOT_DIR/tools/shutdown_budget.py" --budget-only)" || {
+        echo "FATAL: could not derive the shutdown budget" >&2
+        exit 2
+      }
       render() {
         sed -e "s|@ROOT@|$ROOT_DIR|g" \
             -e "s|@PYTHON@|$PYTHON_BIN|g" \
@@ -218,6 +229,7 @@ case "$cmd" in
             -e "s|@ENVFILE@|$ENV_FILE|g" \
             -e "s|@OLLAMA_BIN@|$OLLAMA_BIN_RESOLVED|g" \
             -e "s|@OLLAMA_MODELS@|$OLLAMA_MODELS_RESOLVED|g" \
+            -e "s|@STOP_BUDGET_SECONDS@|$STOP_BUDGET|g" \
             "$1" > "$unit_dir/$2"
       }
     render "$ROOT_DIR/tools/autopoiesis.service.in"  "$SERVICE_NAME"
@@ -299,11 +311,17 @@ case "$cmd" in
     # Not persistent across a manager restart or a reboot; see the note below.
     RUN_UNITS="/run/user/$(id -u)/systemd/user"
     [ -d "$RUN_UNITS" ] || { echo "FATAL: $RUN_UNITS does not exist" >&2; exit 2; }
+    STOP_BUDGET="$(PYTHONPATH="$ROOT_DIR/src$${PYTHONPATH:+:$$PYTHONPATH}" \
+      "$PYTHON_BIN" "$ROOT_DIR/tools/shutdown_budget.py" --budget-only)" || {
+      echo "FATAL: could not derive the shutdown budget" >&2
+      exit 2
+    }
     render() {
       sed -e "s|@ROOT@|$ROOT_DIR|g" \
           -e "s|@PYTHON@|$PYTHON_BIN|g" \
           -e "s|@ENVBIN@|$ENVBIN|g" \
           -e "s|@ENVFILE@|$ENV_FILE|g" \
+          -e "s|@STOP_BUDGET_SECONDS@|$STOP_BUDGET|g" \
           "$ROOT_DIR/$1" > "$RUN_UNITS/$2"
     }
     render tools/ollama.service.in     ollama.service

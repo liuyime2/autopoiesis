@@ -20,7 +20,7 @@ was produced by running a command on this host, and the command is named so it c
 
 ### Verified on this build
 
-- The gate: `make verify` reports **54 check classes, 0 failed**, over 1859 test executions in 81
+- The gate: `make verify` reports **55 check classes, 0 failed**, over 1859 test executions in 81
   files. `pytest` reports **1183 passed**; `ruff check src/ tools/ tests/ examples/` and
   `mypy src/autopoiesis` are clean.
 - The credential-free path claimed by the README quick start. In a fresh clone at this tag, with
@@ -115,7 +115,7 @@ was produced by running a command on this host, and the command is named so it c
   rewritten.
 - `autopoiesis` and `make` run in a plain venv; conda is optional.
 - CI runs mypy, matching `make check`.
-- The gate has 54 check classes. `fact-docs-current`, which made archived audit documents
+- The gate has 55 check classes. `fact-docs-current`, which made archived audit documents
   restate live counts, is retired; `screen-direction-neutral` is new.
 - The offline screen reads each strategy against what its days alone would have scored,
   rejecting only when it is worse beyond noise.

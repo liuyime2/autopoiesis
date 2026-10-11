@@ -73,7 +73,7 @@
       }
     },
     "gate": {
-      "check_classes": 54
+      "check_classes": 55
     },
     "record": {
       "cycles": 2060,
@@ -95,9 +95,9 @@
       }
     },
     "tests": {
-      "test_files": 81,
-      "tests": 1183
+      "test_files": 87,
+      "tests": 1289
     }
   },
-  "generated_at": "2026-10-11T03:18:08.245298+00:00"
+  "generated_at": "2026-10-11T17:07:44.175384+00:00"
 }

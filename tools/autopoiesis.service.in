@@ -42,7 +42,13 @@ Restart=always
 RestartSec=30
 
 KillSignal=SIGTERM
-TimeoutStopSec=30
+# The stop window is derived from the largest synchronous stage that can be in flight at SIGTERM
+# (the curriculum generation, CURRICULUM_TIMEOUT_S) plus a stated buffer, by
+# `tools/shutdown_budget.py` - not read off the wall. A stage timeout that grows without the budget
+# growing with it ends in SIGKILL, which is what the historical evidence records twice. The budget
+# is substituted at install time; a template that reaches systemd with the marker still in it fails
+# to parse, which is the intended loud failure rather than a silently wrong window.
+TimeoutStopSec=@STOP_BUDGET_SECONDS@
 
 [Install]
 WantedBy=default.target

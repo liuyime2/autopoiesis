@@ -143,6 +143,8 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     # Recovery is a capability only if it has been exercised: the snapshot/restore path and the
     # refusal to write to the live runtime.
     "test_journal_snapshot.py": ("unit-integration", "crash-recovery"),
+    # The stop budget is derived and the SIGTERM contract is exercised with a blocking stage.
+    "test_shutdown_budget.py": ("unit-integration", "crash-recovery"),
     # The public site is a published claim: its figures must match the published file.
     "test_public_site.py": ("unit-integration", "data-integrity"),
     # Rotation is the one mechanism that can delete the only source of truth, so the
@@ -1485,6 +1487,53 @@ def check_figures_quoted_in_config_comments() -> Result:
         "config-comment-figures-true", PASS,
         f"ruff.toml's measured figures hold: verify.py {verify_lines:,} lines, "
         f"{found.group(1) if found else '?'} BLE001 findings, {cli_imports} deferred imports",
+    )
+
+
+def check_shutdown_budget_covers_every_stage() -> Result:
+    """The service's stop window must cover the longest stage that can be in flight at SIGTERM.
+
+    The failure this exists to prevent is in the historical evidence twice: a stop job reached the
+    30-second deadline and systemd escalated to SIGKILL, which kills a daemon mid-stage rather than
+    letting it finish and record what it did. The budget is not a number anybody should pick, so it
+    is derived from the largest declared stage timeout plus a stated buffer, and the unit template
+    defers to it with a marker rather than carrying a number that can drift.
+
+    A template that declares its own window is checked against the derived one; a template with the
+    marker is in step by construction. Both are reported, and neither is assumed.
+    """
+    script = ROOT / "tools" / "shutdown_budget.py"
+    if not script.exists():
+        return Result("shutdown-budget-covers-every-stage", SKIP,
+                      "tools/shutdown_budget.py is absent")
+    import subprocess as _sp
+
+    proc = _sp.run([sys.executable, str(script), "--json"], capture_output=True, text=True,
+                   timeout=300)
+    if proc.returncode == 0:
+        payload = json.loads(proc.stdout)
+        stage = payload.get("largest_stage") or {}
+        return Result(
+            "shutdown-budget-covers-every-stage", PASS,
+            f"stop budget {payload['derived_budget_seconds']}s from "
+            f"{stage.get('name', 'the stages')} at {stage.get('seconds')}s plus a "
+            f"{payload['buffer_seconds']}s buffer; the template "
+            + ("defers to it" if payload["unit_declares_the_marker"]
+               else f"declares {payload['unit_declared_seconds']}s"),
+        )
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return Result(
+            "shutdown-budget-covers-every-stage", FAIL,
+            f"shutdown_budget.py failed without producing its report: {_tail(proc.stdout, 200)}",
+        )
+    declared = payload.get("unit_declared_seconds")
+    return Result(
+        "shutdown-budget-covers-every-stage", FAIL,
+        f"the stop window covers {declared}s against a derived budget of "
+        f"{payload['derived_budget_seconds']}s, so a SIGTERM during "
+        f"{(payload.get('largest_stage') or {}).get('name')} ends in SIGKILL",
     )
 
 
@@ -3172,6 +3221,8 @@ BESPOKE_CHECK_NAMES = (
     # The workflow files' jobs are reachable from `jobs:` - a job that lost its parent runs
     # nowhere and fails nothing locally.
     "workflow-jobs-reachable",
+    # The service's stop window covers the longest stage that can be in flight at SIGTERM.
+    "shutdown-budget-covers-every-stage",
     "unit-templates-portable",
     "fact-figures-match",
     "list-count-matches-run",
@@ -3637,6 +3688,8 @@ def main() -> int:
     results.append(_safe(check_docs_not_stale, "docs-not-stale"))
     results.append(_safe(check_release_is_declarable, "release-is-declarable"))
     results.append(_safe(check_workflow_jobs_are_reachable, "workflow-jobs-reachable"))
+    results.append(_safe(check_shutdown_budget_covers_every_stage,
+                         "shutdown-budget-covers-every-stage"))
     results.append(_safe(check_production_research_separation, "production-research-separation"))
     results.append(_safe(check_home_independence, "home-independence"))
     results.append(_safe(check_units_are_where_systemd_looks, "units-where-systemd-looks"))
