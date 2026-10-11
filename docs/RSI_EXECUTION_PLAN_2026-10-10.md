@@ -10,6 +10,10 @@
 
 2026-10-11 又完成一段 paper 订单与账本安全基础：SDK 请求统一经过固定 timeout/禁重试的 client；提交前 fsync 写入 intent，提交响应不明时全局阻止新订单并按精确 client ID 恢复；兼容旧 ERROR 记录；归档 manifest 对历史做连续性校验并提供显式操作员基线审计入口；部分成交以累计快照幂等投影；恢复 runbook 与 CLI/Makefile 路径已加入。证据：`make verify` 52/52 类通过、1959 次测试执行、0 失败；lint 与 mypy（47 源文件）通过。该实现遇到 `replaced` 状态会安全地持续阻断，但尚未跟踪 Alpaca replacement chain；这是未完成项，不能称订单生命周期全部闭环。所有这些只证明离线机制和 fake broker 行为，不证明线上 broker 故障恢复、alpha 或盈利。
 
+Alpha 搜索可复现性继续推进：当前 driver 之前按策略、symbol、参数和 bar 数去重，未核对内容；实测新增的同长度价格变更测试得到 `repeats=2`，错误地把两条不同价格序列当作旧数据。另一个基线问题是 `search()` 无条件把任意输入标为“Alpaca historical bars; not synthetic”，连合成测试序列也如此。修复要求每个调用显式提供来源，真实 cache 运行传来源元数据，数据集 fingerprint 对有序 timestamp/price 做 SHA-256；旧 ledger 缺 fingerprint 时重跑一次。计划与完整验证结果记录在 `docs/superpowers/plans/2026-10-11-research-dataset-identity.md`。本阶段不会把合成单测当成真实 alpha 证据。
+
+此数据身份修改的最终 gate 结果：research-driver 21/21 测试，`make verify` 52/52 类、1,971 次执行、0 失败。只验证了防止数据集误去重及来源误标，不代表已完成真实数据 alpha search 或任何策略晋升。
+
 这些交付推进了阶段 A 的 watchdog、请求边界、歧义订单保护和部分账本恢复；异地备份/恢复演练、replacement chain、SIGTERM 真正可中断边界、统一 provenance、alpha、决策质量和 RSI control/treatment 仍未完成。当前 paper 观察窗仍需满足原定连续 60 个有效交易日；不能把测试/verify 的绿色代替运行时、收益或 RSI 证据。
 
 ## 1. 问题、基线、成功标准、验证
