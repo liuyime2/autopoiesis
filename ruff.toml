@@ -8,7 +8,7 @@
 # house style it does not follow. `BLE001` (blind `except`) is deliberately excluded:
 # the daemon is designed to catch broadly and record the failure in the journal rather
 # than die mid-cycle, which is a correctness property here, not an oversight. Enabling
-# it would have produced 80 findings, all of them intentional. Four arrived with the
+# it would have produced 81 findings, all of them intentional. Four arrived with the
 # instrument profile and the headlines that go beside it: a broker endpoint that is
 # down, a symbol the broker cannot name and a news call that fails must each leave the
 # decision exactly as it was, and each says so on `last_*_error` rather than raising.
@@ -44,11 +44,15 @@ select = [
 ignore = [
     # The daemon catches broadly on purpose: a maintenance failure must be journaled
     # and survive, not crash the process and take the paper run down with it. Each of
-    # these 80 sites records what failed (see `_agent_holding_errors`,
+    # these 81 sites records what failed (see `_agent_holding_errors`,
     # `_should_trade_now`, which refuses to let an unreadable broker clock kill the
     # process the way a network stall did twice on 2026-10-08, and
     # `_maintenance`'s try/except, the doctor's per-check isolation, and
-    # `research/driver._default_symbol`, which falls back to the documented default
+    # `order_reconciler._walk_replacement_chain`, where a replacement link the broker cannot
+# answer about must end the walk rather than propagate: a timeout inside a startup reconcile
+# must leave the block on and the reason on the record, not take the daemon down. Only the
+# exception's type is journalled, never the broker's message, which can carry the host.
+# `research/driver._default_symbol`, which falls back to the documented default
     # when the operator's configuration cannot be read so a scheduled search on a host
     # with an unset environment still runs over the instrument it is about).
     "BLE001",

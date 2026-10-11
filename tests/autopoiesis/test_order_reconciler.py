@@ -264,12 +264,18 @@ def _intent(journal, coid, symbol="SPY", action="BUY", quantity=1):
     ))
 
 
-def test_a_chain_that_ends_at_a_fill_is_walked_and_recorded(tmp_path):
-    """The chain is walked to its end, and the walk's result is on the record.
+def test_a_chain_that_ends_at_a_fill_is_resolved_and_the_fill_is_projected(tmp_path):
+    """A verified chain is a known outcome, so the block clears and the fill lands.
 
-    `replaced_by` names the order that superseded the one we tracked; the last link is the one
-    that can hold the fill. A walk that ends there is recorded as such, so the next pass and the
-    operator start from something rather than from nothing.
+    This is the half of the feature the walk alone could not do: walking and recording left the
+    block on forever, which is safe and a dead end. An ambiguous submit blocks the whole agent
+    until a human intervenes, and a chain verified end to end is exactly the case where that
+    intervention is not needed.
+
+    The fill is projected against the *original* client order id, so it stays attributable to the
+    submission that placed it even though the broker's order id is the replacement's. Clearing the
+    block without projecting the fill would be the "29 unmatched sells" defect: a position in the
+    account that no ledger knows about.
     """
     journal = JsonlJournal(tmp_path / "journal.jsonl")
     journal.archive_manifest_status()
@@ -284,17 +290,80 @@ def test_a_chain_that_ends_at_a_fill_is_walked_and_recorded(tmp_path):
 
     report = OrderReconciler(client=client, journal=journal).reconcile()
 
-    # Still blocked: the walk records the chain but does not by itself project a fill.
-    assert report.unresolved_client_order_ids == (coid,)
     assert client.queried_ids == ["new-order"], "the replacement was looked up, not guessed"
-    events = journal.read_events("ORDER_REPLACEMENT_CHAIN_UNVERIFIED")
-    assert len(events) == 1
-    payload = events[0].payload
-    assert payload["reason"] == "chain end reached at a filled order"
-    chain = payload["observed_chain"]
-    assert [link["order_id"] for link in chain] == ["old-order", "new-order"]
-    assert chain[-1]["status"] == "filled"
-    assert chain[-1]["filled_quantity"] == 1.0
+    assert report.unresolved_client_order_ids == (), "a verified chain clears the block"
+    assert report.matched is True
+    # The fill is projected under the original client order id, with the replacement's facts.
+    [snapshot] = journal.read_events("ORDER_FILL_SNAPSHOT")
+    payload = snapshot.payload
+    assert payload["client_order_id"] == coid
+    assert payload["order_id"] == "new-order"
+    assert payload["filled_quantity"] == 1.0
+    assert payload["filled_avg_price"] == 500.0
+    assert payload["broker_status"] == "filled"
+    # And the shape is the one the evaluator projects, not a second spelling of it.
+    from autopoiesis.fill_reconciler import confirmed_fill_events
+
+    projected = confirmed_fill_events(journal.read_events())
+    assert [e.payload["client_order_id"] for e in projected] == [coid]
+    # The chain is still on the record, with the resolution beside it.
+    [resolved] = journal.read_events("ORDER_SUBMISSION_RESOLVED")
+    assert [link["order_id"] for link in resolved.payload["replacement_chain"]] == [
+        "old-order", "new-order",
+    ]
+    assert journal.read_events("ORDER_REPLACEMENT_CHAIN_UNVERIFIED") == []
+
+
+def test_a_chain_that_ends_canceled_clears_the_block_without_a_fill(tmp_path):
+    """"This order did not trade" is an answer, not a gap.
+
+    Knowing the replacement was canceled with nothing filled is a known outcome for the original
+    submission, so the block clears - but no fill is projected, because none happened. A page or a
+    ledger that inferred one from the fact of the order existing would be inventing a position.
+    """
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    journal.archive_manifest_status()
+    coid = "cid-canceled-chain"
+    _intent(journal, coid)
+    client = _ChainClient(
+        by_coid={coid: _Order("old", "replaced", client_order_id=coid, replaced_by="n")},
+        by_id={"n": _Order("n", "canceled", filled_qty=0.0)},
+    )
+
+    report = OrderReconciler(client=client, journal=journal).reconcile()
+
+    assert report.unresolved_client_order_ids == ()
+    assert journal.read_events("ORDER_FILL_SNAPSHOT") == []
+    [resolved] = journal.read_events("ORDER_SUBMISSION_RESOLVED")
+    assert "did not trade" in resolved.payload.get("message", resolved.message)
+    assert resolved.payload["filled_quantity"] == 0.0
+
+
+def test_a_chain_ending_partial_keeps_the_block_but_projects_its_progress(tmp_path):
+    """A partial fill is not a known outcome yet - more of it can still arrive.
+
+    The cumulative progress is projected so the ledger sees what has filled so far, which is the
+    same cumulative-idempotent projection the fill reconciler uses. The block stays on, because
+    clearing it while the order can still fill would let the next cycle trade on a position that
+    is not what it will end up being.
+    """
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    journal.archive_manifest_status()
+    coid = "cid-partial-chain"
+    _intent(journal, coid, quantity=3)
+    client = _ChainClient(
+        by_coid={coid: _Order("old", "replaced", client_order_id=coid, replaced_by="n")},
+        by_id={"n": _Order("n", "partially_filled", qty=3, filled_qty=1.0,
+                           filled_avg_price=500.0)},
+    )
+
+    report = OrderReconciler(client=client, journal=journal).reconcile()
+
+    assert report.unresolved_client_order_ids == (coid,), "not terminal yet"
+    [snapshot] = journal.read_events("ORDER_FILL_SNAPSHOT")
+    assert snapshot.payload["filled_quantity"] == 1.0
+    assert snapshot.payload["cumulative_filled_quantity"] == 1.0
+    assert journal.read_events("ORDER_SUBMISSION_RESOLVED") == []
 
 
 def test_a_chain_whose_replacement_is_missing_stays_blocked_and_says_why(tmp_path):
@@ -406,3 +475,117 @@ def test_a_client_without_order_lookup_records_that_the_chain_was_not_walked(tmp
     [event] = journal.read_events("ORDER_REPLACEMENT_CHAIN_UNVERIFIED")
     assert event.payload["reason"] == "no order lookup by id"
     assert event.payload["observed_chain"] == []
+
+
+def test_recovery_after_a_broker_timeout_mid_chain_reaches_the_same_outcome(tmp_path):
+    """The recovery case the runbook names: a timeout inside the walk, then a restart.
+
+    A submit whose response was ambiguous blocks trading. The first reconcile attempt reaches the
+    replacement link, the broker times out on it, and the block stays - which is correct and is
+    what the runbook calls "operator investigation". Then the broker answers, the next reconcile
+    walks the same chain to its end, and the order is resolved from the *journal alone*: the
+    unresolved set is recomputed from the whole history, so a fresh process with no in-memory state
+    arrives at the same verdict.
+
+    This is the property that matters for a restart, and it is why the walk is a pure function of
+    the broker and the journal rather than of anything held in memory.
+    """
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    journal.archive_manifest_status()
+    coid = "cid-recovery"
+    _intent(journal, coid)
+
+    timed_out = _ChainClient(
+        by_coid={coid: _Order("old", "replaced", client_order_id=coid, replaced_by="n")},
+        by_id={"n": _Order("n", "filled", filled_qty=1.0, filled_avg_price=500.0)},
+        raise_for_id={"n"},
+    )
+    report_before = OrderReconciler(client=timed_out, journal=journal).reconcile()
+
+    assert report_before.unresolved_client_order_ids == (coid,)
+    [event] = journal.read_events("ORDER_REPLACEMENT_CHAIN_UNVERIFIED")
+    assert "could not be read" in event.payload["reason"]
+    assert event.payload["reason"].endswith("ConnectionError"), (
+        "the exception type is recorded, not the broker's message"
+    )
+    assert journal.read_events("ORDER_SUBMISSION_RESOLVED") == []
+
+    # Restart: a new journal object over the same file, and a broker that now answers.
+    recovered = JsonlJournal(tmp_path / "journal.jsonl")
+    answering = _ChainClient(
+        by_coid={coid: _Order("old", "replaced", client_order_id=coid, replaced_by="n")},
+        by_id={"n": _Order("n", "filled", filled_qty=1.0, filled_avg_price=500.0)},
+    )
+    report_after = OrderReconciler(client=answering, journal=recovered).reconcile()
+
+    assert report_after.unresolved_client_order_ids == (), "restart resolves what it could not"
+    assert report_after.matched is True
+    [snapshot] = recovered.read_events("ORDER_FILL_SNAPSHOT")
+    assert snapshot.payload["filled_quantity"] == 1.0
+    # Both passes are on the record, in order: the failure and then the recovery.
+    both = recovered.read_events()
+    kinds = [e.event_type for e in both]
+    assert kinds.index("ORDER_REPLACEMENT_CHAIN_UNVERIFIED") < kinds.index(
+        "ORDER_FILL_SNAPSHOT"
+    )
+
+
+def test_a_second_pass_does_not_double_project_a_fill(tmp_path):
+    """Re-running recovery must not project the same fill twice.
+
+    `confirmed_fill_events` keeps the *latest* snapshot per client order id, so a second pass
+    overwrites its predecessor rather than adding to it. If it accumulated, every restart would
+    inflate the ledger's filled quantity and the agent would trade on a position it never took.
+    """
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    journal.archive_manifest_status()
+    coid = "cid-idempotent"
+    _intent(journal, coid)
+
+    def client():
+        return _ChainClient(
+            by_coid={coid: _Order("old", "replaced", client_order_id=coid, replaced_by="n")},
+            by_id={"n": _Order("n", "filled", filled_qty=2.0, filled_avg_price=501.0)},
+        )
+
+    first = OrderReconciler(client=client(), journal=journal).reconcile()
+    assert first.unresolved_client_order_ids == ()
+    snapshots = journal.read_events("ORDER_FILL_SNAPSHOT")
+    assert len(snapshots) == 1
+
+    # A second pass over the same history, with the same broker answer.
+    second = OrderReconciler(client=client(), journal=journal).reconcile()
+    assert second.unresolved_client_order_ids == ()
+    assert len(journal.read_events("ORDER_FILL_SNAPSHOT")) == 1, (
+        "a second pass must not project the same fill again"
+    )
+
+    from autopoiesis.fill_reconciler import confirmed_fill_events
+
+    projected = confirmed_fill_events(journal.read_events())
+    assert len(projected) == 1
+    assert projected[0].payload["filled_quantity"] == 2.0
+
+
+def test_a_replaced_order_with_no_pending_intent_is_not_resolved_from_thin_air(tmp_path):
+    """The walk only runs for an order this system submitted.
+
+    `_resolve_unknowns` iterates the journal's unresolved intents. An order the broker reports as
+    replaced that we have no intent for is not ours to resolve, and inventing a resolution for it
+    would put a fill in the ledger for a trade nobody here made.
+    """
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    journal.archive_manifest_status()
+    foreign = "cid-not-ours"
+    client = _ChainClient(
+        by_coid={foreign: _Order("foreign", "replaced", client_order_id=foreign,
+                                 replaced_by="n")},
+        by_id={"n": _Order("n", "filled", filled_qty=1.0)},
+    )
+
+    report = OrderReconciler(client=client, journal=journal).reconcile()
+
+    assert report.matched is True
+    assert journal.read_events("ORDER_FILL_SNAPSHOT") == []
+    assert journal.read_events("ORDER_SUBMISSION_RESOLVED") == []
+    assert journal.read_events("ORDER_REPLACEMENT_CHAIN_UNVERIFIED") == []
