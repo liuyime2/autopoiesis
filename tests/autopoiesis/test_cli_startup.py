@@ -11,7 +11,10 @@ a logic bug.
 import ast
 import builtins
 import inspect
+import os
 import pathlib
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -99,23 +102,25 @@ def test_cli_entry_points_are_present(name):
     assert callable(getattr(cli, name))
 
 
-def test_watchdog_restarts_a_dead_daemon_and_leaves_a_live_one_alone(tmp_path, monkeypatch):
-    """The timer unit ran `--doctor`, so it reported a dead daemon and never revived it.
-
-    With `StartLimitBurst=5` and `StartLimitIntervalSec=900` in the daemon's unit, five
-    crashes inside fifteen minutes left it stopped permanently - systemd had latched the
-    limit - and the only process still running was the one that noticed. The fix is that the
-    watchdog acts rather than reports, and these are the two ways that could do harm if it
-    got them wrong: restarting a healthy daemon, and retrying in a tight loop.
-    """
+def _watchdog_harness(tmp_path, monkeypatch):
     import subprocess
 
     from autopoiesis.cli import SERVICE_NAME, _watchdog
     from autopoiesis.config import AgentConfig
+    from autopoiesis.health import HealthMonitor
+    from autopoiesis.models import HeartbeatPayload
 
-    config = AgentConfig.from_env()
+    config = replace(AgentConfig.from_env(), heartbeat_path=tmp_path / "heartbeat.json")
 
     calls: list[tuple[str, ...]] = []
+    output: list[str] = []
+    state_holder = {
+        "value": "active",
+        "restart_rc": 0,
+        "reset_failed_rc": 0,
+        "reset_failed_out": "",
+        "timeout_calls": set(),
+    }
 
     class Result:
         def __init__(self, code, out=""):
@@ -124,40 +129,268 @@ def test_watchdog_restarts_a_dead_daemon_and_leaves_a_live_one_alone(tmp_path, m
             self.stderr = ""
 
     def fake_run(args, **_kwargs):
+        call_index = len(calls)
         calls.append(tuple(args))
-        # `systemctl --user <verb> <unit>`: the verb is args[2]. Reading args[-1] looked at
-        # the unit name, so the first version of this test asserted against a unit that no longer exists
-        # four times and reported that reset-failed was never called.
+        if call_index in state_holder["timeout_calls"]:
+            raise subprocess.TimeoutExpired(args, timeout=60)
         verb = args[2]
         if verb == "is-active":
+            if "is_active_result" in state_holder:
+                return Result(*state_holder["is_active_result"])
             state = state_holder["value"]
             return Result(0 if state == "active" else 3, state)
-        if verb == "start":
+        if verb == "reset-failed":
+            return Result(state_holder["reset_failed_rc"], state_holder["reset_failed_out"])
+        if verb in {"start", "restart"}:
             if state_holder["value"] != "active":
                 state_holder["value"] = "active"
-            return Result(0)
+            return Result(state_holder["restart_rc"] if verb == "restart" else 0)
         return Result(0)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("builtins.print", lambda *parts, **_kwargs: output.append(" ".join(map(str, parts))))
+    monitor = HealthMonitor(config.heartbeat_path, stale_after_seconds=config.stale_after_seconds)
 
-    # A healthy daemon: nothing is started, and nothing is stopped.
-    state_holder = {"value": "active"}
-    calls.clear()
-    assert _watchdog(config) == 0
-    assert not any(c[2] in {"start", "stop", "restart"} for c in calls), (
-        f"the watchdog touched a running daemon: {calls}"
-    )
+    def write_heartbeat(*, status="RUNNING", timestamp=None, pid=None):
+        monitor.write(HeartbeatPayload(
+            pid=os.getpid() if pid is None else pid,
+            status=status,
+            timestamp=timestamp or datetime.now(timezone.utc),
+            cycle_count=1,
+            error_count=0,
+        ))
 
-    # A dead one: reset-failed then start, and never a stop.
-    state_holder = {"value": "failed"}
-    calls.clear()
+    return config, calls, output, state_holder, write_heartbeat
+
+
+def test_watchdog_leaves_a_fresh_live_daemon_alone(tmp_path, monkeypatch):
+    from autopoiesis.cli import _watchdog
+
+    config, calls, _output, _state_holder, write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    write_heartbeat()
+
     assert _watchdog(config) == 0
-    verbs = [c[2] for c in calls]
-    assert "reset-failed" in verbs, f"the latched start limit was never cleared: {verbs}"
-    assert "start" in verbs, f"a dead daemon was never started: {verbs}"
-    assert "stop" not in verbs and "restart" not in verbs, (
-        f"the watchdog may only start, never stop: {verbs}"
-    )
-    assert verbs.index("reset-failed") < verbs.index("start"), (
-        "reset-failed must come first, or systemd refuses the start"
-    )
+    assert [call[2] for call in calls] == ["is-active"]
+
+
+def test_watchdog_restarts_an_active_daemon_with_a_stale_heartbeat(tmp_path, monkeypatch):
+    """An active unit can still be wedged; the old code only checked systemd state."""
+    from autopoiesis.cli import _watchdog
+
+    config, calls, _output, _state_holder, write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    write_heartbeat(timestamp=datetime.now(timezone.utc) - timedelta(
+        seconds=config.stale_after_seconds + 1,
+    ))
+
+    assert _watchdog(config) == 0
+    assert [call[2] for call in calls] == ["is-active", "restart", "is-active"]
+
+
+def test_watchdog_does_not_restart_when_heartbeat_turns_stopping_during_liveness_check(
+    tmp_path, monkeypatch,
+):
+    from autopoiesis.cli import _watchdog
+    from autopoiesis.health import HealthMonitor
+
+    config, calls, _output, _state_holder, write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    write_heartbeat(timestamp=datetime.now(timezone.utc) - timedelta(
+        seconds=config.stale_after_seconds + 1,
+    ))
+    original_is_live = HealthMonitor.is_live
+
+    def begin_shutdown_during_check(monitor, *args, **kwargs):
+        write_heartbeat(status="STOPPING")
+        return original_is_live(monitor, *args, **kwargs)
+
+    monkeypatch.setattr(HealthMonitor, "is_live", begin_shutdown_during_check)
+
+    assert _watchdog(config) == 0
+    assert [call[2] for call in calls] == ["is-active"]
+
+
+def test_watchdog_does_not_restart_when_final_heartbeat_observation_is_fresh(
+    tmp_path, monkeypatch,
+):
+    from autopoiesis.cli import _watchdog
+    from autopoiesis.health import HealthMonitor
+
+    config, calls, _output, _state_holder, write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    write_heartbeat(timestamp=datetime.now(timezone.utc) - timedelta(
+        seconds=config.stale_after_seconds + 1,
+    ))
+    original_is_live = HealthMonitor.is_live
+
+    def become_fresh_after_stale_liveness_check(monitor, *args, **kwargs):
+        is_live = original_is_live(monitor, *args, **kwargs)
+        if not is_live:
+            write_heartbeat()
+        return is_live
+
+    monkeypatch.setattr(HealthMonitor, "is_live", become_fresh_after_stale_liveness_check)
+
+    assert _watchdog(config) == 0
+    assert [call[2] for call in calls] == ["is-active"]
+
+
+@pytest.mark.parametrize("heartbeat_state", ["missing", "malformed"])
+def test_watchdog_leaves_an_active_daemon_alone_when_heartbeat_is_unknown(
+    tmp_path, monkeypatch, heartbeat_state,
+):
+    from autopoiesis.cli import _watchdog
+
+    config, calls, _output, _state_holder, _write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    if heartbeat_state == "malformed":
+        config.heartbeat_path.write_text("not-json", encoding="utf-8")
+
+    assert _watchdog(config) == 0
+    assert [call[2] for call in calls] == ["is-active"]
+
+
+def test_watchdog_leaves_a_stopping_daemon_alone(tmp_path, monkeypatch):
+    from autopoiesis.cli import _watchdog
+
+    config, calls, _output, _state_holder, write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    write_heartbeat(status="STOPPING")
+
+    assert _watchdog(config) == 0
+    assert [call[2] for call in calls] == ["is-active"]
+
+
+@pytest.mark.parametrize("unit_state", ["inactive", "failed"])
+def test_watchdog_preserves_recovery_order_for_known_stopped_states(tmp_path, monkeypatch, unit_state):
+    """Only explicit stopped states may enter reset-failed then start."""
+    from autopoiesis.cli import _watchdog
+
+    config, calls, _output, state_holder, _write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    state_holder["value"] = unit_state
+
+    assert _watchdog(config) == 0
+    verbs = [call[2] for call in calls]
+    assert verbs == ["is-active", "reset-failed", "start", "is-active"]
+
+
+@pytest.mark.parametrize(
+    ("unit_state", "is_active_result", "expected_detail"),
+    [
+        ("", None, "exit status 3"),
+        ("unknown", None, "unknown"),
+        ("activating", None, "activating"),
+        ("deactivating", None, "deactivating"),
+        ("active", (1, "Failed to connect to bus"), "Failed to connect to bus"),
+    ],
+)
+def test_watchdog_does_not_mutate_unknown_or_in_progress_unit_state(
+    tmp_path, monkeypatch, unit_state, is_active_result, expected_detail,
+):
+    from autopoiesis.cli import _watchdog
+
+    config, calls, output, state_holder, _write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    state_holder["value"] = unit_state
+    if is_active_result is not None:
+        state_holder["is_active_result"] = is_active_result
+
+    assert _watchdog(config) == 0
+    assert [call[2] for call in calls] == ["is-active"]
+    assert any(expected_detail in line for line in output), output
+
+
+def test_watchdog_reports_a_failed_stale_daemon_restart(tmp_path, monkeypatch):
+    from autopoiesis.cli import _watchdog
+
+    config, calls, output, state_holder, write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    write_heartbeat(timestamp=datetime.now(timezone.utc) - timedelta(
+        seconds=config.stale_after_seconds + 1,
+    ))
+    state_holder["restart_rc"] = 1
+
+    assert _watchdog(config) == 0
+    assert [call[2] for call in calls] == ["is-active", "restart"]
+    assert any("could not restart" in line for line in output), output
+
+
+def test_watchdog_does_not_change_service_when_initial_state_check_times_out(tmp_path, monkeypatch):
+    from autopoiesis.cli import _watchdog
+
+    config, calls, output, state_holder, _write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    state_holder["timeout_calls"].add(0)
+
+    assert _watchdog(config) == 0
+    assert [call[2] for call in calls] == ["is-active"]
+    assert any("is-active" in line and "timed out after 60 seconds" in line for line in output)
+
+
+def test_watchdog_does_not_start_after_reset_failed_times_out(tmp_path, monkeypatch):
+    from autopoiesis.cli import _watchdog
+
+    config, calls, output, state_holder, _write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    state_holder["value"] = "failed"
+    state_holder["timeout_calls"].add(1)
+
+    assert _watchdog(config) == 0
+    assert [call[2] for call in calls] == ["is-active", "reset-failed"]
+    assert any("reset-failed" in line and "timed out after 60 seconds" in line for line in output)
+
+
+def test_watchdog_does_not_start_after_reset_failed_returns_error(tmp_path, monkeypatch):
+    from autopoiesis.cli import _watchdog
+
+    config, calls, output, state_holder, _write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    state_holder["value"] = "failed"
+    state_holder["reset_failed_rc"] = 1
+    state_holder["reset_failed_out"] = "permission denied"
+
+    assert _watchdog(config) == 0
+    assert [call[2] for call in calls] == ["is-active", "reset-failed"]
+    assert any("reset-failed" in line and "permission denied" in line for line in output)
+
+
+def test_watchdog_reports_restart_timeout_without_verification_or_retry(tmp_path, monkeypatch):
+    from autopoiesis.cli import _watchdog
+
+    config, calls, output, state_holder, write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    write_heartbeat(timestamp=datetime.now(timezone.utc) - timedelta(
+        seconds=config.stale_after_seconds + 1,
+    ))
+    state_holder["timeout_calls"].add(1)
+
+    assert _watchdog(config) == 0
+    assert [call[2] for call in calls] == ["is-active", "restart"]
+    assert any("restart" in line and "timed out after 60 seconds" in line for line in output)
+
+
+def test_watchdog_reports_start_timeout_without_verification_or_retry(tmp_path, monkeypatch):
+    from autopoiesis.cli import _watchdog
+
+    config, calls, output, state_holder, _write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    state_holder["value"] = "failed"
+    state_holder["timeout_calls"].add(2)
+
+    assert _watchdog(config) == 0
+    assert [call[2] for call in calls] == ["is-active", "reset-failed", "start"]
+    assert any("start" in line and "timed out after 60 seconds" in line for line in output)
+
+
+def test_watchdog_reports_restart_verification_timeout(tmp_path, monkeypatch):
+    from autopoiesis.cli import _watchdog
+
+    config, calls, output, state_holder, write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    write_heartbeat(timestamp=datetime.now(timezone.utc) - timedelta(
+        seconds=config.stale_after_seconds + 1,
+    ))
+    state_holder["timeout_calls"].add(2)
+
+    assert _watchdog(config) == 0
+    assert [call[2] for call in calls] == ["is-active", "restart", "is-active"]
+    assert any("unit is" in line and "timed out after 60 seconds" in line for line in output)
+
+
+def test_watchdog_reports_start_verification_timeout(tmp_path, monkeypatch):
+    from autopoiesis.cli import _watchdog
+
+    config, calls, output, state_holder, _write_heartbeat = _watchdog_harness(tmp_path, monkeypatch)
+    state_holder["value"] = "failed"
+    state_holder["timeout_calls"].add(3)
+
+    assert _watchdog(config) == 0
+    assert [call[2] for call in calls] == ["is-active", "reset-failed", "start", "is-active"]
+    assert any("unit is" in line and "timed out after 60 seconds" in line for line in output)
