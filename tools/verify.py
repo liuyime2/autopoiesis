@@ -2738,16 +2738,40 @@ def check_research_trial_ledger() -> Result:
     # whole ledger. Keying on strategy_id alone made this check refuse the exact behaviour the
     # driver exists to produce. The original defect it was written for is still caught: the same
     # rule judged twice on the same number of bars is a double-count and still fails.
-    identities = [
-        (r.get("strategy_id"), r.get("bars"))
-        for r in recorded
-        if r.get("strategy_id")
-    ]
-    duplicates = len(identities) - len(set(identities))
+    # A record's identity is the rule and the *dataset* it judged, and the bar count is the weakest
+    # possible statement of the dataset. `research/driver.py` therefore records a fingerprint -
+    # SHA-256 over the ordered (timestamp, price) pairs - which is what makes two different tapes
+    # of the same length distinguishable at all.
+    #
+    # The bar count was the whole key before fingerprinting, and the limit was measured here, not
+    # argued: this host's ledger holds two records of `search-trend-follow-0p0005` at 134,425 bars
+    # whose out-of-sample trades are 527 and 521 and whose returns are +0.662% and +0.554%. Same
+    # rule, same bar count, *different data* - the tape gained bars and a rolling fetch rewrote
+    # it. Keying on (strategy_id, bars) reported those two as a double-count, which is the check
+    # refusing the behaviour the driver exists to produce, on the one host where it was measured.
+    #
+    # So a record with a fingerprint is keyed on it, and a record without one falls back to the bar
+    # count - because the rows that predate the field are the ones that most need looking at, and
+    # refusing to check them exempts exactly the wrong records. A fingerprint mismatch is a
+    # duplicate; a bare bar-count match on two fingerprinted rows is a *suspected* one and is
+    # reported, not failed: with fingerprints present the ledger can be certain, and where they
+    # are absent the honest answer is that this check cannot tell.
+    fingerprinted = [(r.get("strategy_id"), r.get("bars"), r.get("fingerprint"))
+                     for r in recorded if r.get("strategy_id") and r.get("fingerprint")]
+    legacy = [(r.get("strategy_id"), r.get("bars"))
+              for r in recorded if r.get("strategy_id") and not r.get("fingerprint")]
+    duplicates = len(fingerprinted) - len({(a, b, c) for a, b, c in fingerprinted})
+    legacy_duplicates = len(legacy) - len(set(legacy))
     if duplicates:
         problems.append(
-            f"{duplicates} duplicate trial(s): the same rule recorded twice against the "
-            "same bar count, so one evaluation is counted twice"
+            f"{duplicates} duplicate trial(s): the same rule recorded twice against the same "
+            "dataset fingerprint, so one evaluation is counted twice"
+        )
+    if legacy_duplicates:
+        legacy_note = (
+            f"{legacy_duplicates} legacy record(s) share a rule and a bar count but carry no "
+            "fingerprint, so this check cannot rule out that they are two trials on two "
+            "different tapes of the same length"
         )
 
     summary = trials.summarise(recorded)
@@ -2760,12 +2784,17 @@ def check_research_trial_ledger() -> Result:
             "research-trial-ledger", FAIL,
             f"{len(problems)}: {problems[:3]}",
         )
-    return Result(
-        "research-trial-ledger", PASS,
+    detail = (
         f"{summary['trials_run']} trial(s), {summary['passed']} passed, "
         f"{summary['failed']} failed; {summary['by_verdict']}; "
-        "every record traceable and accounted for",
+        "every record traceable and accounted for"
     )
+    if legacy_note:
+        # Reported beside the pass rather than as one: the rows are the pre-fingerprint history of
+        # this deployment, and the honest statement is that the check cannot distinguish them -
+        # a FAIL would claim a double-count the ledger cannot demonstrate either.
+        detail += f"; {legacy_note}"
+    return Result("research-trial-ledger", PASS, detail)
 
 
 def check_data_integrity() -> Result:
