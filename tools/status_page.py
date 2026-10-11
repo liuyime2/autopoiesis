@@ -598,6 +598,19 @@ def system(snapshot: Snapshot) -> list[str]:
     body.append('<dl class="kv">')
     body.append(f"<div><dt>daemon</dt><dd>{_badge(_daemon_state(snapshot))}</dd></div>")
     body.append(f"<div><dt>daemon pid</dt><dd>{_cell(beat.get('pid'))}</dd></div>")
+    # Alive and cycling are different questions, and the heartbeat now answers both. A daemon can be
+    # perfectly alive and have completed no cycle for days; a page that reported only the first read
+    # as a system working when it was a system idling.
+    age = beat.get("last_cycle_age_seconds")
+    if age is None:
+        cycling, sub = "UNKNOWN", "no cycle on record, so there is nothing to be recent about"
+    else:
+        hours = float(age) / 3600.0
+        cycling = "yes" if hours <= 24 else "no"
+        sub = (f"last cycle {hours:.1f}h ago"
+               + ("; the record has cycles, this daemon has not run lately" if hours > 24
+                  else "; within the day"))
+    body.append(f"<div><dt>cycling</dt><dd>{_cell(cycling)}</dd><p>{html.escape(sub)}</p></div>")
     body.append(f"<div><dt>cycles recorded</dt><dd>{_cell(len(snapshot.cycles))}</dd></div>")
     body.append(f"<div><dt>cycle errors</dt><dd>{_cell(beat.get('error_count'))}</dd></div>")
     active = beat.get("active_strategy_id")

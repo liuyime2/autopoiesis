@@ -1610,7 +1610,33 @@ class AgentDaemon:
         """Events of one type this process has appended since `mark` (a length of `_appended`)."""
         return [e for e in self._appended[mark:] if e.event_type == event_type]
 
+    def _journal_recency(self) -> tuple[datetime | None, float | None]:
+        """The newest cycle in the journal, and its age, read from the record itself.
+
+        Read once per heartbeat from the tail of the record rather than tracked in memory: a
+        counter kept in memory resets on restart and then claims nothing has run, which is the
+        failure this field exists to make visible. The read is the same one `doctor`'s journal
+        recency check does, so the two cannot disagree about what the record says.
+        """
+        if self.journal is None:
+            return None, None
+        try:
+            records = self.journal.read_all()
+        except Exception:
+            # A record that cannot be read has no recency to report. The heartbeat still carries a
+            # status, an error count and a pid; a missing recency is a missing field rather than a
+            # claim that nothing ran.
+            return None, None
+        stamps = sorted(
+            r.snapshot.timestamp for r in records if getattr(r.snapshot, "timestamp", None)
+        )
+        if not stamps:
+            return None, None
+        latest = stamps[-1]
+        return latest, max(0.0, (self.now() - latest).total_seconds())
+
     def _heartbeat(self, status: DaemonStatus, message: str) -> None:
+        last_at, last_age = self._journal_recency()
         payload = HeartbeatPayload(
             pid=os.getpid(),
             status=status,
@@ -1618,6 +1644,8 @@ class AgentDaemon:
             cycle_count=self.cycle_count,
             error_count=self.error_count,
             last_cycle_id=self.last_cycle_id,
+            last_cycle_at=last_at,
+            last_cycle_age_seconds=last_age,
             message=message,
             source_fingerprint=LOADED_SOURCE_FINGERPRINT,
         )

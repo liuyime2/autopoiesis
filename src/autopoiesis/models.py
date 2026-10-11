@@ -980,6 +980,16 @@ class HeartbeatPayload(BaseModel):
     error_count: int = Field(ge=0)
     active_strategy_id: str | None = None
     last_cycle_id: str | None = None
+    #: When the newest cycle in the journal completed, and how old it is as of this heartbeat.
+    #:
+    #: Read from the journal rather than kept in memory, so it survives a restart. `cycle_count`
+    #: does not: it resets to zero, and a reader of a fresh heartbeat sees "0 cycles" and cannot
+    #: tell a daemon that has just started from one that has been running for a week without a
+    #: successful cycle. The two fields answer different questions - how many this process ran
+    #: against how recently any ran - and a heartbeat that carried only the first could not answer
+    #: the second at all.
+    last_cycle_at: datetime | None = None
+    last_cycle_age_seconds: float | None = Field(default=None, ge=0)
     message: str = ""
     #: Fingerprint of the `src/autopoiesis` tree this process imported, so a running
     #: daemon can be compared against the worktree it claims to be running.

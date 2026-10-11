@@ -68,6 +68,23 @@ class HealthMonitor:
             return True
         return age > self.stale_after_seconds
 
+    def cycling(self, *, within_seconds: float = 86_400.0) -> bool:
+        """Whether the record shows a cycle completed recently, independently of liveness.
+
+        The distinction a reader needs and the heartbeat used to make impossible: a daemon can be
+        perfectly alive - pid up, heartbeat fresh, status RUNNING - and have completed no cycle for
+        days. `is_live` answers "is the process there". This answers "has it done anything", and
+        the two being different is exactly the case where a health report that only knew the first
+        was misleading rather than merely incomplete.
+
+        Read from the record's own newest cycle, which survives a restart, so a daemon restarted an
+        hour after the last cycle reports the truth rather than reporting zero.
+        """
+        payload = self.read()
+        if payload is None or payload.last_cycle_age_seconds is None:
+            return False
+        return payload.last_cycle_age_seconds <= within_seconds
+
     def is_live(self, now: datetime | None = None) -> bool:
         payload = self.read()
         if payload is None:
@@ -90,6 +107,13 @@ class HealthMonitor:
             "pid": payload.pid if payload is not None else None,
             "pid_alive": pid_alive,
             "status": payload.status if payload is not None else "missing",
+            # Alive and cycling are different questions. Both are reported so a reader can tell
+            # "the process is there" from "the process has done something", which a status string
+            # alone cannot distinguish.
+            "cycling": self.cycling(),
+            "last_cycle_age_seconds": (
+                payload.last_cycle_age_seconds if payload is not None else None
+            ),
             "age_seconds": None if age is None else round(age, 3),
             "stale_after_seconds": self.stale_after_seconds,
             "stale": self.is_stale(now),

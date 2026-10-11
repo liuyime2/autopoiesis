@@ -145,6 +145,8 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_journal_snapshot.py": ("unit-integration", "crash-recovery"),
     # The stop budget is derived and the SIGTERM contract is exercised with a blocking stage.
     "test_shutdown_budget.py": ("unit-integration", "crash-recovery"),
+    # A daemon that is alive and one that is cycling are different facts, read from the record.
+    "test_cycle_recency.py": ("unit-integration", "crash-recovery"),
     # The public site is a published claim: its figures must match the published file.
     "test_public_site.py": ("unit-integration", "data-integrity"),
     # Rotation is the one mechanism that can delete the only source of truth, so the
