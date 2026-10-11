@@ -302,16 +302,15 @@ def _run_once(config: AgentConfig) -> int:
         return 1
 
     try:
-        import alpaca_trade_api as tradeapi
+        from autopoiesis.broker_client import create_alpaca_client
     except ImportError as exc:
         print(json.dumps({"error": "alpaca-trade-api is not installed", "detail": str(exc)}, sort_keys=True))
         return 1
 
-    client = tradeapi.REST(
-        key_id=config.alpaca_api_key,
-        secret_key=config.alpaca_secret_key,
+    client = create_alpaca_client(
+        key_id=config.alpaca_api_key or "",
+        secret_key=config.alpaca_secret_key or "",
         base_url=config.alpaca_base_url,
-        api_version="v2",
     )
     loop = TradingLoop(
         data_gateway=AlpacaDataGateway(client=client),
@@ -350,16 +349,15 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         return 1
 
     try:
-        import alpaca_trade_api as tradeapi
+        from autopoiesis.broker_client import create_alpaca_client
     except ImportError as exc:
         print(json.dumps({"error": "alpaca-trade-api is not installed", "detail": str(exc)}, sort_keys=True))
         return 1
 
-    client = tradeapi.REST(
-        key_id=config.alpaca_api_key,
-        secret_key=config.alpaca_secret_key,
+    client = create_alpaca_client(
+        key_id=config.alpaca_api_key or "",
+        secret_key=config.alpaca_secret_key or "",
         base_url=config.alpaca_base_url,
-        api_version="v2",
     )
     journal = JsonlJournal(config.journal_path)
     strategy_library = StrategyLibrary(config.strategy_dir)
@@ -593,16 +591,15 @@ def _reconcile(config: AgentConfig) -> int:
         return 1
 
     try:
-        import alpaca_trade_api as tradeapi
+        from autopoiesis.broker_client import create_alpaca_client
     except ImportError as exc:
         print(json.dumps({"error": "alpaca-trade-api is not installed", "detail": str(exc)}, sort_keys=True))
         return 1
 
-    client = tradeapi.REST(
-        key_id=config.alpaca_api_key,
-        secret_key=config.alpaca_secret_key,
+    client = create_alpaca_client(
+        key_id=config.alpaca_api_key or "",
+        secret_key=config.alpaca_secret_key or "",
         base_url=config.alpaca_base_url,
-        api_version="v2",
     )
     journal = JsonlJournal(config.journal_path)
     reconciler = OrderReconciler(client=client, journal=journal)
@@ -819,15 +816,14 @@ def _paper_client(config: AgentConfig):
         print(json.dumps({"error": "Alpaca base URL must be paper trading"}, sort_keys=True))
         return None
     try:
-        import alpaca_trade_api as tradeapi
+        from autopoiesis.broker_client import create_alpaca_client
     except ImportError as exc:
         print(json.dumps({"error": "alpaca-trade-api is not installed", "detail": str(exc)}, sort_keys=True))
         return None
-    return tradeapi.REST(
-        key_id=config.alpaca_api_key,
-        secret_key=config.alpaca_secret_key,
+    return create_alpaca_client(
+        key_id=config.alpaca_api_key or "",
+        secret_key=config.alpaca_secret_key or "",
         base_url=config.alpaca_base_url,
-        api_version="v2",
     )
 
 

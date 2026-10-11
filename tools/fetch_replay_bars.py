@@ -63,7 +63,7 @@ def client_from_env():
     """The broker client, with credentials loaded the one documented way."""
     from pathlib import Path
 
-    import alpaca_trade_api as tradeapi
+    from autopoiesis.broker_client import create_alpaca_client
 
     env_file = Path(
         os.getenv("XDG_CONFIG_HOME", str(Path.home() / ".config"))
@@ -80,7 +80,11 @@ def client_from_env():
             "no Alpaca credentials; they live in "
             "${XDG_CONFIG_HOME:-$HOME/.config}/autopoiesis/env and not in this repository"
         )
-    return tradeapi.REST(key, secret, "https://paper-api.alpaca.markets")
+    return create_alpaca_client(
+        key_id=key,
+        secret_key=secret,
+        base_url="https://paper-api.alpaca.markets",
+    )
 
 
 def cached_last_bar(symbol: str, interval: str = DEFAULT_INTERVAL) -> datetime | None:

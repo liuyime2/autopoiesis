@@ -60,18 +60,17 @@ def build_client(
     """Create a version-audited paper client with SDK retries disabled."""
     if sdk_version != SUPPORTED_SDK_VERSION:
         raise ValueError(f"sampler only audited for alpaca-trade-api {SUPPORTED_SDK_VERSION}")
+    from autopoiesis.broker_client import configure_alpaca_client
+
     client = rest_constructor(
         key_id=config.alpaca_api_key,
         secret_key=config.alpaca_secret_key,
         base_url=config.alpaca_base_url,
         api_version="v2",
     )
-    # The supported SDK has no public retry constructor option. Disable its 429/504
-    # retry loop so one sampled operation corresponds to one HTTP attempt.
-    if not hasattr(client, "_retry"):
-        raise RuntimeError("audited Alpaca SDK retry control is unavailable")
-    client._retry = 0
-    return client
+    # Keep this test seam for dependency-injected sampler tests; production uses
+    # create_alpaca_client() below, the same factory as the rest of the application.
+    return configure_alpaca_client(client, sdk_version=sdk_version)
 def _percentile(values: list[float], percentile: float) -> float | None:
     """Return the nearest-rank percentile (rank = ceil(p * n))."""
     if not values:
@@ -186,12 +185,16 @@ def main(argv: list[str] | None = None) -> int:
             configured.alpaca_api_key,
             configured.alpaca_secret_key,
         )
-        import alpaca_trade_api
-
         sdk_version = importlib.metadata.version("alpaca-trade-api")
+        from autopoiesis.broker_client import create_alpaca_client
+
         report = run_sample(
             config,
-            lambda cfg: build_client(alpaca_trade_api.REST, cfg, sdk_version=sdk_version),
+            lambda cfg: create_alpaca_client(
+                key_id=cfg.alpaca_api_key or "",
+                secret_key=cfg.alpaca_secret_key or "",
+                base_url=cfg.alpaca_base_url,
+            ),
             count=args.count,
             sdk_version=sdk_version,
         )

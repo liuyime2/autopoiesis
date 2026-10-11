@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import requests
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
@@ -65,6 +66,9 @@ def test_samples_bounded_read_only_operations_and_reports_actual_latency(capsys)
 def test_sdk_client_retries_are_disabled_only_for_audited_version():
     class SDKClient:
         _retry = 3
+        _retry_wait = 3
+        _retry_codes = [429, 504]
+        _session = requests.Session()
     seen = {}
 
     def constructor(**kwargs):

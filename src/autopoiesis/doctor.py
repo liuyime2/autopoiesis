@@ -1609,18 +1609,17 @@ def build_client(config: AgentConfig):
     if config.missing_alpaca_credentials():
         return None
     try:
-        import alpaca_trade_api as tradeapi
+        from autopoiesis.broker_client import create_alpaca_client
     except ImportError:
         return None
     base = config.alpaca_base_url.rstrip("/")
     if base.endswith("/v2"):
         base = base[:-3]
     try:
-        return tradeapi.REST(
-            key_id=config.alpaca_api_key,
-            secret_key=config.alpaca_secret_key,
+        return create_alpaca_client(
+            key_id=config.alpaca_api_key or "",
+            secret_key=config.alpaca_secret_key or "",
             base_url=base,
-            api_version="v2",
         )
     except Exception:
         return None
