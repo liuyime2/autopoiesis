@@ -196,6 +196,21 @@ numbers. There are no screenshots: a reader can re-run a command and cannot re-d
 Both are committed together, and the date field in `figures.json` is what tells a reader how old a
 published measurement is.
 
+**`journal_snapshot.py`** snapshots the whole journal record - live file, rotated generations,
+the archived ones and the archive manifest, each under its runtime-relative path - and restores it
+into a scratch directory. `make journal-drill` does the whole path and compares the restored copy
+against the live record twice: byte for byte against the snapshot's manifest, and then on the
+figures the ledger produces - closed lots, realized and unrealized PnL, the assumed cost. On the
+real record that comparison is 47 closed lots, +757.95 realized, +98.64 unrealized, 35.818876 cost,
+identical live and restored.
+
+The relative paths are the point. `history_paths()` finds the archive under
+`journal-archive/`, so a flattened copy is a record whose own reader cannot see part of it - the
+first version of this tool flattened them, and only the generation count in the drill caught it.
+`restore` refuses to write to the configured runtime directory: restoring a stale snapshot over the
+live record destroys the only copy that was right. `snapshot`, `restore` and the drill all verify
+before acting, and a snapshot that does not verify is not restored at all.
+
 **`check_workflow_jobs.py`** asserts every workflow file's `jobs:` contains the jobs it defines.
 It exists because a `release` job appended to `ci.yml` at column 0 instead of under `jobs:` is
 valid YAML with `release` as a sibling of `jobs` - the workflow ran only `gate`, reported failure

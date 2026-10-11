@@ -140,6 +140,9 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_config_finiteness.py": ("unit-integration", "guardian-bypass-prevention"),
     # The read-only panel is a public surface; it described a system it had not read.
     "test_status_page.py": ("unit-integration", "data-integrity"),
+    # Recovery is a capability only if it has been exercised: the snapshot/restore path and the
+    # refusal to write to the live runtime.
+    "test_journal_snapshot.py": ("unit-integration", "crash-recovery"),
     # The public site is a published claim: its figures must match the published file.
     "test_public_site.py": ("unit-integration", "data-integrity"),
     # Rotation is the one mechanism that can delete the only source of truth, so the

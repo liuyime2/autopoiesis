@@ -82,7 +82,8 @@ endif
         verify verify-self-test doctor audit integrity classes classes-list \
         run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc \
         site refresh-figures benchmark-json dist release-check \
-        attest-archive-baseline fetch-replay-bars research-search research-run
+        attest-archive-baseline fetch-replay-bars research-search research-run \
+        journal-backup journal-restore journal-drill
 
 help:
 	@echo "Interpreter: $(if $(strip $(CONDA_RUN)),$(CONDA_BIN) run -n $(CONDA_ENV),$$(command -v python3) - active environment)$(RUN_HINT)"
@@ -500,3 +501,26 @@ refresh-figures:
 
 benchmark-json:
 	@$(PY) tools/benchmark_json.py
+
+
+# --- journal snapshot and recovery ------------------------------------------------------------
+#
+# The journal is the only source of truth, so a copy of it has to be checkable rather than assumed.
+# `make journal-drill` snapshots the record to a scratch directory, restores it to a second one,
+# and compares them - byte for byte, and then on the figures the ledger produces: closed lots,
+# realized and unrealized PnL, the assumed cost. Restore refuses to write to the live runtime
+# directory, which is the failure this exists to prevent.
+#
+# This proves a snapshot can be taken and restored on this host. It does not ship anything
+# anywhere: an off-site copy is a deployment decision these targets make possible and do not make.
+
+journal-backup:
+	@$(PY) tools/journal_snapshot.py snapshot $(DEST)
+
+journal-restore:
+	@test -n "$(SRC)" || (echo "SRC=<snapshot dir> is required" >&2; exit 2)
+	@test -n "$(DEST)" || (echo "DEST=<scratch dir> is required" >&2; exit 2)
+	@$(PY) tools/journal_snapshot.py restore $(SRC) $(DEST)
+
+journal-drill:
+	@$(PY) tools/journal_snapshot.py drill
