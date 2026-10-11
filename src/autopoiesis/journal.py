@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import itertools
+import json
 import os
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
-from autopoiesis.atomicio import file_lock
+from autopoiesis.atomicio import file_lock, write_json_atomic
 from autopoiesis.models import CycleRecord, JournalEvent
 
 # Substring prefilter, verified against the recorded journal. A CycleRecord
@@ -35,6 +37,13 @@ class RetainedWindow(TypedDict):
     newest: str | None
     generations: int
     truncated: bool | None
+
+
+class ArchiveManifestStatus(TypedDict):
+    valid: bool
+    trusted: bool
+    reason: str
+    next_generation: int
 
 
 class JsonlJournal:
@@ -64,6 +73,103 @@ class JsonlJournal:
             if archive_dir is not None
             else self.path.parent / "journal-archive"
         )
+        self.archive_manifest_path = self.archive_dir / "journal-manifest.json"
+        self._archive_validated_signatures: dict[str, tuple[int, int]] = {}
+
+    def archive_manifest_status(self) -> ArchiveManifestStatus:
+        """Verify archived generations and report whether their baseline was attested."""
+        if not self.archive_manifest_path.exists():
+            if not self._has_existing_history():
+                self.archive_dir.mkdir(parents=True, exist_ok=True)
+                write_json_atomic(
+                    self.archive_manifest_path,
+                    {
+                        "schema_version": 1,
+                        "next_generation": 0,
+                        "entries": [],
+                        "baseline_attestation": {
+                            "operator_id": "system:fresh-install",
+                            "evidence_reference": "empty-journal-baseline",
+                            "reason": "no journal generations existed before first use",
+                            "attested_at": datetime.now(tz=timezone.utc).isoformat(),
+                        },
+                    },
+                )
+                return {
+                    "valid": True,
+                    "trusted": True,
+                    "reason": "fresh empty journal baseline",
+                    "next_generation": 0,
+                }
+            return {
+                "valid": False,
+                "trusted": False,
+                "reason": "existing journal history requires an attested archive baseline",
+                "next_generation": 0,
+            }
+        try:
+            manifest = json.loads(self.archive_manifest_path.read_text(encoding="utf-8"))
+            self._validate_archive_manifest(manifest)
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+            return {
+                "valid": False,
+                "trusted": False,
+                "reason": f"archive manifest invalid: {type(exc).__name__}: {exc}",
+                "next_generation": 0,
+            }
+        return {
+            "valid": True,
+            "trusted": bool(manifest.get("baseline_attestation")),
+            "reason": "verified" if manifest.get("baseline_attestation") else "baseline is not attested",
+            "next_generation": int(manifest["next_generation"]),
+        }
+
+    def attest_archive_baseline(
+        self, *, operator_id: str, evidence_reference: str, reason: str
+    ) -> None:
+        """Record an explicit operator attestation for the history currently on disk.
+
+        This validates the observed files but cannot prove that older history was never lost
+        before the manifest was introduced. That limit belongs in the recovery runbook.
+        """
+        values = (operator_id.strip(), evidence_reference.strip(), reason.strip())
+        if not all(values):
+            raise ValueError("operator attestation requires identity, evidence reference, and reason")
+        if self.archive_manifest_path.exists():
+            current = self.archive_manifest_status()
+            if not current["valid"]:
+                raise ValueError("cannot replace an invalid archive manifest; restore evidence first")
+            if current["trusted"]:
+                raise ValueError("archive baseline is already trusted; attest cannot replace it")
+        self.read_all()
+        if self.last_dropped_lines:
+            raise ValueError("journal cycle history is corrupt; cannot attest baseline")
+        self.read_events()
+        if self.last_dropped_lines:
+            raise ValueError("journal event history is corrupt; cannot attest baseline")
+        archives = self._archive_paths()
+        self._validate_archive_sequence(archives)
+        entries = [self._archive_entry(path) for path in archives]
+        manifest = {
+            "schema_version": 1,
+            "next_generation": len(entries),
+            "entries": entries,
+            "baseline_attestation": {
+                "operator_id": values[0],
+                "evidence_reference": values[1],
+                "reason": values[2],
+                "attested_at": datetime.now(tz=timezone.utc).isoformat(),
+            },
+        }
+        self.archive_dir.mkdir(parents=True, exist_ok=True)
+        write_json_atomic(self.archive_manifest_path, manifest)
+        self._archive_validated_signatures = {
+            str(entry["name"]): (
+                (self.archive_dir / str(entry["name"])).stat().st_size,
+                (self.archive_dir / str(entry["name"])).stat().st_mtime_ns,
+            )
+            for entry in entries
+        }
 
     def append(self, record: CycleRecord) -> None:
         self._append_json(record.model_dump_json())
@@ -345,12 +451,11 @@ class JsonlJournal:
         history to keep trading is not recoverable at all.
         """
         self.archive_dir.mkdir(parents=True, exist_ok=True)
-        sequence = len([p for p in self._archive_paths() if p.is_file()])
-        while True:
-            target = self.archive_dir / f"r{sequence:06d}.jsonl"
-            if not target.exists():
-                break
-            sequence += 1
+        manifest = self._manifest_for_rotation()
+        sequence = int(manifest["next_generation"])
+        target = self.archive_dir / f"r{sequence:06d}.jsonl"
+        if target.exists():
+            raise ValueError(f"archive generation already exists: {target.name}")
         os.replace(generation, target)
         # Durability of the move, not just of the write: without the directory fsync the rename
         # can be visible while the new name is not yet on disk, and a crash at that moment
@@ -366,6 +471,111 @@ class JsonlJournal:
             # The record moved; failing the append over it would trade a real loss for a
             # hypothetical one.
             pass
+        entries = manifest["entries"]
+        if not isinstance(entries, list):
+            raise ValueError("archive manifest entries are invalid")
+        entries.append(self._archive_entry(target))
+        manifest["next_generation"] = sequence + 1
+        # If this atomic write fails, the moved generation is preserved but unmanifested;
+        # the next integrity check blocks use until an operator repairs/attests the baseline.
+        write_json_atomic(self.archive_manifest_path, manifest)
+        self._archive_validated_signatures[target.name] = (
+            target.stat().st_size,
+            target.stat().st_mtime_ns,
+        )
+
+    def _manifest_for_rotation(self) -> dict[str, Any]:
+        if self.archive_manifest_path.exists():
+            existing_manifest = json.loads(self.archive_manifest_path.read_text(encoding="utf-8"))
+            self._validate_archive_manifest(existing_manifest)
+            return existing_manifest
+        archives = self._archive_paths()
+        self._validate_archive_sequence(archives)
+        new_manifest: dict[str, Any] = {
+            "schema_version": 1,
+            "next_generation": len(archives),
+            "entries": [self._archive_entry(path) for path in archives],
+            "baseline_attestation": None,
+        }
+        # Preserve old history while leaving it explicitly untrusted until an operator
+        # verifies and attests the existing account journal.
+        write_json_atomic(self.archive_manifest_path, new_manifest)
+        return new_manifest
+
+    def _validate_archive_manifest(self, manifest: Any) -> None:
+        if not isinstance(manifest, dict):
+            raise ValueError("manifest root must be an object")
+        if manifest.get("schema_version") != 1:
+            raise ValueError("unsupported manifest schema")
+        entries = manifest.get("entries")
+        next_generation = manifest.get("next_generation")
+        if not isinstance(entries, list) or not isinstance(next_generation, int):
+            raise ValueError("manifest generation fields are invalid")
+        if next_generation != len(entries):
+            raise ValueError("manifest generation high-water mark disagrees with entries")
+        expected = [f"r{index:06d}.jsonl" for index in range(next_generation)]
+        actual = [path.name for path in self._archive_paths()]
+        listed = [entry.get("name") for entry in entries if isinstance(entry, dict)]
+        if listed != expected:
+            raise ValueError("manifest generation sequence is not contiguous")
+        if actual != expected:
+            missing = sorted(set(expected) - set(actual))
+            unmanifested = sorted(set(actual) - set(expected))
+            detail = "missing" if missing else "unmanifested"
+            raise ValueError(f"archive {detail} generation: {missing or unmanifested}")
+        for entry, name in zip(entries, expected, strict=True):
+            if not isinstance(entry, dict):
+                raise ValueError(f"archive manifest entry is invalid: {name}")
+            path = self.archive_dir / name
+            stat = path.stat()
+            signature = (stat.st_size, stat.st_mtime_ns)
+            if entry.get("bytes") != stat.st_size:
+                raise ValueError(f"archive size mismatch: {name}")
+            if self._archive_validated_signatures.get(name) != signature:
+                if entry.get("sha256") != self._sha256(path):
+                    raise ValueError(f"archive checksum mismatch: {name}")
+                self._archive_validated_signatures[name] = signature
+        attestation = manifest.get("baseline_attestation")
+        if attestation is not None and (
+            not isinstance(attestation, dict)
+            or not all(attestation.get(key) for key in ("operator_id", "evidence_reference", "reason", "attested_at"))
+        ):
+            raise ValueError("baseline attestation fields are invalid")
+        retained = [
+            index for index in range(1, self.backups + 1)
+            if self.path.with_suffix(self.path.suffix + f".{index}").exists()
+        ]
+        if retained and retained != list(range(1, max(retained) + 1)):
+            raise ValueError("retained journal backup generations are not contiguous")
+        if expected and self.backups > 0 and retained != list(range(1, self.backups + 1)):
+            raise ValueError("required retained journal backup generation is missing")
+
+    def _validate_archive_sequence(self, paths: list[Path]) -> None:
+        expected = [f"r{index:06d}.jsonl" for index in range(len(paths))]
+        actual = [path.name for path in paths]
+        if actual != expected:
+            raise ValueError("archive generations are not contiguous from r000000.jsonl")
+
+    def _archive_entry(self, path: Path) -> dict[str, object]:
+        return {"name": path.name, "bytes": path.stat().st_size, "sha256": self._sha256(path)}
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+        return digest.hexdigest()
+
+    def _has_existing_history(self) -> bool:
+        if self.path.exists() and self.path.stat().st_size:
+            return True
+        if any(
+            self.path.with_suffix(self.path.suffix + f".{index}").exists()
+            for index in range(1, self.backups + 1)
+        ):
+            return True
+        return bool(self._archive_paths())
 
     def _locked(self):
         """Exclusive, for appends."""
