@@ -78,10 +78,10 @@ export
 endif
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install check lint type test smoke smoke-offline fast fast-no-broker daily-report benchmark broker-latency-sample \
+.PHONY: help setup install check lint lint-files type test smoke smoke-offline fast fast-no-broker daily-report benchmark broker-latency-sample \
         verify verify-self-test doctor audit integrity classes classes-list \
         run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc \
-        attest-archive-baseline
+        attest-archive-baseline fetch-replay-bars research-search research-run
 
 help:
 	@echo "Interpreter: $(if $(strip $(CONDA_RUN)),$(CONDA_BIN) run -n $(CONDA_ENV),$$(command -v python3) - active environment)$(RUN_HINT)"
@@ -97,6 +97,7 @@ help:
 	@echo "make test             unit and integration tests only"
 	@echo "make classes          list the check classes and their test files"
 	@echo "make lint             ruff over src/ tools/ tests/ examples/"
+	@echo "make lint-files FILES=...  run ruff on selected files for fast failure isolation"
 	@echo "make type             mypy over src/autopoiesis; reports without gating"
 	@echo "make check            lint + test (no broker, no credentials)"
 	@echo "make test             unit and integration tests only"
@@ -110,6 +111,8 @@ help:
 	@echo "make integrity        runtime state integrity only"
 	@echo "make doctor           health and evidence checks"
 	@echo "make attest-archive-baseline  attest existing journal history using explicit operator evidence"
+	@echo "make fetch-replay-bars       fetch real paper-account bars (SYMBOL, REPLAY_START, REPLAY_END)"
+	@echo "make research-run            install, fetch real bars, then run the offline alpha search"
 	@echo "make audit            the 15-defect regression audit"
 	@echo "make validate-data    parse and check the inputs before anything consumes them"
 	@echo "make evaluate         score the current paper record: strategies, PnL, counterfactuals"
@@ -130,6 +133,31 @@ attest-archive-baseline:
 	@test -n "$$AUTOPOIESIS_EVIDENCE_REFERENCE" || (echo "AUTOPOIESIS_EVIDENCE_REFERENCE is required" >&2; exit 2)
 	@test -n "$$AUTOPOIESIS_ATTESTATION_REASON" || (echo "AUTOPOIESIS_ATTESTATION_REASON is required" >&2; exit 2)
 	@$(PY) -m autopoiesis.cli --attest-archive-baseline
+
+# Replay research consumes only real historical bars. Keep fetch and search behind Make so the
+# interpreter, configuration, and command order are explicit. Date bounds are required rather
+# than inheriting the fetch script's fixed historical defaults.
+REPLAY_SYMBOL ?= SPY
+REPLAY_START ?=
+REPLAY_END ?=
+REPLAY_INTERVAL ?= 5Min
+REPLAY_ROLLING ?= 0
+REPLAY_CACHE ?= runtime/autopoiesis/replay
+
+fetch-replay-bars:
+	@test -n "$(REPLAY_START)" || (echo "REPLAY_START is required (UTC ISO-8601)" >&2; exit 2)
+	@test -n "$(REPLAY_END)" || (echo "REPLAY_END is required (UTC ISO-8601)" >&2; exit 2)
+	@$(PY) tools/fetch_replay_bars.py "$(REPLAY_SYMBOL)" "$(REPLAY_START)" "$(REPLAY_END)" "$(REPLAY_INTERVAL)" $(if $(filter 1 true yes,$(REPLAY_ROLLING)),ROLLING,)
+
+research-search:
+	@$(PY) -m autopoiesis.research.driver "$(REPLAY_CACHE)" "$(REPLAY_SYMBOL)"
+
+research-run:
+	@test -n "$(REPLAY_START)" || (echo "REPLAY_START is required (UTC ISO-8601)" >&2; exit 2)
+	@test -n "$(REPLAY_END)" || (echo "REPLAY_END is required (UTC ISO-8601)" >&2; exit 2)
+	@$(MAKE) research-install
+	@$(MAKE) fetch-replay-bars
+	@$(MAKE) research-search
 
 # Must stay green. If this ever fails, the gate cannot be trusted and every other
 # result from it is meaningless.
@@ -273,6 +301,10 @@ clean-pyc:
 
 lint:
 	@$(CONDA_RUN) ruff check src/ tools/ tests/ examples/
+
+lint-files:
+	@test -n "$(FILES)" || (echo "FILES is required" >&2; exit 2)
+	@$(CONDA_RUN) ruff check $(RUFF_ARGS) $(FILES)
 
 # Type checking, and now part of `make check`.
 #

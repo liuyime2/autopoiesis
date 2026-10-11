@@ -138,6 +138,26 @@ def test_rerunning_on_the_same_data_records_nothing_new(tmp_path):
     )
 
 
+def test_exact_rerun_reuses_ledger_results_without_running_walk_forward(tmp_path, monkeypatch):
+    path = tmp_path / "trials.jsonl"
+    bars = _bars(_oscillating(n=800))
+    first = _search(bars, thresholds=(0.002,), path=path)
+
+    def unexpected_backtest(*_args, **_kwargs):
+        pytest.fail("an exact repeat must reuse the stored walk-forward result")
+
+    monkeypatch.setattr(driver, "run_walk_forward", unexpected_backtest)
+    second = _search(bars, thresholds=(0.002,), path=path)
+
+    assert second["repeats"] == 2
+    assert second["backtests_run"] == 0
+    assert [
+        {key: value for key, value in row.items() if key != "recorded_at"}
+        for row in second["results"]
+    ] == first["results"]
+    assert len(trials.read_trials(path)) == first["candidates"]
+
+
 def test_new_data_re_evaluates_a_candidate_already_on_record(tmp_path):
     """Identity is rule *and* dataset, so more data is a genuinely new trial."""
     path = tmp_path / "trials.jsonl"

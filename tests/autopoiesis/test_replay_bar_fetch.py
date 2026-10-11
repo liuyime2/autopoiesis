@@ -18,6 +18,8 @@ import pathlib
 import sys
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 T0 = datetime(2026, 10, 1, tzinfo=timezone.utc)
 
 
@@ -72,6 +74,16 @@ def _client_returning(closes, *, raises=False):
             return _Bars(rows)
 
     return _Client()
+
+
+def test_invalid_fetch_window_is_refused_before_creating_broker_client(tmp_path):
+    fetcher = _fetcher(tmp_path)
+    fetcher.client_from_env = lambda: pytest.fail("invalid dates must fail before credential loading")
+
+    with pytest.raises(ValueError, match="start must be an ISO-8601 UTC timestamp"):
+        fetcher.main(["x", "SPY", "2026-04-10T09:30:00-04:00", "2026-10-09T19:40:00Z"])
+    with pytest.raises(ValueError, match="earlier than"):
+        fetcher.main(["x", "SPY", "2026-10-09T19:40:00Z", "2026-04-10T13:30:00Z"])
 
 
 def test_the_scheduled_path_is_one_rolling_file_not_a_new_name_per_day(tmp_path):

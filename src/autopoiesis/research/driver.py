@@ -134,6 +134,16 @@ def _already_evaluated(
 
     Any changed ordered tape re-evaluates everything, even when its bar count is unchanged.
     """
+    return _matching_trial(recorded, spec, bars, symbol, fingerprint) is not None
+
+
+def _matching_trial(
+    recorded: list[dict[str, Any]],
+    spec: dict[str, Any],
+    bars: int,
+    symbol: str | None,
+    fingerprint: str,
+) -> dict[str, Any] | None:
     for row in recorded:
         if row.get("strategy_id") != spec["strategy_id"]:
             continue
@@ -145,8 +155,8 @@ def _already_evaluated(
             and (row.get("symbol") or None) == symbol
             and row.get("dataset_fingerprint") == fingerprint
         ):
-            return True
-    return False
+            return row
+    return None
 
 
 def search(
@@ -188,12 +198,39 @@ def search(
     # cannot be known until the count is fixed. Counting repeats here is what made a no-op run
     # raise the bar: `already + len(space)` went from 2 to 4 on a second identical run and moved
     # `required_trades` from 15 to 20 without a single new candidate being tried.
-    fresh = [
-        s for s in space
-        if not _already_evaluated(recorded, s, len(bars), symbol, fingerprint)
-    ]
+    matches = {
+        spec["strategy_id"]: _matching_trial(recorded, spec, len(bars), symbol, fingerprint)
+        for spec in space
+    }
+    fresh = [spec for spec in space if matches[spec["strategy_id"]] is None]
     repeats = len(space) - len(fresh)
     trials = already + len(fresh)
+
+    if not fresh:
+        # The fetcher may run every day and correctly discover that the cache did not
+        # change. Reusing the exact recorded outcomes avoids re-running every fold and
+        # stress case merely to decide not to append a duplicate.
+        cached_rows: list[dict[str, Any]] = []
+        for spec in space:
+            match = matches[spec["strategy_id"]]
+            if match is None:
+                raise RuntimeError("exact-repeat partition lost a matching trial")
+            cached_rows.append(match)
+        return {
+            "searched_at": (now or datetime.now(timezone.utc)).isoformat(),
+            "bars": len(bars),
+            "symbol": symbol,
+            "dataset_fingerprint": fingerprint,
+            "candidates": already,
+            "already_recorded": already,
+            "repeats": repeats,
+            "backtests_run": 0,
+            "unrecorded": 0,
+            "required_trades": cached_rows[0].get("required_trades", 0) if cached_rows else 0,
+            "by_verdict": summarise(cached_rows),
+            "results": cached_rows,
+        }
+
     stamp = now or datetime.now(timezone.utc)
     rows: list[dict[str, Any]] = []
     unrecorded = 0
@@ -230,6 +267,7 @@ def search(
         "candidates": trials,
         "already_recorded": already,
         "repeats": repeats,
+        "backtests_run": len(space),
         "unrecorded": unrecorded,
         "required_trades": rows[0]["required_trades"] if rows else 0,
         "by_verdict": summarise(rows),
@@ -374,7 +412,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"candidates: {report['candidates']} "
         f"(cumulative: {report['already_recorded']} already in the ledger)  "
-        f"required_trades: {report['required_trades']}  "
+        f"required_trades: {report['required_trades']}  backtests_run: {report['backtests_run']}  "
         f"repeats: {report['repeats']}  unrecorded: {report['unrecorded']}"
     )
     for row in report["results"]:

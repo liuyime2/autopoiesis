@@ -14,6 +14,10 @@ Alpha 搜索可复现性继续推进：当前 driver 之前按策略、symbol、
 
 此数据身份修改的最终 gate 结果：research-driver 21/21 测试，`make verify` 52/52 类、1,971 次执行、0 失败。只验证了防止数据集误去重及来源误标，不代表已完成真实数据 alpha search 或任何策略晋升。
 
+随后补齐了可执行 research fetch loop：Makefile 有显式 UTC 窗口的 `fetch-replay-bars`、离线 `research-search` 和顺序 `research-run`；scheduled research unit 也通过同一 Makefile 入口。只读真实 fetch 得到 24,237 根 SPY 5 分钟 bars（2026-04-10 至 2026-10-09），dataset hash 为 `sha256:9137cff68e231f520d1b8ceaa7f3cb8592398162d22088ea0ee508afcd70296b`。11 个既有候选的 verdict 是 4 OVERFIT、7 INSUFFICIENT、0 PASS；详细数据与限制见 `docs/evidence/alpha-search-2026-10-11.md`。搜索首轮约 2 分 53 秒；同 fingerprint 的完整重复搜索现在不再跑 backtest，实测 5.461 秒、11 repeats、0 backtests，约快 31 倍。负结果不用于准入，也没有放宽研究门槛。此结果仅覆盖单一近期窗口和旧策略族，不是最终 holdout，也没有证明 alpha、LLM 决策增益、RSI treatment 优于 control 或 60 日目标。
+
+该 alpha 数据入口及重复运行优化最终通过 `make check`（1,253 passed / 3 skipped）与 `make verify`（52/52 类、1,979 次执行、0 失败）；mypy 覆盖 47 个源文件。真实 paper 账户只用于历史行情只读抓取，没有下单。
+
 这些交付推进了阶段 A 的 watchdog、请求边界、歧义订单保护和部分账本恢复；异地备份/恢复演练、replacement chain、SIGTERM 真正可中断边界、统一 provenance、alpha、决策质量和 RSI control/treatment 仍未完成。当前 paper 观察窗仍需满足原定连续 60 个有效交易日；不能把测试/verify 的绿色代替运行时、收益或 RSI 证据。
 
 ## 1. 问题、基线、成功标准、验证

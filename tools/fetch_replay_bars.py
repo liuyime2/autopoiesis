@@ -125,6 +125,23 @@ def _interval_minutes(interval: str) -> int:
     return int(digits) if interval.endswith("Min") else int(digits) * 60
 
 
+def _validate_utc_window(start: str, end: str) -> None:
+    """Reject malformed/non-UTC/empty fetch windows before opening a broker client."""
+    def parse(label: str, value: str) -> datetime:
+        try:
+            stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(f"{label} must be an ISO-8601 UTC timestamp") from exc
+        if stamp.utcoffset() != timedelta(0):
+            raise ValueError(f"{label} must be an ISO-8601 UTC timestamp")
+        return stamp
+
+    start_at = parse("start", start)
+    end_at = parse("end", end)
+    if start_at >= end_at:
+        raise ValueError("fetch start must be earlier than fetch end")
+
+
 def fetch_would_add_nothing(client, cached: datetime | None, interval: str) -> bool | None:
     """Whether a fetch cannot return a bar newer than the one already cached.
 
@@ -177,6 +194,7 @@ def main(argv: list[str]) -> int:
     interval = argv[4] if len(argv) > 4 else DEFAULT_INTERVAL
     # The scheduled fetch passes ROLLING; a hand-run window keeps its dated path.
     rolling = len(argv) > 5 and argv[5] == "ROLLING"
+    _validate_utc_window(start, end)
 
     from autopoiesis.replay import fetch_bars, save_bars
 
