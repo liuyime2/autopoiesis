@@ -39,7 +39,7 @@ from autopoiesis.evaluator import (
     confirmed_fill_activities,
     owner_fill_activities,
 )
-from autopoiesis.fill_reconciler import FILL_EVENT
+from autopoiesis.fill_reconciler import confirmed_fill_events
 from autopoiesis.health import HealthMonitor
 from autopoiesis.journal import JsonlJournal
 from autopoiesis.knowledge_library import KnowledgeLibrary
@@ -530,8 +530,15 @@ _fills_by_strategy_cached: dict = {}
 
 def _scan_fills(journal: JsonlJournal) -> dict[str, int]:
     counts: dict[str, int] = {}
-    for event in journal.read_events("ORDER_FILL_CONFIRMED"):
-        if event.strategy_id:
+    for event in confirmed_fill_events(journal.read_events()):
+        quantity = event.payload.get("cumulative_filled_quantity", event.payload.get("filled_quantity"))
+        # Legacy confirmed events were written before quantity was included. Their
+        # event itself is still broker evidence; current snapshots must carry a
+        # positive cumulative quantity before they count as a fill.
+        legacy_confirmed = event.event_type == "ORDER_FILL_CONFIRMED" and quantity is None
+        if event.strategy_id and (
+            legacy_confirmed or (isinstance(quantity, (int, float)) and quantity > 0)
+        ):
             counts[event.strategy_id] = counts.get(event.strategy_id, 0) + 1
     _fills_by_strategy_cached[journal.path] = counts
     return counts
@@ -1507,7 +1514,7 @@ def _check_proof(report: DoctorReport, config: AgentConfig) -> None:
         return
 
     fills: dict[str, float] = {}
-    for event in journal.read_events(FILL_EVENT):
+    for event in confirmed_fill_events(journal.read_events()):
         coid = event.payload.get("client_order_id")
         qty = event.payload.get("filled_quantity")
         if isinstance(coid, str) and isinstance(qty, (int, float)) and qty > 0:
@@ -1609,18 +1616,17 @@ def build_client(config: AgentConfig):
     if config.missing_alpaca_credentials():
         return None
     try:
-        import alpaca_trade_api as tradeapi
+        from autopoiesis.broker_client import create_alpaca_client
     except ImportError:
         return None
     base = config.alpaca_base_url.rstrip("/")
     if base.endswith("/v2"):
         base = base[:-3]
     try:
-        return tradeapi.REST(
-            key_id=config.alpaca_api_key,
-            secret_key=config.alpaca_secret_key,
+        return create_alpaca_client(
+            key_id=config.alpaca_api_key or "",
+            secret_key=config.alpaca_secret_key or "",
             base_url=base,
-            api_version="v2",
         )
     except Exception:
         return None

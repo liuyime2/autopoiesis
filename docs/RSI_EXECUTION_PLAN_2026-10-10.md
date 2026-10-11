@@ -4,6 +4,22 @@
 计划基线：提交 `c32f41176cc47ab46b017d705edaec45aab0cc8e`。
 范围：研究和判断可交易信号、决策质量、递归改进研究过程，以及支撑这些工作的可靠运行基础设施。本文件是计划，不表示下述目标已实现。
 
+## 执行进度记录（2026-10-11）
+
+已完成并有证据的基础设施工作：隔离工作树中的 watchdog stale-heartbeat 恢复修复已提交（`ed51c55`），当时完整测试为 1195 passed / 3 skipped、verify 为 52 类零失败；优雅停机审计已记录为独立结论（`505449d`），确认 30 秒 SIGKILL 记录无法归因具体阶段，且 Alpaca 请求没有有限 timeout，因此不能据此直接加大 `TimeoutStopSec`；只读 paper broker 延迟样本已真实执行一次：SDK 3.2.0、20 次 clock + 20 次 account、40 次请求成功、0 失败，合并 p50 25.036ms / p95 27.248ms / max 90.247ms。采样器、精确 SDK pin、此次测试/verify 和结果限制见 `docs/superpowers/plans/2026-10-10-broker-latency-baseline.md`：最终 make check 为 1209 passed / 3 skipped，verify 为 52 类 0 失败、1906 次测试执行，mypy 45 个源文件零问题。
+
+2026-10-11 又完成一段 paper 订单与账本安全基础：SDK 请求统一经过固定 timeout/禁重试的 client；提交前 fsync 写入 intent，提交响应不明时全局阻止新订单并按精确 client ID 恢复；兼容旧 ERROR 记录；归档 manifest 对历史做连续性校验并提供显式操作员基线审计入口；部分成交以累计快照幂等投影；恢复 runbook 与 CLI/Makefile 路径已加入。证据：`make verify` 52/52 类通过、1959 次测试执行、0 失败；lint 与 mypy（47 源文件）通过。该实现遇到 `replaced` 状态会安全地持续阻断，但尚未跟踪 Alpaca replacement chain；这是未完成项，不能称订单生命周期全部闭环。所有这些只证明离线机制和 fake broker 行为，不证明线上 broker 故障恢复、alpha 或盈利。
+
+Alpha 搜索可复现性继续推进：当前 driver 之前按策略、symbol、参数和 bar 数去重，未核对内容；实测新增的同长度价格变更测试得到 `repeats=2`，错误地把两条不同价格序列当作旧数据。另一个基线问题是 `search()` 无条件把任意输入标为“Alpaca historical bars; not synthetic”，连合成测试序列也如此。修复要求每个调用显式提供来源，真实 cache 运行传来源元数据，数据集 fingerprint 对有序 timestamp/price 做 SHA-256；旧 ledger 缺 fingerprint 时重跑一次。计划与完整验证结果记录在 `docs/superpowers/plans/2026-10-11-research-dataset-identity.md`。本阶段不会把合成单测当成真实 alpha 证据。
+
+此数据身份修改的最终 gate 结果：research-driver 21/21 测试，`make verify` 52/52 类、1,971 次执行、0 失败。只验证了防止数据集误去重及来源误标，不代表已完成真实数据 alpha search 或任何策略晋升。
+
+随后补齐了可执行 research fetch loop：Makefile 有显式 UTC 窗口的 `fetch-replay-bars`、离线 `research-search` 和顺序 `research-run`；scheduled research unit 也通过同一 Makefile 入口。只读真实 fetch 得到 24,237 根 SPY 5 分钟 bars（2026-04-10 至 2026-10-09），dataset hash 为 `sha256:9137cff68e231f520d1b8ceaa7f3cb8592398162d22088ea0ee508afcd70296b`。11 个既有候选的 verdict 是 4 OVERFIT、7 INSUFFICIENT、0 PASS；详细数据与限制见 `docs/evidence/alpha-search-2026-10-11.md`。搜索首轮约 2 分 53 秒；同 fingerprint 的完整重复搜索现在不再跑 backtest，实测 5.461 秒、11 repeats、0 backtests，约快 31 倍。负结果不用于准入，也没有放宽研究门槛。此结果仅覆盖单一近期窗口和旧策略族，不是最终 holdout，也没有证明 alpha、LLM 决策增益、RSI treatment 优于 control 或 60 日目标。
+
+该 alpha 数据入口及重复运行优化最终通过 `make check`（1,253 passed / 3 skipped）与 `make verify`（52/52 类、1,979 次执行、0 失败）；mypy 覆盖 47 个源文件。真实 paper 账户只用于历史行情只读抓取，没有下单。
+
+这些交付推进了阶段 A 的 watchdog、请求边界、歧义订单保护和部分账本恢复；异地备份/恢复演练、replacement chain、SIGTERM 真正可中断边界、统一 provenance、alpha、决策质量和 RSI control/treatment 仍未完成。当前 paper 观察窗仍需满足原定连续 60 个有效交易日；不能把测试/verify 的绿色代替运行时、收益或 RSI 证据。
+
 ## 1. 问题、基线、成功标准、验证
 
 ### 问题

@@ -277,6 +277,21 @@ def test_an_order_that_never_left_is_not_scored_as_a_trade(status):
     assert cf.NOT_EXECUTED not in cf.INFORMATIVE
 
 
+def test_unknown_submission_is_visible_but_not_scored_as_fill_or_rejection():
+    records = [
+        _record("unknown", T0, 100.0, action="BUY", status="SUBMISSION_UNKNOWN"),
+        _record("future-1", T0 + timedelta(hours=12), 102.0),
+        _record("future-2", T0 + timedelta(hours=26), 104.0),
+    ]
+    report = cf.evaluate(records, horizon_hours=24.0)
+
+    row = report.rows[0]
+    assert row.verdict == cf.UNRESOLVED_SUBMISSION
+    assert row not in report.scored
+    assert report.unresolved_submission_count == 1
+    assert report.counts()[cf.UNRESOLVED_SUBMISSION] == 1
+
+
 @pytest.mark.parametrize("status", ["SUBMITTED", "SHADOWED", "REPLAYED"])
 def test_orders_that_went_out_or_would_have_are_scored(status):
     records = [

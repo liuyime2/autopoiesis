@@ -24,6 +24,11 @@ def _bars(prices):
     return [Bar(T0 + timedelta(minutes=5 * i), p) for i, p in enumerate(prices)]
 
 
+def _search(bars, **kwargs):
+    """Bookkeeping tests use synthetic bars and must label them as such."""
+    return driver.search(bars, source="synthetic test fixture", **kwargs)
+
+
 def _oscillating(n=1200, amplitude=0.01, period=12):
     """A price series that moves enough to make a band rule fire.
 
@@ -38,7 +43,7 @@ def _oscillating(n=1200, amplitude=0.01, period=12):
 
 def test_every_candidate_leaves_a_trial_with_its_figures(tmp_path):
     path = tmp_path / "trials.jsonl"
-    report = driver.search(
+    report = _search(
         _bars(_oscillating()), thresholds=(0.002, 0.005), path=path
     )
 
@@ -50,7 +55,7 @@ def test_every_candidate_leaves_a_trial_with_its_figures(tmp_path):
         assert "out_of_sample_trades" in row and "required_trades" in row, (
             "a verdict a reviewer cannot recompute is a log, not evidence"
         )
-        assert row["source"] == "alpaca historical bars; not synthetic"
+        assert row["source"] == "synthetic test fixture"
 
 
 def test_the_evidence_bar_counts_cumulative_trials_not_this_run(tmp_path):
@@ -64,11 +69,11 @@ def test_the_evidence_bar_counts_cumulative_trials_not_this_run(tmp_path):
     """
     path = tmp_path / "trials.jsonl"
 
-    first = driver.search(_bars(_oscillating()), thresholds=(0.002,), path=path)
+    first = _search(_bars(_oscillating()), thresholds=(0.002,), path=path)
     assert first["already_recorded"] == 0
     assert first["candidates"] == 2, "one threshold plus FIXED_SIZE, none on record yet"
 
-    second = driver.search(_bars(_oscillating()), thresholds=(0.002, 0.005), path=path)
+    second = _search(_bars(_oscillating()), thresholds=(0.002, 0.005), path=path)
     assert second["already_recorded"] == 2, "the prior run's trials count against the next one"
     # The second sweep adds one threshold. 0.002 and FIXED_SIZE are both already on record, so
     # only the new threshold is an attempt the project has not already made.
@@ -85,7 +90,7 @@ def test_the_evidence_bar_counts_cumulative_trials_not_this_run(tmp_path):
 def test_the_bar_rises_as_the_square_root_of_trials(tmp_path):
     import math
 
-    report = driver.search(_bars(_oscillating()), thresholds=(0.002,), path=tmp_path / "t.jsonl")
+    report = _search(_bars(_oscillating()), thresholds=(0.002,), path=tmp_path / "t.jsonl")
     expected = math.ceil(BASE_REQUIRED_TRADES * math.sqrt(report["candidates"]))
     assert report["required_trades"] == expected
     assert report["results"][0]["required_trades"] == expected
@@ -116,11 +121,11 @@ def test_rerunning_on_the_same_data_records_nothing_new(tmp_path):
     path = tmp_path / "trials.jsonl"
     bars = _bars(_oscillating())
 
-    first = driver.search(bars, thresholds=(0.002,), path=path)
+    first = _search(bars, thresholds=(0.002,), path=path)
     assert first["repeats"] == 0
     rows_after_first = len(trials.read_trials(path))
 
-    second = driver.search(bars, thresholds=(0.002,), path=path)
+    second = _search(bars, thresholds=(0.002,), path=path)
     # `candidates` is the count of distinct trials on record, `repeats` how many of this run's own
     # candidates were already judged on this data.
     assert second["candidates"] == first["candidates"], (
@@ -133,14 +138,86 @@ def test_rerunning_on_the_same_data_records_nothing_new(tmp_path):
     )
 
 
+def test_exact_rerun_reuses_ledger_results_without_running_walk_forward(tmp_path, monkeypatch):
+    path = tmp_path / "trials.jsonl"
+    bars = _bars(_oscillating(n=800))
+    first = _search(bars, thresholds=(0.002,), path=path)
+
+    def unexpected_backtest(*_args, **_kwargs):
+        pytest.fail("an exact repeat must reuse the stored walk-forward result")
+
+    monkeypatch.setattr(driver, "run_walk_forward", unexpected_backtest)
+    second = _search(bars, thresholds=(0.002,), path=path)
+
+    assert second["repeats"] == 2
+    assert second["backtests_run"] == 0
+    assert [
+        {key: value for key, value in row.items() if key != "recorded_at"}
+        for row in second["results"]
+    ] == first["results"]
+    assert len(trials.read_trials(path)) == first["candidates"]
+
+
 def test_new_data_re_evaluates_a_candidate_already_on_record(tmp_path):
     """Identity is rule *and* dataset, so more data is a genuinely new trial."""
     path = tmp_path / "trials.jsonl"
-    driver.search(_bars(_oscillating(n=800)), thresholds=(0.002,), path=path)
+    _search(_bars(_oscillating(n=800)), thresholds=(0.002,), path=path)
 
-    report = driver.search(_bars(_oscillating(n=1200)), thresholds=(0.002,), path=path)
+    report = _search(_bars(_oscillating(n=1200)), thresholds=(0.002,), path=path)
     assert report["repeats"] == 0, "same rule over more data has not been judged before"
     assert len(trials.read_trials(path)) == 4
+
+
+def test_same_length_changed_prices_are_a_new_dataset(tmp_path):
+    """Bar count is not a data version: one changed price must create a new trial."""
+    path = tmp_path / "trials.jsonl"
+    bars = _bars(_oscillating(n=800))
+    _search(bars, thresholds=(0.002,), path=path)
+    changed = list(bars)
+    changed[400] = Bar(changed[400].timestamp, changed[400].price * 1.001)
+
+    report = _search(changed, thresholds=(0.002,), path=path)
+
+    assert report["repeats"] == 0
+    assert len(trials.read_trials(path)) == 4
+
+
+def test_legacy_trial_without_fingerprint_is_not_trusted_as_exact_match(tmp_path):
+    path = tmp_path / "trials.jsonl"
+    bars = _bars(_oscillating(n=800))
+    _search(bars, thresholds=(0.002,), path=path)
+    recorded = trials.read_trials(path)
+    spec = driver.candidates(bars, thresholds=(0.002,))[0]
+    for row in recorded:
+        row.pop("dataset_fingerprint", None)
+
+    assert not driver._already_evaluated(
+        recorded, spec, len(bars), None, driver.dataset_fingerprint(bars)
+    )
+
+
+def test_trial_source_label_is_explicit_and_fingerprint_is_reported(tmp_path):
+    report = driver.search(
+        _bars(_oscillating(n=800)),
+        thresholds=(0.002,),
+        path=tmp_path / "trials.jsonl",
+        source="synthetic test fixture",
+    )
+
+    assert report["dataset_fingerprint"].startswith("sha256:")
+    assert all(row["dataset_fingerprint"] == report["dataset_fingerprint"] for row in report["results"])
+    assert all(row["source"] == "synthetic test fixture" for row in report["results"])
+
+
+def test_fingerprint_covers_ordered_timestamps_and_requires_source(tmp_path):
+    bars = _bars(_oscillating(n=800))
+    changed_timestamp = list(bars)
+    changed_timestamp[400] = Bar(changed_timestamp[400].timestamp + timedelta(seconds=1), changed_timestamp[400].price)
+    assert driver.dataset_fingerprint(bars) != driver.dataset_fingerprint(changed_timestamp)
+    assert driver.dataset_fingerprint(bars) == driver.dataset_fingerprint(list(bars))
+
+    with pytest.raises(ValueError, match="source label"):
+        driver.search(bars, thresholds=(0.002,), path=tmp_path / "trials.jsonl", source="  ")
 
 
 def test_every_cache_file_is_merged_and_deduplicated(tmp_path):
@@ -182,7 +259,7 @@ def test_every_cache_file_is_merged_and_deduplicated(tmp_path):
 
 def test_an_unwritable_ledger_does_not_lose_the_run(tmp_path):
     """A trial that cannot be journalled still ran; the count is reported, not hidden."""
-    report = driver.search(
+    report = _search(
         _bars(_oscillating()),
         thresholds=(0.002,),
         path=tmp_path / "missing" / "trials.jsonl",
@@ -192,7 +269,7 @@ def test_an_unwritable_ledger_does_not_lose_the_run(tmp_path):
 
     blocker = tmp_path / "blocker"
     blocker.write_text("not a directory")
-    report = driver.search(
+    report = _search(
         _bars(_oscillating()), thresholds=(0.002,), path=blocker / "trials.jsonl"
     )
     assert report["unrecorded"] == report["candidates"], "silently lost trials are reported"
@@ -285,7 +362,7 @@ def test_the_driver_writes_only_the_trials_ledger(tmp_path):
     workspace.mkdir(parents=True)
     path = workspace / "research_trials.jsonl"
 
-    driver.search(_bars(_oscillating()), thresholds=(0.002,), path=path)
+    _search(_bars(_oscillating()), thresholds=(0.002,), path=path)
 
     produced = sorted(p.name for p in workspace.iterdir())
     assert produced == ["research_trials.jsonl"], (

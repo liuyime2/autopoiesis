@@ -266,6 +266,35 @@ def test_daily_trade_count_ignores_holds_and_other_days(tmp_path):
     assert journal.count_submitted_on(target) == 1
 
 
+def test_daily_attempt_cap_counts_intents_without_cycle_and_deduplicates_cycle_projection(tmp_path):
+    day = date(2026, 6, 3)
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    base = make_record("cycle-attempt")
+    submitted = CycleRecord(
+        cycle_id=base.cycle_id,
+        snapshot=base.snapshot,
+        decision=base.decision.model_copy(update={"action": "BUY", "quantity": 1}),
+        guardian=base.guardian,
+        execution=ExecutionResult(
+            status="SUBMITTED", order_id="oid-1", client_order_id="cid-1",
+            filled_quantity=0, message="submitted",
+        ),
+    )
+    journal.append_event(JournalEvent(
+        event_id="intent-cid-1", event_type="ORDER_SUBMISSION_INTENT",
+        timestamp=datetime(2026, 6, 3, 14, 31, tzinfo=timezone.utc), status="ACCEPTED",
+        payload={"client_order_id": "cid-1", "symbol": "SPY", "action": "BUY", "quantity": 1},
+    ))
+    journal.append(submitted)
+    journal.append_event(JournalEvent(
+        event_id="intent-cid-2", event_type="ORDER_SUBMISSION_INTENT",
+        timestamp=datetime(2026, 6, 3, 14, 32, tzinfo=timezone.utc), status="ACCEPTED",
+        payload={"client_order_id": "cid-2", "symbol": "QQQ", "action": "BUY", "quantity": 1},
+    ))
+
+    assert journal.count_submitted_on(day) == 2
+
+
 def test_retained_window_reports_the_span_and_says_when_older_cycles_are_gone(tmp_path):
     """Rotation makes the journal a fragment, and nothing used to say so.
 
@@ -381,3 +410,98 @@ def test_an_unwritable_archive_fails_the_append_rather_than_deleting_the_history
     # Whatever happened, the history must not have been destroyed on the way through.
     survivors = [p for p in journal.history_paths() if p.stat().st_size > 0]
     assert survivors, "the append failed and the record went with it"
+
+
+def test_archive_manifest_requires_attestation_for_existing_history(tmp_path):
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    journal.append(make_record("cycle-existing"))
+    status = journal.archive_manifest_status()
+    assert status["valid"] is False
+    assert status["trusted"] is False
+
+    with pytest.raises(ValueError, match="attestation"):
+        journal.attest_archive_baseline(operator_id=" ", evidence_reference="", reason=" ")
+    journal.attest_archive_baseline(
+        operator_id="test-operator",
+        evidence_reference="test-evidence-1",
+        reason="verified current runtime journal and archive set",
+    )
+    status = journal.archive_manifest_status()
+    assert status["valid"] is True
+    assert status["trusted"] is True
+
+
+def test_fresh_empty_journal_persists_explicit_empty_baseline(tmp_path):
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    status = journal.archive_manifest_status()
+
+    assert status["valid"] is True
+    assert status["trusted"] is True
+    assert journal.archive_manifest_path.exists()
+    journal.append(make_record("cycle-first"))
+    assert journal.archive_manifest_status()["trusted"] is True
+
+
+def test_archive_manifest_tracks_rotation_and_detects_deleted_or_changed_archive(tmp_path):
+    journal = JsonlJournal(tmp_path / "journal.jsonl", max_bytes=200, backups=1)
+    journal.append(make_record("cycle-0"))
+    journal.attest_archive_baseline(
+        operator_id="test-operator", evidence_reference="test-evidence-2", reason="verified fresh test journal"
+    )
+    journal.append(make_record("cycle-1"))
+    journal.append(make_record("cycle-2"))
+
+    archives = sorted(journal.archive_dir.glob("r*.jsonl"))
+    assert archives
+    assert journal.archive_manifest_status()["valid"] is True
+    original = archives[0].read_bytes()
+    archives[0].write_bytes(b"X" + original[1:])
+    status = journal.archive_manifest_status()
+    assert status["valid"] is False
+    assert "checksum" in status["reason"]
+    with pytest.raises(ValueError, match="restore evidence"):
+        journal.attest_archive_baseline(
+            operator_id="test-operator", evidence_reference="repair-attempt", reason="do not hide corruption"
+        )
+
+
+def test_archive_manifest_detects_missing_generation(tmp_path):
+    journal = JsonlJournal(tmp_path / "journal.jsonl", max_bytes=200, backups=1)
+    journal.append(make_record("cycle-0"))
+    journal.attest_archive_baseline(
+        operator_id="test-operator", evidence_reference="test-evidence-3", reason="verified fresh test journal"
+    )
+    for index in range(1, 6):
+        journal.append(make_record(f"cycle-{index}"))
+
+    archives = sorted(journal.archive_dir.glob("r*.jsonl"))
+    assert len(archives) >= 2
+    archives[0].unlink()
+    status = journal.archive_manifest_status()
+    assert status["valid"] is False
+    assert "missing" in status["reason"]
+
+
+def test_rotation_manifest_write_failure_leaves_history_fail_closed(tmp_path, monkeypatch):
+    import autopoiesis.journal as journal_module
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl", max_bytes=200, backups=1)
+    journal.append(make_record("cycle-0"))
+    journal.attest_archive_baseline(
+        operator_id="test-operator", evidence_reference="test-evidence-4", reason="verified fresh test journal"
+    )
+    journal.append(make_record("cycle-1"))
+
+    def fail_manifest_write(path, payload, *, indent=2):
+        if path == journal.archive_manifest_path:
+            raise OSError("simulated manifest persistence failure")
+        return original_write(path, payload, indent=indent)
+
+    original_write = journal_module.write_json_atomic
+    monkeypatch.setattr(journal_module, "write_json_atomic", fail_manifest_write)
+    with pytest.raises(OSError, match="manifest persistence"):
+        journal.append(make_record("cycle-2"))
+
+    status = journal.archive_manifest_status()
+    assert status["valid"] is False
+    assert "unmanifested" in status["reason"]

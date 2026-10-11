@@ -4,7 +4,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from autopoiesis.fill_reconciler import FILL_EVENT
+from autopoiesis.fill_reconciler import FILL_EVENT, confirmed_fill_events
 from autopoiesis.models import CycleRecord, JournalEvent, TradeDecision
 
 
@@ -153,9 +153,9 @@ class TradingLoop:
         try:
             events = [
                 event
-                for event in self.journal.read_events("ORDER_FILL_CONFIRMED")
+                for event in confirmed_fill_events(self.journal.read_events())
                 if (event.payload or {}).get("symbol") == symbol
-                and (event.payload or {}).get("filled_quantity") is not None
+                and isinstance((event.payload or {}).get("filled_quantity"), (int, float))
             ]
             # read_events does not promise chronological order, and the replay above
             # depends on it: an out-of-order SELL would deduct against shares that
@@ -164,7 +164,10 @@ class TradingLoop:
             quantity = 0.0
             for event in events:
                 payload = event.payload or {}
-                filled = float(payload["filled_quantity"])
+                raw_filled = payload.get("filled_quantity")
+                if not isinstance(raw_filled, (int, float)):
+                    continue
+                filled = float(raw_filled)
                 side = str(payload.get("side", "")).upper()
                 if side == "BUY":
                     quantity += filled
@@ -194,9 +197,9 @@ class TradingLoop:
         try:
             events = sorted(
                 (
-                    e for e in read("ORDER_FILL_CONFIRMED")
+                    e for e in confirmed_fill_events(read())
                     if (e.payload or {}).get("symbol") == symbol
-                    and (e.payload or {}).get("filled_quantity") is not None
+                    and isinstance((e.payload or {}).get("filled_quantity"), (int, float))
                 ),
                 key=lambda e: e.timestamp,
             )
@@ -204,7 +207,10 @@ class TradingLoop:
             for event in events:
                 payload = event.payload or {}
                 side = str(payload.get("side", "")).upper()
-                filled = float(payload["filled_quantity"])
+                raw_filled = payload.get("filled_quantity")
+                if not isinstance(raw_filled, (int, float)):
+                    continue
+                filled = float(raw_filled)
                 if side == "SHORT":
                     short += filled
                 elif side == "COVER":

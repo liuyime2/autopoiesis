@@ -266,10 +266,16 @@ MarketScheduler.should_trade_now()           market open? (broker clock)
 is regenerable: `reflection.json`, `heartbeat.json`, `risk_baseline.json`,
 `market-state.json` (written by nothing since the deleted `check-market-open.sh`), `curriculum_state.json`, `strategies/`.
 
+Application-created Alpaca clients go through `broker_client.create_alpaca_client`. It accepts
+only the paper endpoint, requires the audited `alpaca-trade-api==3.2.0` contract, disables SDK
+retries, and supplies each Requests call a fresh `urllib3.Timeout(total=7, connect=2, read=5)`.
+These are connect/read-inactivity and urllib3 total budgets, not a hard wall-clock process
+deadline; they do not by themselves justify changing the systemd stop timeout.
+
 ## 3. Module dependency reality
 
-`src/autopoiesis/` - 40 files, ~11,950 lines, 3 external dependencies (`alpaca_trade_api`,
-`pydantic`, `requests`). Heaviest nodes: `models.py` (imported 23x, the shared schema),
+`src/autopoiesis/` - 41 files, ~12,050 lines, 4 external dependencies (`alpaca_trade_api`,
+`pydantic`, `requests`, `urllib3`). Heaviest nodes: `models.py` (imported 23x, the shared schema),
 `atomicio.py` (8x), `journal.py` (6x), `strategy_engine.py` (6x).
 
 `cli.py` imports **26 modules**. That is the real measure of coupling, not module count:
@@ -442,4 +448,3 @@ The import surface in `cli.py` was left alone. Section 8 has the measurements: d
 `requests` made `--help` slower, and the Alpaca SDK is already deferred into the four
 functions that use it. Restructuring it would have added an indirection in exchange for
 nothing measurable.
-

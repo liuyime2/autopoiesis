@@ -4,8 +4,7 @@ import sys
 
 sys.path.insert(0, 'src')
 
-import alpaca_trade_api as tradeapi
-
+from autopoiesis.broker_client import create_alpaca_client
 from autopoiesis.config import AgentConfig
 from autopoiesis.data_gateway import AlpacaDataGateway
 
@@ -16,11 +15,10 @@ def main():
     print("=" * 60)
 
     config = AgentConfig.from_env()
-    client = tradeapi.REST(
+    client = create_alpaca_client(
         key_id=config.alpaca_api_key,
         secret_key=config.alpaca_secret_key,
         base_url=config.alpaca_base_url,
-        api_version="v2",
     )
 
     # Test 1: Get Clock (market open/closed status)

@@ -20,16 +20,17 @@ requires-python = ">=3.10"
 # make the documented fresh-clone install depend on a newer setuptools for no gain.
 license = { text = "Apache-2.0" }
 
-# The complete runtime dependency set. Three packages, all reachable by importing the
+# The complete runtime dependency set. Four packages, all reachable by importing the
 # package: `alpaca_trade_api` in data_gateway/executor/cli/broker_evidence,
-# `pydantic` in models.py, `requests` in the three Alpaca call sites that use it
-# directly. There is no implicit dependency, no vendored copy and no import of a
+# `pydantic` in models.py, `requests` in the broker session and `urllib3` for its
+# explicit timeout policy. There is no implicit dependency, no vendored copy and no import of a
 # stdlib-adjacent backport - this list was derived by scanning every `import` in
 # src/autopoiesis rather than by reading an existing manifest, because there wasn't one.
 dependencies = [
-    "alpaca-trade-api>=3.2,<4",
+    "alpaca-trade-api==3.2.0",
     "pydantic>=2.9,<3",
     "requests>=2.31,<3",
+    "urllib3>=1.26,<2",
 ]
 
 authors = [{ name = "QuantGroup contributors" }]

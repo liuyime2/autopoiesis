@@ -27,6 +27,7 @@ evidence bar; it cannot buy a cheaper verdict by trying harder.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
 import sys
@@ -96,16 +97,32 @@ def candidates(
     return out
 
 
+def dataset_fingerprint(bars: Sequence[Bar]) -> str:
+    """Stable content identity for the ordered timestamp/price tape the evaluator consumes."""
+    digest = hashlib.sha256(b"autopoiesis-bar-series-v1\n")
+    for bar in bars:
+        timestamp = bar.timestamp.isoformat(timespec="microseconds")
+        price = float(bar.price).hex()
+        digest.update(timestamp.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(price.encode("ascii"))
+        digest.update(b"\n")
+    return f"sha256:{digest.hexdigest()}"
+
+
 def _already_evaluated(
-    recorded: list[dict[str, Any]], spec: dict[str, Any], bars: int, symbol: str | None = None
+    recorded: list[dict[str, Any]],
+    spec: dict[str, Any],
+    bars: int,
+    symbol: str | None,
+    fingerprint: str,
 ) -> bool:
     """Whether this exact evaluation is already on the ledger.
 
-    Identity is the rule, the amount of data, and the instrument those bars are of, because all
-    three together determine the result. Re-running the sweep over an unchanged cache re-derives
-    the same verdict for the same candidate, and recording it again would inflate `trials_run` -
-    which is the denominator `required_trades` divides by - so the evidence bar would climb on a
-    static dataset
+    Identity is the rule, data fingerprint, and instrument, because all three determine the
+    result. Re-running the sweep over an unchanged cache re-derives the same verdict for the
+    same candidate, and recording it again would inflate `trials_run`, the denominator that sets
+    `required_trades`. A static dataset must not raise its own evidence bar on a repeat run.
 
     The instrument is part of identity because it was not, for five days. Trials recorded while
     the merge interleaved seventeen symbols carry only a bar count that happens to be close to
@@ -113,13 +130,20 @@ def _already_evaluated(
     nothing would be reused as a verdict over the real instrument. Re-evaluating them is the
     correct outcome, and the trial count rising with it is the direction the multiple-testing
     control wants: a bigger search raises its own bar.
-    without any new candidate ever having been tried. That is the gate in `tools/verify.py`
-    correctly refusing 11 duplicate `strategy_id`s, and the fix belongs here rather than in the
-    gate: a repeat is not a trial.
+    without any new candidate ever having been tried. A repeat is not a trial.
 
-    New data re-evaluates everything, which is correct - the cache grows when it is refetched and
-    a candidate judged over 20448 bars has genuinely not been judged over 30000.
+    Any changed ordered tape re-evaluates everything, even when its bar count is unchanged.
     """
+    return _matching_trial(recorded, spec, bars, symbol, fingerprint) is not None
+
+
+def _matching_trial(
+    recorded: list[dict[str, Any]],
+    spec: dict[str, Any],
+    bars: int,
+    symbol: str | None,
+    fingerprint: str,
+) -> dict[str, Any] | None:
     for row in recorded:
         if row.get("strategy_id") != spec["strategy_id"]:
             continue
@@ -129,9 +153,10 @@ def _already_evaluated(
             row.get("bars") == bars
             and row.get("parameters") == spec["parameters"]
             and (row.get("symbol") or None) == symbol
+            and row.get("dataset_fingerprint") == fingerprint
         ):
-            return True
-    return False
+            return row
+    return None
 
 
 def search(
@@ -142,6 +167,7 @@ def search(
     now: datetime | None = None,
     n_folds: int | None = None,
     symbol: str | None = None,
+    source: str,
 ) -> dict[str, Any]:
     """Run the whole search and record every trial.
 
@@ -162,6 +188,9 @@ def search(
     returns a bool instead of raising - but the count of unrecorded trials is reported so a search
     whose record silently failed cannot be mistaken for a search that ran.
     """
+    if not source.strip():
+        raise ValueError("a non-empty data source label is required for every research trial")
+    fingerprint = dataset_fingerprint(bars)
     space = candidates(bars, thresholds=thresholds)
     recorded = read_trials(path)
     already = len(recorded)
@@ -169,9 +198,39 @@ def search(
     # cannot be known until the count is fixed. Counting repeats here is what made a no-op run
     # raise the bar: `already + len(space)` went from 2 to 4 on a second identical run and moved
     # `required_trades` from 15 to 20 without a single new candidate being tried.
-    fresh = [s for s in space if not _already_evaluated(recorded, s, len(bars), symbol)]
+    matches = {
+        spec["strategy_id"]: _matching_trial(recorded, spec, len(bars), symbol, fingerprint)
+        for spec in space
+    }
+    fresh = [spec for spec in space if matches[spec["strategy_id"]] is None]
     repeats = len(space) - len(fresh)
     trials = already + len(fresh)
+
+    if not fresh:
+        # The fetcher may run every day and correctly discover that the cache did not
+        # change. Reusing the exact recorded outcomes avoids re-running every fold and
+        # stress case merely to decide not to append a duplicate.
+        cached_rows: list[dict[str, Any]] = []
+        for spec in space:
+            match = matches[spec["strategy_id"]]
+            if match is None:
+                raise RuntimeError("exact-repeat partition lost a matching trial")
+            cached_rows.append(match)
+        return {
+            "searched_at": (now or datetime.now(timezone.utc)).isoformat(),
+            "bars": len(bars),
+            "symbol": symbol,
+            "dataset_fingerprint": fingerprint,
+            "candidates": already,
+            "already_recorded": already,
+            "repeats": repeats,
+            "backtests_run": 0,
+            "unrecorded": 0,
+            "required_trades": cached_rows[0].get("required_trades", 0) if cached_rows else 0,
+            "by_verdict": summarise(cached_rows),
+            "results": cached_rows,
+        }
+
     stamp = now or datetime.now(timezone.utc)
     rows: list[dict[str, Any]] = []
     unrecorded = 0
@@ -188,12 +247,13 @@ def search(
         payload = {
             "search_id": f"driver-{stamp.date().isoformat()}",
             "parameters": spec["parameters"],
-            "source": "alpaca historical bars; not synthetic",
+            "source": source.strip(),
             "symbol": symbol,
+            "dataset_fingerprint": fingerprint,
             **result.trial_payload(),
         }
         rows.append(payload)
-        if _already_evaluated(recorded, spec, len(bars), symbol):
+        if _already_evaluated(recorded, spec, len(bars), symbol, fingerprint):
             continue
         recorded.append(payload)
         if not record_trial(payload, path=path, now=stamp):
@@ -203,9 +263,11 @@ def search(
         "searched_at": stamp.isoformat(),
         "bars": len(bars),
         "symbol": symbol,
+        "dataset_fingerprint": fingerprint,
         "candidates": trials,
         "already_recorded": already,
         "repeats": repeats,
+        "backtests_run": len(space),
         "unrecorded": unrecorded,
         "required_trades": rows[0]["required_trades"] if rows else 0,
         "by_verdict": summarise(rows),
@@ -338,9 +400,10 @@ def main(argv: list[str] | None = None) -> int:
     symbol = argv[1] if len(argv) > 1 else None
     bars, provenance, ignored = _load_real_bars(cache_dir, symbol)
     searched = symbol or _default_symbol()
-    report = search(bars, symbol=searched)
+    report = search(bars, symbol=searched, source=provenance)
     summary = report["by_verdict"]
     print(f"bars: {report['bars']} from {provenance}")
+    print(f"dataset_fingerprint: {report['dataset_fingerprint']}")
     if ignored:
         # Named, not counted silently, so a cache whose shape changed is visible in the log the
         # scheduled job writes rather than assumed away.
@@ -349,7 +412,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"candidates: {report['candidates']} "
         f"(cumulative: {report['already_recorded']} already in the ledger)  "
-        f"required_trades: {report['required_trades']}  "
+        f"required_trades: {report['required_trades']}  backtests_run: {report['backtests_run']}  "
         f"repeats: {report['repeats']}  unrecorded: {report['unrecorded']}"
     )
     for row in report["results"]:

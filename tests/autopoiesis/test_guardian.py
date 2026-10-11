@@ -485,7 +485,9 @@ def test_a_hold_is_skipped_not_rejected_after_the_daily_loss_limit_is_hit(tmp_pa
         data_gateway=object(),
         decision_engine=type("E", (), {"decide": lambda self, ctx: _hold(ctx["symbol"])})(),
         guardian=Guardian(allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500),
-        executor=AlpacaPaperExecutor(client=Broker(), base_url="https://paper-api.alpaca.markets"),
+        executor=AlpacaPaperExecutor(
+            client=Broker(), base_url="https://paper-api.alpaca.markets", journal=journal
+        ),
         journal=journal,
         mode="paper",
     )

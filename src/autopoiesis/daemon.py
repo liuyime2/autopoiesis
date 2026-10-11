@@ -24,7 +24,7 @@ from autopoiesis.evaluator import (
     confirmed_fill_activities,
     owner_fill_activities,
 )
-from autopoiesis.fill_reconciler import FILL_EVENT, FillReconciler
+from autopoiesis.fill_reconciler import FILL_EVENT, FillReconciler, latest_fill_snapshots
 from autopoiesis.health import HealthMonitor
 from autopoiesis.journal import JsonlJournal
 from autopoiesis.knowledge_admission import KnowledgeAdmission
@@ -305,6 +305,7 @@ class AgentDaemon:
             "submitted_order_ids": list(report.submitted_order_ids),
             "broker_open_order_ids": list(report.broker_open_order_ids),
             "extra_broker_orders": list(report.extra_broker_orders),
+            "unresolved_client_order_ids": list(report.unresolved_client_order_ids),
             "message": report.message,
         }
         self._append_event(
@@ -821,6 +822,7 @@ class AgentDaemon:
         # 900s later, so the check keeps its ability to catch a real hang; only the
         # honest "I am working" silence is removed.
         self._heartbeat("RUNNING", "maintenance in progress")
+        self._resolve_unresolved_submissions()
         self._resolve_pending_fills()
         evidence = self._latest_evidence_batch()
         if self._due(self.last_evidence_at, self.config.evidence_interval_seconds):
@@ -907,7 +909,7 @@ class AgentDaemon:
             return 0
         for confirmation in confirmations:
             self._append_event(
-                FILL_EVENT,
+                "ORDER_FILL_SNAPSHOT",
                 status="SUCCESS",
                 message=(
                     f"{confirmation.pending.symbol} {confirmation.pending.side} "
@@ -919,15 +921,38 @@ class AgentDaemon:
             )
         return len(confirmations)
 
+    def _resolve_unresolved_submissions(self) -> int:
+        """Retry exact client-ID lookups during maintenance, not only at startup."""
+        if self.startup_reconciler is None or self.journal is None:
+            return 0
+        try:
+            unresolved = self.startup_reconciler.resolve_unresolved_submissions()
+        except Exception as exc:
+            self._append_event(
+                "ORDER_RECONCILIATION_FAILED",
+                status="FAILED",
+                message=f"unresolved submission recovery failed: {exc}",
+                payload={"error_type": type(exc).__name__},
+            )
+            return 0
+        return len(unresolved)
+
     def _confirmed_fills(self) -> dict[str, float]:
         if self.journal is None:
             return {}
         fills: dict[str, float] = {}
-        for event in self.journal.read_events(FILL_EVENT):
+        events = self.journal.read_events()
+        for event in events:
+            if event.event_type != FILL_EVENT:
+                continue
             coid = event.payload.get("client_order_id")
             qty = event.payload.get("filled_quantity")
             if isinstance(coid, str) and isinstance(qty, (int, float)) and qty > 0:
                 fills[coid] = max(fills.get(coid, 0.0), float(qty))
+        for coid, event in latest_fill_snapshots(events).items():
+            quantity = event.payload.get("cumulative_filled_quantity", event.payload.get("filled_quantity"))
+            if isinstance(quantity, (int, float)) and quantity > 0:
+                fills[coid] = float(quantity)
         return fills
 
     def _ingest_broker_evidence(self) -> BrokerEvidenceBatch | None:

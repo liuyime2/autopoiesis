@@ -51,7 +51,11 @@ class FakeClient:
         self.queried.append(coid)
         if coid in self.raise_for:
             raise ConnectionError("ConnectTimeout to paper-api.alpaca.markets")
-        return self.orders.get(coid)
+        order = self.orders.get(coid)
+        if order is not None:
+            order.client_order_id = getattr(order, "client_order_id", coid)
+            order.id = getattr(order, "id", f"o-{coid}")
+        return order
 
 
 def _submitted_cycle(coid, strategy_id="buyer", quantity=2, symbol="SPY", action="BUY"):
@@ -84,7 +88,19 @@ def _submitted_cycle(coid, strategy_id="buyer", quantity=2, symbol="SPY", action
 
 @pytest.fixture
 def journal(tmp_path):
-    return JsonlJournal(tmp_path / "journal.jsonl")
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    journal.archive_manifest_status()
+    return journal
+
+
+def _record_snapshot(journal, confirmation, event_id):
+    journal.append_event(JournalEvent(
+        event_id=event_id,
+        event_type="ORDER_FILL_SNAPSHOT",
+        timestamp=NOW,
+        status="SUCCESS",
+        payload=confirmation.payload(),
+    ))
 
 
 def test_a_filled_order_is_found_and_confirmed(journal):
@@ -126,13 +142,84 @@ def test_a_broker_outage_does_not_fabricate_a_fill(journal):
     assert FillReconciler(client=client, journal=journal).resolve() == []
 
 
-def test_fill_lookup_rejects_mismatched_client_order_id(journal):
+def test_replaced_acknowledged_order_becomes_unresolved_and_blocks_new_orders(journal):
+    from autopoiesis.submission_state import project_submission_state
+
     journal.append(_submitted_cycle("coid-1"))
-    order = BrokerOrder(filled_qty=2.0, status="filled", filled_avg_price=500.0)
-    order.client_order_id = "different-order"
+    order = BrokerOrder(filled_qty=0.0, status="replaced")
+    order.replaced_by = "replacement-order"
     client = FakeClient({"coid-1": order})
 
     assert FillReconciler(client=client, journal=journal).resolve() == []
+    state = project_submission_state(journal)
+    assert state.unresolved["coid-1"]["replaced_by"] == "replacement-order"
+
+
+def test_fill_lookup_rejects_mismatched_client_order_id(journal):
+    journal.append(_submitted_cycle("coid-1"))
+    order = BrokerOrder(filled_qty=2.0, status="filled", filled_avg_price=500.0)
+    order.client_order_id = "other-client-id"
+    client = FakeClient({"coid-1": order})
+
+    assert FillReconciler(client=client, journal=journal).resolve() == []
+
+
+def test_partial_fill_is_repolled_and_snapshots_are_cumulative_and_idempotent(journal):
+    journal.append(_submitted_cycle("coid-1", quantity=3))
+    order = BrokerOrder(filled_qty=1.0, status="partially_filled", filled_avg_price=500.0)
+    client = FakeClient({"coid-1": order})
+    reconciler = FillReconciler(client=client, journal=journal)
+
+    [first] = reconciler.resolve()
+    assert first.filled_quantity == 1.0
+    _record_snapshot(journal, first, "snapshot-1")
+    assert reconciler.pending()[0].client_order_id == "coid-1"
+    assert reconciler.resolve() == []
+
+    order.filled_qty = 2.0
+    order.filled_avg_price = 501.0
+    [second] = reconciler.resolve()
+    assert second.filled_quantity == 2.0
+    _record_snapshot(journal, second, "snapshot-2")
+
+    order.status = "filled"
+    [terminal] = reconciler.resolve()
+    assert terminal.filled_quantity == 2.0
+    assert terminal.is_terminal is True
+    _record_snapshot(journal, terminal, "snapshot-3")
+    assert reconciler.pending() == []
+    assert len(journal.read_events("ORDER_FILL_SNAPSHOT")) == 3
+
+
+def test_same_quantity_average_price_correction_is_a_new_snapshot(journal):
+    journal.append(_submitted_cycle("coid-1"))
+    order = BrokerOrder(filled_qty=1.0, status="partially_filled", filled_avg_price=500.0)
+    reconciler = FillReconciler(client=FakeClient({"coid-1": order}), journal=journal)
+
+    [initial] = reconciler.resolve()
+    _record_snapshot(journal, initial, "snapshot-initial")
+    order.filled_avg_price = 500.5
+
+    [correction] = reconciler.resolve()
+
+    assert correction.filled_quantity == 1.0
+    assert correction.filled_avg_price == 500.5
+
+
+def test_pending_cancel_is_not_terminal_and_canceled_partial_fill_is_preserved(journal):
+    journal.append(_submitted_cycle("coid-1"))
+    order = BrokerOrder(filled_qty=1.0, status="pending_cancel", filled_avg_price=500.0)
+    reconciler = FillReconciler(client=FakeClient({"coid-1": order}), journal=journal)
+
+    [pending_cancel] = reconciler.resolve()
+    assert pending_cancel.is_terminal is False
+    _record_snapshot(journal, pending_cancel, "snapshot-pending-cancel")
+    assert len(reconciler.pending()) == 1
+
+    order.status = "canceled"
+    [canceled] = reconciler.resolve()
+    assert canceled.is_terminal is True
+    assert canceled.filled_quantity == 1.0
 
 
 def test_an_already_confirmed_fill_is_not_polled_twice(journal):

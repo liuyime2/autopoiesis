@@ -51,8 +51,8 @@ EnvironmentFile=@ENVFILE@
 #
 # Twenty minutes clears the measured ~15 minute lag with a margin, and the fetcher skips
 # entirely when the cache already holds a bar inside the last interval.
-ExecStart=/bin/sh -c '@PYTHON@ tools/fetch_replay_bars.py SPY "$(date -u -d "-6 months" +%%Y-%%m-%%dT13:30:00Z)" "$(date -u -d "-20 minutes" +%%Y-%%m-%%dT%%H:%%M:00Z)" 5Min ROLLING || echo "bar fetch returned $?; searching the existing cache anyway"'
-ExecStart=@PYTHON@ -m autopoiesis.research.driver
+ExecStart=/bin/sh -c '/usr/bin/make -C @ROOT@ PY=@PYTHON@ fetch-replay-bars REPLAY_SYMBOL=SPY REPLAY_START="$(date -u -d "-6 months" +%%Y-%%m-%%dT13:30:00Z)" REPLAY_END="$(date -u -d "-20 minutes" +%%Y-%%m-%%dT%%H:%%M:00Z)" REPLAY_INTERVAL=5Min REPLAY_ROLLING=1 || echo "bar fetch returned $?; searching the existing cache anyway"'
+ExecStart=/usr/bin/make -C @ROOT@ PY=@PYTHON@ research-search REPLAY_SYMBOL=SPY
 
 StandardOutput=append:@ROOT@/runtime/autopoiesis/research.log
 StandardError=append:@ROOT@/runtime/autopoiesis/research.log

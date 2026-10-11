@@ -59,6 +59,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--status", action="store_true", help="Print daemon heartbeat status.")
     parser.add_argument("--stop", action="store_true", help="Send SIGTERM to the daemon pidfile process.")
     parser.add_argument("--reconcile", action="store_true", help="Compare recent journal orders with Alpaca open orders.")
+    parser.add_argument(
+        "--attest-archive-baseline", action="store_true",
+        help="Record an audited baseline for existing local journal history (offline; explicit operator evidence required).",
+    )
     parser.add_argument("--ingest-evidence", action="store_true", help="Fetch broker paper evidence for the recent window.")
     parser.add_argument(
         "--ingest-owner-history", action="store_true",
@@ -77,6 +81,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     config = AgentConfig.from_env()
+    if args.attest_archive_baseline:
+        operator_id = os.environ.get("AUTOPOIESIS_OPERATOR_ID", "").strip()
+        evidence_reference = os.environ.get("AUTOPOIESIS_EVIDENCE_REFERENCE", "").strip()
+        reason = os.environ.get("AUTOPOIESIS_ATTESTATION_REASON", "").strip()
+        if not all((operator_id, evidence_reference, reason)):
+            parser.error(
+                "--attest-archive-baseline requires AUTOPOIESIS_OPERATOR_ID, "
+                "AUTOPOIESIS_EVIDENCE_REFERENCE, and AUTOPOIESIS_ATTESTATION_REASON"
+            )
+        try:
+            JsonlJournal(config.journal_path).attest_archive_baseline(
+                operator_id=operator_id,
+                evidence_reference=evidence_reference,
+                reason=reason,
+            )
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"archive baseline attestation refused: {exc}")
+            return 1
+        print("archive baseline attested; history is trusted only from this recorded baseline forward")
+        return 0
     if args.doctor:
         return _doctor(config, skip_broker=args.skip_broker, quiet=args.quiet)
     if args.check_env:
@@ -112,7 +136,7 @@ SERVICE_NAME = "autopoiesis.service"
 
 
 def _watchdog(config: AgentConfig) -> int:
-    """Start the daemon if it is not running. Report; never kill what is alive.
+    """Recover an inactive or wedged daemon without disturbing healthy work.
 
     The watchdog unit ran `--doctor` every ten minutes and wrote the result to a log, which
     made it a reporter and nothing more. Combined with `StartLimitBurst=5` in the daemon's
@@ -120,10 +144,12 @@ def _watchdog(config: AgentConfig) -> int:
     systemd had given up and the only thing still running was the thing that noticed.
 
     So the unit's ExecStart is this instead. `reset-failed` clears the start-limit state
-    systemd latched after the burst, then `start` retries. Every other action is a report.
+    systemd latched after the burst, then `start` retries. An active unit is checked against
+    its heartbeat; a present stale/dead heartbeat gets one `restart` attempt.
 
     Deliberately conservative about the two ways this could do harm:
-      * it never stops or restarts a unit that is active, so a healthy daemon is untouched;
+      * a fresh heartbeat is left alone, and a missing heartbeat or STOPPING state is unknown;
+      * it makes at most one restart attempt per run, so recovery cannot loop tightly;
       * a start that immediately fails is recorded as a failure rather than retried in a
         tight loop, and the next attempt is ten minutes away, which is the timer's period.
 
@@ -132,20 +158,80 @@ def _watchdog(config: AgentConfig) -> int:
     """
     import subprocess
 
-    def systemctl(*words: str) -> tuple[int, str]:
-        proc = subprocess.run(
-            ["systemctl", "--user", *words], capture_output=True, text=True, timeout=60,
-        )
+    def systemctl(*words: str) -> tuple[int | None, str]:
+        command = ["systemctl", "--user", *words]
+        try:
+            proc = subprocess.run(command, capture_output=True, text=True, timeout=60)
+        except subprocess.TimeoutExpired as exc:
+            operation = " ".join(words)
+            return None, f"systemctl {operation} timed out after {exc.timeout} seconds"
         return proc.returncode, (proc.stdout + proc.stderr).strip()
 
     active_rc, active_out = systemctl("is-active", SERVICE_NAME)
-    if active_rc == 0 and active_out.strip() == "active":
-        print(f"watchdog: {SERVICE_NAME} is active; nothing to do")
+    if active_rc is None:
+        print(f"watchdog: could not determine {SERVICE_NAME} state: {active_out}")
+        return 0
+    active_state = active_out.strip().lower()
+    if active_rc == 0 and active_state == "active":
+        monitor = HealthMonitor(
+            config.heartbeat_path,
+            stale_after_seconds=config.stale_after_seconds,
+        )
+        heartbeat = monitor.read()
+        if heartbeat is None:
+            print(f"watchdog: {SERVICE_NAME} is active; heartbeat missing or invalid, state unknown")
+            return 0
+        if heartbeat.status == "STOPPING":
+            print(f"watchdog: {SERVICE_NAME} is active; orderly shutdown in progress")
+            return 0
+        if monitor.is_live():
+            print(f"watchdog: {SERVICE_NAME} is active; heartbeat is live, nothing to do")
+            return 0
+
+        # is_live() reads the file again. Take one final snapshot after that check so a
+        # concurrent shutdown or fresh heartbeat is observed before a state-changing call.
+        latest = monitor.read()
+        if latest is None:
+            print(f"watchdog: {SERVICE_NAME} is active; heartbeat disappeared or became invalid, state unknown")
+            return 0
+        if latest.status == "STOPPING":
+            print(f"watchdog: {SERVICE_NAME} is active; orderly shutdown is in progress")
+            return 0
+        if latest != heartbeat and monitor.is_live():
+            print(f"watchdog: {SERVICE_NAME} is active; heartbeat became live, nothing to do")
+            return 0
+
+        restart_rc, restart_out = systemctl("restart", SERVICE_NAME)
+        if restart_rc != 0:
+            print(
+                f"watchdog: could not restart {SERVICE_NAME} for stale/dead heartbeat: "
+                f"{restart_out or f'exit status {restart_rc}'}"
+            )
+            return 0
+        verify_rc, verify_out = systemctl("is-active", SERVICE_NAME)
+        if verify_rc != 0 or verify_out.strip() != "active":
+            print(
+                f"watchdog: restart of {SERVICE_NAME} returned success but unit is "
+                f"{verify_out!r}"
+            )
+            return 0
+        print(f"watchdog: restarted {SERVICE_NAME} after stale/dead heartbeat")
         return 0
 
-    # `failed` or `inactive` or `activating`: systemd has latched a start limit, or the unit
-    # was never started. reset-failed is what makes another attempt possible.
-    systemctl("reset-failed", SERVICE_NAME)
+    # Only explicit stopped states are safe to recover. In-progress, unknown, and
+    # query-error results leave the unit untouched because its current state is uncertain.
+    if active_rc == 0 or active_state not in {"inactive", "failed"}:
+        detail = active_out.strip() or f"exit status {active_rc}"
+        print(f"watchdog: cannot safely recover {SERVICE_NAME}; is-active returned {detail!r}")
+        return 0
+
+    # `failed` means systemd may have latched a start limit; `inactive` means it is stopped.
+    # reset-failed clears the limit before the single start attempt.
+    reset_rc, reset_out = systemctl("reset-failed", SERVICE_NAME)
+    if reset_rc != 0:
+        detail = reset_out.strip() or f"exit status {reset_rc}"
+        print(f"watchdog: systemctl reset-failed failed for {SERVICE_NAME}: {detail}")
+        return 0
     start_rc, start_out = systemctl("start", SERVICE_NAME)
     if start_rc != 0:
         print(f"watchdog: could not start {SERVICE_NAME}: {start_out}")
@@ -221,7 +307,7 @@ def _execution_sink(config, client, journal):
     """
     if config.shadow:
         return ShadowExecutor(journal=journal)
-    real = AlpacaPaperExecutor(client=client, base_url=config.alpaca_base_url)
+    real = AlpacaPaperExecutor(client=client, base_url=config.alpaca_base_url, journal=journal)
     if config.shorts == "shadow":
         # Shorts are watched before they trade: SHORT and COVER become journalled intents,
         # every other order still reaches the paper broker.
@@ -240,16 +326,15 @@ def _run_once(config: AgentConfig) -> int:
         return 1
 
     try:
-        import alpaca_trade_api as tradeapi
+        from autopoiesis.broker_client import create_alpaca_client
     except ImportError as exc:
         print(json.dumps({"error": "alpaca-trade-api is not installed", "detail": str(exc)}, sort_keys=True))
         return 1
 
-    client = tradeapi.REST(
-        key_id=config.alpaca_api_key,
-        secret_key=config.alpaca_secret_key,
+    client = create_alpaca_client(
+        key_id=config.alpaca_api_key or "",
+        secret_key=config.alpaca_secret_key or "",
         base_url=config.alpaca_base_url,
-        api_version="v2",
     )
     loop = TradingLoop(
         data_gateway=AlpacaDataGateway(client=client),
@@ -288,16 +373,15 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         return 1
 
     try:
-        import alpaca_trade_api as tradeapi
+        from autopoiesis.broker_client import create_alpaca_client
     except ImportError as exc:
         print(json.dumps({"error": "alpaca-trade-api is not installed", "detail": str(exc)}, sort_keys=True))
         return 1
 
-    client = tradeapi.REST(
-        key_id=config.alpaca_api_key,
-        secret_key=config.alpaca_secret_key,
+    client = create_alpaca_client(
+        key_id=config.alpaca_api_key or "",
+        secret_key=config.alpaca_secret_key or "",
         base_url=config.alpaca_base_url,
-        api_version="v2",
     )
     journal = JsonlJournal(config.journal_path)
     strategy_library = StrategyLibrary(config.strategy_dir)
@@ -531,16 +615,15 @@ def _reconcile(config: AgentConfig) -> int:
         return 1
 
     try:
-        import alpaca_trade_api as tradeapi
+        from autopoiesis.broker_client import create_alpaca_client
     except ImportError as exc:
         print(json.dumps({"error": "alpaca-trade-api is not installed", "detail": str(exc)}, sort_keys=True))
         return 1
 
-    client = tradeapi.REST(
-        key_id=config.alpaca_api_key,
-        secret_key=config.alpaca_secret_key,
+    client = create_alpaca_client(
+        key_id=config.alpaca_api_key or "",
+        secret_key=config.alpaca_secret_key or "",
         base_url=config.alpaca_base_url,
-        api_version="v2",
     )
     journal = JsonlJournal(config.journal_path)
     reconciler = OrderReconciler(client=client, journal=journal)
@@ -550,6 +633,7 @@ def _reconcile(config: AgentConfig) -> int:
         "submitted_order_ids": list(report.submitted_order_ids),
         "broker_open_order_ids": list(report.broker_open_order_ids),
         "extra_broker_orders": list(report.extra_broker_orders),
+        "unresolved_client_order_ids": list(report.unresolved_client_order_ids),
         "message": report.message,
     }, indent=2, sort_keys=True))
     return 0 if report.matched else 1
@@ -590,8 +674,12 @@ def _ingest_owner_history(config: AgentConfig) -> int:
     journal = JsonlJournal(config.journal_path)
     agent_orders = {r.execution.order_id for r in journal.read_all() if r.execution.order_id}
     agent_orders |= {
-        str(e.payload.get("order_id")) for e in journal.read_events("ORDER_FILL_CONFIRMED")
-        if e.payload.get("order_id")
+        str(e.payload.get("order_id")) for e in journal.read_events()
+        if e.event_type in {
+            "ORDER_FILL_CONFIRMED", "ORDER_FILL_SNAPSHOT",
+            "ORDER_SUBMISSION_ACKNOWLEDGED", "ORDER_SUBMISSION_RESOLVED",
+        }
+        and e.payload.get("order_id")
     }
     fills = BrokerEvidenceProvider(client=client).fetch_all_fills()
     owner = [
@@ -757,15 +845,14 @@ def _paper_client(config: AgentConfig):
         print(json.dumps({"error": "Alpaca base URL must be paper trading"}, sort_keys=True))
         return None
     try:
-        import alpaca_trade_api as tradeapi
+        from autopoiesis.broker_client import create_alpaca_client
     except ImportError as exc:
         print(json.dumps({"error": "alpaca-trade-api is not installed", "detail": str(exc)}, sort_keys=True))
         return None
-    return tradeapi.REST(
-        key_id=config.alpaca_api_key,
-        secret_key=config.alpaca_secret_key,
+    return create_alpaca_client(
+        key_id=config.alpaca_api_key or "",
+        secret_key=config.alpaca_secret_key or "",
         base_url=config.alpaca_base_url,
-        api_version="v2",
     )
 
 

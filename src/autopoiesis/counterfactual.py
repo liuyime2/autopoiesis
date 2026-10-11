@@ -72,6 +72,7 @@ GOOD_TRADE = "GOOD_TRADE"
 #: refused BUYs and 12 refused SELLs from the live journal into strategies' screens as if
 #: they had traded. Not informative, so it never counts for or against a strategy.
 NOT_EXECUTED = "NOT_EXECUTED"
+UNRESOLVED_SUBMISSION = "UNRESOLVED_SUBMISSION"
 
 #: Execution outcomes that mean the order never left: refused by the Guardian, failed, or
 #: skipped. A trade with one of these is NOT_EXECUTED. Every other outcome is graded,
@@ -158,7 +159,10 @@ class CounterfactualReport:
         confidently wrong number into the counts, which is the failure this whole
         module exists to avoid.
         """
-        return [row for row in self.rows if row.verdict not in {"PENDING", "GAP"}]
+        return [
+            row for row in self.rows
+            if row.verdict not in {"PENDING", "GAP", UNRESOLVED_SUBMISSION}
+        ]
 
     @property
     def pending_count(self) -> int:
@@ -169,6 +173,10 @@ class CounterfactualReport:
         """Rows dropped because the horizon quote was too far away to compare."""
         return sum(1 for row in self.rows if row.verdict == "GAP")
 
+    @property
+    def unresolved_submission_count(self) -> int:
+        return sum(1 for row in self.rows if row.verdict == UNRESOLVED_SUBMISSION)
+
     def counts(self) -> dict[str, int]:
         out: dict[str, int] = {}
         for row in self.scored:
@@ -177,6 +185,8 @@ class CounterfactualReport:
             out["GAP"] = self.gap_count
         if self.pending_count:
             out["PENDING"] = self.pending_count
+        if self.unresolved_submission_count:
+            out[UNRESOLVED_SUBMISSION] = self.unresolved_submission_count
         return out
 
     def net_pct_total(self) -> float:
@@ -304,7 +314,12 @@ def evaluate(
                     ),
                     gross_return_pct=None,
                     assumed_cost_pct=assumed_cost_pct, net_return_pct=None,
-                    verdict=status, decision_source=record.decision.decision_source,
+                    verdict=(
+                        UNRESOLVED_SUBMISSION
+                        if record.execution.status == "SUBMISSION_UNKNOWN"
+                        else status
+                    ),
+                    decision_source=record.decision.decision_source,
                 )
             )
             continue
@@ -312,7 +327,9 @@ def evaluate(
         gross = (future_price - price) / price * 100.0
         net = gross - assumed_cost_pct
         verdict, taken_value = _grade(action, gross, assumed_cost_pct, dead_band_pct)
-        if action != "HOLD" and record.execution.status in NEVER_LEFT_STATUSES:
+        if action != "HOLD" and record.execution.status == "SUBMISSION_UNKNOWN":
+            verdict = UNRESOLVED_SUBMISSION
+        elif action != "HOLD" and record.execution.status in NEVER_LEFT_STATUSES:
             verdict = NOT_EXECUTED
         # The rule's action is graded as a decision, not as an execution: the comparison is
         # between two decisions on the same snapshot, and both would face the same Guardian.

@@ -24,12 +24,14 @@ failure. `make verify` runs it. Three modes:
 
 ## The replay environment — real bars, simulated account
 
-**`fetch_replay_bars.py`** takes `[SYMBOL] [START] [END] [INTERVAL]` and writes what the
-broker's historical endpoint actually returns into `runtime/autopoiesis/replay/`, with the
-provenance recorded in the file. It never falls back to a generator: a replay over invented
-prices can only show that code runs, and this is the one step that needs network and
-credentials. Everything below it runs offline against that cache. On a fresh clone run it
-once.
+**`fetch_replay_bars.py`** is invoked through `make fetch-replay-bars`, with explicit
+`REPLAY_SYMBOL`, UTC `REPLAY_START`, UTC `REPLAY_END`, `REPLAY_INTERVAL`, and optional
+`REPLAY_ROLLING=1`. It writes what the paper broker's historical endpoint actually returns into
+`runtime/autopoiesis/replay/`, with the provenance recorded in the file. It never falls back to a
+generator: a replay over invented prices can only show that code runs. This read-only fetch is
+the one step that needs network and credentials. Everything below it runs offline against that
+cache. `make research-run` installs the research extra, fetches the requested window, then runs
+the offline driver; a failed fetch stops this explicit run rather than claiming new data.
 
 The same API is what `broker_evidence` reads for PnL, and it caps a page at 100. Measured on
 this account: the daemon's 24-hour window returns 0-20 fills, `autopoiesis evidence ingest`'s
@@ -145,6 +147,14 @@ decision, and every file in the library must have a recorded admission verdict.
 **`alpaca_smoke.py`** is a read-only connectivity probe against the paper API — clock,
 account, positions, orders. `make smoke` runs it. It was originally `test_alpaca.py` at
 the repository root, where pytest imported a network-calling module on every run.
+
+**`broker_latency_sample.py`** samples clock/account SDK operation latency against the
+configured paper endpoint only. Run `make broker-latency-sample COUNT=20`; each iteration
+makes one clock and one account read, and COUNT is capped at 50. It prints summary timings
+and SDK version, not response data or error text. Only source-audited
+`alpaca-trade-api 3.2.0` is accepted; SDK retries are disabled so one operation makes
+one HTTP attempt. There is no request deadline yet; do not run it unattended or treat
+observed latency as a stop-time guarantee.
 
 **`provenance.py`** prints what `make reproduce` records: commit, dirty state, the
 resolved configuration, package versions, the seed and dataset version (both reported as
