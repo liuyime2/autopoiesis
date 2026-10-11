@@ -69,3 +69,49 @@ jobs:
 
       - name: the gate itself
         run: python tools/verify.py
+
+# A release is a claim about what a stranger can do with the published artefacts, so CI builds
+# them and installs the sdist. `make release-check` was the target that caught an sdist missing
+# `examples/` and `configs/` - both of them steps in the README's quick start - which `tar tzf`
+# would have reported as "the archive is fine" while nobody could run the fifth command in the
+# instructions.
+release:
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: build and install the sdist
+      run: |
+        python -m pip install --upgrade pip build
+        python -m build --sdist --wheel
+        # The packaged copy carries the package, `examples/` and `configs/`; `tools/` and
+        # `tests/` are a property of the source tree and are deliberately absent, which is why
+        # this job does not run the gate - it runs what an installed copy is claimed to do.
+        tar tzf dist/autopoiesis-*.tar.gz | grep -q "examples/minimal_cycle.py"
+        tar tzf dist/autopoiesis-*.tar.gz | grep -q "configs/paper.env.example"
+        python -m venv /tmp/rc && /tmp/rc/bin/pip install -q dist/autopoiesis-*.tar.gz
+        /tmp/rc/bin/python -c "import autopoiesis, autopoiesis.cli"
+        mkdir -p /tmp/rs && tar -xzf dist/autopoiesis-*.tar.gz -C /tmp/rs
+        /tmp/rc/bin/python /tmp/rs/autopoiesis-*/examples/minimal_cycle.py > /dev/null
+        echo "the sdist installs and runs what the README claims"
+
+    # A tag that disagrees with `pyproject.toml` publishes a version nobody chose. PEP 440
+    # normalisation makes this detectable rather than inferred: `0.1.0-alpha` would become
+    # `0.1.0a0` and nobody wrote a0.
+    - name: a tag names the version the source declares
+      if: startsWith(github.ref, 'refs/tags/')
+      run: |
+        python - <<'PY'
+        import os, re, sys, pathlib
+        tag = os.environ["GITHUB_REF"].rsplit("/", 1)[-1]
+        declared = re.search(r'^version = "([^"]+)"', pathlib.Path("pyproject.toml").read_text(), re.M).group(1)
+        if tag != f"v{declared}":
+            sys.exit(f"tag {tag} does not name version {declared} from pyproject.toml")
+        print(f"tag {tag} names version {declared}")
+        PY

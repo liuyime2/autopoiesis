@@ -1,0 +1,69 @@
+
+# The public site. Built from the committed `docs/site/figures.json` and deployed as static files.
+#
+# It does NOT re-measure anything. The figures are published by `make refresh-figures` on an
+# operator's machine, by running the commands that produced them, and are committed. Measuring
+# here would publish one CI run's numbers as the project's - and a fresh clone has no `runtime/`
+# to measure from, which is exactly why the site reads a committed file and not the live journal.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: the site's own tests
+        run: |
+          python -m pip install -q -e ".[dev]"
+          python -m pytest tests/autopoiesis/test_public_site.py -q
+
+      # The gate, because a site that claims 52 classes while the gate has 53 is exactly the
+      # drift this file exists to make impossible.
+      - name: the published gate count is the real one
+        run: python tools/verify.py --only gate-class-count-consistent
+
+      - name: generate
+        run: python tools/project_site.py
+
+      - name: the pages are complete
+        run: |
+          for page in index evidence architecture safety build; do
+            test -s "docs/site/$page.html" || { echo "docs/site/$page.html is missing or empty"; exit 1; }
+          done
+          grep -oh 'href="[^"]*\.html"' docs/site/*.html | sed 's/href="//; s/"//' | sort -u > /tmp/nav.txt
+          while read -r target; do
+            [ -f "docs/site/$target" ] || { echo "nav links a page that does not exist: $target"; exit 1; }
+          done < /tmp/nav.txt
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

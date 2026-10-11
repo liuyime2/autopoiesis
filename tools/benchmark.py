@@ -58,7 +58,10 @@ at all.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
+import json
 import pathlib
 import sys
 
@@ -69,6 +72,11 @@ sys.path.insert(0, str(ROOT / "src"))
 #: docstring is the specification, and a benchmark whose window can be changed by a flag is a
 #: benchmark whose verdict can be chosen.
 TARGET_TRADING_DAYS = 60
+
+#: Filled by `_run_prose` and read by `main` when it was asked for JSON. A module-level holder
+#: rather than a return value because the measurement and the printing are one function and the
+#: two formats are two views of it - which is the whole reason they cannot disagree.
+_PAYLOAD: dict = {}
 
 EXIT_MET = 0
 EXIT_BEHIND = 1
@@ -309,8 +317,38 @@ def _print_split_section(title: str, detail: str | None, extras: list[str], inde
     print()
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    """The prose form a reader decides by, and `--json` for anything that has to compare.
+
+    `--json` prints one object and exits with the same code. It exists because the public
+    site's figures have to be *collected* rather than retyped, and because running this file
+    directly reads the process environment: on a host without the operator's env file that means
+    the example config's defaults - so `make benchmark-json` is the entry point that publishes a
+    figure, and a bare invocation is the one that shows the default. The make target includes the
+    env file, so both entry points differ only in what they were given, never in what they compute.
+
+    The prose is sent to stderr rather than suppressed, so a JSON run is parseable on stdout and
+    still says what it measured to whoever is watching the log.
+    """
+    argv = sys.argv[1:] if argv is None else argv
+    if "--json" in argv:
+        # The prose form runs into a sink rather than onto the caller's stdout, so one object is
+        # all a parser sees. stderr would keep it visible in a log; a sink keeps the collector
+        # simple and the figures are dumped in full right after.
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = _run_prose(argv)
+        print(json.dumps(_PAYLOAD, indent=2, sort_keys=True))
+        return code
+    return _run_prose(argv)
+
+
+def _run_prose(argv: list[str]) -> int:
     from autopoiesis.config import AgentConfig
+
+    as_json = "--json" in argv
+    payload: dict = {"exit_code": None, "strategies": [], "agent": None}
+    global _PAYLOAD
+    _PAYLOAD = payload
 
     try:
         config = AgentConfig.from_env()
@@ -335,7 +373,14 @@ def main() -> int:
         print("record            none: no cycle records in the journal, so nothing to measure")
         print(f"                  journal: {config.journal_path}")
         print("                  run 'autopoiesis once' (or let the daemon run) to produce one")
+        payload["record"] = {"first": None, "last": None, "trading_days": 0, "cycles": 0,
+                             "journal": str(config.journal_path)}
+        payload["exit_code"] = EXIT_NOTHING_TO_MEASURE
+        if as_json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
         return EXIT_NOTHING_TO_MEASURE
+    payload["record"] = {"first": first, "last": last, "trading_days": days, "cycles": cycles,
+                         "journal": str(config.journal_path)}
     print(f"record            {first} .. {last}   {days} trading day(s), {cycles} cycle(s)")
     print(
         f"target window     {TARGET_TRADING_DAYS} trading days - "
@@ -366,6 +411,10 @@ def main() -> int:
         print("-" * 78)
         print(f"  {'strategy':<26} {'return':>8} {'SPY, same window':>17} {'excess':>8}")
         for name, return_pct, market_pct, excess in rows:
+            payload["strategies"].append(
+                {"strategy_id": name, "return_pct": return_pct,
+                 "market_pct": market_pct, "excess": excess}
+            )
             print(f"  {name:<26} {return_pct:>8} {market_pct:>17} {excess:>8}")
         print()
         print("  basis: each row puts both legs on the same capital and the same window -")
@@ -432,6 +481,19 @@ def main() -> int:
             f"                  covered, so the target over {TARGET_TRADING_DAYS} days is neither met"
         )
         print("                  nor falsified yet. The line above is the whole of the record.")
+    payload["exit_code"] = code
+    payload["agent"] = agent
+    payload["risk_budget"] = {
+        "max_position_value": config.max_position_value,
+        "max_total_exposure": config.max_total_exposure,
+        "max_daily_loss": config.max_daily_loss,
+        "max_trades_per_day": config.max_trades_per_day,
+    }
+    payload["cost"] = {"assumed_round_trip_cost_pct": config.assumed_round_trip_cost_pct}
+    payload["target"] = {
+        "trading_days": TARGET_TRADING_DAYS, "met": days >= TARGET_TRADING_DAYS,
+        "covered": days,
+    }
     return code
 
 

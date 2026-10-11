@@ -1,0 +1,25 @@
+# What a source distribution carries beyond the package itself.
+#
+# The wheel carries `src/autopoiesis/` and that is correct for an installed package. The sdist is
+# different: it is what somebody downloads to get the project, and it used to carry only the
+# package, the README and the metadata - so `examples/minimal_cycle.py` and
+# `configs/paper.env.example` were absent from it, while both are steps in the quick start. A
+# reader who installed from the sdist could not run the fifth command in the README's own
+# instructions. Measured: `tar tzf dist/autopoiesis-0.1.0.tar.gz | grep -c examples/` was 0.
+#
+# What is deliberately *not* here, and why. `tools/` and `tests/` stay out because the gate and
+# the suite are a property of the source tree, not of an installed copy: they need `src/` on the
+# path and a runtime directory that a package install does not create. Putting them in would
+# make the sdist look like a development checkout that cannot run its own instructions, which is
+# worse than a sdist that is honestly a package. The quick start's `make verify` step is
+# clone-based, and the README now says which of its steps need the repository and which an
+# installed copy satisfies.
+include LICENSE
+include NOTICE
+include README.md
+include CHANGELOG.md
+include CONTRIBUTING.md
+include SECURITY.md
+include CODE_OF_CONDUCT.md
+recursive-include examples *.py
+recursive-include configs *.example

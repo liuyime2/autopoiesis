@@ -4,7 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autopoiesis"
-version = "0.1.0"
+# PEP 440 alpha, because that is what it is. `0.1.0-alpha` is not a legal version - pip would
+# normalise it to `0.1.0a0`, which is not a number anyone chose - and calling this `0.1.0` would
+# assert an interface stability the project has not made a claim about. A pre-release is also
+# what keeps `pip install autopoiesis` from silently picking it up over a later stable one.
+version = "0.1.0a1"
 description = "Autopoiesis: a self-evolving LLM paper-trading agent that grades its own strategies against broker evidence and retires the ones that do not earn their place."
 readme = "README.md"
 requires-python = ">=3.10"

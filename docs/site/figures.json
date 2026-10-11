@@ -1,0 +1,103 @@
+{
+  "figures": {
+    "benchmark": {
+      "agent": {
+        "assumed_cost": 35.8189,
+        "capital": 45233.9,
+        "excess": -0.88,
+        "pnl": 820.77,
+        "realized": 757.95,
+        "return_pct": 1.81,
+        "spy_pct": 2.69,
+        "unrealized": 98.64
+      },
+      "cost": {
+        "assumed_round_trip_cost_pct": 0.05
+      },
+      "exit_code": 1,
+      "record": {
+        "cycles": 2060,
+        "first": "2026-06-09",
+        "journal": "runtime/autopoiesis/journal.jsonl",
+        "last": "2026-10-09",
+        "trading_days": 19
+      },
+      "risk_budget": {
+        "max_daily_loss": 500.0,
+        "max_position_value": 25000.0,
+        "max_total_exposure": 90000.0,
+        "max_trades_per_day": 100
+      },
+      "strategies": [
+        {
+          "excess": "-0.02",
+          "market_pct": "+0.97%",
+          "return_pct": "+0.95%",
+          "strategy_id": "trend-follow-20260627-001"
+        },
+        {
+          "excess": "-0.07",
+          "market_pct": "+0.46%",
+          "return_pct": "+0.39%",
+          "strategy_id": "trend-follow-20260727-001"
+        },
+        {
+          "excess": "-0.66",
+          "market_pct": "+4.51%",
+          "return_pct": "+3.85%",
+          "strategy_id": "trend-follow-buy-001"
+        },
+        {
+          "excess": "-0.91",
+          "market_pct": "+2.84%",
+          "return_pct": "+1.92%",
+          "strategy_id": "fixed-size-buy-001"
+        },
+        {
+          "excess": "-1.33",
+          "market_pct": "+2.15%",
+          "return_pct": "+0.81%",
+          "strategy_id": "fixed-size-probe-0001"
+        },
+        {
+          "excess": "-2.89",
+          "market_pct": "+6.87%",
+          "return_pct": "+3.97%",
+          "strategy_id": "tiny-fixed-size-001"
+        }
+      ],
+      "target": {
+        "covered": 19,
+        "met": false,
+        "trading_days": 60
+      }
+    },
+    "gate": {
+      "check_classes": 53
+    },
+    "record": {
+      "cycles": 2060,
+      "first": "2026-06-09",
+      "journal": "runtime/autopoiesis/journal.jsonl",
+      "last": "2026-10-09",
+      "trading_days": 19
+    },
+    "signals": {
+      "hypotheses": 129,
+      "present": true,
+      "rows": 173,
+      "verdicts": {
+        "CONFOUNDED": 2,
+        "EXPLORATORY": 8,
+        "NOT_SIGNIFICANT": 151,
+        "SURVIVES": 6,
+        "UNDERPOWERED": 6
+      }
+    },
+    "tests": {
+      "test_files": 80,
+      "tests": 1177
+    }
+  },
+  "generated_at": "2026-10-11T02:01:35.820387+00:00"
+}

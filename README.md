@@ -7,7 +7,7 @@ broker's own records — and retires the ones that cannot.**
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![Paper trading only](https://img.shields.io/badge/trading-paper%20only-orange.svg)](#safety)
-[![Gate: 52 check classes](https://img.shields.io/badge/gate-52%20check%20classes-brightgreen.svg)](tools/verify.py)
+[![Gate: 53 check classes](https://img.shields.io/badge/gate-53%20check%20classes-brightgreen.svg)](tools/verify.py)
 [![Lint: ruff](https://img.shields.io/badge/lint-ruff-261230.svg)](ruff.toml)
 [![Types: mypy](https://img.shields.io/badge/types-mypy-2a6db2.svg)](pyproject.toml)
 [![Broker: Alpaca](https://img.shields.io/badge/broker-Alpaca%20paper-yellow.svg)](https://alpaca.markets/)
@@ -58,7 +58,7 @@ yourself. Autopoiesis is built around that second part:
 | **Constrained strategy DSL** | New strategies are parameter-only rules (`RULE`, `TREND_FOLLOW`, …) checked by a schema. The model never writes code. |
 | **Bounded short selling** | SHORT/COVER sit behind `AUTOPOIESIS_SHORTS` (`off` / `shadow` / `paper`), with their own Guardian rule. Off by default. |
 | **Broker-verified accounting** | FIFO lot ledger, realised and unrealised PnL, attribution to model vs baseline, and a SPY buy-and-hold benchmark on the same capital and window. |
-| **Self-checking** | `make verify` runs 52 check classes over code *and* the running system; `make verify-self-test` breaks the gate on purpose to prove it can fail. A watchdog restarts the daemon, and a report is written after every close. |
+| **Self-checking** | `make verify` runs 53 check classes over code *and* the running system; `make verify-self-test` breaks the gate on purpose to prove it can fail. A watchdog restarts the daemon, and a report is written after every close. |
 | **Reproducible** | One script clones the committed tree into a new venv with no credentials and runs everything; its log is committed. |
 
 ## How it works
@@ -195,7 +195,8 @@ measure and it is not an edge. `make research-vix-ab` reproduces the table.
 
 ## Quick start
 
-No broker account, model or credentials are needed for any of this.
+No broker account, model or credentials are needed for any of this. Every command below exits 0
+from a fresh clone with none of them.
 
 ```bash
 git clone https://github.com/liuyime2/autopoiesis.git && cd autopoiesis
@@ -204,11 +205,23 @@ make install                    # pip install -e ".[dev]"
 make check                      # ruff + mypy + the test suite
 make smoke-offline              # config and CLI end to end, no broker contacted
 python examples/minimal_cycle.py  # the Guardian approving one order and refusing another
-make verify                     # the full gate: 52 check classes
+make verify                     # the full gate: 53 check classes
 ```
 
 On Debian or Ubuntu, run `sudo apt install python3-venv` first. conda also works: the `make`
 targets use an active venv first, then conda, and need neither.
+
+`make release-check` builds the source distribution and the wheel and installs the sdist into a
+clean virtualenv, so that path is checked rather than assumed: it was how an sdist missing
+`examples/` and `configs/` was found, while `tar tzf` reported a healthy archive and the fifth
+command above was not in it.
+
+**From a package rather than from a clone.** `pip install autopoiesis` (the current release is
+`0.1.0a1`, a pre-release, so `--pre` is needed) gives the `autopoiesis` console script, the
+importable package, `examples/` and `configs/`. It does **not** give the gate, the test suite or
+the `make` targets: those are a property of the source tree — they need `src/` on the path and a
+`runtime/` directory a package install does not create. The README's quick start is clone-based
+for that reason, and CI runs the release check on the packaged path separately.
 
 ## Paper trading
 
@@ -249,7 +262,7 @@ Every task is a `make` target.
 |---|---|---|
 | `make check` | lint + mypy + tests | no |
 | `make smoke-offline` | config and CLI end to end with `--skip-broker` | no |
-| `make verify` | the gate: 52 check classes; `CLASS=<name>` re-runs one | no¹ |
+| `make verify` | the gate: 53 check classes; `CLASS=<name>` re-runs one | no¹ |
 | `make verify-self-test` | breaks the gate on purpose and checks it fails | no |
 | `make smoke` | one real cycle against the paper account | yes |
 | `make fast` | check + smoke + the gate | yes |
@@ -341,7 +354,7 @@ src/autopoiesis/          the package (import name autopoiesis). 43 modules, 3 e
   models.py             shared schema, imported by 23 modules
   research/             walk-forward backtests; production may not import it
 tools/                  the gate (verify.py), benchmark, daily report, probes, systemd templates
-tests/autopoiesis/        80 test files
+tests/autopoiesis/        81 test files
 examples/               the smallest runnable example, no broker needed
 configs/                paper.env.example: every environment variable with its default
 docs/                   ARCHITECTURE.md, evidence/, history/
@@ -354,7 +367,9 @@ autopoiesis                operator script: services, logs, owner history
 - [`tools/README.md`](tools/README.md): every tool and what it checks.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): how to propose a change, and the rules a change must keep.
 - [`AGENTS.md`](AGENTS.md): the working principles every change follows, human or AI.
-- [`CHANGELOG.md`](CHANGELOG.md): what changed.
+- [`docs/site/`](docs/site/index.html): the public site — overview, evidence, architecture,
+  safety and how to build it. Generated from `docs/site/figures.json`, which
+  `make refresh-figures` produces by running the commands that produced each figure.
 - [`CHANGELOG.md`](CHANGELOG.md): what changed, by release.
 - The dated record — what was found, measured and retracted, one plan per change — is not part
   of the repository. It is kept outside it, on the operator's machine, because it describes the

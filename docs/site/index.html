@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>autopoiesis — Overview</title>
+<meta name="description" content="A self-evolving LLM paper-trading agent that grades its own strategies against broker evidence and retires the ones that do not earn their place.">
+<style>
+:root{
+  --bg:#fbfaf7; --surface:#ffffff; --fg:#1b1e22; --dim:#5b636b; --line:#e2ded5;
+  --accent:#0f6f5c; --accent-soft:#e6f2ef; --warn:#8a5a00; --warn-soft:#fdf3e0;
+  --fail:#8f2f26; --fail-soft:#fbeceb;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#14171a; --surface:#1b1f23; --fg:#ecebe7; --dim:#a3abb3; --line:#2c3237;
+    --accent:#5ecfae; --accent-soft:#16302a; --warn:#e0b25f; --warn-soft:#2e2513;
+    --fail:#e8837a; --fail-soft:#2e1a18;
+  }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto} *{transition:none!important}}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent)}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px;border-radius:3px}
+.skip{position:absolute;left:-9999px;top:0;background:var(--surface);padding:.5rem 1rem}
+.skip:focus{left:0}
+header.site{background:var(--surface);border-bottom:1px solid var(--line);padding:1.5rem 2rem}
+header.site h1{margin:0;font-size:1.35rem;letter-spacing:-.01em}
+header.site .tag{margin:.35rem 0 0;color:var(--dim);font-size:.95rem;max-width:60rem}
+nav.site{display:flex;gap:1.25rem;flex-wrap:wrap;margin-top:1rem;font-size:.95rem}
+nav.site a{color:var(--dim);text-decoration:none;padding:.25rem 0;border-bottom:2px solid transparent}
+nav.site a:hover{color:var(--fg)}
+nav.site a[aria-current]{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+main{max-width:66rem;margin:0 auto;padding:2rem}
+h2{font-size:1.15rem;margin:2.5rem 0 .5rem;letter-spacing:-.01em}
+h3{font-size:1rem;margin:1.75rem 0 .35rem}
+p{max-width:60rem}
+.note{color:var(--dim);font-size:.92rem;max-width:60rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1rem;margin:1.25rem 0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:.6rem;padding:1rem}
+.card dt{color:var(--dim);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin:0}
+.card dd{margin:.3rem 0 0;font-size:1.55rem;font-weight:650;font-variant-numeric:tabular-nums}
+.card p{margin:.4rem 0 0;color:var(--dim);font-size:.85rem}
+table{border-collapse:collapse;width:100%;margin:.75rem 0 1.5rem;font-size:.95rem}
+th,td{padding:.5rem .65rem;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.04em}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.badge{display:inline-block;padding:.1rem .55rem;border-radius:1rem;font-size:.78rem;font-weight:650;
+  background:var(--accent-soft);color:var(--accent)}
+.badge.warn{background:var(--warn-soft);color:var(--warn)}
+.badge.fail{background:var(--fail-soft);color:var(--fail)}
+.badge.mute{background:var(--line);color:var(--dim)}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:.5rem;padding:1rem;
+  overflow-x:auto;font-size:.88rem}
+ul{padding-left:1.25rem;max-width:60rem}
+li{margin:.3rem 0}
+footer.site{border-top:1px solid var(--line);margin-top:3rem;padding:1.5rem 2rem;color:var(--dim);
+  font-size:.85rem}
+.tablewrap{overflow-x:auto}
+@media (max-width:48rem){
+  header.site,main,footer.site{padding-left:1rem;padding-right:1rem}
+  .card dd{font-size:1.3rem}
+}
+</style></head><body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site">
+<h1>autopoiesis</h1>
+<p class="tag">A self-evolving LLM paper-trading agent, graded against its own broker evidence. Paper only: the Guardian's limits cannot be weakened by any configuration, and every number on this site names the command that produced it.</p>
+<nav class="site" aria-label="Pages"><a href="index.html" "aria-current"="page">Overview</a><a href="evidence.html">Evidence</a><a href="architecture.html">Architecture</a><a href="safety.html">Safety</a><a href="build.html">Build it</a></nav>
+</header>
+<main id="main">
+<p>A research instrument, not a product. It trades a paper account, grades its own strategies against broker-confirmed fills, retires the ones that do not earn their place, and publishes every claim it makes with the command that produced it.</p>
+<p class="note">Every figure here is published from <code>docs/site/figures.json</code>, and each names the command that produced it. There are no screenshots: a reader can re-run a command and cannot re-derive an image.</p>
+<dl class="grid">
+<div class="card"><dt>agent, after cost</dt><dd>+1.81%</dd><p>return on deployed capital over the record window</p></div>
+<div class="card"><dt>vs SPY holding</dt><dd>-0.88 pts</dd><p>excess on the same capital and the same window</p></div>
+<div class="card"><dt>trading days on record</dt><dd>19</dd><p>against a 60-day target</p></div>
+<div class="card"><dt>gate</dt><dd>53 classes</dd><p>1177 tests across 80 files</p></div>
+</dl>
+<h2>What it has shown</h2>
+<ul>
+<li>The accounting is real: broker-confirmed fills, a FIFO lot ledger, and a Guardian whose limits cannot be weakened by any configuration value.</li>
+<li>The gate can fail, and is made to fail on purpose to prove it. <code>make verify-self-test</code> plants the defects each class exists to catch, including a NaN limit that silently stops comparing.</li>
+<li>The research stage is autonomous: a scheduled job fetches real bars, sweeps candidates, and records every trial, and the evidence bar rises with the number tried.</li>
+</ul>
+<h2>What it has not shown</h2>
+<ul>
+<li><strong>That it beats holding.</strong> +1.81% after cost against SPY +2.69% over 19 of 60 trading days. The denominator is printed with the number.</li>
+<li><strong>Any directional edge.</strong> 129 hypotheses about what predicts returns have been through a family-wise gate. Volatility is the one judgment that holds, and it is a statement about risk, not direction.</li>
+<li><strong>Live trading.</strong> Not present. <code>live</code> mode is refused by the configuration loader.</li>
+</ul>
+</main>
+<footer class="site">
+<p>Figures published 2026-10-11 02:01 UTC from <code>docs/site/figures.json</code>. A number that cannot be computed reads UNKNOWN, which is a different claim from zero.</p>
+<p>Apache-2.0. Paper trading only; no live venue is reachable from this code.</p>
+</footer>
+</body></html>

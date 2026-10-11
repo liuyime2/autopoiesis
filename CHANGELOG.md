@@ -1,9 +1,90 @@
 # Changelog
 
 Notable changes, newest first. The reasoning and the measurements behind each one are in
-the commit message; the long-form record is in [`docs/history/`](docs/history/README.md).
+the commit message. The dated argument trail is not part of the repository - it is kept outside
+it, on the operator's machine, because it describes the system's history rather than the system;
+`git log` carries the same commits.
 
 ## Unreleased
+
+## 0.1.0a1 - 2026-10-10
+
+The first published build of the paper-trading agent. `pyproject.toml` version `0.1.0a1`,
+tag `v0.1.0a1`, classifier `Development Status :: 3 - Alpha`.
+
+**What this release is.** A research instrument: one execution path
+(`cli → daemon → loop → guardian → executor → journal`), an append-only journal as the only
+source of truth, broker-verified paper accounting, a deterministic Guardian with hard limits,
+and an evolution loop that can retire its own strategies on recorded evidence. Everything below
+was produced by running a command on this host, and the command is named so it can be run again.
+
+### Verified on this build
+
+- The gate: `make verify` reports **53 check classes, 0 failed**, over 1853 test executions in 80
+  files. `pytest` reports **1177 passed**; `ruff check src/ tools/ tests/ examples/` and
+  `mypy src/autopoiesis` are clean.
+- The credential-free path claimed by the README quick start. In a fresh clone with no broker
+  credentials, no `runtime/` and no env file: `make install`, `make check`, `make smoke-offline`,
+  `examples/minimal_cycle.py` and `make verify` all exit 0.
+- The package installs and runs. `python -m build --sdist --wheel` succeeds; the sdist carries
+  the package, `examples/` and `configs/`; installing that sdist in a clean virtualenv imports
+  `autopoiesis`, runs `examples/minimal_cycle.py` and exposes the `autopoiesis` console script.
+- The journal no longer deletes its own history when a generation reaches the rotation horizon -
+  it is moved into `runtime/autopoiesis/journal-archive/` and read back first, and a rotation
+  that cannot archive raises instead of unlinking.
+- The scheduled research chain runs end to end: `quant-research.service` fetched 24,287 real
+  five-minute SPY bars, searched 134,425 bars of that one instrument over 11 candidates and
+  recorded every trial with its symbol. The bar fetch had been failing on a mixed cache for a
+  full day before this.
+
+### Not verified, and not claimed
+
+- **Profitability.** `make benchmark` reports the agent **+1.81%** on deployed capital after cost
+  against SPY **+2.69%** over the same window, over **19 of a targeted 60** trading days. The
+  agent is behind, with its denominator printed. Exit code 1, which is the contract: 0 met,
+  1 behind, 2 nothing to measure.
+- **Any directional edge.** 61 hypotheses about what predicts returns have been through a
+  family-wise gate; none carried a direction. The one judgment that holds is volatility, which
+  is a statement about risk, not direction.
+- **The VIX floor is not a Sharpe improvement.** 4 of 4 instruments significant, and an A/B
+  test against itself shows it buys back drawdown with return. It is fused and labelled as that.
+- **Live trading.** Not present. `AUTOPOIESIS_MODE=live` is refused by the loader, and the
+  Guardian's limits are not weakenable by any configuration value - a non-finite limit is now
+  rejected where it is read and where the Guardian is constructed.
+
+### Fixed in this release
+
+- A NaN risk limit silently disabled the Guardian: every comparison against it is False, so a
+  10,000-unit buy that a 5,000 limit correctly refused was **approved**. Rejected at both the
+  loader and the Guardian's constructor.
+- Cost was defined three times, two of them wrong. The round-trip charge was halved a second
+  time (0.18 owed against 35.82 charged basis on this record) and the benchmark computed its own
+  figure. One definition now, from the evaluator; the reported agent figure fell 0.04 points
+  as a result.
+- `make daily-report` called `_headline(report)` after the verdict moved to the agent level, so
+  the entry point a timer invokes raised `TypeError` while its unit tests stayed green.
+- The research merge keyed deduplication on the timestamp alone. Correct with five SPY files,
+  wrong with seventeen instruments: 852,937 of 988,704 bars were dropped and the survivors were
+  fragments of different assets interleaved. The search is now scoped to one instrument, and the
+  instrument is part of a trial's identity.
+- The read-only panel read only the live journal generation and reported 881 cycles where the
+  record holds 2,060, described `PAUSED` as terminal when the daemon reopens it, and judged the
+  daemon by the heartbeat's own status word. It is now one snapshot per run, read across every
+  generation, judged by age and pid, with atomic writes and tests.
+- An empty strategy library failed the gate on a fresh clone, contradicting the README's own
+  claim that no credentials are needed for the quick start.
+- The operator script was still named `minictrl` after the project renamed to `autopoiesis`.
+
+### Known gaps
+
+- 29 shares an agent order sold beyond the agent's own lots are priced and reported separately;
+  their gain is **not** in any total above, and the gap's direction is unknown.
+- 1077 of 2060 decisions cannot be attributed to a model or a rule, because they predate
+  provenance capture.
+- No off-machine copy of the journal exists. The archive keeps the record from being deleted on
+  this host; nothing has shipped it anywhere else, and no test claims otherwise.
+- No browser, accessibility or responsive acceptance of the static panel. It is a snapshot, not
+  a deployed site, and it is published nowhere.
 
 ### Added
 - `make benchmark`: the falsifiable target - beat SPY buy-and-hold within the risk budget,
@@ -17,7 +98,7 @@ the commit message; the long-form record is in [`docs/history/`](docs/history/RE
   rewritten.
 - `autopoiesis` and `make` run in a plain venv; conda is optional.
 - CI runs mypy, matching `make check`.
-- The gate has 52 check classes. `fact-docs-current`, which made archived audit documents
+- The gate has 53 check classes. `fact-docs-current`, which made archived audit documents
   restate live counts, is retired; `screen-direction-neutral` is new.
 - The offline screen reads each strategy against what its days alone would have scored,
   rejecting only when it is worse beyond noise.

@@ -80,7 +80,8 @@ endif
 .DEFAULT_GOAL := help
 .PHONY: help setup install check lint type test smoke smoke-offline fast fast-no-broker daily-report benchmark \
         verify verify-self-test doctor audit integrity classes classes-list \
-        run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc
+        run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc \
+        site refresh-figures benchmark-json dist release-check
 
 help:
 	@echo "Interpreter: $(if $(strip $(CONDA_RUN)),$(CONDA_BIN) run -n $(CONDA_ENV),$$(command -v python3) - active environment)$(RUN_HINT)"
@@ -388,3 +389,66 @@ reproduce:
 clean: clean-pyc
 	@rm -rf .pytest_cache .ruff_cache .mypy_cache
 	@find . -name "*.egg-info" -type d -prune -exec rm -rf {} +
+
+# --- release -------------------------------------------------------------------------------
+#
+# A release is a claim about what a stranger can do with the published artefacts, so it is
+# verified by *installing* them rather than by listing them. `tar tzf` says what is in the sdist;
+# it does not say the thing works once it is out of the archive, and an sdist that is missing
+# `examples/` is exactly the failure this target was added for - measured as zero example files
+# in the 0.1.0 build, while `examples/minimal_cycle.py` is the fifth command in the README's
+# quick start.
+#
+# The wheel is built too, because a package that builds as an sdist and fails as a wheel is a
+# package half of whose consumers cannot install.
+
+dist:
+	@$(PY) -m pip install -q build
+	@rm -rf dist
+	@$(PY) -m build --sdist --wheel
+	@echo "built:" && ls -1 dist/
+
+# Install the sdist just built into a throwaway virtualenv and run what the README claims an
+# installed copy can do. The venv is under runtime/ so `clean` removes it and the repository is
+# untouched.
+release-check: dist
+	@rm -rf runtime/release-check
+	@$(PY) -m venv runtime/release-check
+	@runtime/release-check/bin/pip install -q dist/*.tar.gz
+	@runtime/release-check/bin/python -c "import autopoiesis, autopoiesis.cli" \
+		&& echo "import from the installed sdist: ok"
+	@# Unpacked rather than globbed: `dist/autopoiesis-*` matches the wheel as well as the sdist,
+	@# and a shell glob that expands to two words is a `cd` that fails for a reason unrelated to
+	@# what is being checked.
+	@rm -rf runtime/release-src && mkdir -p runtime/release-src
+	@tar -xzf dist/autopoiesis-*.tar.gz -C runtime/release-src
+	@runtime/release-check/bin/python runtime/release-src/autopoiesis-*/examples/minimal_cycle.py > /dev/null \
+		&& echo "examples/minimal_cycle.py from the sdist: ok"
+	@test -f runtime/release-src/autopoiesis-*/configs/paper.env.example \
+		&& echo "configs/paper.env.example from the sdist: ok"
+	@test -f runtime/release-src/autopoiesis-*/examples/minimal_cycle.py \
+		&& echo "examples/ from the sdist: ok"
+	@echo "release-check: the sdist installs and runs what the README claims it runs"
+
+
+# --- the public site ------------------------------------------------------------------------
+#
+# The site is a published claim, so the figures are *published*: `make refresh-figures` runs the
+# commands on an operator's machine and writes docs/site/figures.json, and `make site` renders
+# from that file. Both are committed together.
+#
+# Why not read runtime state at generation time: the site must build on a fresh clone, where
+# `runtime/` does not exist, and reading the live journal would publish one deployment's numbers
+# as the project's. The date field in the file is what tells a reader how old a published
+# measurement is.
+
+site:
+	@$(PY) tools/project_site.py
+
+refresh-figures:
+	@$(PY) tools/figures.py
+	@$(PY) tools/project_site.py
+	@echo "figures published; commit docs/site/figures.json with the pages it produced"
+
+benchmark-json:
+	@$(PY) tools/benchmark_json.py

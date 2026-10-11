@@ -137,6 +137,8 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_config_finiteness.py": ("unit-integration", "guardian-bypass-prevention"),
     # The read-only panel is a public surface; it described a system it had not read.
     "test_status_page.py": ("unit-integration", "data-integrity"),
+    # The public site is a published claim: its figures must match the published file.
+    "test_public_site.py": ("unit-integration", "data-integrity"),
     # Rotation is the one mechanism that can delete the only source of truth, so the
     # reconstruction property across rotations is gated as a durability class, not just a unit test.
     "test_journal_rotation_recovery.py": ("unit-integration", "crash-recovery", "pnl-accounting"),
@@ -297,6 +299,29 @@ def _tail(text: str, lines: int = 12) -> str:
 # --------------------------------------------------------------------------
 # Non-pytest checks
 # --------------------------------------------------------------------------
+
+#: A PEP 440 version, in the shape projects actually use. Not the full grammar - `epoch`,
+#: `post` and the wildcards are all absent here on purpose, because a version this project
+#: declares has none of them and the check is about "is this a number pip will honour", not
+#: "is this every number pip will honour".
+_PEP440 = re.compile(r"^\d+(\.\d+)*((a|b|rc)\d+)?(\.post\d+)?(\.dev\d+)?$")
+_PACKAGING_VERSION_CACHE: dict[str, str] = {}
+
+
+def packaging_version(raw: str) -> str:
+    """`raw` as pip would normalise it, without importing a packaging library.
+
+    `packaging` is not a runtime dependency and must not become one for a gate check. The two
+    normalisations that matter here are the ones an author actually makes by hand: a hyphen
+    before the pre-release marker (`0.1.0-alpha`), and an explicit separator where PEP 440 wants
+    none. Everything else is passed through, because a version that differs in some other way is
+    a version the regex above has already rejected.
+    """
+    if raw not in _PACKAGING_VERSION_CACHE:
+        candidate = raw.strip().lower().replace("-", "")
+        _PACKAGING_VERSION_CACHE[raw] = candidate
+    return _PACKAGING_VERSION_CACHE[raw]
+
 
 def check_software_supply_chain() -> Result:
     """No credential may ever be committed, and the tree must not be tracking
@@ -1453,6 +1478,68 @@ def check_figures_quoted_in_config_comments() -> Result:
         "config-comment-figures-true", PASS,
         f"ruff.toml's measured figures hold: verify.py {verify_lines:,} lines, "
         f"{found.group(1) if found else '?'} BLE001 findings, {cli_imports} deferred imports",
+    )
+
+
+def check_release_is_declarable() -> Result:
+    """The version in `pyproject.toml` is a legal PEP 440 version, is a pre-release, and has a
+    CHANGELOG entry that names the same number.
+
+    Three ways a release goes wrong that no other check sees:
+
+    - An illegal version string. `0.1.0-alpha` is not PEP 440; pip normalises it to `0.1.0a0`,
+      which is a number nobody chose, and the artefact published under it does not match the tag.
+    - A version `pip install` would pick over a later stable one. `0.1.0` implies an interface
+      stability the project has not claimed, so a pre-release marker is the honest spelling and
+      the classifier already says Alpha.
+    - A CHANGELOG whose latest entry describes a different version, which is how a release ships
+      with last month's notes. The entry is required to name the declared version as `v<version>`
+      or `<version>`, so the file and the metadata cannot drift apart silently.
+
+    Skipped rather than passed when either file is absent: an absent pyproject has no version to
+    declare, and an absent CHANGELOG has no entry to compare - neither is a release that went
+    wrong.
+    """
+    pyproject = ROOT / "pyproject.toml"
+    changelog = ROOT / "CHANGELOG.md"
+    if not pyproject.exists():
+        return Result("release-is-declarable", SKIP, "pyproject.toml is absent")
+    if not changelog.exists():
+        return Result("release-is-declarable", SKIP, "CHANGELOG.md is absent")
+
+    text = pyproject.read_text(encoding="utf-8")
+    match = re.search(r'^version = "([^"]+)"', text, re.MULTILINE)
+    if not match:
+        return Result("release-is-declarable", FAIL, "pyproject.toml declares no version")
+    version = match.group(1)
+
+    problems: list[str] = []
+    if not _PEP440.match(version):
+        problems.append(
+            f"version {version!r} is not a valid PEP 440 version; a normalised form is "
+            f"{packaging_version(version)!r}, which is a number nobody chose"
+        )
+    # `dev` and `post` are also pre-releases in PEP 440's ordering, but neither is what an alpha
+    # is: `a`/`b`/`rc` are, and the classifier says Alpha.
+    elif not re.search(r"(a|b|rc)\d+$", version):
+        problems.append(
+            f"version {version!r} carries no pre-release marker, so `pip install autopoiesis` "
+            "would take it over a later stable release of the same package"
+        )
+
+    notes = changelog.read_text(encoding="utf-8")
+    headings = re.findall(r"^## (.+)$", notes, re.MULTILINE)
+    current = [h for h in headings if version in h or f"v{version}" in h]
+    if not current:
+        problems.append(
+            f"CHANGELOG.md has no entry naming version {version}; the newest headings are "
+            f"{[h.strip() for h in headings[:2]]}"
+        )
+    if problems:
+        return Result("release-is-declarable", FAIL, "; ".join(problems[:2]))
+    return Result(
+        "release-is-declarable", PASS,
+        f"version {version} is a legal pre-release and CHANGELOG.md names it",
     )
 
 
@@ -3010,6 +3097,8 @@ BESPOKE_CHECK_NAMES = (
     "one-credentials-path",
     "no-unreachable-production-code",
     "config-comment-figures-true",
+    # The published artefacts: a legal PEP 440 pre-release version that CHANGELOG.md names.
+    "release-is-declarable",
     "unit-templates-portable",
     "fact-figures-match",
     "list-count-matches-run",
@@ -3028,6 +3117,8 @@ REPOSITORY_CHECK_CLASSES: frozenset[str] = frozenset({
       "class-coverage",
     "test-coverage-map",
     "docs-not-stale",
+    # The published artefacts: a legal pre-release version that CHANGELOG.md actually names.
+    "release-is-declarable",
     "software-supply-chain",
     "production-research-separation",
     "home-independence",
@@ -3471,6 +3562,7 @@ def main() -> int:
     results.append(_safe(check_known_classes_run, "class-coverage"))
     results.append(_safe(check_software_supply_chain, "software-supply-chain"))
     results.append(_safe(check_docs_not_stale, "docs-not-stale"))
+    results.append(_safe(check_release_is_declarable, "release-is-declarable"))
     results.append(_safe(check_production_research_separation, "production-research-separation"))
     results.append(_safe(check_home_independence, "home-independence"))
     results.append(_safe(check_units_are_where_systemd_looks, "units-where-systemd-looks"))
