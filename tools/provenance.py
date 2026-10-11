@@ -84,6 +84,63 @@ def _literal(value):
     return value
 
 
+def _research_fingerprints() -> list[str]:
+    """The dataset fingerprints the research ledger's latest trials were judged on.
+
+    A research result is a claim about a dataset, and the dataset has no version number - it is
+    whatever the broker's tape was on the day. The SHA-256 over ordered (timestamp, price) pairs is
+    what makes two runs' data comparable at all, and a provenance record that omits it lets two
+    verdicts be quoted side by side from tapes that were not the same one.
+    """
+    ledger = RUNTIME / "research_trials.jsonl"
+    if not ledger.exists():
+        return []
+    fingerprints: list[str] = []
+    try:
+        lines = ledger.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        value = row.get("fingerprint")
+        if isinstance(value, str) and value and value not in fingerprints:
+            fingerprints.append(value)
+        if len(fingerprints) >= 3:
+            break
+    return fingerprints
+
+
+def _daemon_state() -> dict[str, object]:
+    """The daemon's own last-known state, so a result can be read against what was running.
+
+    A figure from a run whose daemon was idling, or whose model had stopped answering, is a
+    different kind of figure from one produced while everything was live. The heartbeat is the only
+    place that knows, and a provenance record that omitted it forced a reader to assemble the answer
+    from two files and a timestamp.
+    """
+    path = RUNTIME / "heartbeat.json"
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {
+        "status": payload.get("status"),
+        "pid": payload.get("pid"),
+        "source_fingerprint": payload.get("source_fingerprint"),
+        "last_cycle_age_seconds": payload.get("last_cycle_age_seconds"),
+        "last_broker_ok": payload.get("last_broker_ok"),
+        "last_model_ok": payload.get("last_model_ok"),
+    }
+
+
 def main() -> int:
     out: list[str] = []
     add = out.append
@@ -174,12 +231,43 @@ def main() -> int:
             add(f"  last action:        {decision.get('action')} {decision.get('symbol')} qty {decision.get('quantity')}")
             add(f"  account equity:     {round(float(account.get('equity', 0)), 2)}")
             add(f"  portfolio value:    {round(float(account.get('portfolio_value', 0)), 2)}")
-            states = collections.Counter()
+            states: collections.Counter[str] = collections.Counter()
             for path in glob.glob(str(RUNTIME / "strategies" / "*.json")):
                 states[json.loads(open(path).read()).get("lifecycle")] += 1
             add(f"  strategy lifecycle: {dict(states)}")
     except Exception as exc:
         add(f"  (journal unavailable: {type(exc).__name__})")
+
+    # The research ledger's dataset fingerprints, and the daemon's state at the moment of this
+    # record. Both are separate files that a reader previously had to assemble by hand, and a result
+    # quoted without either cannot be checked: a verdict's value depends on the tape it was judged
+    # on, and its meaning depends on whether the system producing it was actually live.
+    add("")
+    add("## research data")
+    fingerprints = _research_fingerprints()
+    if not fingerprints:
+        add("  (no trial ledger on this host)")
+    else:
+        add("  dataset fingerprint, newest first:")
+        for value in fingerprints:
+            add(f"    {value}")
+
+    add("")
+    add("## daemon state at the time of this record")
+    daemon = _daemon_state()
+    if not daemon:
+        add("  (no heartbeat on this host)")
+    else:
+        add(f"  status:              {daemon.get('status')}")
+        add(f"  pid:                 {daemon.get('pid')}")
+        add(f"  source fingerprint:  {daemon.get('source_fingerprint')}")
+        age = daemon.get("last_cycle_age_seconds")
+        shown_age = "unknown"
+        if isinstance(age, (int, float)):
+            shown_age = str(round(float(age) / 3600, 1)) + "h"
+        add(f"  last cycle age:      {shown_age}")
+        add(f"  broker answered:     {daemon.get('last_broker_ok')}")
+        add(f"  model answered:      {daemon.get('last_model_ok')}")
 
     print("\n".join(out))
     return 0
