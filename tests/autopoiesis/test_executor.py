@@ -1,5 +1,10 @@
+from datetime import datetime, timezone
+
+import pytest
+
 from autopoiesis.executor import AlpacaPaperExecutor
-from autopoiesis.models import ExecutionResult, GuardianResult, TradeDecision
+from autopoiesis.journal import JsonlJournal
+from autopoiesis.models import ExecutionResult, GuardianResult, JournalEvent, TradeDecision
 
 
 class FakeAlpacaClient:
@@ -24,7 +29,8 @@ class FakeAlpacaClient:
 
 def test_executor_skips_hold_without_order():
     client = FakeAlpacaClient()
-    executor = AlpacaPaperExecutor(client=client, base_url="https://paper-api.alpaca.markets")
+    journal = JsonlJournal("unused.jsonl")
+    executor = AlpacaPaperExecutor(client=client, base_url="https://paper-api.alpaca.markets", journal=journal)
     decision = TradeDecision(symbol="SPY", action="HOLD", quantity=0, confidence=0.2, rationale="wait")
 
     result = executor.execute(decision, GuardianResult(approved=True, reason="approved"))
@@ -33,9 +39,10 @@ def test_executor_skips_hold_without_order():
     assert client.orders == []
 
 
-def test_executor_submits_approved_paper_buy_order():
+def test_executor_submits_approved_paper_buy_order(tmp_path):
     client = FakeAlpacaClient()
-    executor = AlpacaPaperExecutor(client=client, base_url="https://paper-api.alpaca.markets")
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    executor = AlpacaPaperExecutor(client=client, base_url="https://paper-api.alpaca.markets", journal=journal)
     decision = TradeDecision(symbol="SPY", action="BUY", quantity=2, confidence=0.7, rationale="trend")
 
     result = executor.execute(decision, GuardianResult(approved=True, reason="approved"), cycle_id="cycle-1")
@@ -44,6 +51,14 @@ def test_executor_submits_approved_paper_buy_order():
     assert result.order_id == "order-123"
     assert result.client_order_id is not None
     assert result.message == "accepted"
+    events = journal.read_events()
+    assert [event.event_type for event in events] == [
+        "ORDER_SUBMISSION_INTENT", "ORDER_SUBMISSION_ACKNOWLEDGED"
+    ]
+    assert events[0].payload["client_order_id"] == result.client_order_id
+    assert events[0].payload["action"] == "BUY"
+    assert events[0].payload["quantity"] == 2
+    assert events[1].payload["order_id"] == "order-123"
     assert client.orders == [
         {
             "symbol": "SPY",
@@ -56,7 +71,7 @@ def test_executor_submits_approved_paper_buy_order():
     ]
 
 
-def test_executor_captures_broker_fill_fields_when_returned():
+def test_executor_captures_broker_fill_fields_when_returned(tmp_path):
     class FilledClient(FakeAlpacaClient):
         def submit_order(self, **kwargs):
             self.orders.append(kwargs)
@@ -73,7 +88,10 @@ def test_executor_captures_broker_fill_fields_when_returned():
                 },
             )()
 
-    executor = AlpacaPaperExecutor(client=FilledClient(), base_url="https://paper-api.alpaca.markets")
+    executor = AlpacaPaperExecutor(
+        client=FilledClient(), base_url="https://paper-api.alpaca.markets",
+        journal=JsonlJournal(tmp_path / "journal.jsonl"),
+    )
     decision = TradeDecision(symbol="SPY", action="BUY", quantity=2, confidence=0.7, rationale="trend")
 
     result = executor.execute(decision, GuardianResult(approved=True, reason="approved"), cycle_id="cycle-1")
@@ -86,10 +104,77 @@ def test_executor_captures_broker_fill_fields_when_returned():
 
 def test_executor_refuses_non_paper_base_url():
     client = FakeAlpacaClient()
+    journal = JsonlJournal("unused.jsonl")
 
     try:
-        AlpacaPaperExecutor(client=client, base_url="https://api.alpaca.markets")
+        AlpacaPaperExecutor(client=client, base_url="https://api.alpaca.markets", journal=journal)
     except ValueError as exc:
         assert "paper" in str(exc)
     else:
         raise AssertionError("expected paper URL validation")
+
+
+def test_submit_timeout_is_durable_unknown_not_error(tmp_path):
+    class AcceptedButLostResponse(FakeAlpacaClient):
+        def submit_order(self, **kwargs):
+            self.orders.append(kwargs)
+            raise TimeoutError("fake test: accepted by broker, response lost")
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    client = AcceptedButLostResponse()
+    executor = AlpacaPaperExecutor(
+        client=client, base_url="https://paper-api.alpaca.markets", journal=journal
+    )
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=1, confidence=0.8, rationale="test")
+
+    result = executor.execute(decision, GuardianResult(approved=True, reason="approved"), cycle_id="cycle-1")
+
+    assert result.status == "SUBMISSION_UNKNOWN"
+    assert client.orders
+    events = journal.read_events()
+    assert [event.event_type for event in events] == [
+        "ORDER_SUBMISSION_INTENT", "ORDER_SUBMISSION_UNKNOWN"
+    ]
+    assert events[0].payload["client_order_id"] == events[1].payload["client_order_id"]
+
+
+def test_intent_append_failure_prevents_broker_submit(tmp_path, monkeypatch):
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    client = FakeAlpacaClient()
+    executor = AlpacaPaperExecutor(
+        client=client, base_url="https://paper-api.alpaca.markets", journal=journal
+    )
+
+    def fail_intent(event):
+        raise OSError("simulated fsync failure")
+
+    monkeypatch.setattr(journal, "append_event", fail_intent)
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=1, confidence=0.8, rationale="test")
+
+    with pytest.raises(OSError, match="fsync"):
+        executor.execute(decision, GuardianResult(approved=True, reason="approved"), cycle_id="cycle-1")
+    assert client.orders == []
+
+
+def test_unresolved_intent_blocks_every_later_non_hold_submission(tmp_path):
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    journal.archive_manifest_status()
+    journal.append_event(JournalEvent(
+        event_id="intent-existing",
+        event_type="ORDER_SUBMISSION_INTENT",
+        timestamp=datetime.now(tz=timezone.utc),
+        status="ACCEPTED",
+        cycle_id="cycle-old",
+        payload={"client_order_id": "cid-existing", "symbol": "QQQ", "quantity": 1},
+    ))
+    client = FakeAlpacaClient()
+    executor = AlpacaPaperExecutor(
+        client=client, base_url="https://paper-api.alpaca.markets", journal=journal
+    )
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=1, confidence=0.8, rationale="test")
+
+    result = executor.execute(decision, GuardianResult(approved=True, reason="approved"), cycle_id="cycle-2")
+
+    assert result.status == "SKIPPED"
+    assert "unresolved" in result.message
+    assert client.orders == []

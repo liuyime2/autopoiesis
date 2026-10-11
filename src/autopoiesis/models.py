@@ -37,6 +37,7 @@ JournalEventType = Literal[
     "CURRICULUM_FAILED",
     "STRATEGY_ADMISSION_REVIEWED",
     "ORDER_RECONCILIATION_REVIEWED",
+    "ORDER_RECONCILIATION_FAILED",
     "BROKER_EVIDENCE_INGESTED",
     "PNL_EVIDENCE_RECORDED",
     "PNL_EVIDENCE_FAILED",
@@ -49,6 +50,12 @@ JournalEventType = Literal[
     "KNOWLEDGE_ARTIFACT_ADMISSION_REVIEWED",
     "CYCLE_FAILED",
     "ORDER_FILL_CONFIRMED",
+    "ORDER_SUBMISSION_INTENT",
+    "ORDER_SUBMISSION_ACKNOWLEDGED",
+    "ORDER_SUBMISSION_UNKNOWN",
+    "ORDER_SUBMISSION_RESOLVED",
+    "ORDER_SUBMISSION_MANUALLY_RESOLVED",
+    "ORDER_FILL_SNAPSHOT",
 ]
 JournalEventStatus = Literal["SUCCESS", "FAILED", "ACCEPTED", "REJECTED", "SKIPPED"]
 StrategyParameter = str | int | float | bool
@@ -836,6 +843,7 @@ class EvaluationReport(BaseModel):
     #: A count, never a PnL contribution: a shadow order proves the path ran,
     #: not that money moved. Kept here so the stage is visibly exercised.
     shadowed_orders: int = Field(default=0, ge=0)
+    unresolved_submissions: int = Field(default=0, ge=0)
     execution_errors: int = Field(ge=0)
     error_count: int = Field(ge=0)
     guardian_approved: int = Field(ge=0)
@@ -1098,7 +1106,15 @@ class ExecutionResult(BaseModel):
     # distinct value for the same reason SHADOWED is: anything branching on this field
     # that does not know REPLAYED will not count it as executed, which is the safe
     # default. A replayed fill is not a broker fill and must never enter the PnL ledger.
-    status: Literal["SKIPPED", "SUBMITTED", "REJECTED", "ERROR", "SHADOWED", "REPLAYED"]
+    status: Literal[
+        "SKIPPED",
+        "SUBMITTED",
+        "REJECTED",
+        "ERROR",
+        "SUBMISSION_UNKNOWN",
+        "SHADOWED",
+        "REPLAYED",
+    ]
     order_id: str | None
     client_order_id: str | None = None
     filled_quantity: float = Field(ge=0)

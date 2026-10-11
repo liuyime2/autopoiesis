@@ -167,3 +167,58 @@ def test_help_renders_without_crashing(capsys):
     # The flags an operator needs to discover the system.
     for flag in ("--daemon", "--status", "--doctor", "--once"):
         assert flag in out, f"{flag} missing from --help output"
+
+
+def test_archive_baseline_attestation_requires_and_records_operator_evidence(tmp_path, monkeypatch, capsys):
+    from autopoiesis import cli
+
+    cfg = config(tmp_path)
+    cfg.journal_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg.journal_path.write_text('{"malformed":\n', encoding="utf-8")
+    # Existing malformed history cannot be attested as a trusted baseline.
+    monkeypatch.setattr(cli.AgentConfig, "from_env", classmethod(lambda cls: cfg))
+    monkeypatch.setenv("AUTOPOIESIS_OPERATOR_ID", "operator-1")
+    monkeypatch.setenv("AUTOPOIESIS_EVIDENCE_REFERENCE", "ticket-123")
+    monkeypatch.setenv("AUTOPOIESIS_ATTESTATION_REASON", "reviewed archive evidence")
+
+    assert cli.main(["--attest-archive-baseline"]) == 1
+    assert "refused" in capsys.readouterr().out
+    assert not JsonlJournal(cfg.journal_path).archive_manifest_path.exists()
+
+
+def test_archive_baseline_attestation_accepts_complete_existing_history(tmp_path, monkeypatch, capsys):
+    from autopoiesis import cli
+
+    cfg = config(tmp_path)
+    journal = JsonlJournal(cfg.journal_path)
+    journal.append_event(JournalEvent(
+        event_id="baseline-event",
+        event_type="REFLECTION_FAILED",
+        timestamp=datetime.now(tz=timezone.utc),
+        status="FAILED",
+        message="baseline evidence",
+    ))
+    monkeypatch.setattr(cli.AgentConfig, "from_env", classmethod(lambda cls: cfg))
+    monkeypatch.setenv("AUTOPOIESIS_OPERATOR_ID", "operator-1")
+    monkeypatch.setenv("AUTOPOIESIS_EVIDENCE_REFERENCE", "ticket-123")
+    monkeypatch.setenv("AUTOPOIESIS_ATTESTATION_REASON", "reviewed archive evidence")
+
+    assert cli.main(["--attest-archive-baseline"]) == 0
+    assert JsonlJournal(cfg.journal_path).archive_manifest_status()["trusted"] is True
+    assert "trusted only from this recorded baseline forward" in capsys.readouterr().out
+
+
+def test_ambiguous_order_runbook_contains_fail_closed_operator_steps():
+    from pathlib import Path
+
+    runbook = Path(__file__).resolve().parents[2] / "docs/runbooks/ambiguous-order-recovery.md"
+    content = runbook.read_text(encoding="utf-8")
+    for required in (
+        "not proof that the POST was rejected",
+        "ORDER_SUBMISSION_INTENT.timestamp",
+        "ORDER_SUBMISSION_RESOLVED",
+        "ORDER_FILL_SNAPSHOT",
+        "Do not manually clear the intent",
+        "operator identity, timestamp, evidence reference",
+    ):
+        assert required in content

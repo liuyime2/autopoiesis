@@ -266,6 +266,35 @@ def test_daily_trade_count_ignores_holds_and_other_days(tmp_path):
     assert journal.count_submitted_on(target) == 1
 
 
+def test_daily_attempt_cap_counts_intents_without_cycle_and_deduplicates_cycle_projection(tmp_path):
+    day = date(2026, 6, 3)
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    base = make_record("cycle-attempt")
+    submitted = CycleRecord(
+        cycle_id=base.cycle_id,
+        snapshot=base.snapshot,
+        decision=base.decision.model_copy(update={"action": "BUY", "quantity": 1}),
+        guardian=base.guardian,
+        execution=ExecutionResult(
+            status="SUBMITTED", order_id="oid-1", client_order_id="cid-1",
+            filled_quantity=0, message="submitted",
+        ),
+    )
+    journal.append_event(JournalEvent(
+        event_id="intent-cid-1", event_type="ORDER_SUBMISSION_INTENT",
+        timestamp=datetime(2026, 6, 3, 14, 31, tzinfo=timezone.utc), status="ACCEPTED",
+        payload={"client_order_id": "cid-1", "symbol": "SPY", "action": "BUY", "quantity": 1},
+    ))
+    journal.append(submitted)
+    journal.append_event(JournalEvent(
+        event_id="intent-cid-2", event_type="ORDER_SUBMISSION_INTENT",
+        timestamp=datetime(2026, 6, 3, 14, 32, tzinfo=timezone.utc), status="ACCEPTED",
+        payload={"client_order_id": "cid-2", "symbol": "QQQ", "action": "BUY", "quantity": 1},
+    ))
+
+    assert journal.count_submitted_on(day) == 2
+
+
 def test_retained_window_reports_the_span_and_says_when_older_cycles_are_gone(tmp_path):
     """Rotation makes the journal a fragment, and nothing used to say so.
 

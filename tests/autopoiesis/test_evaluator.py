@@ -67,7 +67,7 @@ def make_record(
         execution=ExecutionResult(
             status=status,
             order_id=f"oid-{cycle_id}" if status == "SUBMITTED" else None,
-            client_order_id=f"cid-{cycle_id}" if status == "SUBMITTED" else None,
+            client_order_id=f"cid-{cycle_id}" if status in {"SUBMITTED", "SUBMISSION_UNKNOWN"} else None,
             filled_quantity=filled_quantity,
             message="test",
         ),
@@ -118,6 +118,18 @@ def test_evaluator_counts_statuses_guardian_reasons_actions_and_notional():
     assert report.market_open_cycles == 3
     assert report.market_closed_cycles == 1
     assert report.data_sources == {"alpaca": 4}
+
+
+def test_unresolved_submission_is_counted_without_becoming_error_or_fill():
+    report = DeterministicEvaluator().evaluate([
+        make_record(cycle_id="unknown", status="SUBMISSION_UNKNOWN", filled_quantity=0),
+    ])
+
+    assert report.unresolved_submissions == 1
+    assert report.execution_errors == 0
+    assert report.error_count == 0
+    assert report.submitted_orders == 0
+    assert report.filled_quantity == 0
 
 
 def test_evaluator_records_observed_equity_delta_without_calling_it_pnl():

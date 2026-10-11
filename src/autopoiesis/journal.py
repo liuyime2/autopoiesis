@@ -195,16 +195,19 @@ class JsonlJournal:
         return events
 
     def count_submitted_on(self, day) -> int:
-        """Count SUBMITTED executions on a UTC date without materialising records.
+        """Count potential paper order attempts on a UTC date without read_all().
 
         `TradeCounter` called read_all() on every trading cycle, so its cost was
         the entire journal: 0.73s at 16.9MB and growing linearly. A cheap
-        substring test first means only actual cycle lines get validated.
+        substring test first means only date-matching cycle/event lines get validated.
+        Durable intents and legacy ambiguous ERROR rows count conservatively, while a
+        CycleRecord for the same client order ID does not count a second time.
         """
-        if not self.path.exists():
+        paths = self.history_paths()
+        if not paths:
             return 0
-        count = 0
-        self.last_dropped_lines = 0
+        attempts: set[str] = set()
+        intent_ids: set[str] = set()
         date_text = day.isoformat()
         # Across every generation, not just the live file. This is the daily trade cap that
         # Guardian enforces, and it read only `journal.jsonl`: a rotation partway through a
@@ -217,13 +220,27 @@ class JsonlJournal:
         # sits below it and reads the file directly, and its own docstring still names it as a
         # reader that concluded the agent had never run. A limit that can silently stop
         # limiting is worse than no limit, because the report says it is in force.
-        paths = self.history_paths()
-        if not paths:
-            return 0
         with self._read_lock(), contextlib.ExitStack() as stack:
             handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in paths]
             for line in itertools.chain.from_iterable(handles):
-                if _EVENT_MARKER in line or _CYCLE_MARKER not in line or date_text not in line:
+                if date_text not in line:
+                    continue
+                if _EVENT_MARKER in line:
+                    try:
+                        event = JournalEvent.model_validate_json(line)
+                    except Exception:
+                        self._note_drop(line)
+                        continue
+                    if (
+                        event.event_type == "ORDER_SUBMISSION_INTENT"
+                        and event.timestamp.astimezone(timezone.utc).date() == day
+                    ):
+                        client_order_id = event.payload.get("client_order_id")
+                        if isinstance(client_order_id, str) and client_order_id:
+                            intent_ids.add(client_order_id)
+                            attempts.add(client_order_id)
+                    continue
+                if _CYCLE_MARKER not in line:
                     continue
                 try:
                     record = CycleRecord.model_validate_json(line)
@@ -232,12 +249,15 @@ class JsonlJournal:
                     continue
                 if record.snapshot.timestamp.date() != day:
                     continue
-                if record.execution.status != "SUBMITTED":
+                if record.execution.status not in {"SUBMITTED", "ERROR", "SUBMISSION_UNKNOWN"}:
                     continue
                 if record.decision.action == "HOLD":
                     continue
-                count += 1
-        return count
+                client_order_id = record.execution.client_order_id
+                if client_order_id and client_order_id in intent_ids:
+                    continue
+                attempts.add(client_order_id or f"cycle:{record.cycle_id}")
+        return len(attempts)
 
     def retained_window(self, *, known_since: datetime | None = None) -> RetainedWindow:
         """The span of history still on disk, and whether it is the whole story.

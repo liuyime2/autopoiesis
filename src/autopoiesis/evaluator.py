@@ -135,6 +135,7 @@ class DeterministicEvaluator:
         rejected = 0
         skipped = 0
         execution_errors = 0
+        unresolved_submissions = 0
         error_count = 0
         guardian_approved = 0
         guardian_rejected = 0
@@ -186,6 +187,8 @@ class DeterministicEvaluator:
                 skipped += 1
             elif status == "ERROR":
                 execution_errors += 1
+            elif status == "SUBMISSION_UNKNOWN":
+                unresolved_submissions += 1
 
             if status == "ERROR" or record.error:
                 error_count += 1
@@ -227,6 +230,7 @@ class DeterministicEvaluator:
             skipped_orders=skipped,
             shadowed_orders=shadowed,
             execution_errors=execution_errors,
+            unresolved_submissions=unresolved_submissions,
             error_count=error_count,
             guardian_approved=guardian_approved,
             guardian_rejected=guardian_rejected,
@@ -741,7 +745,7 @@ def confirmed_fill_activities(journal, records: Sequence[CycleRecord] | None = N
     the order) where the cycle record still exists, and the two sources are
     labelled differently so a reader can tell which is which.
     """
-    from autopoiesis.fill_reconciler import FILL_EVENT
+    from autopoiesis.fill_reconciler import confirmed_fill_events
 
     anchor: dict[str, datetime] = {}
     for record in records or ():
@@ -750,15 +754,15 @@ def confirmed_fill_activities(journal, records: Sequence[CycleRecord] | None = N
             anchor.setdefault(coid, record.snapshot.timestamp)
 
     activities: list[BrokerFillActivity] = []
-    for event in journal.read_events(FILL_EVENT):
+    for event in confirmed_fill_events(journal.read_events()):
         payload = event.payload
-        coid = payload.get("client_order_id")
+        payload_coid = payload.get("client_order_id")
         price = payload.get("filled_avg_price")
         quantity = payload.get("filled_quantity")
         symbol = payload.get("symbol")
         side = payload.get("side")
         if not (
-            isinstance(coid, str)
+            isinstance(payload_coid, str)
             and isinstance(price, (int, float))
             and price > 0
             and isinstance(quantity, (int, float))
@@ -767,12 +771,14 @@ def confirmed_fill_activities(journal, records: Sequence[CycleRecord] | None = N
             and isinstance(side, str)
         ):
             continue
+        coid = payload_coid
         strategy_id = payload.get("strategy_id")
+        order_id = payload.get("order_id")
         try:
             activities.append(
                 BrokerFillActivity(
                     activity_id=coid,
-                    order_id=payload.get("order_id") if isinstance(payload.get("order_id"), str) else None,
+                    order_id=order_id if isinstance(order_id, str) else None,
                     client_order_id=coid,
                     symbol=symbol,
                     # The journal keeps the decision's intent (SHORT, COVER); the broker side

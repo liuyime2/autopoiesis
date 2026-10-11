@@ -59,6 +59,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--status", action="store_true", help="Print daemon heartbeat status.")
     parser.add_argument("--stop", action="store_true", help="Send SIGTERM to the daemon pidfile process.")
     parser.add_argument("--reconcile", action="store_true", help="Compare recent journal orders with Alpaca open orders.")
+    parser.add_argument(
+        "--attest-archive-baseline", action="store_true",
+        help="Record an audited baseline for existing local journal history (offline; explicit operator evidence required).",
+    )
     parser.add_argument("--ingest-evidence", action="store_true", help="Fetch broker paper evidence for the recent window.")
     parser.add_argument(
         "--ingest-owner-history", action="store_true",
@@ -77,6 +81,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     config = AgentConfig.from_env()
+    if args.attest_archive_baseline:
+        operator_id = os.environ.get("AUTOPOIESIS_OPERATOR_ID", "").strip()
+        evidence_reference = os.environ.get("AUTOPOIESIS_EVIDENCE_REFERENCE", "").strip()
+        reason = os.environ.get("AUTOPOIESIS_ATTESTATION_REASON", "").strip()
+        if not all((operator_id, evidence_reference, reason)):
+            parser.error(
+                "--attest-archive-baseline requires AUTOPOIESIS_OPERATOR_ID, "
+                "AUTOPOIESIS_EVIDENCE_REFERENCE, and AUTOPOIESIS_ATTESTATION_REASON"
+            )
+        try:
+            JsonlJournal(config.journal_path).attest_archive_baseline(
+                operator_id=operator_id,
+                evidence_reference=evidence_reference,
+                reason=reason,
+            )
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"archive baseline attestation refused: {exc}")
+            return 1
+        print("archive baseline attested; history is trusted only from this recorded baseline forward")
+        return 0
     if args.doctor:
         return _doctor(config, skip_broker=args.skip_broker, quiet=args.quiet)
     if args.check_env:
@@ -283,7 +307,7 @@ def _execution_sink(config, client, journal):
     """
     if config.shadow:
         return ShadowExecutor(journal=journal)
-    real = AlpacaPaperExecutor(client=client, base_url=config.alpaca_base_url)
+    real = AlpacaPaperExecutor(client=client, base_url=config.alpaca_base_url, journal=journal)
     if config.shorts == "shadow":
         # Shorts are watched before they trade: SHORT and COVER become journalled intents,
         # every other order still reaches the paper broker.
@@ -609,6 +633,7 @@ def _reconcile(config: AgentConfig) -> int:
         "submitted_order_ids": list(report.submitted_order_ids),
         "broker_open_order_ids": list(report.broker_open_order_ids),
         "extra_broker_orders": list(report.extra_broker_orders),
+        "unresolved_client_order_ids": list(report.unresolved_client_order_ids),
         "message": report.message,
     }, indent=2, sort_keys=True))
     return 0 if report.matched else 1
@@ -649,8 +674,12 @@ def _ingest_owner_history(config: AgentConfig) -> int:
     journal = JsonlJournal(config.journal_path)
     agent_orders = {r.execution.order_id for r in journal.read_all() if r.execution.order_id}
     agent_orders |= {
-        str(e.payload.get("order_id")) for e in journal.read_events("ORDER_FILL_CONFIRMED")
-        if e.payload.get("order_id")
+        str(e.payload.get("order_id")) for e in journal.read_events()
+        if e.event_type in {
+            "ORDER_FILL_CONFIRMED", "ORDER_FILL_SNAPSHOT",
+            "ORDER_SUBMISSION_ACKNOWLEDGED", "ORDER_SUBMISSION_RESOLVED",
+        }
+        and e.payload.get("order_id")
     }
     fills = BrokerEvidenceProvider(client=client).fetch_all_fills()
     owner = [

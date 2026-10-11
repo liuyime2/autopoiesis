@@ -8,7 +8,9 @@
 
 已完成并有证据的基础设施工作：隔离工作树中的 watchdog stale-heartbeat 恢复修复已提交（`ed51c55`），当时完整测试为 1195 passed / 3 skipped、verify 为 52 类零失败；优雅停机审计已记录为独立结论（`505449d`），确认 30 秒 SIGKILL 记录无法归因具体阶段，且 Alpaca 请求没有有限 timeout，因此不能据此直接加大 `TimeoutStopSec`；只读 paper broker 延迟样本已真实执行一次：SDK 3.2.0、20 次 clock + 20 次 account、40 次请求成功、0 失败，合并 p50 25.036ms / p95 27.248ms / max 90.247ms。采样器、精确 SDK pin、此次测试/verify 和结果限制见 `docs/superpowers/plans/2026-10-10-broker-latency-baseline.md`：最终 make check 为 1209 passed / 3 skipped，verify 为 52 类 0 失败、1906 次测试执行，mypy 45 个源文件零问题。
 
-这些交付只完成阶段 A 的一个 watchdog 修复和 broker 延迟基线，不代表 broker deadline、歧义订单对账、备份恢复、provenance、alpha、决策质量或 RSI control/treatment 已完成。当前 paper 观察窗仍需满足原定连续 60 个有效交易日；不能把测试/verify 的绿色代替运行时、收益或 RSI 证据。
+2026-10-11 又完成一段 paper 订单与账本安全基础：SDK 请求统一经过固定 timeout/禁重试的 client；提交前 fsync 写入 intent，提交响应不明时全局阻止新订单并按精确 client ID 恢复；兼容旧 ERROR 记录；归档 manifest 对历史做连续性校验并提供显式操作员基线审计入口；部分成交以累计快照幂等投影；恢复 runbook 与 CLI/Makefile 路径已加入。证据：`make verify` 52/52 类通过、1959 次测试执行、0 失败；lint 与 mypy（47 源文件）通过。该实现遇到 `replaced` 状态会安全地持续阻断，但尚未跟踪 Alpaca replacement chain；这是未完成项，不能称订单生命周期全部闭环。所有这些只证明离线机制和 fake broker 行为，不证明线上 broker 故障恢复、alpha 或盈利。
+
+这些交付推进了阶段 A 的 watchdog、请求边界、歧义订单保护和部分账本恢复；异地备份/恢复演练、replacement chain、SIGTERM 真正可中断边界、统一 provenance、alpha、决策质量和 RSI control/treatment 仍未完成。当前 paper 观察窗仍需满足原定连续 60 个有效交易日；不能把测试/verify 的绿色代替运行时、收益或 RSI 证据。
 
 ## 1. 问题、基线、成功标准、验证
 

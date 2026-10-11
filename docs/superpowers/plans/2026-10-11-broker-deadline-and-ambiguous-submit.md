@@ -1,5 +1,27 @@
 # Bound broker requests without losing ambiguous order outcomes
 
+## Execution record (2026-10-11)
+
+Implemented on isolated branch `codex/rsi-execution`: one paper Alpaca client factory applies
+`Timeout(total=7, connect=2, read=5)` per request and disables SDK retries; durable journal
+intents and acknowledged/unknown/resolved events preserve submit attempts; exact client-ID
+recovery retries during startup and daemon maintenance; unknown and replaced orders remain
+blocked; cumulative fill snapshots continue through partial and `pending_cancel` states and
+project one latest broker observation into evaluation and holdings; archive generations are
+manifested and legacy baselines require explicit operator evidence through
+`make attest-archive-baseline`; the recovery runbook is
+`docs/runbooks/ambiguous-order-recovery.md`.
+
+Verification run: `make verify` — 52/52 check classes passed, 0 failed, 1,959 test executions
+across 83 test files. `make lint`, `make type` (47 source files), and `git diff --check` passed.
+No broker calls, service commands, or real latency samples were run for this implementation.
+
+Remaining within this work package: replacement-chain following is not implemented. A broker
+`replaced` status is converted to unresolved and blocks all later non-HOLD orders pending
+operator investigation; add linked replacement lookup and cumulative fill projection before
+claiming full replacement-order lifecycle support. The test suite verifies fail-closed behavior,
+not real broker outage semantics. This plan is therefore partially executed, not complete.
+
 ## Problem
 
 The paper runtime can block indefinitely in a broker SDK request. Adding a timeout alone is unsafe: an order POST can reach Alpaca and then lose its response, while the current executor records every exception as `ERROR`. The evaluator and counterfactual path treat `ERROR` as an order that never left, fill reconciliation scans only `SUBMITTED`, and the loop's duplicate guard expires after 30 minutes. Retrying after an ambiguous POST can therefore double exposure.

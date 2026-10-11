@@ -52,6 +52,7 @@ WARN = "WARN"
 #: than one class is allowed; leaving one unassigned fails the gate.
 TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_broker_evidence.py": ("broker-reconciliation", "crash-recovery"),
+    "test_broker_client.py": ("broker-reconciliation", "unit-integration"),
     "test_broker_latency_sample.py": ("unit-integration",),
     "test_cli.py": ("unit-integration",),
     # Was mapped only to `syntax-import`, which imports the 35 production
@@ -78,6 +79,7 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_durability.py": ("crash-recovery", "replay-determinism"),
     "test_evaluator.py": ("pnl-accounting", "replay-determinism"),
     "test_executor.py": ("broker-reconciliation", "guardian-bypass-prevention"),
+    "test_submission_state.py": ("broker-reconciliation", "crash-recovery"),
     "test_experiment_registry.py": ("lifecycle-invariants", "data-integrity"),
     "test_lineage.py": (
         "lifecycle-invariants", "data-integrity", "point-in-time-no-leakage",

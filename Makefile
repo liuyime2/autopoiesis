@@ -80,7 +80,8 @@ endif
 .DEFAULT_GOAL := help
 .PHONY: help setup install check lint type test smoke smoke-offline fast fast-no-broker daily-report benchmark broker-latency-sample \
         verify verify-self-test doctor audit integrity classes classes-list \
-        run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc
+        run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc \
+        attest-archive-baseline
 
 help:
 	@echo "Interpreter: $(if $(strip $(CONDA_RUN)),$(CONDA_BIN) run -n $(CONDA_ENV),$$(command -v python3) - active environment)$(RUN_HINT)"
@@ -108,6 +109,7 @@ help:
 	@echo "make clean            remove caches; clean-pyc removes only bytecode"
 	@echo "make integrity        runtime state integrity only"
 	@echo "make doctor           health and evidence checks"
+	@echo "make attest-archive-baseline  attest existing journal history using explicit operator evidence"
 	@echo "make audit            the 15-defect regression audit"
 	@echo "make validate-data    parse and check the inputs before anything consumes them"
 	@echo "make evaluate         score the current paper record: strategies, PnL, counterfactuals"
@@ -122,6 +124,12 @@ help:
 
 verify:
 	@$(PY) tools/verify.py $(if $(CLASS),--only $(CLASS),)
+
+attest-archive-baseline:
+	@test -n "$$AUTOPOIESIS_OPERATOR_ID" || (echo "AUTOPOIESIS_OPERATOR_ID is required" >&2; exit 2)
+	@test -n "$$AUTOPOIESIS_EVIDENCE_REFERENCE" || (echo "AUTOPOIESIS_EVIDENCE_REFERENCE is required" >&2; exit 2)
+	@test -n "$$AUTOPOIESIS_ATTESTATION_REASON" || (echo "AUTOPOIESIS_ATTESTATION_REASON is required" >&2; exit 2)
+	@$(PY) -m autopoiesis.cli --attest-archive-baseline
 
 # Must stay green. If this ever fails, the gate cannot be trusted and every other
 # result from it is meaningless.
