@@ -113,6 +113,12 @@ def test_the_daemon_populates_recency_from_the_journal(tmp_path):
     daemon.cycle_count = 0
     daemon.error_count = 0
     daemon.last_cycle_id = None
+    # The dependency outcomes. `__init__` sets these; a constructed instance must too, because the
+    # heartbeat writes them and a recorder must never raise out of the trading loop.
+    daemon._last_broker_at = None
+    daemon._last_broker_ok = None
+    daemon._last_model_at = None
+    daemon._last_model_ok = None
 
     # No cycles yet: the recency is absent rather than claimed.
     assert daemon._journal_recency() == (None, None)
@@ -153,3 +159,63 @@ def _cycle_record(journal: JsonlJournal, at: datetime) -> None:
         guardian=GuardianResult(approved=True, reason="approved"),
         execution=ExecutionResult(status="SKIPPED", order_id=None, filled_quantity=0, message="hold"),
     ))
+
+
+def test_an_alive_daemon_that_is_not_cycling_says_why(tmp_path):
+    """The ambiguity this closes: alive-and-idle against market-closed against broker-down.
+
+    Before the heartbeat carried the dependency outcomes, all three looked identical - process up,
+    heartbeat fresh, cycle_count whatever it happened to be. A model outage in particular looked
+    like a market with nothing to do, because the loop fails closed to a HOLD and the cycle
+    "succeeds". Recording which dependency last answered, and whether it did, is what makes the
+    three distinguishable by a reader who has only the heartbeat file.
+    """
+    from autopoiesis.health import HealthMonitor
+
+    path = tmp_path / "heartbeat.json"
+    payload = HeartbeatPayload(
+        pid=4242, status="RUNNING", timestamp=NOW, cycle_count=0, error_count=0,
+        last_cycle_age_seconds=46.2 * 3600,
+        last_broker_at=NOW - timedelta(minutes=5),
+        last_broker_ok=False,
+        last_model_at=NOW - timedelta(minutes=5),
+        last_model_ok=True,
+    )
+    path.write_text(payload.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    body = json.loads((tmp_path / "heartbeat.json").read_text(encoding="utf-8"))
+
+    assert body["last_broker_ok"] is False, "the broker stopped answering, and the file says so"
+    assert body["last_model_ok"] is True, "and the model is fine, which rules out the other cause"
+    assert body["last_cycle_age_seconds"] == pytest.approx(46.2 * 3600)
+    # Both facts together distinguish "dependencies broke" from "market closed": a closed market
+    # has a last broker answer that succeeded and simply nothing since.
+    liveness = json.loads(HealthMonitor(path).status_json(now=NOW))
+    assert liveness["status"] == "RUNNING" and liveness["cycling"] is False
+
+
+def test_the_daemon_records_the_model_not_answering(tmp_path):
+    """`fallback_policy_engine` is the fail-closed path, and it is a model outage.
+
+    The loop already turns an unusable engine output into a HOLD, so the cycle succeeds either
+    way. Reading the decision's own source is the only way to tell the two apart from outside.
+    """
+    from autopoiesis.daemon import AgentDaemon
+    from autopoiesis.models import TradeDecision
+
+    daemon = AgentDaemon.__new__(AgentDaemon)
+    daemon.now = lambda: NOW
+    daemon._last_broker_at = None
+    daemon._last_broker_ok = None
+    daemon._last_model_at = None
+    daemon._last_model_ok = None
+
+    daemon._record_model(False)
+    assert daemon._last_model_ok is False
+    daemon._record_model(True)
+    assert daemon._last_model_ok is True
+
+    # And the decision source the loop records is the signal it was derived from.
+    decision = TradeDecision(symbol="SPY", action="HOLD", quantity=0, confidence=0.0,
+                             rationale="fail-closed HOLD after invalid decision engine output",
+                             decision_source="fallback_policy_engine")
+    assert (decision.decision_source == "llm") is False

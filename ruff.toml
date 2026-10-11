@@ -8,7 +8,7 @@
 # house style it does not follow. `BLE001` (blind `except`) is deliberately excluded:
 # the daemon is designed to catch broadly and record the failure in the journal rather
 # than die mid-cycle, which is a correctness property here, not an oversight. Enabling
-# it would have produced 82 findings, all of them intentional. Four arrived with the
+# it would have produced 83 findings, all of them intentional. Four arrived with the
 # instrument profile and the headlines that go beside it: a broker endpoint that is
 # down, a symbol the broker cannot name and a news call that fails must each leave the
 # decision exactly as it was, and each says so on `last_*_error` rather than raising.
@@ -44,13 +44,16 @@ select = [
 ignore = [
     # The daemon catches broadly on purpose: a maintenance failure must be journaled
     # and survive, not crash the process and take the paper run down with it. Each of
-    # these 82 sites records what failed (see `_agent_holding_errors`,
+    # these 83 sites records what failed (see `_agent_holding_errors`,
     # `_should_trade_now`, which refuses to let an unreadable broker clock kill the
     # process the way a network stall did twice on 2026-10-08, and
     # `_maintenance`'s try/except, the doctor's per-check isolation, and
     # `daemon._journal_recency`, where a record that cannot be read has no recency to report: the
 # heartbeat still carries a status, an error count and a pid, and a missing recency is a missing
 # field rather than a claim that nothing ran.
+# `daemon._now_or_none`, where a clock that cannot be read must not raise out of the trading loop.
+# An absent timestamp is a missing field in a heartbeat; an exception from a *recorder* would take
+# the cycle it was recording with it, which is the one path that has to keep running.
 # `order_reconciler._walk_replacement_chain`, where a replacement link the broker cannot
 # answer about must end the walk rather than propagate: a timeout inside a startup reconcile
 # must leave the block on and the reason on the record, not take the daemon down. Only the

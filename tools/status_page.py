@@ -613,6 +613,19 @@ def system(snapshot: Snapshot) -> list[str]:
     body.append(f"<div><dt>cycling</dt><dd>{_cell(cycling)}</dd><p>{html.escape(sub)}</p></div>")
     body.append(f"<div><dt>cycles recorded</dt><dd>{_cell(len(snapshot.cycles))}</dd></div>")
     body.append(f"<div><dt>cycle errors</dt><dd>{_cell(beat.get('error_count'))}</dd></div>")
+    # The dependency outcomes, which is what turns "alive but idle" into an actionable fact.
+    for label, key in (("last broker answer", "last_broker_ok"),
+                       ("last model answer", "last_model_ok")):
+        ok = beat.get(key)
+        at = beat.get(key.replace("_ok", "_at"))
+        if ok is None:
+            shown, sub = "UNKNOWN", "not used since this process started"
+        else:
+            shown = "yes" if ok else "no"
+            sub = ("answered " + str(at)[:16].replace("T", " ") + " UTC" if ok
+                   else "did not answer; the loop fails closed, so a cycle can still succeed")
+        body.append(f"<div><dt>{html.escape(label)}</dt><dd>{html.escape(shown)}</dd>"
+                    f"<p>{html.escape(sub)}</p></div>")
     active = beat.get("active_strategy_id")
     body.append(f"<div><dt>active strategy</dt><dd>{_cell(active)}</dd></div>" if active
                 else "<div><dt>active strategy</dt><dd>none selected</dd></div>")

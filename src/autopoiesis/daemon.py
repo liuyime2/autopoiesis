@@ -139,6 +139,13 @@ class AgentDaemon:
         self.reflect_every = reflect_every
         self.curriculum_every = curriculum_every
         self._stop_requested = False
+        # Latest outcome of each dependency, refreshed when it is used. Not initialised from the
+        # journal: a fresh process has not talked to anything yet, and claiming otherwise would put
+        # a timestamp in a heartbeat that describes a run that did not happen.
+        self._last_broker_at: datetime | None = None
+        self._last_broker_ok: bool | None = None
+        self._last_model_at: datetime | None = None
+        self._last_model_ok: bool | None = None
         self.cycle_count = 0
         self.daily_cycle_count = 0
         self.current_cycle_date: date | None = None
@@ -244,7 +251,9 @@ class AgentDaemon:
         """
         try:
             open_now = self.scheduler.should_trade_now()
+            self._record_broker(True)
         except Exception as exc:
+            self._record_broker(False)
             self.error_count += 1
             self._clock_failures += 1
             delay = min(300, 15 * self._clock_failures)
@@ -283,6 +292,13 @@ class AgentDaemon:
                 self._heartbeat("BACKING_OFF", f"broker data unavailable for {symbol}")
                 return
             self.last_cycle_id = record.cycle_id
+            # The decision engine's own account of whether it answered. `fallback_policy_engine`
+            # is the fail-closed path the loop takes when the model's output could not be used, so
+            # a model outage looks exactly like a market with nothing to do - and the only way to
+            # tell them apart is to record which of the two produced the decision.
+            source = getattr(record.decision, "decision_source", None)
+            if source is not None:
+                self._record_model(source == "llm")
             self._post_cycle()
             self._heartbeat("RUNNING", f"completed cycle for {symbol}")
         except Exception as exc:
@@ -1610,6 +1626,48 @@ class AgentDaemon:
         """Events of one type this process has appended since `mark` (a length of `_appended`)."""
         return [e for e in self._appended[mark:] if e.event_type == event_type]
 
+    def _now_or_none(self):
+        """The daemon's clock, or None when a constructed instance has not been given one.
+
+        `AgentDaemon.__new__` is how this project's tests build an instance without running
+        `__init__`, and several of them set only the fields a particular path needs. Recording a
+        dependency's outcome must not then raise out of the trading loop, which is the one path
+        that has to keep running; an unrecorded outcome is a missing field, and a crash in a
+        recorder would take the cycle with it.
+        """
+        clock = getattr(self, "now", None)
+        if not callable(clock):
+            return None
+        try:
+            return clock()
+        except Exception:
+            return None
+
+    def _record_broker(self, ok: bool) -> None:
+        """When the broker last answered, and whether it did.
+
+        Recorded rather than inferred from the cycle count, because a daemon that is alive and not
+        cycling is ambiguous between "market closed" and "broker unreachable" and those need
+        different people. The clock check is the cheapest real broker call the daemon makes, so it
+        is the honest sample of reachability.
+        """
+        stamp = self._now_or_none()
+        if stamp is not None:
+            self._last_broker_at = stamp
+        self._last_broker_ok = ok
+
+    def _record_model(self, ok: bool) -> None:
+        """When the model last answered, and whether it did.
+
+        The decision path already fails closed to a HOLD when the engine raises, so a model outage
+        looks exactly like a market with nothing to do. Recording the outcome is what tells them
+        apart.
+        """
+        stamp = self._now_or_none()
+        if stamp is not None:
+            self._last_model_at = stamp
+        self._last_model_ok = ok
+
     def _journal_recency(self) -> tuple[datetime | None, float | None]:
         """The newest cycle in the journal, and its age, read from the record itself.
 
@@ -1618,10 +1676,11 @@ class AgentDaemon:
         failure this field exists to make visible. The read is the same one `doctor`'s journal
         recency check does, so the two cannot disagree about what the record says.
         """
-        if self.journal is None:
+        journal = getattr(self, "journal", None)
+        if journal is None:
             return None, None
         try:
-            records = self.journal.read_all()
+            records = journal.read_all()
         except Exception:
             # A record that cannot be read has no recency to report. The heartbeat still carries a
             # status, an error count and a pid; a missing recency is a missing field rather than a
@@ -1633,7 +1692,12 @@ class AgentDaemon:
         if not stamps:
             return None, None
         latest = stamps[-1]
-        return latest, max(0.0, (self.now() - latest).total_seconds())
+        clock = self._now_or_none()
+        if clock is None:
+            # The record's newest cycle is a fact the record holds; its age needs a clock, and a
+            # constructed daemon without one reports the fact and not the age rather than raising.
+            return latest, None
+        return latest, max(0.0, (clock - latest).total_seconds())
 
     def _heartbeat(self, status: DaemonStatus, message: str) -> None:
         last_at, last_age = self._journal_recency()
@@ -1646,6 +1710,10 @@ class AgentDaemon:
             last_cycle_id=self.last_cycle_id,
             last_cycle_at=last_at,
             last_cycle_age_seconds=last_age,
+            last_broker_at=self._last_broker_at,
+            last_broker_ok=self._last_broker_ok,
+            last_model_at=self._last_model_at,
+            last_model_ok=self._last_model_ok,
             message=message,
             source_fingerprint=LOADED_SOURCE_FINGERPRINT,
         )

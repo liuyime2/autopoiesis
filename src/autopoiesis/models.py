@@ -990,6 +990,15 @@ class HeartbeatPayload(BaseModel):
     #: the second at all.
     last_cycle_at: datetime | None = None
     last_cycle_age_seconds: float | None = Field(default=None, ge=0)
+    #: When the broker last answered, and whether it did. An alive daemon that has completed no
+    #: cycle is ambiguous between "the market is closed" and "the broker stopped answering", and
+    #: those need different operators. The heartbeat could not tell them apart, so it answered
+    #: neither.
+    last_broker_at: datetime | None = None
+    last_broker_ok: bool | None = None
+    #: When the model last answered, and whether it did. Same ambiguity, same resolution.
+    last_model_at: datetime | None = None
+    last_model_ok: bool | None = None
     message: str = ""
     #: Fingerprint of the `src/autopoiesis` tree this process imported, so a running
     #: daemon can be compared against the worktree it claims to be running.
