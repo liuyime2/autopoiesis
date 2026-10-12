@@ -30,12 +30,23 @@ REQUEST_TIMEOUT = RequestTimeoutPolicy(total=7, connect=2, read=5)
 class TimedRequestsSession(requests.Session):
     """Supply a fresh timeout to every call made through the pinned SDK session."""
 
-    def request(self, method, url, **kwargs):
+    def request(
+        self,
+        method: str,
+        url: str | bytes,
+        # Everything `Session.request` takes after `url` is positional-or-keyword, so a caller
+        # may hand it `params`, `data`, `headers`... positionally. `**kwargs` alone accepts
+        # those by name only, which is narrower than the supertype and exactly what mypy
+        # flagged. `*args` is what makes this override accept every call the base does, which
+        # is the whole point of overriding it rather than wrapping it.
+        *args: Any,
+        **kwargs: Any,
+    ) -> requests.Response:
         # Never inherit Requests' no-timeout default and never reuse urllib3's stateful
         # Timeout instance. This bounds connect/read inactivity and urllib3's total budget,
         # but it is not a hard process deadline for slow-trickle responses or DNS stalls.
         kwargs["timeout"] = REQUEST_TIMEOUT.new_timeout()
-        return super().request(method, url, **kwargs)
+        return super().request(method, url, *args, **kwargs)
 
 
 def _sdk_version() -> str:

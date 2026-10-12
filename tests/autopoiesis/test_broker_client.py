@@ -106,3 +106,56 @@ def test_all_app_and_tool_rest_construction_uses_the_factory():
                 if direct:
                     direct_construction.append(str(path.relative_to(ROOT)))
     assert direct_construction == []
+
+
+def test_the_session_override_forwards_positional_arguments_and_forces_the_timeout():
+    """The signature that mypy demanded, checked for the bug it could have introduced.
+
+    CI failed type-check on this class for three Python versions while the same `mypy
+    src/autopoiesis` passed here. The reason is not the version: `requests` on this host ships
+    without `py.typed`, so with `ignore_missing_imports` the superclass resolved to `Any` and the
+    override could not be checked. In a clean `pip install -e ".[dev]"` - which is what CI does -
+    the installed `requests` is typed, and mypy sees that the subclass does not accept every call
+    the base does.
+
+    The fix is `*args: Any`, because `Session.request`'s parameters after `url` are
+    positional-or-keyword and a caller may pass `params`, `data`, `headers` positionally.
+    **`*args` also silently changes behaviour if it is not forwarded**, which is the trap this
+    test exists for: `super().request(method, url, **kwargs)` drops every positional argument the
+    caller passed, so the first broker call that used one would have sent a request missing its
+    body and nothing in the type checker would have complained.
+
+    Both properties are pinned here: the extras reach the base, and the timeout this class
+    exists to supply is still the one that is used.
+    """
+    from autopoiesis.broker_client import TimedRequestsSession
+
+    sent: dict[str, object] = {}
+
+    def fake_send(self, prepared, **kwargs):  # signature copied from requests' Session.send
+        sent["prepared"] = prepared
+        sent["send_kwargs"] = kwargs
+        return "response"
+
+    session = TimedRequestsSession()
+    monkeypatch_send = TimedRequestsSession.send
+    TimedRequestsSession.send = fake_send
+    try:
+        # A call shaped like one a caller may make: `params` and `data` passed positionally.
+        result = session.request("POST", "https://example.test/v2/orders", {"limit": 1}, "body")
+    finally:
+        TimedRequestsSession.send = monkeypatch_send
+
+    assert result == "response"
+    prepared = sent["prepared"]
+    # The positional arguments must have reached the request, not been dropped by `*args`.
+    assert prepared is not None and "limit=1" in (prepared.url or ""), (
+        "`*args` must be forwarded to super(); a positional parameter that is accepted and then "
+        "dropped is worse than the signature error it fixed"
+    )
+    body = prepared.body
+    body_text = body.decode() if isinstance(body, bytes) else str(body or "")
+    assert "body" in body_text, "the positional body must survive the override"
+    assert isinstance(sent["send_kwargs"].get("timeout"), Timeout), (
+        "the override's whole purpose is to bound every call with a fresh timeout"
+    )
