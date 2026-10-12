@@ -43,6 +43,7 @@ from autopoiesis.models import (
 from autopoiesis.reflection_memory import ReflectionMemory
 from autopoiesis.strategy_admission import StrategyAdmission
 from autopoiesis.strategy_engine import (
+    MAX_PROBATION_RESTARTS,
     StrategyLibrary,
     StrategyLifecycleDecision,
     StrategyLifecycleManager,
@@ -1506,8 +1507,6 @@ class AgentDaemon:
                     paused_at[event.strategy_id] = event.timestamp
                 else:
                     paused_at.pop(event.strategy_id, None)
-        budget = admission.probation_selector.min_probation_cycles
-        by_id = {result.strategy_id: result for result in results}
         candidates = []
         for spec in self.strategy_library.list():
             if spec.lifecycle != "PAUSED" or not spec.enabled:
@@ -1520,12 +1519,38 @@ class AgentDaemon:
                 continue
             if screen.day_margin is None:
                 continue
-            served = by_id[spec.strategy_id].cumulative_cycles if spec.strategy_id in by_id else 0
+            if spec.probation_restarts >= MAX_PROBATION_RESTARTS:
+                # The bound that ends the oscillation. The loop was here, not in the lifecycle
+                # rules: a strategy paused for producing no exploration evidence is not served
+                # again, so its reflection window empties, `review` returns no ruling for it
+                # (`result.cycles <= 0`), and the guard below read that absence as permission -
+                # "the rules would not pause it again" is true of a ruling nobody made. It was
+                # therefore reopened every 3 days, forever.
+                #
+                # Measured on the live library 2026-10-12: `trend-follow-buy-010` had been
+                # reopened 319 times. It had run 151 selected cycles that day without
+                # submitting one order, and its probation slot was still holding the admission
+                # gate shut for the whole session - 15 curriculum proposals, none admissible,
+                # 151 of 155 probation cycles spent on a strategy that was being judged
+                # incapable of producing an outcome. The retry count is now bounded by the
+                # same `MAX_PROBATION_RESTARTS`, so a strategy is looked at again a few times
+                # under rules that may since have been replaced and then left alone. Nothing
+                # here can promote it or let it trade.
+                continue
             reopened = spec.model_copy(update={
                 "lifecycle": "PROBATION",
-                # A fresh budget on top of what it has already been served, so it is not
-                # read as budget-spent the moment it returns.
-                "probation_restarts": served // max(budget, 1) + 1,
+                # A count of re-admissions, which is what the field documents and what the
+                # bounded retry in the lifecycle gate is measured against.
+                #
+                # It was `served // budget + 1`, derived from lifetime service instead. The
+                # two agree only on a candidate served fewer than one budget, and diverge
+                # without limit after that: a strategy with 692 cumulative cycles was given
+                # 319 restarts, which put its probation budget at 4160 cycles and made it
+                # permanently unreachable - and it was being reopened over and over, since
+                # reopening is this method and nothing here was stopping it. Counting the
+                # returns keeps the number small, which is the point of a retry count, and it
+                # is what makes the bound mean a bounded number of chances.
+                "probation_restarts": spec.probation_restarts + 1,
             })
             if any(
                 d.new_lifecycle in {"PAUSED", "RETIRED"}

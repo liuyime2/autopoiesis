@@ -1409,3 +1409,84 @@ def test_a_closed_market_is_not_counted_as_a_broker_failure(tmp_path):
     assert daemon._should_trade_now() is False
     assert daemon.error_count == 0
     assert sleeps == [], "a closed market is not a backoff case"
+
+
+def _paused_after_restarts(tmp_path, restarts: int):
+    """The live PAUSED setup, with a strategy that has already been reopened `restarts` times."""
+    from datetime import timedelta
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from autopoiesis.models import JournalEvent
+    from autopoiesis.offline_validation import OfflineValidationResult
+
+    now = datetime.now(tz=timezone.utc)
+    cfg = config(tmp_path, interval=0)
+    journal = JsonlJournal(cfg.journal_path)
+    library = StrategyLibrary(cfg.strategy_dir)
+    spec = StrategySpec(
+        strategy_id="p1", name="p1", kind="FIXED_SIZE", symbols=("SPY",),
+        parameters={"action": "BUY", "quantity": 1, "confidence": 0.7}, max_position_value=1000,
+        enabled=True, lifecycle="PAUSED", created_at=now, rationale="test",
+        probation_restarts=restarts,
+    )
+    library.save(spec)
+    journal.append_event(JournalEvent(
+        event_id=str(uuid4()), event_type="STRATEGY_LIFECYCLE_UPDATED",
+        timestamp=now - timedelta(days=5), status="SUCCESS", message="m",
+        strategy_id="p1", payload={"phase": "applied", "new_lifecycle": "PAUSED"},
+    ))
+
+    class _Rules:
+        def review(self, strategies, results, evidence):
+            return []
+
+    admission = SimpleNamespace(
+        probation_backlog=lambda results: 0, max_probation_queue=13,
+        probation_selector=SimpleNamespace(min_probation_cycles=13),
+    )
+    daemon = AgentDaemon(
+        config=cfg, loop=FakeLoop(journal=journal), sleep=lambda s: None, journal=journal,
+        strategy_library=library, lifecycle_manager=_Rules(), strategy_admission=admission,
+        now=lambda: now,
+    )
+    screen = OfflineValidationResult(strategy_id="p1", verdict="PASS_SCREENED", reason="r",
+                                     scored=12, day_margin=0.05)
+    return daemon, {"p1": screen}
+
+
+def test_a_paused_strategy_is_not_reopened_forever(tmp_path):
+    """The reopen loop, bounded. This is what actually held the queue shut.
+
+    The guard in `_reconsider_paused` asks the lifecycle rules whether they "would immediately
+    pause or retire it again". For a candidate paused because it produced no exploration
+    evidence the answer is always no verdict at all: it is not served again, so its reflection
+    window is empty and `_review_one` returns None on `result.cycles <= 0`. Absence of a
+    ruling was read as permission, and the strategy was reopened every `PAUSED_REVIEW_DAYS`
+    forever - `probation_restarts` climbing past 300, which the selector then scaled the
+    probation budget by, so each reopen made the queue harder to drain than the last.
+
+    Measured on the live library 2026-10-12: `trend-follow-buy-010` had been reopened 319
+    times, ran 151 selected cycles that session without submitting an order, and its probation
+    slot blocked the admission gate for the whole session.
+    """
+    from autopoiesis.strategy_engine import MAX_PROBATION_RESTARTS
+
+    # Inside the bound it is reopened, and the counter advances by one rather than by a
+    # function of lifetime service.
+    for restarts in range(MAX_PROBATION_RESTARTS):
+        daemon, evidence = _paused_after_restarts(tmp_path / f"r{restarts}", restarts)
+        (decision,) = daemon._reconsider_paused([], evidence)
+        assert decision.new_lifecycle == "PROBATION", f"restart {restarts} is inside the bound"
+        assert decision.update == {"probation_restarts": restarts + 1}, (
+            "the counter must count re-openings; it was `served // budget + 1`, which reached "
+            "319 on a strategy that had been reopened 319 times but grew without limit for any "
+            "strategy with a long service record"
+        )
+
+    # Past the bound it is left alone, even with room in the queue and evidence on its side.
+    daemon, evidence = _paused_after_restarts(tmp_path / "spent", 319)
+    assert daemon._reconsider_paused([], evidence) == [], (
+        "a strategy that has been reopened MAX_PROBATION_RESTARTS times and is still unable to "
+        "produce an outcome must stop occupying a probation slot"
+    )

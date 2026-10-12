@@ -85,6 +85,26 @@ class StrategyLifecycleDecision:
 #: 0.75-0.91 per selected cycle.
 PROBATION_CYCLES = 13
 
+#: How many times a candidate may be returned to probation for want of an outcome before
+#: the lifecycle stops believing another attempt would produce one.
+#:
+#: `probation_restarts` scaled the probation budget without bound (`PROBATION_CYCLES * (1 +
+#: restarts)`), which made probation unreachable for exactly the strategies that had been
+#: served longest. Measured on the live library 2026-10-12: `trend-follow-buy-010` at 692
+#: cumulative cycles and 319 restarts needed 4160 cycles to leave the queue, while the
+#: lifecycle gate it was held against is the flat `PROBATION_CYCLES`. So it could not be
+#: served its way out, the queue could not drain, and the admission gate refused every new
+#: candidate for the whole session - 15 curriculum proposals, none admissible. It held 151
+#: of the 155 probation cycles served today, which is why 16 of 24 probation candidates
+#: had never been served once.
+#:
+#: The bound is on how often a candidate is *handed another budget*, not on how it is judged.
+#: A candidate that submits orders is still decided on outcomes by the screen and the
+#: promotion gate, untouched, and nothing here can promote anything. The same bound stops a
+#: PAUSED strategy being re-opened indefinitely, which is what actually drove the counter:
+#: `self_evolution_probe.py` is the check that this did not quietly shorten the evidence run.
+MAX_PROBATION_RESTARTS = 3
+
 #: Selected cycles between which an actionable ACTIVE strategy is served.
 #:
 #: Probation has absolute priority in `StrategySelector.select`, and admission holds the
@@ -349,6 +369,24 @@ class StrategyLifecycleManager:
             # replaced. Not retirement - it has not failed, it has not been tried. Returning
             # it to probation is the only outcome that is true and that lets it become
             # judgeable.
+            #
+            # Deliberately unbounded here, and that is a decision rather than an omission.
+            # Serving a strategy does not cause a trade - the decision comes from the model -
+            # so more service cannot manufacture the evidence this branch waits for: measured
+            # on the live library 2026-10-12, `trend-follow-buy-010` was returned 319 times
+            # and ran 151 selected cycles in one session without submitting one order. What
+            # ended that loop was not a verdict on the candidate but a bound on how often it
+            # could be *handed another budget*: `MAX_PROBATION_RESTARTS` in the selector, and
+            # the same bound on re-opening in `_reconsider_paused`. Both leave this rule's
+            # judgement alone, because a candidate that needs many chances is exactly the one
+            # whose evidence is still coming.
+            #
+            # A terminal verdict for the unevaluable case was tried here and removed. It
+            # retired the replay's own strategy after 3 retries instead of 20+ cycles, so
+            # `tools/self_evolution_probe.py` could no longer score a single decision and
+            # reported "no evidence reached the lifecycle" - a true statement about a shorter
+            # evidence run, caused by a rule that was not needed to close the loop. The
+            # candidate ends PAUSED either way, which holds no probation slot.
             if result.submitted_orders <= 0:
                 return StrategyLifecycleDecision(
                     strategy,
@@ -779,7 +817,18 @@ class StrategySelector:
         # immediately after the return was introduced (2026-10-06): the strategy was
         # correctly transitioned back to PROBATION and `_needs_probation` still answered
         # false, so the selector still would not serve it.
-        granted = self.min_probation_cycles * (1 + strategy.probation_restarts)
+        #
+        # The grant is capped at `MAX_PROBATION_RESTARTS`. Unscaled, it outran the evidence
+        # it was trying to buy: the required budget grows 13 cycles per restart while service
+        # accrues at best 1 cycle per opportunity, so a strategy restarted more than a handful
+        # of times could never leave the queue and held it against every other candidate. The
+        # lifecycle gate this queue feeds is the flat `PROBATION_CYCLES`, so the two answers
+        # to "has this candidate had its budget" disagreed - and only the queue's answer had
+        # any effect on whether a verdict was ever reached. Capped, both read the same number
+        # and both are finite.
+        granted = self.min_probation_cycles * (
+            1 + min(strategy.probation_restarts, MAX_PROBATION_RESTARTS)
+        )
         return result.cumulative_cycles < granted
 
 

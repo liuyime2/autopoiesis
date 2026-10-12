@@ -2060,3 +2060,114 @@ def test_the_daemon_writes_a_transition_update_alongside_the_lifecycle():
         "the apply path must write the decision's update dict, or a probation restart "
         "changes the lifecycle and leaves the state behind"
     )
+
+
+def test_a_probation_budget_is_bounded_however_many_restarts_are_recorded():
+    """The grant on each restart was unbounded, and it outran the evidence it buys.
+
+    `granted = PROBATION_CYCLES * (1 + restarts)` grows 13 cycles per restart while service
+    accrues at best one cycle per opportunity. A strategy restarted more than a handful of
+    times therefore could not leave the queue, and the queue has absolute priority in the
+    selector - so it starved every candidate behind it and held the admission gate shut.
+
+    Measured on the live library 2026-10-12: `trend-follow-buy-010`, 692 cumulative cycles,
+    319 restarts, needed 4160 cycles to leave probation, against a lifecycle gate that reads
+    the flat 13. It was served 151 of the day's 155 probation cycles and blocked all 15 of
+    the day's curriculum proposals, while 16 of 24 probation candidates had never been served
+    once. Two gates answering "has this candidate had its budget" with different numbers, and
+    only the queue's answer affecting whether a verdict was ever reached.
+
+    Capped, both gates read the same finite number.
+    """
+    from autopoiesis.strategy_engine import MAX_PROBATION_RESTARTS, PROBATION_CYCLES
+
+    selector = StrategySelector(min_probation_cycles=PROBATION_CYCLES)
+    spec = make_spec(strategy_id="sell", kind="FIXED_SIZE", lifecycle="PROBATION")
+
+    def spent(cycles: int) -> StrategyResult:
+        return StrategyResult(
+            strategy_id="sell", cycles=cycles, cumulative_cycles=cycles,
+            cumulative_trade_attempts=cycles, submitted_orders=1, trade_attempts=1,
+            rejected_orders=0, errors=0, score=0.9,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        )
+
+    ceiling = PROBATION_CYCLES * (1 + MAX_PROBATION_RESTARTS)
+    # The live measurement, as a precondition: the old rule could not retire this queue.
+    runaway = spec.model_copy(update={"probation_restarts": 319})
+    assert not selector._needs_probation(runaway, spent(ceiling)), (
+        "at the ceiling a candidate must be out of the queue whatever its restart count"
+    )
+
+    # Just short of the ceiling it is still servable, so the cap is a ceiling and not a cliff.
+    assert selector._needs_probation(runaway, spent(ceiling - 1))
+
+    # And the grant never exceeds the cap, at any restart count: the most restart-hungry
+    # candidate still leaves the queue once it is served out to the ceiling.
+    for restarts in (0, 1, 3, 66, 319, 10_000):
+        candidate = spec.model_copy(update={"probation_restarts": restarts})
+        assert selector._needs_probation(candidate, spent(ceiling)) is False, (
+            f"restarts={restarts} must be budget-spent at the cap, not held in the queue by a "
+            f"budget that grows with it"
+        )
+
+    # The ceiling itself is `min_probation_cycles` scaled by the capped restart count, so a
+    # candidate inside the bound is served on its own budget and not on the cap's.
+    assert selector._needs_probation(spec, spent(PROBATION_CYCLES - 1))
+    assert not selector._needs_probation(spec, spent(PROBATION_CYCLES))
+
+
+def test_returning_to_probation_keeps_counting_retries_without_a_verdict_from_the_count():
+    """The retry counter is the loop's fuel, so what it counts has to be exactly one thing.
+
+    `probation_restarts` is bumped by this branch and is what `MAX_PROBATION_RESTARTS` bounds,
+    so it must count returns to probation. It was also written from lifetime service by
+    `_reconsider_paused` (`served // budget + 1`), which reached 319 on a strategy that had
+    been returned 319 times but grows without limit for any strategy with a long service
+    record - and each write made the queue budget bigger, so the next return was further from
+    ever being served. That is the escalation the two bounds stop.
+
+    This branch is deliberately unbounded, and pinning that is part of the contract: retiring
+    the unevaluable candidate here was tried and removed, because it shortened the replay's
+    evidence run to the point where `self_evolution_probe.py` could score nothing. The loop
+    is closed by bounding how often a candidate is handed another budget, not by judging it
+    harder.
+    """
+    mgr = StrategyLifecycleManager(probation_cycles=13)
+    spec = make_spec(strategy_id="quiet", kind="FIXED_SIZE", lifecycle="PROBATION")
+    unevaluable = StrategyResult(
+        strategy_id="quiet", cycles=151, cumulative_cycles=151, cumulative_trade_attempts=151,
+        submitted_orders=0, trade_attempts=151, rejected_orders=4, errors=0, score=0.0,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+
+    for restarts in (0, 1, 3, 66, 319):
+        candidate = spec.model_copy(update={"probation_restarts": restarts})
+        decision = mgr.review([candidate], [unevaluable])[0]
+        assert decision.new_lifecycle == "PROBATION", (
+            "no outcome to judge is not a failure: this must not retire the candidate"
+        )
+        assert decision.update == {"probation_restarts": restarts + 1}, (
+            f"restarts={restarts} must advance by one, not by anything derived from service"
+        )
+
+
+def test_the_retry_counter_does_not_touch_candidates_that_do_submit_orders():
+    """The counter is bookkeeping for the unevaluable case, not an attempt limit.
+
+    A candidate with orders is decided on outcomes by the screen and the promotion gate. If
+    service alone could retire one of those, the bound would be a hidden attempt limit and a
+    strategy would lose the ability to be promoted by evidence.
+    """
+    mgr = StrategyLifecycleManager(probation_cycles=13)
+    spec = make_spec(strategy_id="trader", kind="FIXED_SIZE", lifecycle="PROBATION")
+    with_orders = StrategyResult(
+        strategy_id="trader", cycles=151, cumulative_cycles=151, cumulative_trade_attempts=151,
+        submitted_orders=12, trade_attempts=151, rejected_orders=4, errors=0, score=0.0,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+    heavily_retried = spec.model_copy(update={"probation_restarts": 319})
+    decision = mgr.review([heavily_retried], [with_orders])
+    assert [d for d in decision if d.new_lifecycle == "PROBATION" and d.update] == [], (
+        "a candidate that submits orders must not be pushed back for want of an outcome"
+    )
