@@ -149,6 +149,8 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_cycle_recency.py": ("unit-integration", "crash-recovery"),
     # One provenance record: research dataset, daemon state, code, config.
     "test_provenance_unified.py": ("unit-integration", "data-integrity"),
+    # A hypothesis registered before the data, and a tape checked before it is used.
+    "test_research_prereg.py": ("unit-integration", "research-separation"),
     # The public site is a published claim: its figures must match the published file.
     "test_public_site.py": ("unit-integration", "data-integrity"),
     # Rotation is the one mechanism that can delete the only source of truth, so the

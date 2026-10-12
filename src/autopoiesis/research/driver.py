@@ -97,12 +97,29 @@ def candidates(
     return out
 
 
+def _bar_price(bar) -> float:
+    """The bar's price, under whichever name it carries it.
+
+    `regime.Bar` spells it `price` and `replay.ReplayBar` spells it `close`; they are the same number
+    to every consumer, and the driver receives either depending on whether it was called on a
+    regime tape or on a fetched one. Reading only one spelling makes the fingerprint raise on the
+    other, which is how this was found - the preregistration gate passed a real tape in and the
+    fingerprint helper refused it.
+    """
+    value = getattr(bar, "price", None)
+    if value is None:
+        value = getattr(bar, "close", None)
+    if value is None:
+        raise ValueError(f"a bar with no price: {bar!r}")
+    return float(value)
+
+
 def dataset_fingerprint(bars: Sequence[Bar]) -> str:
     """Stable content identity for the ordered timestamp/price tape the evaluator consumes."""
     digest = hashlib.sha256(b"autopoiesis-bar-series-v1\n")
     for bar in bars:
         timestamp = bar.timestamp.isoformat(timespec="microseconds")
-        price = float(bar.price).hex()
+        price = _bar_price(bar).hex()
         digest.update(timestamp.encode("utf-8"))
         digest.update(b"\0")
         digest.update(price.encode("ascii"))

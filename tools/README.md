@@ -196,6 +196,21 @@ numbers. There are no screenshots: a reader can re-run a command and cannot re-d
 Both are committed together, and the date field in `figures.json` is what tells a reader how old a
 published measurement is.
 
+**`check_research_tape.py`** runs `research/prereg.py`'s data-quality gate over the tape a
+search is about to consume: it verifies the spec is the one registered before the run, loads the
+merged bars for the spec's instrument exactly as the driver merges them, and refuses the tape if it
+carries a duplicate timestamp, a non-chronological series, an unusable price, or a bar outside the
+declared window. `make research-check-tape SPEC=... REPLAY_CACHE=...` runs it between fetching and
+searching.
+
+First run against the real cache, and it found something: the SPY tape the driver consumes spans
+2016-01-04 to 2026-10-09 - 3931 days - while the spec declared six months of 2026. 110,014 bars
+precede the declared window and 50 follow it. So the search that recorded those trials ran over a
+decade of SPY it never said it would use, and its own evidence record describes one file rather than
+the merged series actually read. The gate returns 1 and the search does not start. The finding is
+written up in `docs/evidence/preregistration-2026-10-11.md`; the fix - making the consumed tape match
+the spec, or the spec match the cache - is not done.
+
 **`shutdown_budget.py`** derives the service's stop window instead of letting it be picked. It
 enumerates the stages that can be in flight when SIGTERM arrives - broker HTTP, the curriculum
 generation, the model decision, the doctor probes, the watchdog's systemctl subprocess - reads the

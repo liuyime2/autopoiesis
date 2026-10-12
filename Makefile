@@ -83,7 +83,8 @@ endif
         run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc \
         site refresh-figures benchmark-json dist release-check \
         attest-archive-baseline fetch-replay-bars research-search research-run \
-        journal-backup journal-restore journal-drill
+        journal-backup journal-restore journal-drill \
+        research-register research-verify research-check-tape
 
 help:
 	@echo "Interpreter: $(if $(strip $(CONDA_RUN)),$(CONDA_BIN) run -n $(CONDA_ENV),$$(command -v python3) - active environment)$(RUN_HINT)"
@@ -524,3 +525,28 @@ journal-restore:
 
 journal-drill:
 	@$(PY) tools/journal_snapshot.py drill
+
+
+# --- pre-registered research -----------------------------------------------------------------
+#
+# A hypothesis stated after the data was examined is a description of the data. Registering the spec
+# writes a copy named by its own SHA-256 before the run, and `verify` recomputes the hash afterwards,
+# so a spec edited to match the result is a different file and the verification says so.
+#
+# `make research-check-tape` runs the data-quality gate over the tape a run is about to consume: a
+# duplicate timestamp (which breaks the fingerprint), a non-chronological series, an unusable price,
+# or a bar outside the declared window. Run it after fetching and before searching - a verdict from a
+# tape that is not the tape the spec declared is a number with no meaning that looks like one.
+
+research-register:
+	@test -n "$(SPEC)" || (echo "SPEC=<path to a .spec file> is required" >&2; exit 2)
+	@$(PY) -m autopoiesis.research.prereg register $(SPEC)
+
+research-verify:
+	@test -n "$(SPEC)" || (echo "SPEC=<path to a .spec file> is required" >&2; exit 2)
+	@$(PY) -m autopoiesis.research.prereg verify $(SPEC)
+
+research-check-tape:
+	@test -n "$(SPEC)" || (echo "SPEC=<path to a .spec file> is required" >&2; exit 2)
+	@test -n "$(REPLAY_CACHE)" || (echo "REPLAY_CACHE=<bar cache dir> is required" >&2; exit 2)
+	@$(PY) tools/check_research_tape.py $(SPEC) $(REPLAY_CACHE)
