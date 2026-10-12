@@ -53,9 +53,29 @@ search does not start.
 - Nothing here promotes anything. `verdict` is a research signal, and the offline screen still
   decides admission.
 
-## Next
+## The fix, and what it proves
 
-The tape the driver consumes must be made to match the spec it is judged against - either by
-filtering the merged series to the declared window, or by having the spec declare the window the
-cache actually holds. Until then a search over this cache is a search over a decade it did not
-specify, and the gate refuses it.
+`driver._load_real_bars` now takes the spec's window and filters the merged series to it, and the
+gate checks the tape *that loader produces* rather than one it assembled itself. That second part
+matters as much as the first: two halves that each built their own idea of "the tape" could agree
+about a series neither of them searched, so the gate is now the same code path as the search.
+
+Against the real cache, with the same spec:
+
+```
+symbol: SPY   files: 8 of 31 in the cache
+  bars: 24361 over 182.3 days (2026-04-10 13:30:00+00:00 .. 2026-10-09 19:40:00+00:00)
+  usable
+the tape is the one the spec declared, so a verdict from it means what it says
+```
+
+134,425 bars became 24,361, all inside the declared window, and `make research-check-tape` returns 0.
+So the loop the first run refused now runs: register the spec, fetch, check the tape, search, and the
+fingerprint recorded with each trial is the fingerprint of the tape the spec declared.
+
+## What is still not claimed
+
+No verdict from that tape has been produced by this change, and none should be read as a result. What
+changed is that a verdict from it would now mean what it says. The candidates on the existing ledger
+were recorded against the unfiltered tape and are not comparable to anything a windowed run
+produces.

@@ -313,6 +313,7 @@ def _default_symbol() -> str:
 def _load_real_bars(
     cache_dir: pathlib.Path = DEFAULT_CACHE_DIR,
     symbol: str | None = None,
+    window: tuple | None = None,
 ) -> tuple[list[Bar], str, list[str]]:
     """Real bars for **one symbol**, with the provenance it recorded.
 
@@ -393,9 +394,30 @@ def _load_real_bars(
             by_timestamp.setdefault(row.timestamp, bar)
 
     bars = [by_timestamp[key] for key in sorted(by_timestamp)]
+    if window is not None:
+        # The tape consumed is the tape the spec declared, and nothing else.
+        #
+        # Found by the pre-registration gate on 2026-10-11: the merged SPY tape spans 2016 to 2026
+        # - 3931 days, 134,425 bars - while the spec that recorded those trials declared six
+        # months. 110,014 bars preceded the declared window and 50 followed it, so every verdict in
+        # the ledger was a statement about data outside its own specification. The gate refused the
+        # tape and the search did not start, which is the correct behaviour for a gate; this is the
+        # other half, which makes the tape and the spec agree instead of merely detecting that they
+        # do not.
+        #
+        # Filtering after the merge rather than before, because the merge is what makes each file's
+        # overlapping windows harmless - and the window is a *claim about the series*, so it applies
+        # to the merged series, not to whichever files happen to overlap it.
+        start, end = window
+        kept = [bar for bar in bars if start <= bar.timestamp <= end]
+        dropped = len(bars) - len(kept)
+        if dropped:
+            ignored.append(f"{dropped} bar(s) outside the declared window "
+                           f"{start.isoformat()} .. {end.isoformat()}")
+        bars = kept
     if not bars:
         raise SystemExit(
-            f"no bars for {symbol} in {cache_dir}; the cache holds: "
+            f"no bars for {symbol} in {cache_dir} inside the declared window; the cache holds: "
             f"{', '.join(ignored) or 'nothing'}. Fetch some with tools/fetch_replay_bars.py."
         )
     return (
@@ -406,7 +428,7 @@ def _load_real_bars(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """`[cache_dir] [symbol]`. The symbol defaults to what the daemon trades.
+    """`[cache_dir] [symbol] [spec]`. The symbol defaults to what the daemon trades.
 
     It is an argument because the cache holds more than one instrument, and because the answer to
     "which instrument am I searching" must be visible in the invocation rather than inferred
@@ -415,7 +437,18 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     cache_dir = pathlib.Path(argv[0]) if argv else DEFAULT_CACHE_DIR
     symbol = argv[1] if len(argv) > 1 else None
-    bars, provenance, ignored = _load_real_bars(cache_dir, symbol)
+    spec_path = pathlib.Path(argv[2]) if len(argv) > 2 else None
+    window = None
+    if spec_path is not None:
+        # The spec's declared window, applied to the tape. Passing it here rather than assuming the
+        # cache is the window is what makes the run's data a property of the hypothesis rather than
+        # of whatever happened to be on disk.
+        from autopoiesis.research.prereg import _parse_utc, load_spec_from_text
+
+        spec = load_spec_from_text(spec_path.read_text(encoding="utf-8"))
+        if spec.get("window_start_utc") and spec.get("window_end_utc"):
+            window = (_parse_utc(spec["window_start_utc"]), _parse_utc(spec["window_end_utc"]))
+    bars, provenance, ignored = _load_real_bars(cache_dir, symbol, window)
     searched = symbol or _default_symbol()
     report = search(bars, symbol=searched, source=provenance)
     summary = report["by_verdict"]

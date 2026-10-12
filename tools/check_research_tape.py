@@ -28,7 +28,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--symbol", default=None, help="the instrument; default is the spec's")
     args = parser.parse_args(argv)
 
-    from autopoiesis.replay import bar_files, load_bars
+    from autopoiesis.replay import bar_files
+    from autopoiesis.research import driver as _driver
     from autopoiesis.research import prereg
 
     spec_text = Path(args.spec).read_text(encoding="utf-8")
@@ -45,6 +46,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     symbol = (args.symbol or spec.get("instrument") or "").strip().upper()
+    start = end = None
+    if spec.get("window_start_utc") and spec.get("window_end_utc"):
+        start = prereg._parse_utc(spec["window_start_utc"])
+        end = prereg._parse_utc(spec["window_end_utc"])
     files, ignored = bar_files(args.cache)
     mine = [p for p in files if p.name.upper().startswith(symbol + "_")]
     if not mine:
@@ -52,14 +57,13 @@ def main(argv: list[str] | None = None) -> int:
               f"{[p.name for p in files][:5]}")
         return 2
 
-    # The tape the search consumes is every generation of this instrument's bars, merged by
-    # timestamp exactly as the driver merges them. Checking a different series than the search runs
-    # on would be a gate that passes while the thing it gates fails.
-    by_timestamp: dict = {}
-    for path in mine:
-        for bar in load_bars(path):
-            by_timestamp.setdefault(bar.timestamp, bar)
-    bars = [by_timestamp[key] for key in sorted(by_timestamp)]
+    # The tape the search consumes, produced by the *same* code the search uses. Checking a series
+    # this gate assembled itself would be a gate that passes while the thing it gates fails, and the
+    # window filter in particular has to be the driver's: it is the one that decides what "the
+    # declared window" means for a merged tape.
+    bars, provenance, _ignored = _driver._load_real_bars(
+        Path(args.cache), symbol, (start, end)
+    )
 
     report = prereg.check_tape(bars, spec)
     print(f"symbol: {symbol}   files: {len(mine)} of {len(files)} in the cache")

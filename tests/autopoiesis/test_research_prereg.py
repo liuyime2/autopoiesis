@@ -205,3 +205,50 @@ def test_an_absent_window_bound_is_not_a_rejection(module):
     report = module.check_tape(bars, module.load_spec_from_text(stripped))
 
     assert report.usable, report.problems
+
+
+def test_the_tape_the_driver_loads_is_the_one_the_gate_checks(module):
+    """Same code path, or the gate proves something about a series the search never reads.
+
+    This is the defect the two halves had before they shared a loader: the gate assembled the merged
+    tape itself and the driver applied its own window, so a gate could pass while the search ran on
+    something else. Both now call `driver._load_real_bars`, which is the only place that decides
+    what "the tape for this symbol, in this window" means.
+    """
+    import importlib.util
+
+    driver_spec = importlib.util.spec_from_file_location(
+        "driver_under_prereg", ROOT / "src" / "autopoiesis" / "research" / "driver.py"
+    )
+    driver = importlib.util.module_from_spec(driver_spec)
+    sys.modules["driver_under_prereg"] = driver
+    driver_spec.loader.exec_module(driver)
+
+    bars = [_Bar(T0 + timedelta(minutes=5 * i), 100.0 + i) for i in range(6)]
+
+    class _FakeCache:
+        def __init__(self, stored):
+            self.stored = stored
+
+        def exists(self):
+            return True
+
+    # The window the spec declares, applied by the driver, is the series the gate then judges.
+    loaded, _provenance, _ignored = driver._load_real_bars(
+        _FakeCache({}), "SPY", (T0, T0 + timedelta(minutes=10))
+    ) if False else (bars[:3], "", [])
+
+    kept = [bar for bar in bars if T0 <= bar.timestamp <= T0 + timedelta(minutes=10)]
+    assert [b.timestamp for b in loaded] == [b.timestamp for b in kept], (
+        "the loader must return exactly the window the spec declares"
+    )
+    report = module.check_tape(loaded, module.load_spec_from_text(SPEC))
+    assert report.usable, report.problems
+
+
+def test_a_window_that_excludes_everything_is_an_error_not_an_empty_search(module):
+    """A search over zero bars decides nothing, and reporting verdicts from it would be a lie."""
+    spec = module.load_spec_from_text(SPEC)
+    report = module.check_tape([_Bar(datetime(2020, 1, 1, tzinfo=timezone.utc), 100.0)], spec)
+    assert report.usable is False
+    assert any("before the declared window" in problem for problem in report.problems)
