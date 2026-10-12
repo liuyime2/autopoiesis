@@ -29,6 +29,7 @@ from autopoiesis.health import HealthMonitor
 from autopoiesis.journal import JsonlJournal
 from autopoiesis.knowledge_admission import KnowledgeAdmission
 from autopoiesis.knowledge_library import lesson_effects
+from autopoiesis.loop import FAIL_CLOSED_RATIONALE
 from autopoiesis.models import (
     BrokerEvidenceBatch,
     DaemonStatus,
@@ -292,13 +293,23 @@ class AgentDaemon:
                 self._heartbeat("BACKING_OFF", f"broker data unavailable for {symbol}")
                 return
             self.last_cycle_id = record.cycle_id
-            # The decision engine's own account of whether it answered. `fallback_policy_engine`
-            # is the fail-closed path the loop takes when the model's output could not be used, so
-            # a model outage looks exactly like a market with nothing to do - and the only way to
-            # tell them apart is to record which of the two produced the decision.
-            source = getattr(record.decision, "decision_source", None)
-            if source is not None:
-                self._record_model(source == "llm")
+            # Whether the model answered, recorded from the one signal that says so.
+            #
+            # `decision_source == "llm"` means it did. `fallback_policy_engine` means it did not -
+            # but that is two different facts, and the first version of this recorded both as
+            # "the model did not answer":
+            #
+            #   - the loop's fail-closed path, when the engine's output could not be used. That is
+            #     an outage, and it is what the field is for.
+            #   - the policy engine declining because the snapshot's symbol is outside the
+            #     strategy's universe. The model was never asked. Nothing is wrong.
+            #
+            # Recording the second as a failure means `last_model_ok` reads False about a fifth of
+            # the time on a widened universe and looks exactly like an outage - a monitor that
+            # cries wolf on a correct decline is a monitor that gets ignored. So a decline leaves
+            # the flag at its last known value, which is the honest statement: nothing new is
+            # known about the model from a cycle that did not ask it.
+            self._post_cycle_model_flag(record)
             self._post_cycle()
             self._heartbeat("RUNNING", f"completed cycle for {symbol}")
         except Exception as exc:
@@ -1667,6 +1678,31 @@ class AgentDaemon:
         if stamp is not None:
             self._last_model_at = stamp
         self._last_model_ok = ok
+
+    def _post_cycle_model_flag(self, record) -> None:
+        """Record whether the model answered, from the one signal that says so.
+
+        `decision_source == "llm"` means it did. `fallback_policy_engine` means it did not - and
+        that is two different facts:
+
+        - the loop's fail-closed path, when the engine's output could not be used. An outage, and
+          what the flag is for.
+        - the policy engine declining because the snapshot's symbol is outside the strategy's
+          universe. The model was never asked. Nothing is wrong.
+
+        Recording the second as a failure makes `last_model_ok` read False about a fifth of the
+        time on a widened universe and look exactly like an outage. So a decline leaves the flag at
+        its last known value, which is the honest statement: a cycle that did not ask the model
+        tells us nothing new about it.
+        """
+        decision = getattr(record, "decision", None)
+        if decision is None:
+            return
+        source = getattr(decision, "decision_source", None)
+        if source == "llm":
+            self._record_model(True)
+        elif getattr(decision, "rationale", "") == FAIL_CLOSED_RATIONALE:
+            self._record_model(False)
 
     def _journal_recency(self) -> tuple[datetime | None, float | None]:
         """The newest cycle in the journal, and its age, read from the record itself.

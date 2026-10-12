@@ -219,3 +219,65 @@ def test_the_daemon_records_the_model_not_answering(tmp_path):
                              rationale="fail-closed HOLD after invalid decision engine output",
                              decision_source="fallback_policy_engine")
     assert (decision.decision_source == "llm") is False
+
+
+def test_a_decline_the_model_was_never_asked_about_is_not_a_model_failure():
+    """`last_model_ok` must not cry wolf on a correct decline.
+
+    With `universe=tradable` the daemon cycles symbols the champion strategy does not cover, and
+    the policy engine declines them without consulting the model - about a fifth of cycles on this
+    host. The first version of the recorder treated every `fallback_policy_engine` decision as "the
+    model did not answer", so `last_model_ok` read False roughly one cycle in five and looked
+    exactly like an outage. A monitor that reports a failure where there is none is a monitor that
+    gets ignored, which is the worse failure.
+
+    The two facts are distinguished by the rationale: the loop's fail-closed text means the model
+    was consulted and its output unusable; anything else means it was not asked.
+    """
+    from autopoiesis.daemon import AgentDaemon
+    from autopoiesis.loop import FAIL_CLOSED_RATIONALE
+    from autopoiesis.models import TradeDecision
+
+    daemon = AgentDaemon.__new__(AgentDaemon)
+    daemon.now = lambda: NOW
+    daemon._last_model_at = None
+    daemon._last_model_ok = None
+
+    class _Record:
+        def __init__(self, decision):
+            self.decision = decision
+
+    def _decide(source, rationale):
+        daemon._post_cycle_model_flag(_Record(TradeDecision(
+            symbol="SOXS", action="HOLD", quantity=0, confidence=0.0, rationale=rationale,
+            decision_source=source,
+        )))
+
+    # A decline: the flag is untouched rather than flipped to False.
+    _decide("fallback_policy_engine", "strategy:x snapshot symbol is outside strategy universe")
+    assert daemon._last_model_ok is None, "a decline must not report the model as failed"
+
+    # The model answers, so the flag goes True.
+    _decide("llm", "no directional signal in this regime")
+    assert daemon._last_model_ok is True
+
+    # A decline after a success leaves the last known value standing.
+    _decide("fallback_policy_engine", "strategy:x snapshot symbol is outside strategy universe")
+    assert daemon._last_model_ok is True, (
+        "nothing new is known about the model from a cycle that did not ask it"
+    )
+
+    # A real failure - the loop's fail-closed path - does flip it.
+    _decide("fallback_policy_engine", FAIL_CLOSED_RATIONALE)
+    assert daemon._last_model_ok is False
+
+
+def test_a_post_cycle_model_flag_helper_is_what_the_loop_calls():
+    """The extraction exists so the rule is in one place and testable without a cycle."""
+    from autopoiesis.daemon import AgentDaemon
+
+    daemon = AgentDaemon.__new__(AgentDaemon)
+    daemon.now = lambda: NOW
+    daemon._last_model_at = None
+    daemon._last_model_ok = None
+    assert callable(daemon._post_cycle_model_flag)

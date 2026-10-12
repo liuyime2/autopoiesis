@@ -7,6 +7,12 @@ from uuid import uuid4
 from autopoiesis.fill_reconciler import FILL_EVENT, confirmed_fill_events
 from autopoiesis.models import CycleRecord, JournalEvent, TradeDecision
 
+#: What the loop writes when the decision engine's output could not be used. A module constant
+#: rather than a literal at the one call site, because the daemon reads it to decide whether the
+#: model was consulted and failed - and a reason string that exists in two places is a reason the
+#: two can drift until the monitor quietly stops distinguishing an outage from a decline.
+FAIL_CLOSED_RATIONALE = "fail-closed HOLD after invalid decision engine output"
+
 
 class TradingLoop:
     # An order submitted this recently, with no fill confirmation, is treated as still in
@@ -244,7 +250,7 @@ class TradingLoop:
                 action="HOLD",
                 quantity=0,
                 confidence=0.0,
-                rationale="fail-closed HOLD after invalid decision engine output",
+                rationale=FAIL_CLOSED_RATIONALE,
             )
         trades_today = 0
         if self.trade_counter is not None:
