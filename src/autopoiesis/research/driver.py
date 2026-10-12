@@ -185,6 +185,7 @@ def search(
     n_folds: int | None = None,
     symbol: str | None = None,
     source: str,
+    fingerprint: str | None = None,
 ) -> dict[str, Any]:
     """Run the whole search and record every trial.
 
@@ -237,6 +238,9 @@ def search(
             "searched_at": (now or datetime.now(timezone.utc)).isoformat(),
             "bars": len(bars),
             "symbol": symbol,
+            # Which tape this verdict is about. Absent is not an option: a trial without it cannot
+            # be told from another trial on different data with the same length, which is the
+            # whole reason the field exists.
             "dataset_fingerprint": fingerprint,
             "candidates": already,
             "already_recorded": already,
@@ -266,6 +270,9 @@ def search(
             "parameters": spec["parameters"],
             "source": source.strip(),
             "symbol": symbol,
+            # Which tape this verdict is about. Absent is not an option: a trial without it cannot
+            # be told from another trial on different data with the same length, which is the
+            # whole reason the field exists.
             "dataset_fingerprint": fingerprint,
             **result.trial_payload(),
         }
@@ -450,7 +457,16 @@ def main(argv: list[str] | None = None) -> int:
             window = (_parse_utc(spec["window_start_utc"]), _parse_utc(spec["window_end_utc"]))
     bars, provenance, ignored = _load_real_bars(cache_dir, symbol, window)
     searched = symbol or _default_symbol()
-    report = search(bars, symbol=searched, source=provenance)
+    # The fingerprint of the tape actually consumed - after the window filter, because that is the
+    # series the verdicts are about. Computing it here rather than inside `search` is what makes it
+    # the fingerprint of what ran, not of what a caller happened to pass.
+    #
+    # It was not passed at all until now, which is why every row in the ledger reads
+    # `dataset_fingerprint: null`: `search` has the parameter and the payload has the field, and the
+    # one call site did not connect them. The deduplication this exists for was therefore falling
+    # back to the bar count alone, which is exactly the weakness the fingerprint was added to fix.
+    fingerprint = dataset_fingerprint(bars)
+    report = search(bars, symbol=searched, source=provenance, fingerprint=fingerprint)
     summary = report["by_verdict"]
     print(f"bars: {report['bars']} from {provenance}")
     print(f"dataset_fingerprint: {report['dataset_fingerprint']}")

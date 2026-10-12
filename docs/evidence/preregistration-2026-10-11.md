@@ -79,3 +79,33 @@ No verdict from that tape has been produced by this change, and none should be r
 changed is that a verdict from it would now mean what it says. The candidates on the existing ledger
 were recorded against the unfiltered tape and are not comparable to anything a windowed run
 produces.
+
+## The search that ran, and what it said
+
+With the window applied, a search over the same cache and spec ran end to end:
+
+```
+bars: 24361 ... dataset_fingerprint: sha256:9d2b1f7a38a6f335fb5636f833b8a5635b8c76e737b05b6131d2a0e8a8ebdb81
+candidates: 121 (cumulative: 121 already in the ledger)  required_trades: 110  backtests_run: 11
+  search-trend-follow-0p0005  OVERFIT       oos +0.024% over 197 trades
+  search-trend-follow-0p0010  OVERFIT       oos +0.032% over 140 trades
+  search-trend-follow-0p0020  INSUFFICIENT  oos -0.031% over 102 trades
+  ...
+  search-fixed-size-buy-hold  OVERFIT       oos +0.115% over 110 trades
+trials_run: 11  passed: 0
+```
+
+Eleven candidates, zero passed, on the tape the spec declared. **The same eleven candidates on the
+decade-long tape were also zero passed**, so the window change did not produce a different answer -
+it produced an answer that means what it says. A second run of the identical search reused all
+eleven (`repeats: 11, backtests_run: 0`) rather than recomputing them, which is the property the
+dataset fingerprint exists for.
+
+One defect surfaced while reading the ledger back: `search()` had the `fingerprint` parameter and the
+payload had the field, and the one call site did not connect them - so all 121 rows read
+`dataset_fingerprint: null`, and the deduplication was falling back to the bar count. The ledger now
+carries a fingerprint per row, and the runs before and after the window filter are distinguishable.
+
+**Not claimed:** that any of these candidates works. Zero passed is a result, and it is the same
+result as before - which is the point. What changed is that the number is now about the data the
+hypothesis declared.

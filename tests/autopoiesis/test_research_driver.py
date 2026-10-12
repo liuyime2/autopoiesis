@@ -446,3 +446,62 @@ def test_a_symbol_argument_reaches_the_loader(tmp_path):
     bars, provenance, _ = driver._load_real_bars(cache, "qqq")
     assert provenance.startswith("QQQ:"), provenance
     assert len(bars) == 5
+
+
+def test_main_records_the_fingerprint_of_the_tape_it_consumed(tmp_path, monkeypatch):
+    """The ledger rows must say which tape their verdict is about.
+
+    `search` has the parameter and the payload has the field, and the one call site did not connect
+    them - so every row in the ledger read `dataset_fingerprint: null`, and the deduplication this
+    exists for was falling back to the bar count. Found by running the real search and reading the
+    ledger back: 121 rows, 121 nulls, and a repeat run that re-ran 11 backtests it could have reused.
+
+    Two fingerprints in the ledger now, not one null: the runs before and after the window filter
+    are distinguishable, which is the property a trial record needs.
+    """
+    from datetime import timedelta
+
+    import autopoiesis.research.driver as driver
+    from autopoiesis.replay import ReplayBar
+
+    cache = tmp_path / "replay"
+    cache.mkdir()
+    t0 = datetime(2026, 4, 10, 13, 30, tzinfo=timezone.utc)
+    rows = [ReplayBar(timestamp=t0 + timedelta(minutes=5 * i), open=100.0, high=100.0,
+                      low=100.0, close=100.0 + i, volume=1000.0) for i in range(40)]
+    from autopoiesis.replay import save_bars
+
+    save_bars(cache / "SPY_5Min_test.json", "SPY", rows)
+    ledger = tmp_path / "trials.jsonl"
+    spec = tmp_path / "spec.spec"
+    spec.write_text(
+        "hypothesis: h\nfamily: f\ninstrument: SPY\n"
+        "window_start_utc: 2026-04-10T13:30:00Z\nwindow_end_utc: 2026-04-10T16:00:00Z\n"
+        "rule: r\nprimary_metric: m\nexpected_trades: 1\n",
+        encoding="utf-8",
+    )
+
+    # The default ledger path lives in `trials`, not in the driver: the driver's `search` passes
+    # `path=None` through to `record_trial`, which resolves it there. Patching the driver's name
+    # would leave the real ledger in place, which is how the first version of this test failed - and
+    # how a test can quietly assert about the deployment's data instead of its own fixture.
+    from autopoiesis.research import trials as _trials
+
+    monkeypatch.setattr(_trials, "DEFAULT_TRIALS_PATH", ledger)
+    monkeypatch.setattr(driver, "DEFAULT_CACHE_DIR", cache)
+    monkeypatch.setattr(driver, "_default_symbol", lambda: "SPY")
+
+    rc = driver.main([str(cache), "SPY", str(spec)])
+    assert rc == 0, driver.main.__doc__
+
+    recorded = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()
+                if line.strip()]
+    # The window in the spec is 13:30..16:00, so the tape the driver consumed is the filtered one,
+    # and its fingerprint - not the whole file's - is what the rows carry.
+    fingerprints = {row["dataset_fingerprint"] for row in recorded}
+    assert None not in fingerprints, "a trial row without its dataset fingerprint is untraceable"
+    assert len(fingerprints) == 1, f"one tape per run, got {fingerprints}"
+    expected = driver.dataset_fingerprint(
+        [b for b in rows if b.timestamp <= datetime(2026, 4, 10, 16, 0, tzinfo=timezone.utc)]
+    )
+    assert fingerprints == {expected}
