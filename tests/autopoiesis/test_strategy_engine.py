@@ -2171,3 +2171,71 @@ def test_the_retry_counter_does_not_touch_candidates_that_do_submit_orders():
     assert [d for d in decision if d.new_lifecycle == "PROBATION" and d.update] == [], (
         "a candidate that submits orders must not be pushed back for want of an outcome"
     )
+
+
+def test_the_selector_does_not_serve_a_strategy_for_a_symbol_it_does_not_cover():
+    """The defect behind the day that was 89% wasted cycles.
+
+    Every strategy in the live library declared `symbols=('SPY',)` while the daemon rotated ten
+    symbols - the configured six plus four `attention_slots` of the broker's most-active names.
+    `select` filtered on `enabled` and lifecycle and on nothing else, so a SPY-anchored
+    TREND_FOLLOW was served for BIL, TLT, XLB, XLE, XLF, SOXS, NOK, BITO and ONDS cycles and
+    evaluated at 6.65, 91.50 or 163.45 instead of 777. Its reference band is in SPY terms;
+    against any other instrument it is not a weak signal, it is no signal at all.
+
+    Measured on 2026-10-12: 238 of the day's 266 service cycles were a strategy priced against
+    a symbol it does not cover. All 238 returned HOLD, so no order was ever placed in the wrong
+    instrument and Guardian would have reviewed it if it had been - the loss was the cycle
+    budget and the evidence it buys. The same mismatch read as "no exploration evidence" and
+    paused strategies that had never been run on their own market, and it decided which
+    candidates looked actionable, because `_declared_actions` is priced on the cycled symbol.
+
+    Passing `symbol` narrows the population before anything else looks at it.
+    """
+    from autopoiesis.models import StrategyResult
+
+    selector = StrategySelector(min_probation_cycles=13)
+    spy = make_spec(strategy_id="spy-rule", kind="TREND_FOLLOW", lifecycle="PROBATION")
+    bil = make_spec(strategy_id="bil-rule", kind="FIXED_SIZE", lifecycle="PROBATION",
+                    symbols=("BIL",), action="SELL")
+
+    def result_for(spec):
+        return StrategyResult(
+            strategy_id=spec.strategy_id, cycles=1, cumulative_cycles=1,
+            cumulative_trade_attempts=1, submitted_orders=1, trade_attempts=1,
+            rejected_orders=0, errors=0, score=0.5,
+            evaluated_at=datetime.now(tz=timezone.utc),
+        )
+
+    results = [result_for(spy), result_for(bil)]
+
+    # A SPY price can only serve the SPY strategy, even though both are serviceable and the
+    # SPY one is older and would win a symbol-blind oldest-first queue.
+    picked = selector.select([spy, bil], results, last_price=777.54, served=1, symbol="SPY")
+    assert picked is not None and picked.strategy_id == "spy-rule"
+
+    # A BIL price can only serve the BIL strategy. This is the line that used to return the
+    # SPY rule: the BIL cycle was served a strategy that had never seen BIL.
+    picked = selector.select([spy, bil], results, last_price=91.50, served=1, symbol="BIL")
+    assert picked is not None and picked.strategy_id == "bil-rule", (
+        "a strategy must never be evaluated against a symbol it does not cover"
+    )
+
+    # A symbol nothing covers returns None, which is the caller's honest "no strategy covers
+    # this symbol" - not a strategy chosen because the filter did not apply.
+    assert selector.select([spy, bil], results, last_price=49.52, served=1, symbol="XLB") is None
+
+
+def test_omitting_the_symbol_keeps_the_selector_behaviour_it_always_had():
+    """`symbol=None` is the pre-fix behaviour, by design: a caller without a symbol cannot be
+    narrowed, and silently dropping the strategy population would trade one bug for another."""
+    from autopoiesis.models import StrategyResult
+
+    selector = StrategySelector(min_probation_cycles=13)
+    spy = make_spec(strategy_id="spy-rule", kind="TREND_FOLLOW", lifecycle="PROBATION")
+    result = StrategyResult(
+        strategy_id="spy-rule", cycles=1, cumulative_cycles=1, cumulative_trade_attempts=1,
+        submitted_orders=1, trade_attempts=1, rejected_orders=0, errors=0, score=0.5,
+        evaluated_at=datetime.now(tz=timezone.utc),
+    )
+    assert selector.select([spy], [result], last_price=49.52, served=1) is not None

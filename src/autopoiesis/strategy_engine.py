@@ -565,6 +565,7 @@ class StrategySelector:
         results: list[StrategyResult] | None = None,
         last_price: float | None = None,
         served: int | None = None,
+        symbol: str | None = None,
     ) -> StrategySpec | None:
         """Pick the strategy to serve this cycle.
 
@@ -587,6 +588,29 @@ class StrategySelector:
             for strategy in strategies
             if strategy.enabled and strategy.lifecycle not in {"PAUSED", "RETIRED"}
         ]
+        # And it has to be a strategy that covers the symbol this cycle is about.
+        #
+        # This check did not exist. Every strategy in the library declared `symbols=('SPY',)`
+        # while the daemon rotated ten symbols - the configured six plus `attention_slots` of the
+        # broker's most-active names - so a SPY-anchored TREND_FOLLOW was selected for BIL, TLT,
+        # XLB, XLE, XLF, SOXS, NOK, BITO and ONDS cycles and evaluated at 6.65, not 777. Its
+        # reference band is SPY terms; against 91.50 it has no meaning, and the executor's own
+        # coverage check then declined the cycle with "snapshot symbol is outside strategy
+        # universe". Measured on 2026-10-12: **238 of the day's 266 service cycles (89%) were a
+        # strategy evaluated against a symbol it does not cover.**
+        #
+        # Nothing was lost money-wise - every one of those 238 cycles returned HOLD, and Guardian
+        # would have reviewed an order anyway. What was lost is the cycle budget, and with it
+        # most of the evidence the system was built to collect. The same defect read as
+        # "no exploration evidence" and paused strategies that had never been run on their own
+        # market at all: `fixed-size-probe-0001` was served 180 cycles, effectively none of them
+        # on SPY, and paused for producing no orders. It also decided which candidates looked
+        # actionable, since `_declared_actions` is priced on the cycled symbol - which is why 16
+        # candidates had never been served once and why one monopolised the queue.
+        #
+        # `None` keeps the old behaviour so every existing caller and test means what it meant.
+        if symbol is not None:
+            eligible = [strategy for strategy in eligible if symbol in (strategy.symbols or ())]
         if not eligible:
             return None
 

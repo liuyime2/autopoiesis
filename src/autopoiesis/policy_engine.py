@@ -56,7 +56,8 @@ class PolicyEngine:
         # different strategy than the model would have been asked about. It omitted the
         # price, so coverage was judged on paper here and at the real price there.
         strategy = self.selector.select(
-            strategies, results, last_price=snapshot.last_price, served=self.served()
+            strategies, results, last_price=snapshot.last_price, served=self.served(),
+            symbol=snapshot.symbol,
         )
         if strategy is None:
             return TradeDecision(

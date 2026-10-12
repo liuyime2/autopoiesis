@@ -362,6 +362,10 @@ class HybridDecisionEngine:
                 # 2026-10-05 the incumbent was selected 0 times in 8 cycles because
                 # `served` was frozen at 146 and `146 % 5 == 1` for the whole window.
                 self._served(),
+                # Coverage is per-symbol, so it is the cycled symbol that decides it. Without
+                # this the selector served SPY-anchored strategies for BIL/TLT/XLB/... cycles
+                # and the executor declined 89% of a day's service - see `select`.
+                symbol=snapshot.symbol,
             )
             if selected is not None:
                 strategy_id = selected.strategy_id
