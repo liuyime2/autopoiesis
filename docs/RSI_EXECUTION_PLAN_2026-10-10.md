@@ -20,6 +20,16 @@ Alpha 搜索可复现性继续推进：当前 driver 之前按策略、symbol、
 
 这些交付推进了阶段 A 的 watchdog、请求边界、歧义订单保护和部分账本恢复；异地备份/恢复演练、replacement chain、SIGTERM 真正可中断边界、统一 provenance、alpha、决策质量和 RSI control/treatment 仍未完成。当前 paper 观察窗仍需满足原定连续 60 个有效交易日；不能把测试/verify 的绿色代替运行时、收益或 RSI 证据。
 
+## 执行状态复核（2026-10-12 收盘后）
+
+此前隔离工作已合入主分支，审查基线为 `b1f1189`。新增替换订单链恢复、本机隔离目录的真实账本恢复演练、派生关机预算（630s）、健康字段、研究预注册与窗口过滤。这些实现不表示持续异地备份、调用取消或完整 research/RSI 验收已完成。
+
+本次实际命令：`make doctor` 为 0 failure/7 warning；今日 266 cycles、0 errors、0 submitted orders、0 LLM overrides。今天 238 次策略/标的不匹配已修代码，但收盘后部署，下一次开盘验证仍未完成。`make benchmark` 为 20/60 有记录交易日，诊断 agent +1.79% vs SPY +3.32%，净超额 -1.53 个百分点；资本分母仍需修复。最新 research ledger 143 行、0 PASS、99 行无 dataset fingerprint。
+
+新的阻断项：主分支 `make check` 因 RUF059 失败，远端三版本 CI 同样在 lint 失败；隔离新克隆还复现了 provenance 测试依赖本机 heartbeat 的失败。research-search/定时任务未强制 spec 验证和数据门禁，今日仍搜索十年合并数据；registry 默认路径落在 src 内，provenance 的指纹字段与 trial 合同不一致。演化提案在运行，但 research control/treatment 仍未开始。旧阶段完成记录保留为历史，不能用来声称最新提交 CI 已通过。
+
+完整差距、命令证据和下一轮验收见 `docs/evidence/rsi-status-audit-2026-10-12.md`。下一优先级为新克隆/CI → 正确标的周期验证 → 强制研究合同/provenance → 同步组合收益/决策对照 → 受控 RSI → shadow/有限 paper 与完整 60 日窗口。
+
 ## 1. 问题、基线、成功标准、验证
 
 ### 问题
