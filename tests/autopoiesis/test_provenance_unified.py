@@ -19,6 +19,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -94,26 +96,80 @@ def test_the_record_carries_the_daemon_state(tmp_path, monkeypatch):
     assert state["last_cycle_age_seconds"] == 48 * 3600
 
 
-def test_the_published_record_contains_both_new_sections():
-    """The end-to-end check, on the real record this host produces.
+_HEARTBEAT = {
+    "status": "RUNNING",
+    "pid": 4242,
+    "cycle_count": 1284,
+    "error_count": 0,
+    "source_fingerprint": "sha256:synthetic",
+    "last_cycle_age_seconds": 42,
+    "last_broker_ok": True,
+    "last_model_ok": True,
+}
 
-    A field that exists in a helper but never reaches the output is a field nobody has. This runs
-    `make reproduce`'s tool and asserts the sections a reader needs are in what it prints.
-    """
-    module = _load()
+
+def _run_main(module) -> str:
     import contextlib
     import io
 
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         module.main()
-    text = buffer.getvalue()
+    return buffer.getvalue()
+
+
+def test_the_published_record_contains_both_new_sections(tmp_path, monkeypatch):
+    """The end-to-end check on what the tool prints, on a runtime it can have anywhere.
+
+    **Synthetic, and deliberately so.** The version this replaces ran `main()` against whatever
+    this host had in `runtime/`, so on a fresh clone - no journal, no heartbeat - the daemon
+    section printed "(no heartbeat on this host)" and the assertions on `status:` failed. The
+    suite went 1 failed / 1319 passed in a clean checkout and 1323 passed here, and the difference
+    was exactly this test: every green run on this machine was leaning on this machine's state.
+
+    The heartbeat below is fabricated, and the value it is being used for is not a claim about
+    this host. It is a fixed input to the question the test actually asks: does a field the helper
+    computes reach the printed record? That question needs a heartbeat to exist, not a real one.
+    """
+    module = _load()
+    runtime = tmp_path / "runtime" / "autopoiesis"
+    runtime.mkdir(parents=True)
+    (runtime / "heartbeat.json").write_text(json.dumps(_HEARTBEAT), encoding="utf-8")
+    (runtime / "research_trials.jsonl").write_text(
+        json.dumps({"strategy_id": "t1", "bars": 100, "fingerprint": "sha256:aaaa"}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "RUNTIME", runtime)
+
+    text = _run_main(module)
 
     for heading in ("## code", "## configuration in effect", "## research data",
                     "## daemon state at the time of this record"):
         assert heading in text, f"{heading} is missing from the provenance record"
+    assert "status:" in text
+    assert "broker answered:" in text
+    assert "model answered:" in text
+    assert "sha256:synthetic" in text, (
+        "the daemon state has to carry what the helper read, not a placeholder"
+    )
 
-    # And the daemon section carries a real state rather than a placeholder.
+
+def test_the_real_record_on_this_host_still_prints_its_daemon_state():
+    """The published record, on the runtime this host actually produced.
+
+    The mechanism test above proves the sections are emitted given a heartbeat. This one keeps the
+    original assertion - the real printed record - because that is the artefact a reader opens. It
+    skips, with the reason, on a checkout with no running system: a fresh clone has no heartbeat,
+    and asserting the real record exists there would be asserting this machine.
+    """
+    module = _load()
+    if not (module.RUNTIME / "heartbeat.json").exists():
+        pytest.skip(
+            "no runtime/heartbeat.json in this checkout; the real record is produced by a running "
+            "system, so the printed record can only be checked where one ran. The mechanism is "
+            "covered by test_the_published_record_contains_both_new_sections."
+        )
+    text = _run_main(module)
     assert "status:" in text
     assert "broker answered:" in text
     assert "model answered:" in text

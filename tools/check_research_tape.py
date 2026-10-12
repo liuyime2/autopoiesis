@@ -69,6 +69,15 @@ def main(argv: list[str] | None = None) -> int:
     print(f"symbol: {symbol}   files: {len(mine)} of {len(files)} in the cache")
     if ignored:
         print(f"ignored (not bar files): {', '.join(ignored)}")
+    # The tape's own provenance, printed rather than discarded. Every verdict below is a claim
+    # about this series, so the series' identity belongs next to the verdict - and a gate that
+    # reports its own input is the difference between "the tape was the declared one" being
+    # checkable and being asserted. The first version unpacked it and dropped it, which ruff
+    # flagged as an unused variable and which hid the fingerprint the ledger is supposed to
+    # carry: 99 of the ledger's records have no fingerprint at all, and the field the reader
+    # looks up is not the name the writer used, so newer ones are missed too.
+    if provenance:
+        print(f"tape provenance: {', '.join(sorted(provenance))}")
     print(report.render())
     if not report.usable:
         print()
