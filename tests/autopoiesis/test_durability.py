@@ -482,31 +482,61 @@ def test_a_reader_never_sees_a_half_written_append(tmp_path):
     while the daemon was mid-append could observe a partial line and count it as
     corruption. This showed up as an intermittent test failure only when the
     daemon was live."""
+    # Synthetic cycles exercise real journal appends and scans, with one append
+    # per scan so the workload cannot grow independently of reader progress.
     journal = JsonlJournal(tmp_path / "j.jsonl", lock=True)
-    journal.append(_record("seed"))  # so the first read is never empty
-    stop = threading.Event()
-    torn = []
+    journal.append(_record("seed"))
+    rounds = 30
+    start_round = threading.Barrier(2, timeout=5)
+    finish_round = threading.Barrier(2, timeout=5)
     counter = [0]
+    worker_errors = []
+    observations = []
+    reader_error = None
 
     def writer():
-        while not stop.is_set():
-            counter[0] += 1
-            journal.append(_record(f"c{counter[0]}"))
+        try:
+            for i in range(1, rounds + 1):
+                start_round.wait()
+                journal.append(_record(f"c{i}"))
+                counter[0] += 1
+                finish_round.wait()
+        except BaseException as exc:
+            worker_errors.append(exc)
+            start_round.abort()
+            finish_round.abort()
 
     thread = threading.Thread(target=writer, daemon=True)
     thread.start()
     try:
-        for _ in range(30):
+        for i in range(1, rounds + 1):
+            start_round.wait()
             records = journal.read_all()
-            if journal.last_dropped_lines:
-                torn.append(journal.last_dropped_lines)
-            assert records
+            assert journal.last_dropped_lines == 0, "reader observed a torn append"
+            ids = [record.cycle_id for record in records]
+            before_append = ["seed", *[f"c{j}" for j in range(1, i)]]
+            assert ids in (before_append, [*before_append, f"c{i}"]), (
+                "each scan must contain a complete ordered prefix, without lost or duplicate cycles"
+            )
+            observations.append(ids)
+            finish_round.wait()
+    except BaseException as exc:
+        reader_error = exc
+        start_round.abort()
+        finish_round.abort()
     finally:
-        stop.set()
         thread.join(timeout=5)
 
-    assert counter[0] > 0, "the writer never ran, so the test proved nothing"
-    assert torn == [], f"reader observed a torn append {len(torn)} time(s)"
+    assert not thread.is_alive(), "writer did not finish the bounded append workload"
+    assert not worker_errors, f"writer failed: {worker_errors!r}"
+    if reader_error is not None:
+        raise reader_error
+    assert counter[0] == rounds, "not all appends completed"
+    assert len(observations) == rounds, "not all concurrent scans completed"
+    assert [record.cycle_id for record in journal.read_all()] == [
+        "seed", *[f"c{i}" for i in range(1, rounds + 1)]
+    ]
+    assert journal.last_dropped_lines == 0
 
 
 def test_a_reader_waits_for_the_writer_then_succeeds(tmp_path):
