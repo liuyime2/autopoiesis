@@ -10,6 +10,7 @@ the archive (kept outside the repository).
 """
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 import sys
@@ -39,6 +40,47 @@ def function_body(text: str, name: str) -> str:
     return re.sub(r'("""|\'\'\').*?\1', "", body, flags=re.S)
 
 
+def gateway_uses_supported_broker_reads(gateway: str, broker: str) -> bool:
+    """Follow the gateway's actual calls through its imported shared SDK reader.
+
+    Comments, docstrings and calls in unrelated functions cannot stand in for
+    the broker reads. A missing or incompatible shared reader fails closed.
+    """
+    try:
+        gateway_tree, broker_tree = ast.parse(gateway), ast.parse(broker)
+    except SyntaxError:
+        return False
+    gateway_class = next((node for node in gateway_tree.body
+                          if isinstance(node, ast.ClassDef) and node.name == "AlpacaDataGateway"), None)
+    if gateway_class is None:
+        return False
+    methods = {node.name: node for node in gateway_class.body if isinstance(node, ast.FunctionDef)}
+    reader = next((node for node in broker_tree.body
+                   if isinstance(node, ast.FunctionDef) and node.name == "list_open_orders"), None)
+    if reader is None:
+        return False
+    imported_readers = {
+        alias.asname or alias.name
+        for node in gateway_tree.body
+        if isinstance(node, ast.ImportFrom) and node.level == 0
+        and node.module == "autopoiesis.broker_client"
+        for alias in node.names if alias.name == "list_open_orders"
+    }
+
+    def calls(function: ast.FunctionDef | None, target: str) -> list[ast.Call]:
+        if function is None:
+            return []
+        return [node for node in ast.walk(function)
+                if isinstance(node, ast.Call) and ast.unparse(node.func) == target]
+
+    positions = calls(methods.get("_fetch_positions"), "self.client.list_positions")
+    delegates = [call for name in imported_readers
+                 for call in calls(methods.get("_fetch_open_orders"), name)
+                 if len(call.args) == 1 and ast.unparse(call.args[0]) == "self.client"]
+    sdk_reads = calls(reader, "client.list_orders")
+    return bool(positions and delegates and sdk_reads)
+
+
 def main() -> int:
     py = {p.name: p.read_text(encoding="utf-8") for p in SRC.glob("*.py") if p.is_file()}
     py = {k: v for k, v in py.items() if k != "__init__.py"}
@@ -57,7 +99,8 @@ def main() -> int:
     sa, md = py["strategy_admission.py"], py["models.py"]
 
     # D1 - broker data is real or loudly absent
-    check("D1", "gateway calls list_positions/list_orders", "list_positions()" in dg and "list_orders(" in dg)
+    check("D1", "gateway reads positions and shared SDK open orders",
+          gateway_uses_supported_broker_reads(dg, py.get("broker_client.py", "")))
     check("D1", "pre-3.2.0 method names are gone", "get_all_positions" not in dg and "get_orders(" not in dg)
     check("D1", "no degradation to an empty result", "except Exception: return ()" not in dg)
     check("D1", "BrokerDataUnavailable is raised", "raise BrokerDataUnavailable" in dg)

@@ -217,7 +217,107 @@ def test_every_recorded_defect_is_still_fixed():
         env={**__import__("os").environ, "PYTHONPATH": str(root / "src")},
     )
     assert result.returncode == 0, f"defect audit failed:\n{result.stdout[-3000:]}"
-    assert "checks pass across 15 defects" in result.stdout
+    assert "62/62 checks pass across 15 defects" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("filename", "original", "replacement"),
+    [
+        pytest.param(
+            "data_gateway.py", "raw_positions = self.client.list_positions()",
+            "# self.client.list_positions()\n            raw_positions = []",
+            id="positions-comment-only",
+        ),
+        pytest.param(
+            "data_gateway.py", "raw_positions = self.client.list_positions()",
+            '"""self.client.list_positions()"""\n            raw_positions = []',
+            id="positions-docstring-only",
+        ),
+        pytest.param(
+            "data_gateway.py", "raw_orders = list_open_orders(self.client)",
+            "# list_open_orders(self.client)\n            raw_orders = []",
+            id="gateway-comment-only",
+        ),
+        pytest.param(
+            "data_gateway.py", "raw_orders = list_open_orders(self.client)",
+            '"""list_open_orders(self.client)"""\n            raw_orders = []',
+            id="gateway-docstring-only",
+        ),
+        pytest.param(
+            "data_gateway.py", "from autopoiesis.broker_client import list_open_orders",
+            "# from autopoiesis.broker_client import list_open_orders",
+            id="missing-helper-import",
+        ),
+        pytest.param(
+            "data_gateway.py", "from autopoiesis.broker_client import list_open_orders",
+            "from unrelated_module import list_open_orders",
+            id="wrong-helper-import",
+        ),
+        pytest.param(
+            "data_gateway.py", "list_open_orders(self.client)",
+            "list_open_orders(other_client)", id="wrong-helper-client",
+        ),
+        pytest.param(
+            "broker_client.py", None, None, id="missing-helper-module",
+        ),
+        pytest.param(
+            "broker_client.py", "def list_open_orders(", "def unrelated_reader(",
+            id="missing-helper-function",
+        ),
+        pytest.param(
+            "broker_client.py", 'orders = client.list_orders(status="open", limit=ORDER_PAGE_LIMIT)',
+            '# client.list_orders(status="open")\n        orders = []',
+            id="sdk-comment-only",
+        ),
+        pytest.param(
+            "broker_client.py", 'orders = client.list_orders(status="open", limit=ORDER_PAGE_LIMIT)',
+            '"""client.list_orders(status="open")"""\n        orders = []',
+            id="sdk-docstring-only",
+        ),
+        pytest.param(
+            "broker_client.py", "client.list_orders(", "client.get_orders(",
+            id="legacy-sdk-method",
+        ),
+        pytest.param(
+            "broker_client.py", "client.list_orders(", "other_client.list_orders(",
+            id="wrong-sdk-client",
+        ),
+    ],
+)
+def test_defect_audit_rejects_broken_shared_broker_reader(
+    tmp_path, monkeypatch, capsys, filename, original, replacement,
+):
+    """Synthetic source regressions must fail the real D1 audit and its exit code."""
+    import importlib.util
+    import shutil
+
+    spec = importlib.util.spec_from_file_location("audit_defects", ROOT / "tools/audit_defects.py")
+    audit = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(audit)
+    source = tmp_path / "src"
+    source.mkdir()
+    for path in (ROOT / "src/autopoiesis").glob("*.py"):
+        shutil.copyfile(path, source / path.name)
+    target = source / filename
+    if original is None:
+        target.unlink()
+    else:
+        text = target.read_text(encoding="utf-8")
+        assert original in text, "fixture must modify the current source"
+        target.write_text(text.replace(original, replacement), encoding="utf-8")
+    # Historical API mentions must not hide a missing call anywhere in the chain.
+    gateway = source / "data_gateway.py"
+    gateway.write_text(
+        "# Historical supported read: list_orders(...)\n" + gateway.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(audit, "SRC", source)
+
+    assert audit.main() == 1
+    assert len(audit.results) == 62
+    assert audit.results[0][0] == "D1"
+    assert audit.results[0][2] is False
+    assert "61/62 checks pass across 15 defects" in capsys.readouterr().out
 
 
 def test_the_readme_counts_match_the_tree():
