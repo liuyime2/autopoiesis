@@ -51,6 +51,10 @@ WARN = "WARN"
 #: Every test file, and the check class it belongs to. Assigning a file to more
 #: than one class is allowed; leaving one unassigned fails the gate.
 TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
+    "test_fresh_clone.py": ("unit-integration",),
+    "test_local_backup_installer.py": ("unit-integration", "crash-recovery"),
+    "test_learning_evidence.py": ("pnl-accounting", "lifecycle-invariants", "point-in-time-no-leakage"),
+    "test_research_contract.py": ("unit-integration", "point-in-time-no-leakage", "lifecycle-invariants"),
     "test_broker_evidence.py": ("broker-reconciliation", "crash-recovery"),
     "test_broker_client.py": ("broker-reconciliation", "unit-integration"),
     "test_broker_latency_sample.py": ("unit-integration",),

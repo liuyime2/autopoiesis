@@ -81,7 +81,7 @@ endif
 .PHONY: help setup install check lint lint-files type test test-provenance-host smoke smoke-offline fast fast-no-broker daily-report benchmark broker-latency-sample \
         verify verify-self-test doctor audit integrity classes classes-list \
         run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc \
-        site refresh-figures benchmark-json dist release-check \
+        site refresh-figures benchmark-json dist release-check fresh-clone example-cycle cli-help \
         attest-archive-baseline fetch-replay-bars research-search research-run \
         journal-backup journal-local-backup journal-restore journal-drill \
         research-register research-verify research-check-tape
@@ -332,6 +332,17 @@ type:
 	@$(CONDA_RUN) mypy src/autopoiesis
 
 check: lint type test
+
+# The fresh-clone harness uses the same declared entry points as a contributor.
+FRESH_CLONE_DEST ?=
+fresh-clone:
+	@bash docs/evidence/run-fresh-clone.sh $(if $(FRESH_CLONE_DEST),"$(FRESH_CLONE_DEST)",)
+
+example-cycle:
+	@$(PY) examples/minimal_cycle.py
+
+cli-help:
+	@$(PY) -m autopoiesis.cli --help
 
 # Smoke: one real cycle end to end against the broker. This is the cheapest test
 # that touches the network and the model, and the first one that can catch a
