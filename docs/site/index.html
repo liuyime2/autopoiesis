@@ -74,26 +74,26 @@ footer.site{border-top:1px solid var(--line);margin-top:3rem;padding:1.5rem 2rem
 <p>A research instrument, not a product. It trades a paper account, grades its own strategies against broker-confirmed fills, retires the ones that do not earn their place, and publishes every claim it makes with the command that produced it.</p>
 <p class="note">Every figure here is published from <code>docs/site/figures.json</code>, and each names the command that produced it. There are no screenshots: a reader can re-run a command and cannot re-derive an image.</p>
 <dl class="grid">
-<div class="card"><dt>agent, after cost</dt><dd>+1.81%</dd><p>return on deployed capital over the record window</p></div>
-<div class="card"><dt>vs SPY holding</dt><dd>-0.88 pts</dd><p>excess on the same capital and the same window</p></div>
-<div class="card"><dt>trading days on record</dt><dd>19</dd><p>against a 60-day target</p></div>
-<div class="card"><dt>gate</dt><dd>55 classes</dd><p>1289 tests across 87 files</p></div>
+<div class="card"><dt>agent, after cost</dt><dd>UNKNOWN</dd><p>allocation and aligned rolling equity history unavailable</p></div>
+<div class="card"><dt>vs SPY holding</dt><dd>UNKNOWN</dd><p>aligned portfolio comparison unavailable</p></div>
+<div class="card"><dt>trading days on record</dt><dd>20</dd><p>against a 60-day target</p></div>
+<div class="card"><dt>gate</dt><dd>55 classes</dd><p>1490 tests across 94 files</p></div>
 </dl>
 <h2>What it has shown</h2>
 <ul>
 <li>The accounting is real: broker-confirmed fills, a FIFO lot ledger, and a Guardian whose limits cannot be weakened by any configuration value.</li>
 <li>The gate can fail, and is made to fail on purpose to prove it. <code>make verify-self-test</code> plants the defects each class exists to catch, including a NaN limit that silently stops comparing.</li>
-<li>The research stage is autonomous: a scheduled job fetches real bars, sweeps candidates, and records every trial, and the evidence bar rises with the number tried.</li>
+<li>Research requires a registered contract and validated real bars before evaluating candidates and recording trials. Scheduled operation requires a configured contract, usable cache and verified successful runs.</li>
 </ul>
 <h2>What it has not shown</h2>
 <ul>
-<li><strong>That it beats holding.</strong> +1.81% after cost against SPY +2.69% over 19 of 60 trading days. The denominator is printed with the number.</li>
-<li><strong>Any directional edge.</strong> 129 hypotheses about what predicts returns have been through a family-wise gate. Volatility is the one judgment that holds, and it is a statement about risk, not direction.</li>
+<li><strong>That it beats holding.</strong> UNKNOWN after cost against SPY UNKNOWN over 20 of 60 recorded dates. Allocated capital and aligned equity are unavailable.</li>
+<li><strong>Any directional edge.</strong> 129 hypotheses appear in the historical signal ledger. These aggregate verdict counts do not establish validated alpha or certify statistical error control.</li>
 <li><strong>Live trading.</strong> Not present. <code>live</code> mode is refused by the configuration loader.</li>
 </ul>
 </main>
 <footer class="site">
-<p>Figures published 2026-10-11 17:07 UTC from <code>docs/site/figures.json</code>. A number that cannot be computed reads UNKNOWN, which is a different claim from zero.</p>
+<p>Figures published 2026-10-13 04:33 UTC from <code>docs/site/figures.json</code>. A number that cannot be computed reads UNKNOWN, which is a different claim from zero.</p>
 <p>Apache-2.0. Paper trading only; no live venue is reachable from this code.</p>
 </footer>
 </body></html>

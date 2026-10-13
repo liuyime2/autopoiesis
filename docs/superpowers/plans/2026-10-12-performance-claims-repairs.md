@@ -73,3 +73,32 @@ Public figures still require final refresh under the accepted source.
 
 Independent quality re-review approved the fixes: **36 passed in 1.55s**, scoped
 lint and diff checks clean. Final publication refresh remains a Task 6 requirement.
+
+Public refresh review measured two unsupported current assertions in the overview:
+that scheduled research is operating autonomously, and that all 129 legacy signal
+hypotheses establish a family-wise-tested volatility result. The published
+aggregate has counts/verdict names only, and the actual new research diagnostic is
+0 PASS with a square-root sample heuristic, not FWER control. Success: render
+research as a contract-gated capability whose runtime requires verification, and
+legacy ledger verdicts as historical counts without alpha/statistical certification.
+Minimum change: replace these two prose blocks, retain actual counts and UNKNOWN
+portfolio results; run existing project-site tests and regenerate through Make.
+
+Final actual public refresh ran all five collectors successfully against the sealed
+real restored journal and a hash-identical private copy of the main legacy signal
+ledger (sha256 b5ca9c7ae6cc139351478f1c7a650ee64d46a19970e7255ada132e121885f762).
+Published figures show 2,326 cycles / 20 distinct dates, net paper accounting
+811.72, all portfolio ratios null, comparison UNKNOWN. Legacy signal ledger is
+173 verdict rows / 129 hypotheses; it is separate from the threshold research
+trial ledger and does not confer eligibility under the new contract. Gate collector
+lists 55 classes, test collector counts 1,490 collected tests / 94 files; neither
+collector is proof that those checks passed. Actual execution is recorded separately.
+
+Publication review also found the historical verdict paragraph and build denominator
+prose overstated validation; both now state historical counts/accounting/UNKNOWN.
+First root invocation used nonexistent test_project_site.py and ran zero tests;
+corrected `make test ENVFILE=/dev/null TEST_ARGS='tests/autopoiesis/test_public_site.py'`
+returned **8 passed in 0.19s**; `make site ENVFILE=/dev/null` regenerated all pages,
+and scoped lint passed. Independent publication re-review approved source/pages,
+nulls/accounting consistency and absence of private paths/credentials. Refresh
+completed without publishing raw journal, fills, account positions or credentials.

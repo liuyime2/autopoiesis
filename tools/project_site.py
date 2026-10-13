@@ -238,9 +238,9 @@ def overview(figures: Figures) -> list[str]:
     body.append('<li>The gate can fail, and is made to fail on purpose to prove it. '
                 '<code>make verify-self-test</code> plants the defects each class exists to '
                 'catch, including a NaN limit that silently stops comparing.</li>')
-    body.append('<li>The research stage is autonomous: a scheduled job fetches real bars, sweeps '
-                'candidates, and records every trial, and the evidence bar rises with the '
-                'number tried.</li>')
+    body.append('<li>Research requires a registered contract and validated real bars before '
+                'evaluating candidates and recording trials. Scheduled operation requires '
+                'a configured contract, usable cache and verified successful runs.</li>')
     body.append('</ul>')
 
     body.append('<h2>What it has not shown</h2>')
@@ -252,9 +252,9 @@ def overview(figures: Figures) -> list[str]:
                 + ' recorded dates. Allocated capital and aligned equity are unavailable.</li>')
     body.append('<li><strong>Any directional edge.</strong> '
                 + str(signals.get('hypotheses', 0))
-                + ' hypotheses about what predicts returns have been through a family-wise '
-                'gate. Volatility is the one judgment that holds, and it is a statement about '
-                'risk, not direction.</li>')
+                + ' hypotheses appear in the historical signal ledger. These aggregate '
+                'verdict counts do not establish validated alpha or certify statistical '
+                'error control.</li>')
     body.append('<li><strong>Live trading.</strong> Not present. <code>live</code> mode is '
                 'refused by the configuration loader.</li>')
     body.append('</ul>')
@@ -325,8 +325,9 @@ def evidence(figures: Figures) -> list[str]:
                         + '</span></td><td class="num">' + str(count) + '</td></tr>')
         body.append('</table></div>')
         body.append('<p>' + str(signals.get('hypotheses')) + ' distinct hypotheses, '
-                    + str(signals.get('rows')) + ' recorded verdicts. The bar rises with the '
-                    'number tried, so a bigger search cannot buy a cheaper pass.</p>')
+                    + str(signals.get('rows')) + ' historical recorded verdicts. These are ledger '
+                    'counts, not certification under the current research contract or evidence '
+                    'of validated alpha.</p>')
     else:
         body.append('<p class="note">No signal ledger in the published figures, so the research '
                     'record reads UNKNOWN rather than as zero.</p>')
@@ -461,8 +462,9 @@ def build(figures: Figures) -> list[str]:
         'is how an sdist missing <code>examples/</code> was found.</p>',
         '<h2>Reproducing the results</h2>',
         '<p>Every figure on this site names its command. <code>make benchmark</code> prints the '
-        'target and the agent-level figure with its denominator; '
-        '<code>make research-signals</code> reproduces the signal ledger; '
+        'raw paper-account accounting and an UNKNOWN portfolio comparison; '
+        '<code>make research-search SPEC=&lt;registered-spec&gt;</code> evaluates validated '
+        'cached bars under the declared research contract; '
         '<code>make audit</code> runs the recorded-defect audit.</p>',
         '<p class="note">Reproducing them needs a paper account and the same bar cache. A fresh '
         'clone with no credentials can build, test and gate the project; it cannot reproduce '

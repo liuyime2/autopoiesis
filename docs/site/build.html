@@ -80,17 +80,17 @@ make smoke-offline      # config and CLI end to end, no broker contacted
 python examples/minimal_cycle.py
 make verify             # the full gate: 55 check classes</code></pre>
 <h2>What the gate covers</h2>
-<p>55 check classes over the code and the running system, run by 1289 tests across 87 files. It is made to fail on purpose to prove it can: <code>make verify-self-test</code> plants the defects each class exists to catch.</p>
+<p>55 check classes over the code and the running system, run by 1490 tests across 94 files. It is made to fail on purpose to prove it can: <code>make verify-self-test</code> plants the defects each class exists to catch.</p>
 <h2>From a package rather than from a clone</h2>
 <p><code>pip install autopoiesis</code> (a pre-release, so <code>--pre</code>) gives the console script, the importable package, <code>examples/</code> and <code>configs/</code>. It does not give the gate, the suite or the make targets: those are a property of the source tree.</p>
 <h2>Release</h2>
 <p><code>make release-check</code> builds the sdist and the wheel, installs the sdist into a clean virtualenv, and runs what the README claims an installed copy can do. It is how an sdist missing <code>examples/</code> was found.</p>
 <h2>Reproducing the results</h2>
-<p>Every figure on this site names its command. <code>make benchmark</code> prints the target and the agent-level figure with its denominator; <code>make research-signals</code> reproduces the signal ledger; <code>make audit</code> runs the recorded-defect audit.</p>
+<p>Every figure on this site names its command. <code>make benchmark</code> prints the raw paper-account accounting and an UNKNOWN portfolio comparison; <code>make research-search SPEC=&lt;registered-spec&gt;</code> evaluates validated cached bars under the declared research contract; <code>make audit</code> runs the recorded-defect audit.</p>
 <p class="note">Reproducing them needs a paper account and the same bar cache. A fresh clone with no credentials can build, test and gate the project; it cannot reproduce trading results, and no page here claims it can.</p>
 </main>
 <footer class="site">
-<p>Figures published 2026-10-11 17:07 UTC from <code>docs/site/figures.json</code>. A number that cannot be computed reads UNKNOWN, which is a different claim from zero.</p>
+<p>Figures published 2026-10-13 04:33 UTC from <code>docs/site/figures.json</code>. A number that cannot be computed reads UNKNOWN, which is a different claim from zero.</p>
 <p>Apache-2.0. Paper trading only; no live venue is reachable from this code.</p>
 </footer>
 </body></html>
