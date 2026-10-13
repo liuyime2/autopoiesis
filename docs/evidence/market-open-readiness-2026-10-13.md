@@ -456,3 +456,61 @@ day-adjusted gate has never had a base rate to read a strategy's ratio against.
 
 The scoring itself is sound: across 213,416 rows in the journal there are 189,912 non-`PENDING`
 verdicts, so the grader works when it has gradeable input.
+
+## Deployment of the multi-symbol counterfactual — 17:24 to 18:25 EDT
+
+Source `b7bb043b2eac509f` deployed with the market closed, replacing `712dad74d423eeef`.
+
+- Unit bytes preserved (14 files) at `/tmp/opencode/unit-backup-20261013-1815/`.
+- Cooperative stop measured at **3 s** against the 630 s budget, `Result=success`,
+  `ExecMainStatus=0` - the second closed-market stop tonight, after 4 s for the previous
+  deploy and 64 s for the mid-session one.
+- Journal snapshot `CERTIFIED`: 2,781 cycles, 22,309 events, 0 unparsed lines.
+- State checkpoint `predeploy-state-1818`: 220 files / 311.4 MB, **220 of 220** hashes verified.
+- Ten units rendered, all byte-identical; `TimeoutStopSec=630`.
+- Started 18:18:31, PID **3513315**, `NRestarts=0`, fingerprint `b7bb043b2eac509f`. Both
+  readiness units reinstalled on the new fingerprint with
+  `DEPLOYMENT_AFTER=2026-10-13T18:18:31-04:00`; all six timers armed.
+
+### Verified live on the first pass after deployment
+
+The pass at 18:22:31 evaluated six symbols and wrote 858 rows:
+
+    symbols=6 hold_quality=0.530311 scored=2035 pending=275 gap=58 new_or_changed=858/2368
+
+Per-symbol verdicts, which is the part that was never produced before:
+
+| symbol | rows | verdict breakdown |
+|---|---|---|
+| SPY | 1510 | GOOD_HOLD 884, MISSED_ALPHA 284, NOT_EXECUTED 97, NEUTRAL 56, GOOD_TRADE 50, GAP 53, FALSE_TRADE 40, PENDING 46 |
+| TLT | 173 | MISSED_ALPHA 90, NEUTRAL 30, GOOD_HOLD 5, NOT_EXECUTED 1, GAP 1, PENDING 46 |
+| XLB | 172 | MISSED_ALPHA 73, GOOD_HOLD 48, NOT_EXECUTED 2, GAP 1, NEUTRAL 2, PENDING 46 |
+| XLE | 171 | MISSED_ALPHA 104, GOOD_HOLD 13, NOT_EXECUTED 3, NEUTRAL 3, GOOD_TRADE 1, GAP 1, PENDING 46 |
+| XLF | 169 | MISSED_ALPHA 98, GOOD_HOLD 21, NEUTRAL 2, NOT_EXECUTED 1, GOOD_TRADE 1, PENDING 45 |
+| BIL | 173 | NEUTRAL 126, PENDING 46, GAP 1 |
+
+The three strategies that actually traded today now have decisions in the screen, where they
+had **none**:
+
+| strategy | orders today | screen decisions before | after |
+|---|---|---|---|
+| `fixed-size-tlt-sell-001` | 9 | **0** | 46 |
+| `fixed-size-xle-sell-001` | 2 | **0** | 31 |
+| `fixed-size-xlf-sell-001` | 1 | **0** | 15 |
+
+Two properties hold, and both were the risk in this change. SPY's verdict counts are
+**identical** to the pre-deployment measurement - 884 / 284 / 97 / 56 / 50 / 53 / 40 / 46 -
+so nothing already graded was re-graded. And the per-symbol splits differ sharply (TLT 90
+MISSED_ALPHA against XLB's 73 with 48 GOOD_HOLD), which is what per-symbol price series look
+like; a shared series would have produced identical distributions.
+
+All four screened strategies still report `informative=0` and
+`INCONCLUSIVE_INSUFFICIENT_EVIDENCE`, and `day_direction` still returns **0 days**. Both are
+the predicted state and both have the same cause: every one of these decisions was made today
+and is still inside its 24-hour horizon, so `net_return_pct` is `None`. They are not missing
+and not broken - they are not due until **2026-10-14 afternoon**.
+
+Cost recorded rather than discovered later: the pass wrote 858 rows on its first run, taking
+`journal.jsonl` to 29.8 MB. That is the one-time cost of grading five symbols that had never
+been graded. Steady-state growth is unchanged, because the journal-growth guard still writes
+only new-or-changed rows.
