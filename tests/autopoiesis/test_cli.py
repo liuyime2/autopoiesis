@@ -804,6 +804,196 @@ def test_readiness_builder_refuses_foreign_journal_before_construction(tmp_path)
         _build_agent_daemon(cfg, object(), journal=journal)
 
 
+def _synthetic_curriculum_spec(*, action="BUY"):
+    """Flat synthetic model output for the actual curriculum generator."""
+    return {
+        "strategy_id": "synthetic-request-boundary", "name": "Synthetic request boundary",
+        "symbols": ["SPY"], "max_position_value": 1000,
+        "created_at": "2026-10-13T00:00:00+00:00", "rationale": "synthetic fixture",
+        "action": action, "quantity": 1, "confidence": 0.9,
+    }
+
+
+@pytest.mark.parametrize("stop_at", ["phase_a", "parser_retry", "capability_retry", "complete"])
+def test_assembled_curriculum_refuses_actual_requests_after_stop(
+    tmp_path, monkeypatch, entry_no_network, stop_at,
+):
+    """Synthetic HTTP responses exercise real assembly, generation, parsing and audit."""
+    from autopoiesis import cli
+    from autopoiesis.models import ReflectionRecord, StrategySpec
+
+    cfg = replace(_synthetic_entry_config(tmp_path), curriculum_enabled=True)
+    requests_started = []
+    waits = []
+    screens = []
+    spec = _synthetic_curriculum_spec()
+    if stop_at == "parser_retry":
+        spec.pop("max_position_value")
+
+    def model_response(engine, url, payload, timeout):
+        requests_started.append(daemon._stop_requested)
+        assert timeout == cli.CURRICULUM_TIMEOUT_S
+        response = {"kind": "FIXED_SIZE"} if len(requests_started) % 2 else spec
+        if len(requests_started) == (1 if stop_at == "phase_a" else 2):
+            daemon.stop()
+        return {"response": json.dumps(response)}
+
+    monkeypatch.setattr(cli.OllamaDecisionEngine, "_requests_transport", model_response)
+    daemon = cli._build_agent_daemon(cfg, _SyntheticClosedBroker())
+    daemon.sleep = waits.append
+    daemon.reflection_memory.save(ReflectionRecord(
+        generated_at=datetime.now(timezone.utc), window_cycles=1, submitted_orders=0,
+        rejected_orders=0, error_count=0, summary="synthetic request stop",
+    ))
+    if stop_at == "capability_retry":
+        daemon.strategy_library.save(StrategySpec(
+            strategy_id="synthetic-buy-only", name="Synthetic buy only", kind="FIXED_SIZE",
+            symbols=("SPY",), parameters={"action": "BUY", "quantity": 1, "confidence": 0.9},
+            max_position_value=1000, created_at=datetime.now(timezone.utc), rationale="synthetic fixture",
+        ))
+        monkeypatch.setattr(daemon, "_last_market", lambda: (100, "SPY"))
+        monkeypatch.setattr(daemon, "_open_book", lambda: [{"symbol": "SPY", "quantity": 1}])
+    monkeypatch.setattr(daemon, "_screen_candidate", screens.append)
+
+    daemon._curriculum_proposal()
+
+    assert requests_started == ([False] if stop_at == "phase_a" else [False, False])
+    assert waits == []
+    assert screens == []
+    assert not daemon.journal.read_events("STRATEGY_ADMISSION_REVIEWED")
+    proposals = daemon.journal.read_events("CURRICULUM_PROPOSED")
+    failures = daemon.journal.read_events("CURRICULUM_FAILED")
+    if stop_at == "complete":
+        assert len(proposals) == 1
+        assert proposals[0].status == "SUCCESS"
+        assert proposals[0].payload["source"] == "llm"
+        assert not failures
+    else:
+        assert not proposals
+        assert len(failures) == 1
+        assert failures[0].status == "FAILED"
+        assert failures[0].payload["error_type"] == "RuntimeError"
+        assert failures[0].message == "curriculum model request refused: daemon stop requested"
+        if stop_at == "parser_retry":
+            assert "previous_output_rejected" in daemon.curriculum_agent.last_context
+        if stop_at == "capability_retry":
+            assert "unfilled_capability" in daemon.curriculum_agent.last_context
+
+
+def test_assembled_curriculum_stop_predicate_belongs_to_its_daemon(
+    tmp_path, monkeypatch, entry_no_network,
+):
+    """Synthetic transport entry proves separate builders retain their own stop flags."""
+    from autopoiesis import cli
+    from autopoiesis.curriculum import parse_curriculum_task_json
+
+    requests_started = []
+
+    def model_response(engine, url, payload, timeout):
+        requests_started.append(payload)
+        response = {"kind": "FIXED_SIZE"} if len(requests_started) % 2 else _synthetic_curriculum_spec()
+        return {"response": json.dumps(response)}
+
+    monkeypatch.setattr(cli.OllamaDecisionEngine, "_requests_transport", model_response)
+    cfg = replace(_synthetic_entry_config(tmp_path), curriculum_enabled=True)
+    daemon = cli._build_agent_daemon(cfg, _SyntheticClosedBroker())
+    other_cfg = replace(cfg, journal_path=tmp_path / "other" / "journal.jsonl")
+    other_daemon = cli._build_agent_daemon(other_cfg, _SyntheticClosedBroker())
+    task = parse_curriculum_task_json(daemon.curriculum_agent.transport({}))
+    assert task.strategy_spec.kind == "FIXED_SIZE"
+    assert len(requests_started) == 2
+
+    daemon.stop()
+    with pytest.raises(RuntimeError, match="curriculum model request refused: daemon stop requested"):
+        daemon.curriculum_agent.transport({})
+    assert len(requests_started) == 2
+    assert parse_curriculum_task_json(other_daemon.curriculum_agent.transport({})).source == "llm"
+    assert len(requests_started) == 4
+
+
+@pytest.mark.parametrize("retry", ["none", "parser", "capability"])
+def test_standalone_curriculum_adapter_preserves_unstopped_generation(
+    tmp_path, monkeypatch, entry_no_network, retry,
+):
+    """Synthetic controls keep the real two-phase adapter and internal retries enabled."""
+    from autopoiesis import cli
+    from autopoiesis.models import ReflectionRecord, StrategySpec
+
+    requests_started = []
+
+    def model_response(engine, url, payload, timeout):
+        requests_started.append(payload)
+        if len(requests_started) % 2:
+            response = {"kind": "FIXED_SIZE"}
+        else:
+            response = _synthetic_curriculum_spec(action="SELL" if retry == "capability" else "BUY")
+            if len(requests_started) == 2 and retry == "parser":
+                response.pop("max_position_value")
+            elif len(requests_started) == 2 and retry == "capability":
+                response["action"] = "BUY"
+        return {"response": json.dumps(response)}
+
+    monkeypatch.setattr(cli.OllamaDecisionEngine, "_requests_transport", model_response)
+    cfg = _synthetic_entry_config(tmp_path)
+    agent = cli.StructuredCurriculumAgent(transport=cli._ollama_curriculum_transport(cfg))
+    strategies = []
+    if retry == "capability":
+        strategies.append(StrategySpec(
+            strategy_id="synthetic-buy-only", name="Synthetic buy only", kind="FIXED_SIZE",
+            symbols=("SPY",), parameters={"action": "BUY", "quantity": 1, "confidence": 0.9},
+            max_position_value=1000, created_at=datetime.now(timezone.utc), rationale="synthetic fixture",
+        ))
+    task = agent.propose(
+        reflection=ReflectionRecord(
+            generated_at=datetime.now(timezone.utc), window_cycles=1, submitted_orders=0,
+            rejected_orders=0, error_count=0, summary="synthetic unstopped control",
+        ),
+        current_strategies=strategies, last_price=100 if retry == "capability" else None,
+        open_positions=[{"symbol": "SPY", "quantity": 1}] if retry == "capability" else [],
+    )
+
+    assert len(requests_started) == (2 if retry == "none" else 4)
+    assert task.source == "llm"
+    assert task.strategy_spec.parameters["action"] == ("SELL" if retry == "capability" else "BUY")
+    assert agent.parse_attempts == (1 if retry == "none" else 2)
+    assert agent.last_failure is None
+
+
+@pytest.mark.parametrize("spec_hint", [None, "FIXED_SIZE"])
+def test_curriculum_request_predicate_guards_each_generator_branch(
+    tmp_path, monkeypatch, entry_no_network, spec_hint,
+):
+    """Synthetic optional hints use the same actual per-request stop predicate."""
+    from autopoiesis import cli
+    from autopoiesis.curriculum import generate_curriculum_task_json, parse_curriculum_task_json
+
+    requests_started = []
+    stopped = True
+
+    def model_response(engine, url, payload, timeout):
+        requests_started.append(payload)
+        response = (
+            {"kind": "FIXED_SIZE"}
+            if spec_hint is None and len(requests_started) == 1
+            else _synthetic_curriculum_spec()
+        )
+        return {"response": json.dumps(response)}
+
+    def generate(*, call, prompt_context):
+        return generate_curriculum_task_json(call=call, prompt_context=prompt_context, spec_hint=spec_hint)
+
+    monkeypatch.setattr(cli.OllamaDecisionEngine, "_requests_transport", model_response)
+    monkeypatch.setattr(cli, "generate_curriculum_task_json", generate)
+    transport = cli._ollama_curriculum_transport(config(tmp_path), should_stop=lambda: stopped)
+    with pytest.raises(RuntimeError, match="curriculum model request refused: daemon stop requested"):
+        transport({})
+    assert requests_started == []
+
+    stopped = False
+    assert parse_curriculum_task_json(transport({})).source == "llm"
+    assert len(requests_started) == (2 if spec_hint is None else 1)
+
+
 @pytest.mark.parametrize("condition", ["holiday", "blocked", "orders-incomplete", "stale-clock", "model-failure"])
 def test_readiness_synthetic_broker_or_model_failure_never_certifies(tmp_path, monkeypatch, condition):
     fixture = synthetic_readiness(tmp_path, monkeypatch)

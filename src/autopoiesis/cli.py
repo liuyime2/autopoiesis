@@ -6,6 +6,7 @@ import os
 import signal
 import subprocess
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -469,7 +470,7 @@ def _build_agent_daemon(
         trade_counter=TradeCounter(journal=journal),
         manage_account=config.whole_account,
     )
-    return AgentDaemon(
+    daemon = AgentDaemon(
         config=config,
         loop=loop,
         journal=journal,
@@ -481,7 +482,7 @@ def _build_agent_daemon(
         on_cycle_count=lambda n: served_count.__setitem__("cycles", n),
         curriculum_agent=(
             StructuredCurriculumAgent(
-                transport=_ollama_curriculum_transport(config),
+                transport=_ollama_curriculum_transport(config, should_stop=lambda: daemon._stop_requested),
                 state_path=config.journal_path.parent / "curriculum_state.json",
             )
             if config.curriculum_enabled
@@ -500,9 +501,10 @@ def _build_agent_daemon(
         reflect_every=config.reflect_every,
         curriculum_every=config.curriculum_every,
     )
+    return daemon
 
 
-def _ollama_curriculum_transport(config: AgentConfig):
+def _ollama_curriculum_transport(config: AgentConfig, *, should_stop: Callable[[], bool] | None = None):
     engine = OllamaDecisionEngine(
         base_url=config.ollama_base_url,
         model=config.model,
@@ -523,6 +525,8 @@ def _ollama_curriculum_transport(config: AgentConfig):
             "format": schema,
             "options": {"temperature": 0.1, "num_ctx": CURRICULUM_NUM_CTX},
         }
+        if should_stop is not None and should_stop():
+            raise RuntimeError("curriculum model request refused: daemon stop requested")
         response = engine.transport(f"{engine.base_url}/api/generate", payload, engine.timeout)
         return str(response.get("response", ""))
 
