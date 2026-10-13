@@ -9,10 +9,10 @@ $ python3 -m venv .venv
 $ source .venv/bin/activate && make install ENVFILE=/dev/null
 
 ## commit under test
-cd2874e Refuse account-only profit target verdicts across every active consumer
+41cbb83 Evaluate the current checkout even when an older package is installed
 
 ## environment
-interpreter: /tmp/autopoiesis-fresh-clone.XDv3At/.venv/bin/python
+interpreter: /tmp/autopoiesis-fresh-clone.cMGaby/.venv/bin/python
 version: 3.10.18
 credentials: none present (verified by probing, after unset)
 child env files: ENVFILE=/dev/null; AUTOPOIESIS_ENV_FILE=/dev/null
@@ -20,7 +20,7 @@ child XDG config: empty disposable directory; HOME unchanged
 
 ## install
 $ source .venv/bin/activate && make install
-Obtaining file:///tmp/autopoiesis-fresh-clone.XDv3At
+Obtaining file:///tmp/autopoiesis-fresh-clone.cMGaby
   Installing build dependencies: started
   Installing build dependencies: finished with status 'done'
   Checking if build backend supports build_editable: started
@@ -29,129 +29,129 @@ Obtaining file:///tmp/autopoiesis-fresh-clone.XDv3At
   Getting requirements to build editable: finished with status 'done'
   Preparing editable metadata (pyproject.toml): started
   Preparing editable metadata (pyproject.toml): finished with status 'done'
-Collecting urllib3<2,>=1.26
-  Downloading urllib3-1.26.20-py2.py3-none-any.whl (144 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 144.2/144.2 kB 7.9 MB/s eta 0:00:00
-Collecting requests<3,>=2.31
-  Downloading requests-2.34.2-py3-none-any.whl (73 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.1/73.1 kB 20.4 MB/s eta 0:00:00
 Collecting alpaca-trade-api==3.2.0
   Downloading alpaca_trade_api-3.2.0-py3-none-any.whl (34 kB)
 Collecting pydantic<3,>=2.9
   Downloading pydantic-2.14.1-py3-none-any.whl (488 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 488.1/488.1 kB 25.7 MB/s eta 0:00:00
-Collecting ruff>=0.6
-  Downloading ruff-0.17.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.4 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.4/10.4 MB 42.2 MB/s eta 0:00:00
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 488.1/488.1 kB 16.5 MB/s eta 0:00:00
+Collecting requests<3,>=2.31
+  Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.1/73.1 kB 18.8 MB/s eta 0:00:00
+Collecting urllib3<2,>=1.26
+  Downloading urllib3-1.26.20-py2.py3-none-any.whl (144 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 144.2/144.2 kB 33.8 MB/s eta 0:00:00
 Collecting mypy>=1.11
   Downloading mypy-2.4.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (15.5 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 15.5/15.5 MB 34.7 MB/s eta 0:00:00
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 15.5/15.5 MB 30.7 MB/s eta 0:00:00
+Collecting ruff>=0.6
+  Downloading ruff-0.17.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.4 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.4/10.4 MB 52.1 MB/s eta 0:00:00
 Collecting pytest<9,>=8
   Downloading pytest-8.4.2-py3-none-any.whl (365 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 365.8/365.8 kB 41.4 MB/s eta 0:00:00
-Collecting numpy>=1.11.1
-  Downloading numpy-2.2.6-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (16.8 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.8/16.8 MB 34.6 MB/s eta 0:00:00
-Collecting websocket-client<2,>=0.56.0
-  Downloading websocket_client-1.9.2-py3-none-any.whl (95 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 95.8/95.8 kB 24.7 MB/s eta 0:00:00
-Collecting aiohttp<4,>=3.8.3
-  Downloading aiohttp-3.14.5-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.9 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.9/1.9 MB 50.3 MB/s eta 0:00:00
-Collecting websockets<11,>=9.0
-  Downloading websockets-10.4-cp310-cp310-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (106 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 106.8/106.8 kB 11.7 MB/s eta 0:00:00
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 365.8/365.8 kB 37.6 MB/s eta 0:00:00
 Collecting msgpack==1.0.3
   Downloading msgpack-1.0.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (323 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 323.7/323.7 kB 41.3 MB/s eta 0:00:00
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 323.7/323.7 kB 33.6 MB/s eta 0:00:00
+Collecting aiohttp<4,>=3.8.3
+  Downloading aiohttp-3.14.5-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.9 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.9/1.9 MB 55.1 MB/s eta 0:00:00
+Collecting websocket-client<2,>=0.56.0
+  Downloading websocket_client-1.9.2-py3-none-any.whl (95 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 95.8/95.8 kB 14.4 MB/s eta 0:00:00
 Collecting PyYAML==6.0.1
   Downloading PyYAML-6.0.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (705 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 705.5/705.5 kB 59.9 MB/s eta 0:00:00
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 705.5/705.5 kB 53.5 MB/s eta 0:00:00
+Collecting websockets<11,>=9.0
+  Downloading websockets-10.4-cp310-cp310-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (106 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 106.8/106.8 kB 10.8 MB/s eta 0:00:00
 Collecting deprecation==2.1.0
   Downloading deprecation-2.1.0-py2.py3-none-any.whl (11 kB)
 Collecting pandas>=0.18.1
   Downloading pandas-2.3.3-cp310-cp310-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.8 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 53.1 MB/s eta 0:00:00
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 53.4 MB/s eta 0:00:00
+Collecting numpy>=1.11.1
+  Downloading numpy-2.2.6-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (16.8 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.8/16.8 MB 37.1 MB/s eta 0:00:00
 Collecting packaging
   Using cached packaging-26.3-py3-none-any.whl (129 kB)
 Collecting librt>=0.16.0
   Downloading librt-0.16.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (515 kB)
      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 515.5/515.5 kB 42.4 MB/s eta 0:00:00
-Collecting ast-serialize<1.0.0,>=0.11.2
-  Downloading ast_serialize-0.13.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.3 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 75.6 MB/s eta 0:00:00
-Collecting tomli>=1.1.0
-  Downloading tomli-2.5.0-py3-none-any.whl (14 kB)
 Collecting mypy_extensions>=1.0.0
   Downloading mypy_extensions-1.1.0-py3-none-any.whl (5.0 kB)
 Collecting typing_extensions>=4.6.0
   Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 45.6/45.6 kB 15.3 MB/s eta 0:00:00
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 45.6/45.6 kB 12.5 MB/s eta 0:00:00
+Collecting tomli>=1.1.0
+  Downloading tomli-2.5.0-py3-none-any.whl (14 kB)
 Collecting pathspec>=1.0.0
   Downloading pathspec-1.1.1-py3-none-any.whl (57 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 57.3/57.3 kB 20.3 MB/s eta 0:00:00
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 57.3/57.3 kB 16.5 MB/s eta 0:00:00
+Collecting ast-serialize<1.0.0,>=0.11.2
+  Downloading ast_serialize-0.13.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.3 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 52.1 MB/s eta 0:00:00
 Collecting annotated-types>=0.6.0
   Downloading annotated_types-0.8.0-py3-none-any.whl (13 kB)
-Collecting typing-inspection>=0.4.4
-  Downloading typing_inspection-0.4.4-py3-none-any.whl (14 kB)
 Collecting pydantic-core==2.50.1
   Downloading pydantic_core-2.50.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.2 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.2/2.2 MB 49.3 MB/s eta 0:00:00
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.2/2.2 MB 59.9 MB/s eta 0:00:00
+Collecting typing-inspection>=0.4.4
+  Downloading typing_inspection-0.4.4-py3-none-any.whl (14 kB)
+Collecting exceptiongroup>=1
+  Downloading exceptiongroup-1.3.1-py3-none-any.whl (16 kB)
 Collecting iniconfig>=1
   Downloading iniconfig-2.3.1-py3-none-any.whl (7.6 kB)
 Collecting pygments>=2.7.2
   Downloading pygments-2.21.0-py3-none-any.whl (1.3 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 78.6 MB/s eta 0:00:00
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 65.5 MB/s eta 0:00:00
 Collecting pluggy<2,>=1.5
   Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
-Collecting exceptiongroup>=1
-  Downloading exceptiongroup-1.3.1-py3-none-any.whl (16 kB)
-Collecting idna<4,>=2.5
-  Downloading idna-3.20-py3-none-any.whl (69 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 69.6/69.6 kB 22.4 MB/s eta 0:00:00
-Collecting certifi>=2023.5.7
-  Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 137.0/137.0 kB 40.3 MB/s eta 0:00:00
 Collecting charset_normalizer<4,>=2
   Downloading charset_normalizer-3.5.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (271 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 271.1/271.1 kB 40.2 MB/s eta 0:00:00
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 271.1/271.1 kB 17.7 MB/s eta 0:00:00
+Collecting certifi>=2023.5.7
+  Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 137.0/137.0 kB 31.5 MB/s eta 0:00:00
+Collecting idna<4,>=2.5
+  Downloading idna-3.20-py3-none-any.whl (69 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 69.6/69.6 kB 8.2 MB/s eta 0:00:00
 Collecting async-timeout<6.0,>=4.0
   Downloading async_timeout-5.0.1-py3-none-any.whl (6.2 kB)
-Collecting aiosignal>=1.4.0
-  Downloading aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
-Collecting frozenlist>=1.1.1
-  Downloading frozenlist-1.8.0-cp310-cp310-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (219 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 219.5/219.5 kB 20.8 MB/s eta 0:00:00
-Collecting aiohappyeyeballs>=2.5.0
-  Downloading aiohappyeyeballs-2.7.1-py3-none-any.whl (15 kB)
-Collecting yarl<2.0,>=1.25.1
-  Downloading yarl-1.25.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (118 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 118.1/118.1 kB 11.9 MB/s eta 0:00:00
 Collecting attrs>=17.3.0
   Downloading attrs-26.1.0-py3-none-any.whl (67 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 67.5/67.5 kB 18.5 MB/s eta 0:00:00
-Collecting propcache>=0.2.0
-  Downloading propcache-0.5.4-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (224 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 224.3/224.3 kB 40.3 MB/s eta 0:00:00
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 67.5/67.5 kB 19.5 MB/s eta 0:00:00
 Collecting multidict<8.0,>=4.5
   Downloading multidict-7.1.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (464 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 464.4/464.4 kB 33.5 MB/s eta 0:00:00
-Collecting pytz>=2020.1
-  Downloading pytz-2026.5-py2.py3-none-any.whl (506 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 506.3/506.3 kB 61.8 MB/s eta 0:00:00
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 464.4/464.4 kB 28.1 MB/s eta 0:00:00
+Collecting aiosignal>=1.4.0
+  Downloading aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+Collecting aiohappyeyeballs>=2.5.0
+  Downloading aiohappyeyeballs-2.7.1-py3-none-any.whl (15 kB)
+Collecting frozenlist>=1.1.1
+  Downloading frozenlist-1.8.0-cp310-cp310-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (219 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 219.5/219.5 kB 39.4 MB/s eta 0:00:00
+Collecting yarl<2.0,>=1.25.1
+  Downloading yarl-1.25.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (118 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 118.1/118.1 kB 10.9 MB/s eta 0:00:00
+Collecting propcache>=0.2.0
+  Downloading propcache-0.5.4-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (224 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 224.3/224.3 kB 20.1 MB/s eta 0:00:00
 Collecting tzdata>=2022.7
   Downloading tzdata-2026.5-py2.py3-none-any.whl (347 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 348.0/348.0 kB 40.3 MB/s eta 0:00:00
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 348.0/348.0 kB 38.7 MB/s eta 0:00:00
+Collecting pytz>=2020.1
+  Downloading pytz-2026.5-py2.py3-none-any.whl (506 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 506.3/506.3 kB 36.2 MB/s eta 0:00:00
 Collecting python-dateutil>=2.8.2
   Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 44.2 MB/s eta 0:00:00
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 43.2 MB/s eta 0:00:00
 Collecting six>=1.5
   Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
 Building wheels for collected packages: autopoiesis
   Building editable for autopoiesis (pyproject.toml): started
   Building editable for autopoiesis (pyproject.toml): finished with status 'done'
-  Created wheel for autopoiesis: filename=autopoiesis-0.1.0a1-0.editable-py3-none-any.whl size=16785 sha256=8f1a211e36674277ce96b6cbbaedbb826d9091a5642443f43c94c4b88b17343c
-  Stored in directory: /tmp/pip-ephem-wheel-cache-r26cbkqo/wheels/4d/d6/59/67b8c430a0d6482b0b49d308085122bba5b9bc50ec0224727f
+  Created wheel for autopoiesis: filename=autopoiesis-0.1.0a1-0.editable-py3-none-any.whl size=16787 sha256=f5cfdea9e529d32a7e119a49305d30aae9152fa5b27231e4832abeb92de8bf80
+  Stored in directory: /tmp/pip-ephem-wheel-cache-ch8xv27i/wheels/bf/b8/3e/d36424b225456f58246cc13fedf4c20773af6be57a045001b1
 Successfully built autopoiesis
 Installing collected packages: pytz, msgpack, websockets, websocket-client, urllib3, tzdata, typing_extensions, tomli, six, ruff, PyYAML, pygments, propcache, pluggy, pathspec, packaging, numpy, mypy_extensions, librt, iniconfig, idna, frozenlist, charset_normalizer, certifi, attrs, async-timeout, ast-serialize, annotated-types, aiohappyeyeballs, typing-inspection, requests, python-dateutil, pydantic-core, mypy, multidict, exceptiongroup, deprecation, aiosignal, yarl, pytest, pydantic, pandas, aiohttp, alpaca-trade-api, autopoiesis
 Successfully installed PyYAML-6.0.1 aiohappyeyeballs-2.7.1 aiohttp-3.14.5 aiosignal-1.4.0 alpaca-trade-api-3.2.0 annotated-types-0.8.0 ast-serialize-0.13.0 async-timeout-5.0.1 attrs-26.1.0 autopoiesis-0.1.0a1 certifi-2026.7.22 charset_normalizer-3.5.2 deprecation-2.1.0 exceptiongroup-1.3.1 frozenlist-1.8.0 idna-3.20 iniconfig-2.3.1 librt-0.16.0 msgpack-1.0.3 multidict-7.1.0 mypy-2.4.0 mypy_extensions-1.1.0 numpy-2.2.6 packaging-26.3 pandas-2.3.3 pathspec-1.1.1 pluggy-1.6.0 propcache-0.5.4 pydantic-2.14.1 pydantic-core-2.50.1 pygments-2.21.0 pytest-8.4.2 python-dateutil-2.9.0.post0 pytz-2026.5 requests-2.34.2 ruff-0.17.0 six-1.17.0 tomli-2.5.0 typing-inspection-0.4.4 typing_extensions-4.16.0 tzdata-2026.5 urllib3-1.26.20 websocket-client-1.9.2 websockets-10.4 yarl-1.25.1
@@ -170,26 +170,26 @@ All checks passed!
 Success: no issues found in 49 source files
 ........................................................................ [  4%]
 ........................................................................ [  9%]
-....................................................s................... [ 14%]
+.....................................................s.................. [ 14%]
 ........................................................................ [ 19%]
 ........................................................................ [ 23%]
 ........................................................................ [ 28%]
 ........................................................................ [ 33%]
 ........................................................................ [ 38%]
 ........................................................................ [ 43%]
-......................................................................s. [ 47%]
+.......................................................................s [ 47%]
 ........................................................................ [ 52%]
 ........................................................................ [ 57%]
-.............................................................s.......... [ 62%]
-.....s.s..........................................................s..... [ 66%]
+..............................................................s......... [ 62%]
+......s.s..........................................................s.... [ 66%]
 ........................................................................ [ 71%]
 ........................................................................ [ 76%]
 ........................................................................ [ 81%]
-...............................s........................................ [ 86%]
+................................s....................................... [ 86%]
 ........................................................................ [ 90%]
 ........................................................................ [ 95%]
-.................................................................        [100%]
-1498 passed, 7 skipped in 34.29s
+..................................................................       [100%]
+1499 passed, 7 skipped in 35.46s
 RESULT: PASS
 
 ## smoke-offline
@@ -203,26 +203,26 @@ RESULT: PASS
 $ source .venv/bin/activate && make test
 ........................................................................ [  4%]
 ........................................................................ [  9%]
-....................................................s................... [ 14%]
+.....................................................s.................. [ 14%]
 ........................................................................ [ 19%]
 ........................................................................ [ 23%]
 ........................................................................ [ 28%]
 ........................................................................ [ 33%]
 ........................................................................ [ 38%]
 ........................................................................ [ 43%]
-......................................................................s. [ 47%]
+.......................................................................s [ 47%]
 ........................................................................ [ 52%]
 ........................................................................ [ 57%]
-.............................................................s.......... [ 62%]
-.....s.s..........................................................s..... [ 66%]
+..............................................................s......... [ 62%]
+......s.s..........................................................s.... [ 66%]
 ........................................................................ [ 71%]
 ........................................................................ [ 76%]
 ........................................................................ [ 81%]
-...............................s........................................ [ 86%]
+................................s....................................... [ 86%]
 ........................................................................ [ 90%]
 ........................................................................ [ 95%]
-.................................................................        [100%]
-1498 passed, 7 skipped in 30.66s
+..................................................................       [100%]
+1499 passed, 7 skipped in 31.73s
 RESULT: PASS
 
 ## example
@@ -288,10 +288,10 @@ RESULT: PASS
 $ source .venv/bin/activate && make reproduce
 wrote runtime/autopoiesis/reproduce.txt
 # provenance for one run of autopoiesis
-generated: 2026-10-13T04:58:44Z
+generated: 2026-10-13T05:25:00Z
 
 ## code
-commit: cd2874e1e0de90606c25443dab0d78cdb22c48e0
+commit: 41cbb833b6aeb6752928afdca60494017f88304d
 dirty:  yes
 
 ## environment
@@ -328,7 +328,7 @@ verify: every check class, one gate
 
 [PASS] test-coverage-map                     all 94 test files are assigned, and each is assigned to at least one class that actually runs it
 [PASS] class-coverage                        all 12 behaviour classes have tests; 23 repository/system checks are exempt by name
-[PASS] software-supply-chain                 282 tracked files, no credentials, no tracked env file
+[PASS] software-supply-chain                 283 tracked files, no credentials, no tracked env file
 [SKIP] docs-not-stale                        no plan documents in the published tree; the archive is not part of the repository, so its documents are not checked here
 [PASS] release-is-declarable                 version 0.1.0a1 is a legal pre-release and CHANGELOG.md names it
 [PASS] workflow-jobs-reachable               every top-level key in every workflow is one Actions accepts, and every job is reachable from jobs:
@@ -341,13 +341,13 @@ verify: every check class, one gate
 [PASS] example-runs                          examples/minimal_cycle.py runs with no broker or credentials
 [PASS] tools-readme-accurate                 tools/README.md names all 37 tools and invents none of them
 [PASS] no-loose-design-notes                 every root markdown file is a documented entry point (AGENTS.md, CHANGELOG.md, CODE_OF_CONDUCT.md, CONTRIBUTING.md, README.md, SECURITY.md) or declare
-[PASS] fresh-clone-evidence-real             log records 9 steps from commit 1e2c679, regenerable by run-fresh-clone.sh
+[PASS] fresh-clone-evidence-real             log records 9 steps from commit cd2874e, regenerable by run-fresh-clone.sh
 [PASS] shell-scripts-well-formed             3 shell script(s) parse cleanly under bash -n
 [PASS] bespoke-list-matches-run              22 bespoke names, all appended by main() and all reported by --list
 [SKIP] status-states-only-fixed-facts        STATUS.md is absent
 [PASS] config-comment-figures-true           ruff.toml's measured figures hold: verify.py 3,810 lines, 83 BLE001 findings, 25 deferred imports
 [PASS] list-count-matches-run                --list says 55; the run produces 55 for the same set (syntax-import contributes the extra row)
-[PASS] fact-figures-match                    prose agrees with the commands: audit 62/62, 1505 tests collected; and no document claims a doctor warnings count (live value is 14, which is why none
+[PASS] fact-figures-match                    prose agrees with the commands: audit 62/62, 1506 tests collected; and no document claims a doctor warnings count (live value is 14, which is why none
 [PASS] unit-templates-portable               10 unit template(s) carry no host path and every placeholder is substituted
 [PASS] pipeline-targets-exist                pipeline runs ['validate-data', 'test', 'evaluate', 'reproduce'] and every stage has a rule
 [PASS] type-checking-is-a-gate               `type:` runs mypy and blocks; `check:` runs lint, type and test. This class asserts the wiring only - it does not run mypy, and no verdict here says t
@@ -369,7 +369,7 @@ verify: every check class, one gate
 [PASS] selection-pressure-reaches-the-rules  a REJECT verdict retires from the rule set carrying its ratio, while INCONCLUSIVE and absent evidence do not
 [SKIP] self-evolution-closes                 no runtime journal in this checkout; the replay needs real bars fetched with a paper account (tools/fetch_replay_bars.py)
 [PASS] syntax-import                         ........................................................................ [ 96%] | ...                                                                 
-[PASS] unit-integration                      ........................................................................ [ 10%] | .....................................................s..............
+[PASS] unit-integration                      ........................................................................ [ 10%] | ......................................................s.............
 [PASS] point-in-time-no-leakage              ......................................................s................. [ 33%] | .......s............................................................
 [PASS] pnl-accounting                        ........................................................................ [ 33%] | ..........................................s.........................
 [PASS] lifecycle-invariants                  ........................................................................ [ 14%] | ....................................................................
@@ -382,7 +382,7 @@ verify: every check class, one gate
 [PASS] doctor                                no broker credentials; ran offline (ok=False exit=1 failures=[alpaca credentials] warnings=[daemon,journal,strategy library,knowledge library,end-to-e
 [PASS] gate-class-count-consistent           every document that states the count says '55 check classes'
 
-classes: 55   passed: 55   failed: 0   test executions: 2488 across 94 test files
+classes: 55   passed: 55   failed: 0   test executions: 2489 across 94 test files
 
 OK - all check classes pass
 RESULT: PASS

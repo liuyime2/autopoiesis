@@ -55,11 +55,11 @@ cycles lack frozen decision-time provenance and are excluded from learning.
   make check, UTC tests, required verify gates and credential-free fresh clone on
   committed changes. Reconcile RSI plan/evidence/docs. Publish a reviewable branch
   and inspect GitHub CI if authentication permits; never report local as remote.
-- [ ] 6a. Actual-entry follow-up: Make evaluate selected the ambient old package
+- [x] 6a. Actual-entry follow-up: Make evaluate selected the ambient old package
   despite fresh-install CI passing. Select current checkout source, reproduce with
   a foreign-package test, independently review and rerun the real sealed journal.
-  Those checks are complete; new committed-source clone, full gate and exact
-  latest CI are required before closing this follow-up. Details are recorded in
+  Those checks and the new committed-source clone/full gate/exact source CI are
+  complete for 41cbb83. Details are recorded in
   `2026-10-13-profit-target-consumers.md`; previous Task 6 evidence remains bound
   to cd2874e/003688a rather than relabelled.
 
@@ -386,3 +386,29 @@ completed successfully at 01:02:02, ExecMainStatus=0/Result=success. Trading dae
 remained active with PID 2800047 and old source. Final public refresh from the same
 sealed real journal succeeded; collected tests 1,505 in 94 files, unchanged net
 paper accounting and UNKNOWN portfolio comparison. No order or risk change.
+
+## Actual-entry and publication acceptance reconciliation
+
+The later real Make entry defect is closed in **41cbb83**, with red foreign-package
+regression, both independent reviews, real sealed-journal UNKNOWN collection and
+full check **1,500 passed / 6 skipped in 77.70s**, clean lint/type. Its committed
+fresh clone really exited 0 with **9 PASS / 0 FAIL**, **1,499 passed / 7 skipped**,
+**55/55 classes / 2,489 executions / 94 files**. Its exact remote run **38351090887**
+completed all three Python gates and release SUCCESS. These supersede the earlier
+pending statements for that unit, not the historical commands/results.
+
+After clone completion, root serial full gate passed **55/55 classes / 2,490
+executions / 94 files / zero failures**. Publication review caught current risk
+configuration being asserted as historical compliance. The bounded rendering
+correction and adjacent observed-fee/UNKNOWN prose correction are **cd8dd1b**,
+with eight focused tests, clean lint/Make regeneration and independent approval.
+The full gate began at the earlier risk-prose freeze; final two safety sentences
+have separate focused proof. Latest delivery commit's CI is inspected separately
+after push, rather than labelling the 41cbb83 run as that commit's result.
+
+Final real public refresh: **1,506 collected tests / 94 files**; sealed paper
+accounting remains **811.72**, comparison UNKNOWN. Current default risk values
+describe the measurement configuration and do not establish historical compliance.
+Deployment, alpha, LLM paired benefit, RSI control/treatment, complete synchronized
+60-day profitability evidence, offsite/full-state durability, and browser/mobile
+acceptance remain recorded follow-ups in the report and original RSI plan.

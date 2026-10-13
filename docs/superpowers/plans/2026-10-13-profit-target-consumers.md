@@ -89,7 +89,8 @@ integration evidence rather than inferred from these checks.
 Final source cd2874e passed real fresh clone (nine steps, 55/55 classes) and remote
 CI run 38348912218 (all three Python gate jobs plus release SUCCESS). Root serial
 full gate passed 55/55 classes / 2,489 executions / zero failures after clone-log
-completion. Documentation-only evidence publication follows; no later source edit.
+completion. That evidence publication changed no source. The real-entry follow-up
+below subsequently found another source-selection defect and has separate proof.
 
 ## Real-entry follow-up: ambient installed CLI
 
@@ -153,3 +154,11 @@ Committed-source fresh clone and latest remote CI remain integration follow-ups.
 Root full `make check ENVFILE=/dev/null` after this follow-up exited 0:
 **1,500 passed / 6 skipped in 77.70s**, lint clean, mypy 49 source files clean.
 Private original output: `/tmp/autopoiesis-audit-workspace-entry-check.log`.
+
+Integration acceptance for **41cbb83**: actual credential-free committed-source
+fresh clone exit 0, **9 PASS / 0 FAIL**, **1,499 passed / 7 skipped**, **55/55 classes,
+2,489 executions, 94 files**. Exact remote CI **38351090887** completed all three
+Python gate versions plus release SUCCESS. After clone-log completion, serial
+root gate passed **55/55 classes / 2,490 executions / zero failures / 94 files**.
+This closes this entry-point follow-up; later bounded publication wording is a
+separate unit and latest delivery CI is checked separately. No trading deployment.

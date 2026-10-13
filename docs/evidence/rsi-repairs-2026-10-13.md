@@ -10,7 +10,7 @@
 | 研究合同 | Make/定时入口可绕过声明；十年合并数据与六个月声明不一致；缓存身份、重复试验及落盘失败未严格约束 | 强制注册合同、标的/时间/区间/成本/预算/来源校验；冲突 bars、非法结果和台账写入失败拒绝运行；安装后的 registry 位于工作目录 |
 | 回测计算 | 入场费用漏算、回撤只看端点、按开仓基准重复复利、因果前缀反复复制 | 合成的 100→120→90→110 路径回撤修正为 25%；平价完整交易计入双边费用；前缀视图避免重复切片。合成测试只证明计算逻辑 |
 | 学习证据 | 用当前可变策略解释过去决策；UNKNOWN、旧行为、受污染订单别名和缓存可能供给学习/晋升 | 冻结决策时策略行为和 universe；所有学习消费者检查身份与来源；永久保留已知 client/broker 别名污染；旧账本和 FIFO 核算保留，缺证据的样本不参与学习 |
-| 收益披露 | 独立策略峰值资金之和被当作 agent 资本；短期账户数据被当作组合达标 | 公共/操作面板、benchmark、CLI 和 daemon 统一 UNKNOWN；资本/收益率/超额为 null，账户数据仅作诊断。`make evaluate` 接受未知测量但拒绝执行异常/不一致 JSON；保留有归属的纸上核算及明确标注的峰值诊断 |
+| 收益披露 | 独立策略峰值资金之和被当作 agent 资本；短期账户数据被当作组合达标；实际 Make 入口选中环境里的旧安装包 | 公共/操作面板、benchmark、CLI 和 daemon 统一 UNKNOWN；资本/收益率/超额为 null，账户数据仅作诊断。`make evaluate` 明确加载当前源码，接受未知测量但拒绝执行异常/不一致 JSON；保留有归属的纸上核算及明确标注的峰值诊断 |
 | 本地备份 | 发现文件与复制未共享一致性边界；深层 generation 遗漏；fsync/归档清单及重试可能虚假认证 | 锁内发现/复制，密封副本校验，所有数字 generation 按历史顺序读取/归档；无效/未认证清单阻止完成备份。真实恢复和演练通过，小时备份任务已启用 |
 | 停止流程 | 信号处理器做 IO；停止后仍开新阶段；回调异常重复计数或丢失完成 ID | 信号只置标志；启动、维护、clock/backoff、screen/post-cycle 等边界检查；每次尝试计数一次，回调前记录完成 ID。64 个专项测试通过；这不证明生产停机耗时 |
 
@@ -26,19 +26,21 @@
 
 ## 集成验证
 
-最终修复源码为 `cd2874e1e0de90606c25443dab0d78cdb22c48e0`；以下是实际执行，后续提交只补本轮真实日志、聚合页面和计划记录。最终证据提交的 CI 以 PR 最新检查页面及交付说明为准；本文件的实验和克隆日志绑定上述源码 SHA。
+实际执行路径修复源码为 `41cbb833b6aeb6752928afdca60494017f88304d`；其后还修正了风险配置的页面说明。此前 `cd2874e` 已通过安装后的 CI，但随后实际运行发现 Make 仍调用旧 editable 包；不能把新安装环境的绿色替代现有环境入口验证。以下保留各次执行的实际 SHA，最终证据及页面提交的 CI 以 PR 最新检查页面及交付说明为准。
 
 - `make check ENVFILE=/dev/null` 在 target-consumer 后续修复前：1,484 passed / 6 skipped，36.18s；lint clean，mypy 49 个源文件 clean。
-- 最终 target-consumer 修复 `cd2874e`：`make check ENVFILE=/dev/null` 为 **1,499 passed / 6 skipped，38.25s**；lint 和 49 文件类型检查通过。独立规格复审 87 项、质量复审 82 项通过。正/负/缺失账户数据不能标记 agent 达标，且 CLI 元数据使用配置目标、帮助文字明确百分数单位。
+- target-consumer 修复 `cd2874e`：`make check ENVFILE=/dev/null` 为 **1,499 passed / 6 skipped，38.25s**；lint 和 49 文件类型检查通过。独立规格复审 87 项、质量复审 82 项通过。正/负/缺失账户数据不能标记 agent 达标，且 CLI 元数据使用配置目标、帮助文字明确百分数单位。
+- 实际入口补漏 `41cbb83`：旧安装包导致真实 `make evaluate` 的 producer JSON 与新 validator 不一致，Make 拒绝；foreign-PYTHONPATH 回归先失败再通过。复用现有 `$(PY)` 后，密封真实 journal 评估 **Make exit 0 / producer exit 2 / UNKNOWN / unproven / satisfied=false**，原因仍是 agent allocation、cash flows 和同步权益缺失。独立规格/质量复审各 9 项通过。完整 `make check ENVFILE=/dev/null` **1,500 passed / 6 skipped，77.70s**；lint 和 49 文件类型检查通过。真实入口验证不依赖合成 journal 的收益结果。
 - 独立非 editable `make release-check ENVFILE=/dev/null`：exit 0；确认为 venv site-packages 导入，空环境中运行注册/核验，并确认独立工作目录中的 .spec/.json。
 - `make verify-self-test ENVFILE=/dev/null`：通过，能检测失败测试、缺名称、空类、未分类文件、过时计划和不可达 systemd 单元。
 - 初次默认 Python 3.12 创建 venv 因 host 缺少 ensurepip 失败，脚本记录 FAIL；README 已要求 Debian/Ubuntu 安装 python3-venv。随后显式 Python 3.10 创建新空 venv。首次根目录全 gate 中，工具文件文档漏项已修正；另两次验证读取到并行自检临时文件或尚未写完的 clone log，不算通过。最终验证在日志完成、无临时测试文件时串行执行。
-- 最终源码真实全新克隆：`make fresh-clone ENVFILE=/dev/null PYTHON=<explicit Python 3.10>` exit 0，**9 PASS / 0 FAIL**；空配置独立 venv 下 1,498 passed / 7 skipped，55 类门禁全通过、2,488 次测试执行。额外跳过的配置主机检查与空 XDG 配置隔离一致。完整原始输出保留在 [fresh-clone.log](fresh-clone.log)，不是模板填数。
-- 最终工作树 `make verify ENVFILE=/dev/null`：**55/55 类、2,489 次测试执行、0 失败**，94 test files。Doctor 的离线 warnings 不等于真实部署通过；公共 collector 收集到 1,505 个测试也不等于它自己执行了这些测试。
-- 最终源码 `cd2874e` 的 [GitHub CI](https://github.com/liuyime2/autopoiesis/actions/runs/38348912218) 四个 job（Python 3.10/3.11/3.12 gate 与 release）全部 success。此前 `0fe69e8` 同样通过；不以旧结果代替此次核验。
+- 执行路径修复 `41cbb83` 真实全新克隆：`make fresh-clone ENVFILE=/dev/null PYTHON=<explicit Python 3.10>` exit 0，**9 PASS / 0 FAIL**；空配置独立 venv 下 1,499 passed / 7 skipped，55 类门禁全通过、2,489 次测试执行。额外跳过的配置主机检查与空 XDG 配置隔离一致。完整原始输出保留在 [fresh-clone.log](fresh-clone.log)，不是模板填数；随后页面措辞的修改不冒充这一 SHA 的克隆结果。
+- 工作树集成 `make verify ENVFILE=/dev/null`：**55/55 类、2,490 次测试执行、0 失败**，94 test files。它在风险配置说明冻结后运行；随后安全页的费用/UNKNOWN 两句另有 8 项 focused 验证和独立复审，完整最终提交由最新 CI 核验。Doctor 的 warnings 不等于真实部署通过；公共 collector 收集到 1,506 个测试也不等于它自己执行了这些测试。
+- 页面措辞修复为 `cd8dd1b`，现有 8 项 public-site 测试、lint、生成与独立规格/质量复审通过；风险历史断言、未观察费用被认定为零、UNKNOWN 被写成未达标三个披露问题已关闭。未改风险值、账本金额或执行路径。
+- 执行路径修复 `41cbb83` 的 [GitHub CI](https://github.com/liuyime2/autopoiesis/actions/runs/38351090887) 四个 job（Python 3.10/3.11/3.12 gate 与 release）全部 success。此前 `cd2874e` 的 [CI](https://github.com/liuyime2/autopoiesis/actions/runs/38348912218) 与 `0fe69e8` 同样通过；旧结果保留各自 SHA，不替代最新证据及页面提交的核验。
 - 活跃源码、tools/configs/examples、Make/入口、pyproject 和 GitHub workflows 的 `min-agent/min_agent` 引用扫描为 0，已跟踪文件名匹配为 0；历史文档/证据不作为正在运行的旧框架。
 
-最终刷新公共聚合页面成功，仍基于同一密封恢复记录；测试 collection 更新为 1,505 / 94 files，金额和 UNKNOWN 状态不变。首次真正由 timer 触发的本地备份于 01:01:30 EDT 启动、01:02:02 成功完成，生成 `20261013T050130Z-db3c455ce565`，Result=success / ExecMainStatus=0。本轮没有交易服务重启、手动 broker 下单、live 接入或硬风险放宽。
+最终刷新公共聚合页面成功，仍基于同一密封恢复记录；测试 collection 更新为 1,506 / 94 files，金额和 UNKNOWN 状态不变。展示的 5,000 / 20,000 / 10 等风险值是本次隔离测量配置，不能证明历史记录遵守这些限额；历史风险配置/合规情况未确认。首次真正由 timer 触发的本地备份于 01:01:30 EDT 启动、01:02:02 成功完成，生成 `20261013T050130Z-db3c455ce565`，Result=success / ExecMainStatus=0。本轮没有交易服务重启、手动 broker 下单、live 接入或硬风险放宽。
 
 ## 当前运行与原计划差距
 

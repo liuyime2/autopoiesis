@@ -22,17 +22,22 @@
 不证明连续有效交易日或 60 日窗口。公共历史 signal ledger 173 verdicts / 129
 hypotheses，与当前研究试验分开。账户目标 CLI/daemon 的遗留误判已在 `cd2874e`
 修复并通过规格/质量复审，现统一 UNKNOWN；不把整账户涨幅认定为 agent 达标。
+实际入口又发现 Conda 旧安装包被选中；`41cbb83` 明确加载当前工作树，foreign
+PYTHONPATH 回归及真实密封账本评估通过（Make exit 0，producer UNKNOWN/exit 2）。
+公开风险表改为本次测量配置，历史风险配置/合规情况仍未建立。
 
 用户确认尚无异地目标：先完成本地可靠备份。真实 5 文件备份、隔离恢复及完整 drill
 逐字节/语义一致（2,326 cycles、21,671 events、0 未解析行、CERTIFIED archive）；
 小时持久化 timer 已启用，首次实际 backup service exit 0。仅是 journal 本地恢复，
 异地/完整状态/主机损失恢复和留存政策仍未完成。
 
-最终代码 `cd2874e` 完整检查 1,499 passed / 6 skipped；远端三 Python 版本 gate
-加 release 均通过。独立 Python 3.10 全新 venv 克隆九步骤通过（1,498 passed /
-7 skipped，空配置隔离），55 类门禁零失败。最终工作树 gate 为 55/55 类、
-2,489 次测试执行、0 失败。后续只补证据的提交也须核对最新 CI，不以旧 SHA
-的绿色代替最新状态。
+执行路径代码 `41cbb83` 完整检查 1,500 passed / 6 skipped；远端三 Python 版本
+gate 加 release 均通过。独立 Python 3.10 全新 venv 克隆九步骤通过
+（1,499 passed / 7 skipped，空配置隔离），55 类门禁、2,489 次测试执行零失败。
+这些结果绑定 `41cbb83`，后续页面措辞和证据提交也须核对最新 gate/CI，不能把
+旧 SHA 的绿色代替最新状态。
+串行工作树集成 gate 实测 55/55 类、2,490 次测试执行、0 失败、94 files；随后
+两句安全页措辞另有 8 项 focused 验证，页面修复为 `cd8dd1b`，独立复审通过。
 完整命令、后续状态和边界见 [本轮修复记录](evidence/rsi-repairs-2026-10-13.md)。
 
 原计划 A/G 的可靠性和实验前提明显推进；B 尚无有效 alpha，C 尚无 LLM 配对增益，
