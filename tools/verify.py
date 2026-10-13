@@ -2222,34 +2222,21 @@ def check_config_example_covers_every_variable() -> Result:
 
 
 def check_config_example_names_are_real() -> Result:
-    """Every variable in configs/paper.env.example must exist in the codebase.
+    """Active example keys must have a loader, shell or Make consumer.
 
-    A configuration example is read by whoever is setting the system up, and a name that
-    nothing reads is a setting they will change in the belief it took effect. The names
-    are checked against config.py's own env reads plus the deployed env file's keys,
-    which together are where a variable can legitimately come from.
-
-    `config.py` is not the only reader, and assuming it was made this check host-dependent
-    in the worst possible way. The env file is dual-purpose: `autopoiesis` sources the same file
-    before it ever calls `python -m autopoiesis.cli`, and reads AUTOPOIESIS_ENVBIN out of it to
-    find the environment's bin directory. `AUTOPOIESIS_ENVBIN` is set in the deployed env file
-    on this host and is absent from config.py, so documenting it made this check pass *only
-    because the env file happened to be present* - and a fresh clone, which is exactly where
-    someone reads the example, would have reported a live knob as dead and sent them to delete
-    the line that makes their install work. So `autopoiesis`'s executable code is a reader too.
+    An operator's env file declares values, not readers. Using it as evidence made dead
+    settings pass on configured hosts and working Make settings fail on fresh clones.
     """
     example = ROOT / "configs" / "paper.env.example"
     if not example.exists():
         return Result("config-example-names", FAIL, "configs/paper.env.example is missing")
-    names = set(re.findall(r"^(AUTOPOIESIS_[A-Z_]+|ALPACA_[A-Z_]+|OLLAMA_BASE_URL)=", example.read_text(), re.M))
+    variable = r"(?:AUTOPOIESIS|ALPACA|APCA|OLLAMA)_[A-Z0-9_]+"
+    names = set(re.findall(rf"^[ \t]*({variable})=", example.read_text(), re.M))
     if not names:
         return Result("config-example-names", FAIL, "no variable names found in the example")
-    known = (ROOT / "src" / "autopoiesis" / "config.py").read_text(encoding="utf-8")
-    known += _entry_point_reads()
-    env_file = Path(os.environ.get("XDG_CONFIG_HOME", "")) / "autopoiesis" / "env"
-    if env_file.exists():
-        known += env_file.read_text(encoding="utf-8")
-    unknown = sorted(n for n in names if n not in known)
+    loader = (ROOT / "src" / "autopoiesis" / "config.py").read_text(encoding="utf-8")
+    known = set(re.findall(variable, loader + "\n" + _entry_point_reads()))
+    unknown = sorted(names - known)
     if unknown:
         return Result(
             "config-example-names", FAIL,
@@ -2257,26 +2244,58 @@ def check_config_example_names_are_real() -> Result:
         )
     return Result(
         "config-example-names", PASS,
-        f"all {len(names)} variable names in the example are read by config.py, by autopoiesis, "
-        "or by the env file",
+        f"all {len(names)} variable names in the example are read by config.py, autopoiesis "
+        "or Make",
     )
 
 
 def _entry_point_reads() -> str:
-    """`autopoiesis`'s executable code, whole-line comments dropped.
+    """Actual shell expansions and non-comment Make variable references.
 
-    The same file documents in its header every shell knob it honours, so scanning it whole
-    would count a variable that is only described as having existed. The header is entirely
-    `#` comment lines, so dropping those is enough to make the scan mean "this code reads it".
-    Inline trailing comments are left in: autopoiesis's executable body is short, and excluding
-    them would need a shell tokenizer to do properly.
+    Names in documentation or on an assignment's left side are not consumers. Select
+    shell dollars outside comments, single quotes and escapes; retain double-quoted
+    expansions. Make comments are removed before scanning references.
     """
     script = ROOT / "autopoiesis"
-    if not script.exists():
-        return ""
-    code = [line for line in script.read_text(encoding="utf-8").splitlines()
-            if not line.lstrip().startswith("#")]
-    return "\n".join(code)
+    code = script.read_text(encoding="utf-8") if script.exists() else ""
+    variable = re.compile(r"\$\{?((?:AUTOPOIESIS|ALPACA|APCA|OLLAMA)_[A-Z0-9_]+)\b")
+    reads = []
+    quote = ""
+    word_start = True
+    index = 0
+    while index < len(code):
+        char = code[index]
+        if quote == "'":
+            if char == quote:
+                quote = ""
+            index += 1
+            continue
+        if char == "\\" and index + 1 < len(code):
+            if code[index + 1] != "\n":
+                word_start = False
+            index += 2
+            continue
+        if char in "'\"" and (not quote or char == quote):
+            quote = "" if quote else char
+            word_start = False
+        elif char == "#" and not quote and word_start:
+            newline = code.find("\n", index)
+            index = len(code) if newline < 0 else newline
+            continue
+        else:
+            if char == "$":
+                match = variable.match(code, index)
+                if match:
+                    reads.append(match.group(1))
+            word_start = not quote and (char.isspace() or char in ";|&()<>")
+        index += 1
+    makefile = ROOT / "Makefile"
+    if makefile.exists():
+        make_code = "\n".join(
+            line.split("#", 1)[0] for line in makefile.read_text(encoding="utf-8").splitlines()
+        )
+        reads += re.findall(r"\$\((AUTOPOIESIS_[A-Z0-9_]+)\)", make_code)
+    return "\n".join(reads)
 
 
 def check_docs_do_not_instruct_deleted_commands() -> Result:
