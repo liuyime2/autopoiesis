@@ -233,7 +233,8 @@ def test_fallback_still_produces_a_real_trade(tmp_path):
     assert engine.decide_snapshot(_snapshot()).action == "BUY"
 
 
-def test_a_broken_policy_engine_does_not_matter_when_the_llm_works(tmp_path):
+def test_a_broken_policy_engine_abstains_before_the_llm(tmp_path):
+    """Synthetic broken selection cannot supply a frozen trading mandate."""
     from autopoiesis.models import TradeDecision
 
     class ExplodingPolicy:
@@ -242,12 +243,16 @@ def test_a_broken_policy_engine_does_not_matter_when_the_llm_works(tmp_path):
         reflection_memory = None
 
         def decide_snapshot(self, snapshot):
-            raise AssertionError("policy engine must not be consulted when the LLM answered")
+            raise AssertionError("failed selection must not trigger policy reselection")
 
     llm = ScriptedLLM(TradeDecision(symbol="SPY", action="HOLD", quantity=0, confidence=0.2, rationale="wait"))
     engine = HybridDecisionEngine(llm=llm, policy_engine=ExplodingPolicy())
 
-    assert engine.decide_snapshot(_snapshot()).decision_source == "llm"
+    decision = engine.decide_snapshot(_snapshot())
+    assert (decision.action, decision.quantity, decision.decision_source) == ("HOLD", 0, "policy_engine")
+    assert decision.strategy_id is None and decision.strategy_provenance is None
+    assert "selection_unavailable" in decision.rationale
+    assert llm.calls == []
 
 
 # --- decision_source is recorded ---------------------------------------------

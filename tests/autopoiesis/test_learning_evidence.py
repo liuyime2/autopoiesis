@@ -116,6 +116,123 @@ def test_model_cannot_forge_strategy_id_or_metadata_and_selection_reads_once(tmp
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("boundary", [
+    "empty_library", "uncovered_symbol", "selector_failure", "missing_provenance",
+    "wrong_selected_symbol", "wrong_provenance_id", "invalid_provenance_digest",
+])
+def test_synthetic_unattributed_selection_abstains_before_model(tmp_path, monkeypatch, boundary):
+    """Synthetic failures must never let an actionable model trade without attribution."""
+    from test_llm_provenance import ScriptedLLM, _engine, _snapshot
+
+    from autopoiesis import llm_decision
+
+    symbol = "XLB" if boundary in {"uncovered_symbol", "wrong_selected_symbol"} else "SPY"
+    model = ScriptedLLM(TradeDecision(
+        symbol=symbol, action="BUY", quantity=1, confidence=.9,
+        rationale="synthetic actionable model response",
+    ))
+    engine, policy = _engine(tmp_path, model, strategies=() if boundary == "empty_library" else ("s1",))
+    if boundary == "selector_failure":
+        def failed_selection(*_args, **_kwargs):
+            raise RuntimeError("synthetic selector failure")
+
+        monkeypatch.setattr(policy.selector, "select", failed_selection)
+    elif boundary == "wrong_selected_symbol":
+        selected = policy.strategy_library.list()[0]
+        monkeypatch.setattr(policy.selector, "select", lambda *_args, **_kwargs: selected)
+    elif boundary == "missing_provenance":
+        monkeypatch.setattr(llm_decision, "capture", lambda _spec: None)
+    elif boundary == "wrong_provenance_id":
+        monkeypatch.setattr(llm_decision, "capture", lambda _spec: capture(synthetic_spec("other")))
+    elif boundary == "invalid_provenance_digest":
+        monkeypatch.setattr(llm_decision, "capture", lambda spec: capture(spec).model_copy(
+            update={"behavior_digest": "0" * 64},
+        ))
+    fallback_calls = []
+
+    def would_reselect(snapshot):
+        fallback_calls.append(snapshot)
+        return model.response
+
+    monkeypatch.setattr(policy, "decide_snapshot", would_reselect)
+    decision = engine.decide_snapshot(_snapshot(symbol=symbol))
+
+    assert (decision.symbol, decision.action, decision.quantity) == (symbol, "HOLD", 0)
+    assert "selection" in decision.rationale
+    assert decision.hold_reason == "no_signal"
+    assert decision.strategy_id is None and decision.strategy_provenance is None
+    assert model.calls == []
+    assert fallback_calls == []
+
+
+def test_synthetic_no_selection_fallback_does_not_reselect_trade(tmp_path, monkeypatch):
+    """A synthetic policy that would reselect BUY must not run in the fallback."""
+    from test_llm_provenance import ScriptedLLM, _engine, _snapshot
+
+    engine, policy = _engine(tmp_path, ScriptedLLM(), strategies=())
+    calls = []
+
+    def would_reselect(snapshot):
+        calls.append(snapshot)
+        return TradeDecision(
+            symbol=snapshot.symbol, action="BUY", quantity=1, confidence=.9,
+            rationale="synthetic second-selection trade", strategy_id="second-selection",
+        )
+
+    monkeypatch.setattr(policy, "decide_snapshot", would_reselect)
+    decision = engine._fallback(_snapshot(), "synthetic timeout")
+    assert (decision.action, decision.quantity) == ("HOLD", 0)
+    assert "selection" in decision.rationale
+    assert decision.strategy_id is None and decision.strategy_provenance is None
+    assert calls == []
+
+
+@pytest.mark.parametrize("model_fails", [False, True])
+def test_synthetic_covered_model_and_fallback_preserve_frozen_provenance(tmp_path, monkeypatch, model_fails):
+    """Synthetic covered trades keep the original capture even if the library changes."""
+    from test_llm_provenance import ScriptedLLM, _engine, _snapshot
+
+    model = ScriptedLLM(
+        TradeDecision(symbol="SPY", action="BUY", quantity=1, confidence=.6, rationale="synthetic"),
+        error=TimeoutError("synthetic") if model_fails else None,
+    )
+    engine, policy = _engine(tmp_path, model)
+    frozen = capture(policy.strategy_library.list()[0])
+    original_decide = model.decide
+
+    def mutate_library(context):
+        policy.strategy_library.save(synthetic_spec("s1", "TLT"))
+        return original_decide(context)
+
+    monkeypatch.setattr(model, "decide", mutate_library)
+    decision = engine.decide_snapshot(_snapshot())
+    assert (decision.symbol, decision.action, decision.strategy_id) == ("SPY", "BUY", "s1")
+    assert decision.strategy_provenance == frozen
+    assert decision.decision_source == ("fallback_policy_engine" if model_fails else "llm")
+    assert len(model.calls) == 1
+
+
+@pytest.mark.parametrize("model_fails", [False, True])
+def test_synthetic_risk_fitted_rule_keeps_frozen_provenance(tmp_path, model_fails):
+    """Synthetic position limits change the rule action without losing its attribution."""
+    from test_llm_provenance import ScriptedLLM, _engine, _snapshot
+
+    from autopoiesis.models import PositionSnapshot
+
+    model = ScriptedLLM(
+        TradeDecision(symbol="SPY", action="BUY", quantity=1, confidence=.6, rationale="synthetic"),
+        error=TimeoutError("synthetic") if model_fails else None,
+    )
+    engine, policy = _engine(tmp_path, model)
+    engine.risk_limits = {"max_position_value": 1000, "allowlist": ["SPY"]}
+    frozen = capture(policy.strategy_library.list()[0])
+    held = PositionSnapshot(symbol="SPY", quantity=2, market_value=1400)
+    decision = engine.decide_snapshot(_snapshot(price=700, positions=[held]))
+    assert (decision.action, decision.quantity, decision.strategy_id) == ("HOLD", 0, "s1")
+    assert decision.strategy_provenance == frozen
+    assert decision.decision_source == ("fallback_policy_engine" if model_fails else "policy_engine")
+
+
 def test_contaminated_decision_still_supplies_counterfactual_horizon_quote():
     from autopoiesis import counterfactual
 

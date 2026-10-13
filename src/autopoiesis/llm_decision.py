@@ -10,7 +10,7 @@ import requests
 
 from autopoiesis import coerce, regime
 from autopoiesis.coerce import is_number
-from autopoiesis.learning_evidence import capture
+from autopoiesis.learning_evidence import capture, valid_provenance
 from autopoiesis.models import (
     DataSnapshot,
     KnowledgeArtifact,
@@ -283,6 +283,21 @@ class HybridDecisionEngine:
 
     def decide_snapshot(self, snapshot: DataSnapshot) -> TradeDecision:
         context = self._context(snapshot)
+        selected_spec = self._selected_spec
+        provenance = valid_provenance(self._selected_provenance)
+        if (
+            selected_spec is None
+            or context.get("selected_strategy_id") != selected_spec.strategy_id
+            or provenance is None
+            or provenance.strategy_id != selected_spec.strategy_id
+            or snapshot.symbol not in selected_spec.symbols
+            or snapshot.symbol not in provenance.universe
+        ):
+            return TradeDecision(
+                symbol=snapshot.symbol, action="HOLD", quantity=0, confidence=0,
+                rationale="selection_unavailable: no matching frozen strategy covering snapshot symbol",
+                hold_reason="no_signal", decision_source="policy_engine",
+            )
         rule = self._rule_decision
         try:
             decision = self.llm.decide(context)
@@ -308,6 +323,8 @@ class HybridDecisionEngine:
             # declining a trade the rule would have taken, with nothing recorded about why.
             return rule.model_copy(update={
                 "decision_source": "policy_engine",
+                "strategy_id": selected_spec.strategy_id,
+                "strategy_provenance": self._selected_provenance,
                 "rule_action": rule.action,
                 "lesson_ids": self._lesson_split[0],
                 "lessons_withheld": self._lesson_split[1],
@@ -331,20 +348,26 @@ class HybridDecisionEngine:
         return decision.model_copy(update=update)
 
     def _fallback(self, snapshot: DataSnapshot, reason: str) -> TradeDecision:
+        if self._selected_spec is None:
+            return TradeDecision(
+                symbol=snapshot.symbol, action="HOLD", quantity=0, confidence=0,
+                rationale="selection_unavailable: no frozen strategy for fallback",
+                hold_reason="no_signal", decision_source="policy_engine",
+            )
         if self._rule_decision is not None:
             decision = self._rule_decision
-        elif self._selected_spec is not None:
+        else:
             decision = TradeDecision(
                 symbol=snapshot.symbol, action="HOLD", quantity=0, confidence=0,
                 rationale="selected strategy could not produce a fallback decision",
                 strategy_id=self._selected_spec.strategy_id,
                 strategy_provenance=self._selected_provenance,
             )
-        else:
-            decision = self.policy_engine.decide_snapshot(snapshot)
         return decision.model_copy(
             update={
                 "decision_source": "fallback_policy_engine",
+                "strategy_id": self._selected_spec.strategy_id,
+                "strategy_provenance": self._selected_provenance,
                 # The fallback is the rule, so the rule's action is the action taken.
                 "rule_action": decision.action,
                 "rationale": f"{decision.rationale} | llm_unavailable: {reason}",
@@ -352,10 +375,9 @@ class HybridDecisionEngine:
         )
 
     def _context(self, snapshot: DataSnapshot) -> dict[str, Any]:
-        # The selected strategy and the lesson set both come from the policy
-        # engine. If that lookup fails the LLM still gets a decision: a degraded
-        # context is better than no decision, and Guardian reviews the result
-        # either way.
+        # Selection and lessons come from the policy engine. A missing or invalid
+        # frozen selection makes decide_snapshot abstain before calling the LLM;
+        # Guardian remains the final authority on covered decisions.
         strategy_id = None
         selected_spec = None
         self._rule_decision = None
