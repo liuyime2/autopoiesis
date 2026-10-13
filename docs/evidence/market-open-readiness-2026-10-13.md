@@ -180,3 +180,78 @@ The curriculum path also produced a false premise and one failure: `CURRICULUM_P
 Six configured symbols: SPY held by a strategy that resets forever and never trades; BIL's only strategy retired by the staleness misclassification, leaving BIL uncovered; TLT the only symbol with a working strategy, which sold 2 shares; XLB, XLE and XLF uncovered. Four attention names and CIFR were cycled and could not act. Against a starting book of six positions, the measured result of the first hour is **two shares of TLT sold at 78.53 and 78.33**, no other symbol able to act, zero errors, zero unresolved submissions, and two certificate FAILs that are truthful.
 
 No profitability claim follows from this. Sell prices are known, the cost basis is known, and the position carries a large pre-existing unrealized loss; attributing any of it to the session is not something this evidence supports.
+
+## Deployment of the staleness-attribution fix — 14:06 to 14:23 EDT
+
+Source `3619ff2ddac17037` deployed mid-session, replacing `9fb9066d820f27c9`. The switch
+happened with the market open, at the operator's instruction, and every step below is an
+observed value rather than an intention.
+
+- **Pre-stop state recorded:** PID 3184440, RUNNING, 325 cycles, `error_count=1`, zero
+  restarts since 05:53:18. The single error is the 10:10:04 `CURRICULUM_FAILED` ("constrained
+  response contained no JSON object"), a maintenance-stage failure; no cycle carried an error
+  at any point in the session.
+- **Unit bytes preserved:** 14 service/timer files with SHA-256 sums at
+  `/tmp/opencode/unit-backup-20261013-1406/`.
+- **Timers paused** around the switch: `quant-watchdog`, `market-preflight`,
+  `market-open-verify`, `quant-research`. `quant-backup` and `quant-report` were left alone.
+- **Cooperative stop, measured:** stop requested 14:07:02, process gone 14:08:06,
+  **64 s**, against the derived `TimeoutStopSec=630`. `Result=success`, `ExecMainStatus=0`,
+  no SIGKILL, final heartbeat `STOPPED` with 325 cycles. This closes the one open
+  operational measurement in the roadmap, which had recorded only that the earlier 06:08
+  stop was not timed.
+- **Post-stop journal snapshot:** `deployment-checkpoints/20261013/post-stop-journal-1407`,
+  exit 0, 2,651 cycles, 22,107 events, four generations, **0 unparsed lines**, archive
+  recovery `CERTIFIED`, `realized_pnl` 760.03 and `unrealized_pnl` 46.58 at snapshot time.
+- **Application state checkpoint:** `deployment-checkpoints/20261013/predeploy-state-1408`,
+  215 files / 311.3 MB across strategies, knowledge, observations, preregistration, reports,
+  replay caches, readiness output, curriculum, reflection, risk baselines, research trials,
+  signal trials, revisions and logs. All 215 SHA-256 hashes verified. Credentials excluded.
+  (`du` reports a wrong total on this filesystem; the byte count is from `find -printf`.)
+- **Units rendered:** `make install-service` wrote 10 files to
+  `/home/liuyime2/.config/systemd/user`. All ten are **byte-identical** to the bytes that were
+  running, so the switch did not alter any risk, mode or endpoint setting: `paper`,
+  `shadow=false`, `shorts=shadow`, `manage_account=true`, position cap 25,000, exposure cap
+  90,000, 100 attempts/day, `stale_after_seconds=900`. The service unit does not embed the
+  fingerprint, so no unit change was required for the deploy itself.
+- **Start:** 14:09:16, PID 3412695, zero restarts, `active (running)`. Heartbeat reports
+  fingerprint `3619ff2ddac17037`, matching the on-disk source.
+- **Startup reconciliation:** `ORDER_RECONCILIATION_REVIEWED` `matched: true` at 14:10:16.
+  Broker read independently: account ACTIVE, equity 99,776.45, **0** open orders, five
+  positions intact (BIL 209, SPY 32, TLT 218, XLB 1, XLF 1). Journal carries **0** unresolved
+  submissions.
+- **Readiness timers reinstalled with the new fingerprint.** Both units bake
+  `EXPECTED_FINGERPRINT` into `ExecStart`, so without this every check tomorrow would have
+  failed with `SOURCE_MISMATCH`. `systemctl --user show` confirms both now carry
+  `3619ff2ddac17037`, with `DEPLOYMENT_AFTER=2026-10-13T14:09:16-04:00`. The install was
+  directed at the manager's real unit directory explicitly, after the morning's incident in
+  which `make install-readiness-timers` defaulted to `$XDG_CONFIG_HOME` and exited 0 having
+  written somewhere the manager never reads. All six timers are armed: watchdog, backup,
+  report, research, and the two readiness timers for 08:45 and 09:45/10:30 tomorrow.
+
+### Live verification of the new deployment
+
+`market-open-verify` against the new source, read-only, at 14:22 EDT: `status=WAIT`,
+`exit_code=2`, diagnostic `FIRST_ROUND_COVERAGE_MISSING`, `profitability=UNPROVEN`. That is
+the designed soft refusal, not a failure - the run was thirteen minutes into the session and
+the first-round deadline is 19:09:16 EDT, so partial coverage is reported rather than failed.
+Identity passed on every axis: the daemon's fingerprint equals both the requested fingerprint
+and the current on-disk source, and there is no `SOURCE_MISMATCH`.
+
+Session evidence in that window: 5 cycles, 5 of the 6 configured symbols observed (XLF not yet
+cycled), 3 eligible cycles, 2 model decisions, 2 policy decisions, 1 fallback, 2 safe
+unattributed abstentions, 1 submitted order, 1 pending fill observation, and
+**`actionable_unexecuted: 0`** - nothing was approved and left unsent. Every cycle carried
+`source=alpaca` with quote ages of 0, 2, 6, 114 and 15 seconds. The order submitted at 14:19:42
+(`fixed-size-tlt-sell-001`, TLT SELL 1, `autopoiesis-0f313e6f17d9f95b`) filled at 78.39; TLT
+went 218 to 217 and open orders returned to zero.
+
+`CURRICULUM_PROPOSED` at 14:16 offered a "Fixed Size SPY Buy Probe" and
+`STRATEGY_ADMISSION_REVIEWED` refused it because 21 candidates are in probation and short of
+the 13-cycle budget - the capacity gate holding.
+
+**The fix has not yet been exercised by a live stale refusal.** No stale-quote cycle occurred
+under the new deployment in the verified window, so the claim that it works rests on the 21
+tests and their measured red-to-green, not on a live refusal yet being attributed correctly.
+The next BIL staleness event is the real test, and the attribution is observable in the next
+`REFLECTION_GENERATED` payload.
