@@ -141,3 +141,30 @@ independent specification **28 passed in 2.97s**, subsequent quality **28 passed
 in 3.03s**. Production locks are unchanged. All eight bounded units have written
 targets and two-stage reviews; final combined re-review and the new whole-suite,
 fresh clone and CI remain required before deployment.
+
+The frozen 56c1875 full check subsequently passed **1,707 / 6 skipped in 44.04s**
+with thread warnings as errors. Final independent combined review then blocked
+deployment on an additional wait boundary: ordinary default sleep may continue
+for **675s** after SIGTERM, beyond the **630s** budget. Synthetic actual-handler
+probes confirmed resumed sleep. This measured gap is planned before edits in
+`2026-10-13-cooperative-daemon-wait.md`; another frozen full run is required.
+
+The old process also uses ordinary sleep and an older signal handler that writes
+STOPPING health. For the actual switch, pause watchdog and mutation timers, verify
+the old process is parked after its closed-market heartbeat (Linux wait channel
+may be `poll_schedule_timeout.constprop.0` for this Python build), and retain
+existing drop-ins. A unique temporary transition stop drop-in will grant **705s**
+(old declared 675s wait plus 30s buffer), solely to let that old wait return without
+SIGKILL. Cooperative stop is still required; do not kill through a journal/order
+boundary. Remove that temporary drop-in after confirmed old exit, reload and
+verify the final derived new-source budget before starting the new process.
+This does not increase a risk limit or establish an exact filesystem stop bound.
+
+Unit 9 is accepted in f4e3232: default waits poll the stop flag in at most one-second
+sleep requests while preserving the normal monotonic deadline and explicit callbacks.
+The actual synthetic 30s wait now returns within 2s after SIGTERM; independent
+specification and quality each passed **100** focused tests. The signal handler
+remains flag-only, risk/order boundaries unchanged, final stop inventory **630s**.
+Final combined re-review and frozen full check are running; fresh clone and exact
+CI must follow, then the operational steps. Nine accepted source units do not
+constitute actual deployed-source or open-session verification.
