@@ -30,6 +30,14 @@ Alpha 搜索可复现性继续推进：当前 driver 之前按策略、symbol、
 
 完整差距、命令证据和下一轮验收见 `docs/evidence/rsi-status-audit-2026-10-12.md`。下一优先级为新克隆/CI → 正确标的周期验证 → 强制研究合同/provenance → 同步组合收益/决策对照 → 受控 RSI → shadow/有限 paper 与完整 60 日窗口。
 
+## 夜间复核增量（2026-10-12，代码基线 49063c8）
+
+上次的 lint、heartbeat 主机依赖测试、requests typed override 和 provenance 指纹字段问题已有提交修复；symbol 历史污染量化为 862/1602 有 strategy_id 的 cycles，新增复发门禁。registry 路径只有未提交修改，不算部署完成。research 必经入口和受污染策略的干净样本重新审议仍未完成。
+
+本机工作树 `make check` 实测 lint/type（48 源文件）通过、1329 passed、315.80s；最新已提交源码的远端三版本 CI 仍失败。读取 job 日志并在 UTC 独立克隆复现，根因为 VIX 测试固定日期与未固定当前时间：缓存年龄跨过 4 天门槛，导致另一分支。下一修复是固定测试时钟，保留生产过期行情保护。本机绿色不能替代最新远端 CI。
+
+研究台账仍 143 行/0 PASS，收盘后没有新的市场周期，盈利与 RSI 结论未改变。详细差距、复现与下一轮验收见 `docs/evidence/rsi-status-followup-2026-10-12.md`；历史记录保留而不覆写。
+
 ## 1. 问题、基线、成功标准、验证
 
 ### 问题
