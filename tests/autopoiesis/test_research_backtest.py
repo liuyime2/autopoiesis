@@ -136,6 +136,61 @@ def test_cost_is_charged_on_both_sides():
     assert charged.return_pct < gross.return_pct
 
 
+def test_flat_synthetic_round_trip_deducts_both_commissions():
+    result = bt.run_backtest(_bars([100.0, 100.0]), strategy_id="cost-arithmetic",
+        kind=bt.KIND_FIXED_SIZE, parameters={"action": "BUY", "quantity": 1},
+        commission_pct=0.1, slippage_pct=0.0)
+    assert result.costs == pytest.approx(0.2)
+    assert result.gross_pnl == pytest.approx(0.0)
+    assert result.net_pnl == pytest.approx(-0.2)
+    assert result.losses == 1
+
+
+def test_synthetic_intra_trade_drawdown_survives_profitable_final_price():
+    result = bt.run_backtest(_bars([100.0, 120.0, 90.0, 110.0]),
+        strategy_id="drawdown-arithmetic", kind=bt.KIND_FIXED_SIZE,
+        parameters={"action": "BUY", "quantity": 1}, commission_pct=0, slippage_pct=0)
+    assert result.net_pnl == pytest.approx(10.0)
+    assert result.max_drawdown_pct == pytest.approx(25.0)
+
+
+def test_synthetic_multiple_round_trips_preserve_cost_accounting():
+    result = bt.run_backtest(_bars([100.0, 102.0, 98.0, 102.0, 98.0]),
+        strategy_id="round-trips", kind=bt.KIND_TREND_FOLLOW,
+        parameters={"quantity": 1, "threshold_pct": 0.01}, commission_pct=0.1,
+        slippage_pct=0)
+    assert result.trades == result.losses == 2
+    assert result.costs == pytest.approx(0.4)
+    assert result.net_pnl == pytest.approx(-8.4)
+    assert result.gross_pnl == pytest.approx(-8.0)
+
+
+def test_synthetic_trade_win_requires_paying_entry_commission():
+    result = bt.run_backtest(_bars([100.0, 100.15]), strategy_id="win-after-cost",
+        kind=bt.KIND_FIXED_SIZE, parameters={"action": "BUY", "quantity": 1},
+        commission_pct=0.1, slippage_pct=0)
+    assert result.net_pnl == pytest.approx(-0.05015)
+    assert result.losses == 1
+    assert result.wins == 0
+
+
+def test_causal_check_does_not_copy_every_synthetic_prefix():
+    class CountedBars(list):
+        copied = 0
+
+        def __getitem__(self, index):
+            result = super().__getitem__(index)
+            if isinstance(index, slice):
+                self.copied += len(result)
+            return result
+
+    bars = CountedBars(_bars(RISING))
+    result = bt.run_backtest(bars, strategy_id="causal-view", kind=bt.KIND_FIXED_SIZE,
+        parameters={"action": "BUY", "quantity": 1}, commission_pct=0, slippage_pct=0)
+    assert result.leakage_violations == 0
+    assert bars.copied == 0
+
+
 def test_slippage_alone_reduces_a_round_trip():
     bars = _bars([100.0, 100.0])
     free = bt.run_backtest(

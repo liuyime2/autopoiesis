@@ -55,6 +55,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import overload
 
 #: Reused, not re-declared. The separation rule is one-way - production must never
 #: import research - so research may import production. This module previously had
@@ -276,6 +277,29 @@ def _max_drawdown(equity: list[float]) -> float:
     return abs(worst) * 100.0
 
 
+class _CausalPrefix(Sequence[Bar]):
+    """Bound visibility without copying all earlier bars at every decision."""
+
+    def __init__(self, bars: Sequence[Bar], length: int):
+        self._bars = bars
+        self._length = length
+
+    def __len__(self) -> int:
+        return self._length
+
+    @overload
+    def __getitem__(self, index: int) -> Bar: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> Sequence[Bar]: ...
+
+    def __getitem__(self, index: int | slice) -> Bar | Sequence[Bar]:
+        visible = range(self._length)[index]
+        if isinstance(visible, range):
+            return [self._bars[i] for i in visible]
+        return self._bars[visible]
+
+
 def run_backtest(
     bars: Sequence[Bar],
     *,
@@ -299,7 +323,9 @@ def run_backtest(
 
     position = 0
     entry_price = 0.0
-    equity = 1.0
+    initial_capital: float | None = None
+    equity_curve: list[float] = []
+    entry_commission = 0.0
     realized = 0.0
     spent = 0.0
 
@@ -312,7 +338,7 @@ def run_backtest(
         # The first version of this check merely noticed the index going backwards,
         # which no rule here could do - it could not have detected a rule that read
         # a future price, which is the only leak that actually matters.
-        truncated = rule(bars[: i + 1], i)
+        truncated = rule(_CausalPrefix(bars, i + 1), i)
         if (truncated.action, truncated.quantity) != (decision.action, decision.quantity):
             result.leakage_violations += 1
 
@@ -328,6 +354,11 @@ def run_backtest(
             position = side * decision.quantity
             notional = abs(position) * entry_price
             cost = notional * commission_pct / 100.0
+            entry_commission = cost
+            realized -= cost
+            if initial_capital is None:
+                initial_capital = notional
+                equity_curve.append(initial_capital)
             spent += notional + cost
             result.costs += cost
             result.trades += 1
@@ -335,14 +366,15 @@ def run_backtest(
             gross, cost = _close(position, entry_price, bar.price, slippage_pct, commission_pct)
             result.costs += cost
             realized += gross - cost
-            equity *= 1 + (gross - cost) / (abs(position) * entry_price)
-            result.wins += 1 if gross - cost > 0 else 0
-            result.losses += 1 if gross - cost <= 0 else 0
+            result.wins += 1 if gross - cost - entry_commission > 0 else 0
+            result.losses += 1 if gross - cost - entry_commission <= 0 else 0
             position = 0
-        elif position != 0:
-            # Mark to market so drawdown reflects holding, not just closed trades.
-            direction = 1 if position > 0 else -1
-            equity *= 1 + direction * (bar.price - entry_price) / entry_price
+
+        if initial_capital is not None:
+            # Each mark is a valuation of the current lot, not another reinvestment
+            # of its entire entry-relative return.
+            unrealized = position * (bar.price - entry_price) if position else 0.0
+            equity_curve.append(initial_capital + realized + unrealized)
 
     if position != 0 and bars:
         # Close the open position at the last bar so the result is complete. Left
@@ -350,12 +382,14 @@ def run_backtest(
         gross, cost = _close(position, entry_price, bars[-1].price, slippage_pct, commission_pct)
         result.costs += cost
         realized += gross - cost
-        result.wins += 1 if gross - cost > 0 else 0
-        result.losses += 1 if gross - cost <= 0 else 0
+        result.wins += 1 if gross - cost - entry_commission > 0 else 0
+        result.losses += 1 if gross - cost - entry_commission <= 0 else 0
+        if initial_capital is not None:
+            equity_curve.append(initial_capital + realized)
 
     result.gross_pnl = realized + result.costs
     result.net_pnl = realized
     if spent > 0:
         result.return_pct = realized / spent * 100.0
-    result.max_drawdown_pct = _max_drawdown([1.0, equity])
+    result.max_drawdown_pct = _max_drawdown(equity_curve)
     return result
