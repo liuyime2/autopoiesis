@@ -682,10 +682,10 @@ class AgentDaemon:
         if self.journal is None:
             return
         try:
-            symbol = self.config.symbols[0] if self.config.symbols else "SPY"
-            report = counterfactual.evaluate(
+            symbols = list(self.config.symbols)
+            report = counterfactual.evaluate_symbols(
                 self.journal.read_all(),
-                symbol=symbol,
+                symbols=symbols,
                 horizon_hours=self.config.counterfactual_horizon_hours,
                 assumed_cost_pct=self.config.assumed_round_trip_cost_pct,
             )
@@ -715,20 +715,28 @@ class AgentDaemon:
             # again would add a row that says only that the pass ran.
             return
         counts = report.counts()
+        # Per symbol, because "the screen has nothing to judge" and "the screen has nothing to
+        # judge for TLT" are different facts and only the second one is a coverage defect.
+        per_symbol: dict[str, dict[str, int]] = {}
+        for row in report.rows:
+            bucket = per_symbol.setdefault(row.symbol, {})
+            bucket[row.verdict] = bucket.get(row.verdict, 0) + 1
         self._append_event(
             "COUNTERFACTUAL_EVALUATED",
             status="SUCCESS",
             message=(
+                f"symbols={len(symbols)} "
                 f"hold_quality={report.hold_quality()} "
                 f"scored={len(report.scored)} pending={report.pending_count} "
                 f"gap={report.gap_count} new_or_changed={len(fresh)}/{len(report.rows)}"
             ),
             payload={
-                "symbol": symbol,
+                "symbols": symbols,
                 "horizon_hours": self.config.counterfactual_horizon_hours,
                 "assumed_round_trip_cost_pct": self.config.assumed_round_trip_cost_pct,
                 "hold_quality": report.hold_quality(),
                 "counts": counts,
+                "counts_by_symbol": per_symbol,
                 "scored": len(report.scored),
                 "pending": report.pending_count,
                 "gap": report.gap_count,

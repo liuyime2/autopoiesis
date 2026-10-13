@@ -44,6 +44,7 @@ acquired the verb for trading well.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -210,6 +211,52 @@ class CounterfactualReport:
             return None
         good = sum(1 for row in holds if row.verdict == GOOD_HOLD)
         return round(good / len(holds), 6)
+
+
+def evaluate_symbols(
+    records: list[CycleRecord],
+    *,
+    symbols: Sequence[str],
+    horizon_hours: float = DEFAULT_HORIZON_HOURS,
+    max_gap_hours: float = MAX_HORIZON_GAP_HOURS,
+    assumed_cost_pct: float = DEFAULT_ASSUMED_ROUND_TRIP_COST_PCT,
+    dead_band_pct: float = DEFAULT_DEAD_BAND_PCT,
+) -> CounterfactualReport:
+    """Score every configured symbol, each against its own future.
+
+    `evaluate` takes one symbol and builds one price series from it, which has to stay that
+    way: a TLT decision is a question about TLT's next 24 hours, and grading it against SPY's
+    would be a confidently wrong number rather than a rough one.
+
+    The defect this exists to fix was in the caller, which passed
+    `config.symbols[0]` - so a six-symbol configuration scored SPY and nothing else. Measured
+    on the live journal 2026-10-13: all 493 `COUNTERFACTUAL_EVALUATED` events carried
+    `symbol: SPY`, and the three strategies that actually traded that day -
+    `fixed-size-tlt-sell-001`, `fixed-size-xle-sell-001`, `fixed-size-xlf-sell-001` - had zero
+    decisions in the offline screen. A strategy with no rows cannot be screened on any
+    horizon, so it can never be promoted out of probation and never judged on its outcomes.
+
+    Each row carries its own `symbol`, and `collect_decisions` filters on
+    `row["symbol"] in provenance.universe`, so a SPY-only strategy rejects TLT rows on its own
+    and nothing leaks across symbols. Verdicts for a given row are identical either way,
+    because the per-symbol grading rules are the same ones `evaluate` already applies.
+
+    A symbol with no quotes in the journal contributes nothing rather than being invented; a
+    blank list is an empty report, not a fallback to a hard-coded symbol.
+    """
+    report = CounterfactualReport()
+    for symbol in symbols:
+        report.rows.extend(
+            evaluate(
+                records,
+                symbol=symbol,
+                horizon_hours=horizon_hours,
+                max_gap_hours=max_gap_hours,
+                assumed_cost_pct=assumed_cost_pct,
+                dead_band_pct=dead_band_pct,
+            ).rows
+        )
+    return report
 
 
 def _price_series(records: list[CycleRecord], symbol: str) -> list[tuple[datetime, float, CycleRecord]]:
