@@ -337,6 +337,16 @@ def _heartbeat() -> dict:
         return {}
 
 
+def _accounting(agent: dict) -> dict:
+    """Only the versioned accounting contract is accepted; comparison stays unknown."""
+    return agent if agent.get("performance_contract") == "agent-accounting-v1" else {}
+
+
+def _comparison(agent: dict) -> str:
+    return "UNKNOWN: " + str(_accounting(agent).get("comparison_reason",
+        "agent allocation and aligned rolling equity history unavailable"))
+
+
 def _benchmark_verdict() -> tuple[str | None, dict]:
     """The agent-level verdict, from the same evaluator `make benchmark` uses.
 
@@ -350,8 +360,7 @@ def _benchmark_verdict() -> tuple[str | None, dict]:
         module = __import__("importlib.util", fromlist=["util"]).module_from_spec(spec)
         spec.loader.exec_module(module)
         agent = module._agent_level()
-        return (f"{agent['return_pct']:+.2f}% vs SPY {agent['spy_pct']:+.2f}% "
-                f"({agent['excess']:+.2f})" if agent else None), (agent or {})
+        return _comparison(agent or {}), _accounting(agent or {})
     except Exception:
         return None, {}
 
@@ -406,11 +415,7 @@ def _daemon_state(snapshot: Snapshot) -> str:
 
 def overview(snapshot: Snapshot) -> list[str]:
     cycles = _recent(snapshot, 500)
-    agent = snapshot.agent
-    verdict = None
-    if agent:
-        verdict = (f"{agent['return_pct']:+.2f}% vs SPY {agent['spy_pct']:+.2f}% "
-                   f"({agent['excess']:+.2f})")
+    verdict = _comparison(snapshot.agent)
     return [
         '<dl class="kv">',
         "<div><dt>mode</dt><dd>paper</dd></div>",
@@ -425,13 +430,13 @@ def overview(snapshot: Snapshot) -> list[str]:
         "<h2>Does the result hold up?</h2>",
         "<table><tr><th>what</th><th>value</th></tr>",
         f"<tr><td>the agent after cost, vs SPY on the same window</td><td>{_cell(verdict)}</td></tr>",
-        f"<tr><td>return on deployed capital</td><td>{_cell(agent.get('return_pct'))}%</td></tr>",
-        f"<tr><td>SPY, same window</td><td>{_cell(agent.get('spy_pct'))}%</td></tr>",
+        f"<tr><td>return on deployed capital</td><td>{_cell(None)}%</td></tr>",
+        f"<tr><td>SPY, same window</td><td>{_cell(None)}%</td></tr>",
         f"<tr><td>cycles in this snapshot</td><td>{_cell(len(cycles))}</td></tr>",
         "</table>",
         '<p class="note">The full target verdict, the per-strategy diagnostic and the attribution '
-        "coverage come from <code>make benchmark</code>; this page prints the agent-level figure only, "
-        "because that is the claim the target sentence makes.</p>",
+        "coverage come from <code>make benchmark</code>. Raw PnL can be reported; "
+        "portfolio return and alpha require allocated capital and aligned equity history.</p>",
     ]
 
 
@@ -565,19 +570,19 @@ def portfolio(snapshot: Snapshot) -> list[str]:
         body.append("</table>")
         total = sum(r["peak_exposure"] for r in positions)
         body.append(f'<p class="note">Peak exposure across {len(positions)} strategies: '
-                    f"{total:,.2f}. This is the denominator the agent-level return uses, so the "
-                    f"two pages cannot disagree about the capital.</p>")
+                    f"{total:,.2f}. These independent historical maxima are diagnostics, "
+                    "not simultaneous exposure or allocated agent capital.</p>")
         if agent:
             body.append(f'<p class="note">Agent return on deployed capital, after cost: '
-                        f"{_cell(agent.get('return_pct'))}%</p>")
+                        f"{_cell(None)}%</p>")
 
     if limits and positions:
         exposure_cap = float(limits.get("max_total_exposure") or 0)
         if exposure_cap > 0:
             used = sum(r["peak_exposure"] for r in positions)
-            body.append(f'<p class="note">Peak exposure {used:,.2f} against the configured cap '
-                        f"{exposure_cap:,.2f} - {used / exposure_cap:.0%} of it, on the worst "
-                        "peak of the record rather than on today.</p>")
+            body.append(f'<p class="note">Sum of independent historical peaks {used:,.2f}; '
+                        f"configured cap {exposure_cap:,.2f}. This does not measure simultaneous "
+                        "exposure or establish historical compliance.</p>")
     body.append('<p class="note">Drawdown is not shown. The record has no equity curve to draw '
                 "down from - it is a set of discrete paper cycles - and a page that manufactured "
                 "one from realized PnL alone would be reporting a number that moves with the "
@@ -678,21 +683,14 @@ def system(snapshot: Snapshot) -> list[str]:
     return body
 
 def evidence(snapshot: Snapshot) -> list[str]:
-    verdict = None
-    if snapshot.agent:
-        verdict = (f"{snapshot.agent['return_pct']:+.2f}% vs SPY "
-                   f"{snapshot.agent['spy_pct']:+.2f}% ({snapshot.agent['excess']:+.2f})")
+    verdict = _comparison(snapshot.agent)
     registry = snapshot.model_registry
     body = ["<h2>Do the results hold up?</h2>"]
     body.append("<table><tr><th>claim</th><th>what the record says</th></tr>")
     body.append(f"<tr><td>the agent beats holding, after cost</td><td>{_cell(verdict)}</td></tr>")
     body.append(f"<tr><td>how much of that is the model</td><td>{_cell(registry)}</td></tr>")
-    body.append("<tr><td>directional edge in price</td><td>none found — 47 pre-stated price "
-                "hypotheses and 14 news hypotheses through a family-wise gate</td></tr>")
-    body.append("<tr><td>directional edge in news</td><td>the model reads overnight gaps "
-                "correctly; the tradable next-day correlation is within 0.03 of zero</td></tr>")
-    body.append("<tr><td>the one judgement that holds</td><td>volatility, on every instrument "
-                "tested — a statement about risk, not direction</td></tr>")
+    body.append("<tr><td>directional and volatility evidence</td><td>UNKNOWN from this "
+                "snapshot; inspect dated experiments and their registered contracts.</td></tr>")
     body.append("</table>")
     body.append("<h2>The signal ledger</h2>")
     ledger = ROOT / "runtime" / "autopoiesis" / "signal_trials.jsonl"

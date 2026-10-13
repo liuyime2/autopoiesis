@@ -1,59 +1,20 @@
-"""Benchmark the system against SPY buy-and-hold, after costs, inside the risk budget.
+"""Read-only paper accounting and the unmeasured portfolio profitability target.
 
-Run it:
+Use make benchmark or make benchmark-json. All accounting comes from the retained
+real journal and broker evidence, including confirmed older fills and owner-fill
+segregation. No credentials, broker requests or orders are needed.
 
-    make benchmark            # or: python tools/benchmark.py
+The target is after-cost agent performance against an aligned SPY control over a
+rolling 60 trading days, with hard risk limits and a separately measured LLM
+increment. Retained journal dates establish coverage, not a rolling equity curve.
+Strategy peak-exposure ratios are diagnostics. Their independent maxima cannot
+define allocated agent capital, and whole-account equity contains owner capital.
 
-**Why this exists.** An external review's central objection was that nothing had shown the
-system beats doing nothing, and that the model's contribution had never been isolated. Both
-are measurable, and neither had been measured in a form anyone else could run. This is that
-form.
-
-**What it needs.** The runtime record: the journal and the broker evidence batches in
-`runtime/`, which are gitignored because they are produced by trading. No credentials and no
-network - `doctor` is run with `skip_broker=True` and every number is read out of what is
-already on disk. That also means it is **not** a fresh-clone demo: a new clone has no record
-and the tool reports that rather than inventing a number for it.
-
-Every figure is computed once, by `src/autopoiesis/doctor.py`, and parsed back out of its check
-detail rather than recomputed here. A second implementation of the comparison could disagree
-with the one the project argues from, and then two numbers would exist and only one of them
-would be defended.
-
-**The target, stated once so there is nothing to reinterpret:**
-
-    Within a stated risk budget and after costs, beat SPY buy-and-hold over a rolling
-    60-trading-day window. Separately: the increment attributable to LLM decisions versus the
-    deterministic baseline, over the same window and the same fills.
-
-Deliberately *not* "make money". A positive return in a rising market is not evidence of
-anything, and every strategy in the library already has one. Beating buy-and-hold is the claim.
-
-**On the window, which is the part that is easy to fake.** `doctor`'s comparison covers the
-whole retained journal, and the journal is not 60 trading days long. The first version of this
-script printed the replay cache's date range next to whole-of-record returns, which made a
-60-day benchmark out of 16 days of cycles - the same error as labelling a whole-of-record
-figure "monthly". So the record's own window is printed, the target window is reported as met
-or not, and the verdict says both things:
-
-    * on the record that exists, the target is currently failed - all four strategies that
-      closed a lot are behind the market, by 1.47 to 4.29 points;
-    * over the 60 trading days the target actually names, it is neither met nor falsified,
-      because only 16 trading days of cycles exist.
-
-**On the LLM increment.** The split is printed next to its own coverage, always. "The model
-contributed +193.56" means the model made the decisions on the lots that closed profitably; it
-does **not** mean the baseline would have lost that money on the same bars, because the
-decision changed which lot existed, so no paired comparison was run. And most decisions predate
-provenance capture and cannot be attributed to any model at all. A share printed without its
-coverage is the kind of figure that gets retracted later; this one is printed with it or not
-at all.
-
-**Exit codes**, so a green run is never mistaken for a passed target:
-
-    0  the target is met over the record
-    1  the target is failed: at least one strategy is behind buy-and-hold
-    2  nothing to measure - no journal, or no closed lots on record
+The current record lacks an explicit agent allocation, cash-flow history and
+aligned rolling equity/control series. Therefore return, excess and target status
+are UNKNOWN, even when raw agent PnL can be measured. Missing valuation is never
+zero. The JSON collector reports successful collection separately from target
+status. Exit 2 means the target is not measurable; it does not mean PnL is zero.
 """
 
 from __future__ import annotations
@@ -187,118 +148,61 @@ def _pick(checks, name: str):
 
 
 def _headline(report, agent: dict | None) -> tuple[str, int]:
-    """The verdict and its exit code.
-
-    Two claims are reported because they are two different claims, and the target sentence is only
-    one of them. The per-strategy worst case answers "given each strategy its own peak capital, did
-    it beat SPY over its own holding window". The target sentence answers "did the agent, after
-    costs, beat SPY over the window". A single weak strategy failing the first says nothing about
-    the second, and reporting only the first made the agent look worse than its own record - or
-    better - than it was.
-
-    The exit code follows the target sentence, because that is the specification. The worst case
-    is printed first and labelled as what it is, so a reader cannot mistake one for the other.
-    """
+    """Per-strategy ratios and raw PnL cannot prove the portfolio target."""
     detail, _ = _pick(report.checks, "pnl vs holding")
-    if detail is None:
-        return "NOT MEASURABLE: doctor reported no comparison against buy-and-hold", (
-            EXIT_NOTHING_TO_MEASURE
+    rows = _parse_comparison(detail) if detail else None
+    diagnostic = "no per-strategy comparison available"
+    if rows:
+        behind = [row for row in rows if row[3].startswith("-")]
+        diagnostic = (
+            f"{len(behind)} of {len(rows)} strategies are behind buy-and-hold on their own "
+            f"peak exposure and window (worst {min(behind, key=lambda r: float(r[3]))[0]} "
+            f"by {min(behind, key=lambda r: float(r[3]))[3][1:]} points) - a diagnostic"
+            if behind else f"all {len(rows)} strategy ratios are positive diagnostics"
         )
-    rows = _parse_comparison(detail)
-    if not rows:
-        return f"NOT MEASURABLE: {detail}", EXIT_NOTHING_TO_MEASURE
-    behind = [row for row in rows if row[3].startswith("-")]
-    diagnostic = (
-        f"{len(behind)} of {len(rows)} strategies are behind buy-and-hold on their own capital and "
-        f"window (worst {min(behind, key=lambda r: float(r[3]))[0]} by "
-        f"{min(behind, key=lambda r: float(r[3]))[3][1:]} points) - a diagnostic, not the target"
-        if behind
-        else f"all {len(rows)} strategies beat buy-and-hold on their own capital and window"
-    )
-
-    # The target sentence: the agent, after costs, over the window.
-    if agent is None:
-        return f"NOT MEASURABLE: {diagnostic}; the agent-level comparison could not be computed", (
-            EXIT_NOTHING_TO_MEASURE
-        )
-    if agent["excess"] >= 0:
-        return (
-            f"PASS: the agent returned {agent['return_pct']:+.2f}% on deployed capital after cost "
-            f"against SPY {agent['spy_pct']:+.2f}% over the same window ({agent['excess']:+.2f}). "
-            f"{diagnostic}",
-            EXIT_MET,
-        )
-    return (
-        f"FAIL: the agent returned {agent['return_pct']:+.2f}% on deployed capital after cost "
-        f"against SPY {agent['spy_pct']:+.2f}% over the same window ({agent['excess']:+.2f}). "
-        f"{diagnostic}",
-        EXIT_BEHIND,
-    )
+    reason = (agent or {}).get("comparison_reason",
+        "agent allocation and aligned rolling equity history are unavailable")
+    return f"NOT MEASURABLE: {reason}; {diagnostic}", EXIT_NOTHING_TO_MEASURE
 
 
-def _agent_level() -> dict | None:
-    """The agent's own return on its own deployed capital, after cost, against SPY on the same window.
+def _agent_level(config=None) -> dict | None:
+    """Verified raw agent accounting; no inferred allocation or portfolio return.
 
-    Computed from the evaluator's structured `PnLEvidence` rather than parsed out of `doctor`'s
-    prose, because the capital leg is a number no sentence in that prose carries: a comparison row
-    has `return_pct` but not the PnL you would divide back out to recover the capital. The first
-    version of this tried the parse, found it could not, and would have reported "not measurable" for
-    a reason that was an artefact of the parsing rather than of the data.
-
-    The denominator is the sum of each strategy's peak exposure: the same convention the per-strategy
-    rows use, so the two read against each other, and not the account's total equity, which holds the
-    owner's pre-existing positions and is not capital the agent was given.
-
-    Returns None when either leg is missing, rather than a number computed from half the record.
+    Independent strategy peaks and whole-account equity containing owner capital
+    cannot define agent allocation or an aligned rolling benchmark.
     """
     from autopoiesis.broker_evidence import latest_evidence_batch
     from autopoiesis.config import AgentConfig
-    from autopoiesis.evaluator import PNL_EVIDENCE_MISSING, _pnl_evidence, confirmed_fill_activities
+    from autopoiesis.evaluator import (
+        PNL_EVIDENCE_MISSING,
+        _pnl_evidence,
+        confirmed_fill_activities,
+        owner_fill_activities,
+    )
     from autopoiesis.journal import JsonlJournal
 
-    config = AgentConfig.from_env()
+    config = config or AgentConfig.from_env()
     journal = JsonlJournal(config.journal_path)
     records = journal.read_all()
     evidence = latest_evidence_batch(journal)
     if not records or evidence is None:
         return None
-    # Seeded from the journal exactly as the doctor does. Without it the batch's 24h window
-    # hides lots opened weeks ago, `closed_lots` comes back empty, and this reports the open
-    # lots' unrealized PnL as the agent's whole record - +24.19 against the real +871.02. That
-    # is not a rounding difference, it is a different population, and it is the same defect
-    # class the project corrects everywhere else.
-    pnl = _pnl_evidence(records, evidence, confirmed_fill_activities(journal, records))
-    if pnl.status == PNL_EVIDENCE_MISSING or not pnl.strategy_peak_exposure:
+    pnl = _pnl_evidence(records, evidence, confirmed_fill_activities(journal, records),
+        assumed_round_trip_cost_pct=config.assumed_round_trip_cost_pct,
+        owner_fills=owner_fill_activities(journal))
+    if pnl.status == PNL_EVIDENCE_MISSING or not pnl.linked_fill_count:
         return None
-
-    capital = sum(pnl.strategy_peak_exposure.values())
-    if capital <= 0:
-        return None
-    # Realized plus unrealized, which is what the strategy rows also compare.
-    realized = sum(pnl.strategy_realized_pnl.values())
-    unrealized = pnl.unrealized_pnl or 0.0
-    # The cost comes from the evaluator, which charges the configured rate on the notional
-    # **actually traded, both sides** (`_assumed_cost_for_lots`). Computing it here as
-    # `realized * pct` is a second formula, and it is wrong in the direction that flatters the
-    # result: a round trip costs its two sides, so charging one side of the PnL understates the
-    # cost. Measured on this record, 0.180 against 0.379 - and the two numbers disagreeing by
-    # two tenths is what makes a reader distrust both. One formula, in one place.
-    cost = sum(pnl.assumed_cost.values())
-    net = realized + unrealized - cost
-    if not pnl.market_return_pct:
-        return None
-    return_pct = net / capital * 100.0
     return {
-        "pnl": round(net, 2),
-        "realized": round(realized, 2),
-        "unrealized": round(unrealized, 2),
-        "capital": round(capital, 2),
-        "return_pct": round(return_pct, 2),
-        "spy_pct": round(pnl.market_return_pct, 2),
-        "excess": round(return_pct - pnl.market_return_pct, 2),
-        # Reported so the headline and the increment block cannot drift apart again: they use one
-        # formula now, and this is the number that formula produced.
-        "assumed_cost": round(cost, 4),
+        "performance_contract": "agent-accounting-v1",
+        "comparison_status": "UNKNOWN",
+        "comparison_reason": "agent allocation, cash flows and aligned rolling equity history are unavailable",
+        "pnl": round(pnl.net_after_assumed_cost, 2) if pnl.net_after_assumed_cost is not None else None,
+        "realized": round(sum(pnl.strategy_realized_pnl.values()), 2),
+        "unrealized": round(pnl.unrealized_pnl, 2) if pnl.unrealized_pnl is not None else None,
+        "observed_fees": round(sum(pnl.strategy_fees.values()), 4),
+        "capital": None, "return_pct": None, "spy_pct": None, "excess": None,
+        "diagnostic_market_return_pct": pnl.market_return_pct,
+        "assumed_cost": round(sum(pnl.assumed_cost.values()), 4),
     }
 
 
@@ -346,7 +250,9 @@ def _run_prose(argv: list[str]) -> int:
     from autopoiesis.config import AgentConfig
 
     as_json = "--json" in argv
-    payload: dict = {"exit_code": None, "strategies": [], "agent": None}
+    payload: dict = {"exit_code": None, "strategies": [], "agent": None,
+                    "target": {"status": "UNKNOWN", "met": False,
+                               "trading_days": TARGET_TRADING_DAYS, "window_covered": False}}
     global _PAYLOAD
     _PAYLOAD = payload
 
@@ -374,18 +280,18 @@ def _run_prose(argv: list[str]) -> int:
         print(f"                  journal: {config.journal_path}")
         print("                  run 'autopoiesis once' (or let the daemon run) to produce one")
         payload["record"] = {"first": None, "last": None, "trading_days": 0, "cycles": 0,
-                             "journal": str(config.journal_path)}
+                             "day_count_basis": "distinct cycle dates; not continuous exchange-calendar coverage"}
         payload["exit_code"] = EXIT_NOTHING_TO_MEASURE
         if as_json:
             print(json.dumps(payload, indent=2, sort_keys=True))
         return EXIT_NOTHING_TO_MEASURE
     payload["record"] = {"first": first, "last": last, "trading_days": days, "cycles": cycles,
-                         "journal": str(config.journal_path)}
+                         "day_count_basis": "distinct cycle dates; not continuous exchange-calendar coverage"}
     print(f"record            {first} .. {last}   {days} trading day(s), {cycles} cycle(s)")
     print(
         f"target window     {TARGET_TRADING_DAYS} trading days - "
         + (
-            "MET"
+            "RECORD COVERAGE ONLY; rolling comparison unavailable"
             if days >= TARGET_TRADING_DAYS
             else f"NOT MET ({days} of {TARGET_TRADING_DAYS})"
         )
@@ -417,38 +323,24 @@ def _run_prose(argv: list[str]) -> int:
             )
             print(f"  {name:<26} {return_pct:>8} {market_pct:>17} {excess:>8}")
         print()
-        print("  basis: each row puts both legs on the same capital and the same window -")
+        print("  diagnostic basis: a strategy peak-exposure ratio and market price change -")
         print("  realized plus unrealized PnL over the strategy's peak exposure, against SPY from")
         print("  its first entry to its last exit (or last valuation while a lot is open). Gross")
-        print("  of the assumed round-trip cost; the after-cost figure for the whole account is")
-        print("  in the increment block below.")
+        print("  of the assumed round-trip cost; the after-cost figure for agent lots is")
+        print("  in the accounting block below. These ratios are not portfolio alpha.")
         print()
 
     attribution, extras = _pick(report.checks, "pnl attribution")
     _print_split_section("LLM increment vs the deterministic baseline", attribution, extras)
 
-    # --- the agent-level claim, which is what the target sentence is about -------------------
-    #
-    # The rows above answer a different question: "given each strategy its own peak capital, did it
-    # beat SPY over its own holding window". A worst-case rule over six of those rows is not the
-    # target sentence, which is about the *agent* - one capital base, after costs, over one window.
-    # Reporting only the worst row made a single weak strategy read as the whole agent failing, and
-    # that is a definition error, not a strict one.
-    agent = _agent_level()
+    agent = _agent_level(config)
     if agent is not None:
-        print("the agent itself, after cost, over the record window")
+        print("agent accounting after observed fees and assumed costs")
         print("-" * 78)
-        print(f"  agent PnL (realized + unrealized, after cost)   {agent['pnl']:>+12.2f}"
-              f"   (cost {agent['assumed_cost']:.4f}, from the evaluator)")
-        print(f"    of which realized {agent['realized']:>+.2f}, unrealized {agent['unrealized']:>+.2f}")
-        print(f"  on capital deployed (sum of peak exposures)     {agent['capital']:>12.2f}")
-        print(f"  return on deployed capital                      {agent['return_pct']:>+11.2f}%")
-        print(f"  SPY over the same window                        {agent['spy_pct']:>+11.2f}%")
-        print(f"  excess                                          {agent['excess']:>+11.2f} points")
-        print()
-        print("  this is the claim the target sentence makes. It is not the worst strategy row, and")
-        print("  it is not the sum of the rows either: strategies that never overlapped in time did")
-        print("  not compete for the same capital, so their peak exposures add.")
+        for key in ("realized", "unrealized", "observed_fees", "assumed_cost", "pnl"):
+            value = agent[key]
+            print(f"  {key:20s} " + (f"{value:+,.4f}" if value is not None else "UNKNOWN"))
+        print(f"  portfolio comparison UNKNOWN: {agent['comparison_reason']}")
         print()
 
     paired, _ = _pick(report.checks, "llm vs rule")
@@ -491,7 +383,8 @@ def _run_prose(argv: list[str]) -> int:
     }
     payload["cost"] = {"assumed_round_trip_cost_pct": config.assumed_round_trip_cost_pct}
     payload["target"] = {
-        "trading_days": TARGET_TRADING_DAYS, "met": days >= TARGET_TRADING_DAYS,
+        "trading_days": TARGET_TRADING_DAYS, "met": False, "status": "UNKNOWN",
+        "window_covered": False, "recorded_days_sufficient": days >= TARGET_TRADING_DAYS,
         "covered": days,
     }
     return code

@@ -118,6 +118,41 @@ def test_every_page_reads_the_same_cycle_count(tmp_path):
     )
 
 
+def test_unknown_portfolio_comparison_renders_without_inventing_return():
+    module = _load_module()
+    snapshot = module.Snapshot(taken_at=datetime.now(timezone.utc), source="synthetic",
+        cycles=[], events=[], strategies=[], heartbeat={}, model_registry=None,
+        positions=[], limits={}, journal_state={}, agent={
+        "performance_contract": "agent-accounting-v1", "comparison_status": "UNKNOWN",
+        "comparison_reason": "allocation unavailable", "return_pct": None,
+        "spy_pct": None, "excess": None})
+    text = "".join(module.overview(snapshot) + module.evidence(snapshot))
+    assert "UNKNOWN" in text
+
+
+def test_operator_page_refuses_legacy_portfolio_ratio():
+    module = _load_module()
+    snapshot = module.Snapshot(taken_at=datetime.now(timezone.utc), source="synthetic",
+        cycles=[], events=[], strategies=[], heartbeat={}, model_registry=None,
+        positions=[], limits={}, journal_state={},
+        agent={"return_pct": 989.12, "spy_pct": 1.0, "excess": 988.12})
+    text = "".join(module.overview(snapshot) + module.evidence(snapshot))
+    assert "+989.12%" not in text
+    assert "UNKNOWN" in text
+
+
+def test_independent_historical_peaks_are_not_simultaneous_cap_utilization():
+    module = _load_module()
+    snapshot = module.Snapshot(taken_at=datetime.now(timezone.utc), source="synthetic",
+        cycles=[], events=[], strategies=[], heartbeat={}, model_registry=None,
+        agent={}, journal_state={}, limits={"max_total_exposure": 150},
+        positions=[{"strategy_id": sid, "peak_exposure": 100,
+                    "realized_pnl": 0, "assumed_cost": 0} for sid in ("a", "b")])
+    text = "".join(module.portfolio(snapshot))
+    assert "133%" not in text
+    assert "worst peak of the record" not in text
+
+
 def test_the_readers_see_rotated_generations_not_just_the_live_file(tmp_path):
     rotations = 2
     module = _load_module()

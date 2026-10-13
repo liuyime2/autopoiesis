@@ -184,6 +184,13 @@ def _page(title: str, current: str, body: list[str], figures: Figures) -> str:
 # --- the five pages -------------------------------------------------------------------------
 
 
+def _agent_accounting(benchmark: dict) -> dict:
+    agent = benchmark.get("agent") or {}
+    if agent.get("performance_contract") != "agent-accounting-v1":
+        return {}
+    return agent
+
+
 def _card(label, value, sub):
     return ('<div class="card"><dt>' + html.escape(str(label)) + '</dt><dd>'
             + html.escape(str(value)) + '</dd><p>' + html.escape(str(sub)) + '</p></div>')
@@ -196,8 +203,6 @@ def overview(figures: Figures) -> list[str]:
     record = figures.named("record")
     signals = figures.named("signals")
     target = benchmark.get("target") or {}
-    agent = benchmark.get("agent") or {}
-    spy = benchmark.get("agent", {}).get("spy_pct") if agent else None
 
     body = [
         '<p>A research instrument, not a product. It trades a paper account, grades its own '
@@ -214,11 +219,11 @@ def overview(figures: Figures) -> list[str]:
                     'rather than as zero: ' + html.escape(', '.join(broken)) + '.</p>')
 
     body.append('<dl class="grid">')
-    body.append(_card('agent, after cost', _pct(agent.get('return_pct')) if agent else 'UNKNOWN',
-                      'return on deployed capital over the record window'))
+    body.append(_card('agent, after cost', 'UNKNOWN',
+                      'allocation and aligned rolling equity history unavailable'))
     body.append(_card('vs SPY holding',
-                      (str(agent.get('excess')) + ' pts') if agent else 'UNKNOWN',
-                      'excess on the same capital and the same window'))
+                      'UNKNOWN',
+                      'aligned portfolio comparison unavailable'))
     body.append(_card('trading days on record', record.get('trading_days', 0),
                       'against a ' + str(target.get('trading_days', 60)) + '-day target'))
     body.append(_card('gate', str(gate.get('check_classes')) + ' classes',
@@ -241,11 +246,10 @@ def overview(figures: Figures) -> list[str]:
     body.append('<h2>What it has not shown</h2>')
     body.append('<ul>')
     body.append('<li><strong>That it beats holding.</strong> '
-                + (_pct(agent.get('return_pct')) if agent else 'UNKNOWN')
-                + ' after cost against SPY ' + (_pct(spy) if spy is not None else 'UNKNOWN')
+                + 'UNKNOWN after cost against SPY UNKNOWN'
                 + ' over ' + str(record.get('trading_days', 0)) + ' of '
                 + str(target.get('trading_days', 60))
-                + ' trading days. The denominator is printed with the number.</li>')
+                + ' recorded dates. Allocated capital and aligned equity are unavailable.</li>')
     body.append('<li><strong>Any directional edge.</strong> '
                 + str(signals.get('hypotheses', 0))
                 + ' hypotheses about what predicts returns have been through a family-wise '
@@ -261,7 +265,7 @@ def evidence(figures: Figures) -> list[str]:
     benchmark = figures.named("benchmark")
     record = figures.named("record")
     signals = figures.named("signals")
-    agent = benchmark.get("agent") or {}
+    agent = _agent_accounting(benchmark)
     target = benchmark.get("target") or {}
     budget = benchmark.get("risk_budget") or {}
     rows = benchmark.get("strategies") or []
@@ -271,15 +275,14 @@ def evidence(figures: Figures) -> list[str]:
                 'budget, over a rolling ' + str(target.get('trading_days', 60))
                 + '-trading-day window. The record holds '
                 + str(record.get('trading_days', 0)) + ' trading days, so the window is '
-                + ('met' if target.get('met') else 'not met')
-                + ' and the verdict is not yet falsified.</p>')
+                + 'not established by these dates alone'
+                + '; allocation and aligned equity/control history are unavailable.</p>')
     body.append('<dl class="grid">')
     body.append(_card('agent return on deployed capital',
-                      _pct(agent.get('return_pct')) if agent else 'UNKNOWN',
-                      _money(agent.get('pnl'), sign=True) + ' on '
-                      + _money(agent.get('capital')) + ' deployed'))
-    body.append(_card('SPY, same window', _pct(agent.get('spy_pct')) if agent else 'UNKNOWN',
-                      'buy-and-hold on the same capital'))
+                      'UNKNOWN',
+                      _money(agent.get('pnl'), sign=True) + ' PnL; allocated capital UNKNOWN'))
+    body.append(_card('SPY, same window', 'UNKNOWN',
+                      'aligned agent capital and rolling window unavailable'))
     body.append(_card('after cost', _money(agent.get('assumed_cost')) if agent else 'UNKNOWN',
                       'assumed '
                       + str(benchmark.get('cost', {}).get('assumed_round_trip_cost_pct'))
@@ -302,9 +305,9 @@ def evidence(figures: Figures) -> list[str]:
                         + '</td><td class="num">' + html.escape(str(row.get('excess')))
                         + '</td></tr>')
         body.append('</table></div>')
-        body.append('<p class="note">Each row puts both legs on the same capital and the same '
-                    'window. One weak strategy failing is not the agent failing, so this is a '
-                    'diagnostic and is labelled as one.</p>')
+        body.append('<p class="note">Strategy returns use historical peak exposure as a '
+                    'diagnostic denominator. They do not establish agent allocation, '
+                    'a continuous equity curve, or project profitability.</p>')
 
     if signals.get('present'):
         body.append('<h2>The signal ledger</h2>')
