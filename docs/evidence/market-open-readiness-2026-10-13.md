@@ -35,3 +35,28 @@ Private report files are under `runtime/autopoiesis/readiness/`; no account bala
 - The actual 08:45 preflight and 09:45/10:30 open observations remain pending at the time this evidence is written. Open-session checks require new session cycles, fresh quotes, source/provenance match, Guardian and order/fill reconciliation. A HOLD/no fill can be safe and cannot be converted to a profit claim.
 
 Paper-only and Guardian/market-time checks remain mandatory. A successful preflight does not demonstrate alpha or RSI; the latest real-data diagnostic search still has zero PASS trials.
+
+## Corrected open-verifier deployment cutoff — 08:12–08:18 EDT
+
+The installed `market-open-verify.service` carried `DEPLOYMENT_AFTER=2026-10-13T09:53:18-04:00`, while the documented and measured deployment instant is **05:53:18 EDT** (`ExecMainStartTimestamp`, PID 3184440). Converting both to UTC gives `09:53:18+00:00` versus `13:53:18+00:00`: the configured cutoff was the deployment start *in UTC* relabelled as Eastern, a **4h00m** drift.
+
+Root cause: the deployment timestamp's UTC clock reading was substituted without converting the offset, so the minutes and seconds survived and the hour shifted.
+
+Measured consequence in `tools/market_readiness.py`, not an estimate:
+
+- `_require(after <= now, "DEPLOYMENT_CUTOFF_IN_FUTURE", 2)` fails for any 09:45 trigger, because `09:45:00 <= now <= 09:45:30 < 09:53:18`. The 09:45 run was therefore guaranteed to report FAIL/exit 2 and collect no session evidence at all.
+- `_session_evidence` starts at `max(opened, after)`, so the 10:30 run would have measured `09:53:18–10:30` and excluded the first 23 minutes of the actual session. Excluding real opening cycles from the observation window is a self-inflicted evidence gap, not a stricter gate.
+
+Correction, installed through `make install-readiness-timers` with `DEPLOYMENT_AFTER=2026-10-13T05:53:18-04:00`:
+
+- The change was rendered first into a temporary unit directory with `READINESS_UNIT_DIR`; `systemd-analyze --user verify` passed and the rendered bytes differed from the installed bytes in exactly one token.
+- The first install attempt wrote to `/localscratch/liuyime2/ohome/.config/systemd/user` and reported exit 0, because `make install-readiness-timers` without an explicit `READINESS_UNIT_DIR` defaults to `$(XDG_CONFIG_HOME)/systemd/user` and this shell exports `XDG_CONFIG_HOME=/localscratch/liuyime2/ohome/.config`, while `systemctl --user show-environment` reports no `XDG_CONFIG_HOME` at all, so the user manager loads from `/home/liuyime2/.config/systemd/user`. The exit code alone would have concealed this. The four stray files, all written at 08:15:18, were removed and that directory was left empty; the correct directory received the install.
+- Post-install verification: all four units byte-identical to the verified dry run; only `market-open-verify.service` differs from the preserved pre-change bytes; `systemctl --user show market-open-verify.service -p ExecStart` now reports `DEPLOYMENT_AFTER=2026-10-13T05:53:18-04:00`; both timers still active for 08:45 and 09:45/10:30.
+- Pre-change unit bytes are preserved at `/tmp/opencode/unit-backup-20261013/` with their SHA-256 sums, so the correction is reversible by restoring four files.
+- The trading daemon was not touched: MainPID 3184440, `NRestarts=0`, `ExecMainStartTimestamp` still 05:53:18 EDT, unit `active`, heartbeat RUNNING with fingerprint `9fb9066d820f27c9`, `cycle_count=0` and `error_count=0` while the market is closed. No risk limit, Guardian rule, execution path or broker order state was modified.
+
+This correction widens the evidence window and makes the gate stricter, not more forgiving: with the cutoff restored, the 10:30 run's first-round deadline becomes 09:30+60min = **10:30**, so all six configured symbols (SPY, BIL, TLT, XLB, XLE, XLF) must each appear in a real cycle record before 10:30 or the run reports `FIRST_ROUND_COVERAGE_MISSING`. That is a real failure mode and is left standing rather than softened.
+
+Follow-up, not fixed here: `Makefile`'s `READINESS_UNIT_DIR` default can silently resolve to a directory the systemd user manager does not read. It should derive the manager's real unit path (or fail when the two disagree) before this installer is used unattended.
+
+The 08:45 preflight, 09:45 and 10:30 open observations remain pending. Installing an active timer and correcting its arguments is not a session result.
