@@ -60,3 +60,17 @@ This correction widens the evidence window and makes the gate stricter, not more
 Follow-up, not fixed here: `Makefile`'s `READINESS_UNIT_DIR` default can silently resolve to a directory the systemd user manager does not read. It should derive the manager's real unit path (or fail when the two disagree) before this installer is used unattended.
 
 The 08:45 preflight, 09:45 and 10:30 open observations remain pending. Installing an active timer and correcting its arguments is not a session result.
+
+## Actual scheduled 08:45 preflight — 08:45:09 to 08:47:59 EDT
+
+The installed timer fired on its own; this is scheduled evidence, not a manual invocation. `Result=success`, `ExecMainStatus=0`, report `status=READY`, `exit_code=0`, `diagnostics=[]`.
+
+- Broker clock `2026-10-13T12:45:37Z` (08:45:37 EDT), `market_open=false`, session date 2026-10-13, open `13:30:00Z` = 09:30 EDT, close `20:00:00Z` = 16:00 EDT. Account ACTIVE, **6** positions, complete open-order snapshot with **0** orders, `unresolved_submissions=0` across 2,326 journal cycles and 21,853 events, `trusted_archive=true`.
+- Daemon identity confirmed in-process: PID **3184440**, status RUNNING, fingerprint `9fb9066d820f27c9`, `cycle_count=0`, `error_count=0`, `broker_healthy=true`. Read-only configuration is unchanged from deployment: paper, `manage_account=true`, `shadow=false`, `shorts=shadow`, symbols BIL/SPY/TLT/XLB/XLE/XLF, position cap 25,000, total exposure cap 90,000, daily loss cap 500, 100 attempts/day, 1,200 daily cycles, `min_confidence=0.5`, `min_price=5`, `stale_after_seconds=900`, model `qwen3.8:27b`, interval 300s, maintenance 900s.
+- **Strategy coverage measured per configured symbol:** SPY, BIL and TLT are `selectable=true`; **XLB, XLE and XLF are `selectable=false` with `HOLD_ZERO_WITHOUT_ATTRIBUTION`.** Half the configured universe therefore has no frozen strategy and can only abstain. These are abstention cycles, not failures, and they must not be counted as decisions.
+- Preview: a real model response was observed with valid provenance against frozen strategy `trend-follow-20260824-001` for SPY; action HOLD, quantity 0, `decision_source=llm`, `scheduler_trade_now=false`. Every quote was genuinely stale — SPY's newest regular-session print is `2026-10-12T16:19:47-04:00` — so Guardian refused with `STALE_DATA`, `guardian_approved=false`, `closed_market_approval_certified=false`. Nothing was submitted.
+- The report states `profitability=UNPROVEN` and `additional_held_attention_coverage=UNOBSERVED`.
+
+The collector's own peak memory was 3.3 GB. It builds a daemon instance to preview decisions; it is a separate process from the trading daemon and does not trade.
+
+This is preopen readiness only. It proves the scheduled path executes and the identity, account, calendar and refusal boundaries hold before 09:30; it contains no open-session cycle and no return.
