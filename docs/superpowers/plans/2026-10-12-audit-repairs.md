@@ -23,7 +23,7 @@ not claims about a new run. Reproduce focused failures before changing their cau
   use explicit synthetic test dates without weakening the four-day production
   freshness rule. Fix Git status detection and remove accidental production-host
   work from ordinary tests. Verify via Make focused tests, lint and type checks.
-- [ ] 2. Mandatory research contract. Connect registration verification, declared
+- [x] 2. Mandatory research contract. Connect registration verification, declared
   symbol/interval/window, tape validation, evaluator identity and trial persistence
   to driver.py, Makefile and research.service.in. Fix registry location without
   writing site-packages. Reject conflicting overlapping bars. Test refusals before
@@ -161,3 +161,148 @@ Each unit records commands, outputs, root cause, limits and commit below. Synthe
 fixtures prove software behavior only. Real research results cannot establish live
 profitability. A profitable, autonomous recursive improvement loop still requires
 frozen control/treatment experiments and clean paper observations over time.
+
+Task 2 regression baseline: `make test ENVFILE=/dev/null
+TEST_ARGS='tests/autopoiesis/test_research_contract.py'` -> **16 failed in 0.73s**.
+Missing/unregistered/unsupported specs reached loaders/backtests, overlaps silently
+preferred a price, re-registration rewrote first registration, and persistence
+failure returned zero. These fixtures are explicitly synthetic software checks.
+Implementation design: reuse the actual grid (one TREND_FOLLOW per threshold plus
+one FIXED_SIZE buy-hold), version its rule/metric/evaluator, declare thresholds,
+exact candidate budget, costs, folds and training bars. `expected_trades` is intent
+metadata, never an override of cumulative required-trades control. Identity hashes
+contract bytes, actual evaluator implementation and settings; historical generic
+specs may retain metadata registrations but cannot execute supported CLI research.
+
+### Task 2 implementation and focused evidence
+
+Root cause: spec was optional at both production callers and driver boundary;
+registration checked only copy existence/bytes; the loader silently preferred the
+first conflicting price and mixed intervals; repeat matching omitted execution
+settings and evaluator identity; an unpersisted result still exited zero. The old
+loader-integration test never called its loader (`if False`).
+
+The shared preparation gate now freezes one read of verified spec bytes, validates
+only the existing versioned threshold grid and metric, selects symbol/interval/window,
+checks selected bars and overlap consistency, and prepares complete evaluation
+identity. Contract declarations require thresholds, exact candidate budget, costs,
+fold count and training length; unknown execution promises are refused. Each trial
+records spec/implementation hashes, actual settings, ordered tape fingerprint,
+first registration metadata and factual pre-window/after-window registration scope.
+Registrations are immutable and idempotent; corrupt metadata/copies and future
+registration timestamps are refused. Registry and ledger defaults are relative
+runtime paths with documented external environment overrides, independent of
+installed source locations.
+
+Make and scheduled research require an externally supplied registered SPEC. The
+run derives exact fetch symbol/window/interval from that verified contract, passes
+the same explicit cache directory to fetch/search, and stops on fetch failure.
+The fetcher's filename now uses its actual requested interval. It never
+post-registers a hypothesis. Exact repeats reuse stored outcomes; changed contracts,
+settings, implementations or tapes count as new attempts. Corrupt ledgers stop the
+CLI instead of resetting attempt counts, and incomplete persistence fails the
+command. A nonblocking ledger session lock excludes simultaneous CLI evaluation
+before cumulative ledger reads or backtests.
+
+Measured checks (all with disposable synthetic fixtures; no real-market conclusions):
+
+- Initial red contract baseline: `make test ENVFILE=/dev/null
+  TEST_ARGS='tests/autopoiesis/test_research_contract.py'` -> **16 failed in 0.73s**;
+  first green after driver/gate repairs -> **16 passed in 0.38s**.
+- Concurrency red: `make test ENVFILE=/dev/null
+  TEST_ARGS='tests/autopoiesis/test_research_contract.py -k concurrent'` ->
+  **1 failed, 32 deselected in 0.45s**, reaching trial reads while a separate process
+  held the ledger. Green with session lock -> **1 passed, 32 deselected in 0.36s**.
+- Final focused suite: `make test ENVFILE=/dev/null
+  TEST_ARGS='tests/autopoiesis/test_research*.py tests/autopoiesis/test_replay_bar_fetch.py'`
+  -> **132 passed in 6.77s**. Includes an actual tempfile bar cache through the shared
+  gate, invalid/missing/changed/unsupported contracts, corrupt/non-real/naive/invalid
+  bars, overlap equality/conflicts, interval/window filtering, precise settings
+  forwarding, changes to tape/cost/evaluator identity, immutable registration,
+  frozen reads, cumulative counts, persistence failure and Make fetch refusal.
+- `make lint-files ENVFILE=/dev/null FILES='src/autopoiesis/research/driver.py
+  src/autopoiesis/research/prereg.py src/autopoiesis/research/trials.py
+  src/autopoiesis/research/walk_forward.py tools/check_research_tape.py
+  tools/fetch_replay_bars.py tests/autopoiesis/test_research_contract.py
+  tests/autopoiesis/test_research_prereg.py tests/autopoiesis/test_research_driver.py
+  tests/autopoiesis/test_research_fetch_make.py tests/autopoiesis/test_replay_bar_fetch.py'`
+  -> **All checks passed**. Earlier lint findings were import sorting and unused
+  fixture unpackings; fixes were rerun through the suite.
+- `make type ENVFILE=/dev/null` -> **Success: no issues found in 48 source files**.
+  Initial type run found five newly introduced heterogeneous-settings/source-path
+  annotations; corrected annotations/null-source guard passed the final rerun.
+- `make verify ENVFILE=/dev/null CLASS=config-example-names` -> **1 class passed**,
+  documenting 40 recognized names; `CLASS=config-example-complete` -> **1 class
+  passed**, all 44 variables the config loader reads documented.
+- Scheduled direct-Make invocation follow-up: `make test ENVFILE=/dev/null
+  TEST_ARGS='tests/autopoiesis/test_research_fetch_make.py'` -> **5 passed in 0.14s**.
+- `git diff --check` -> **exit 0**.
+
+Limits and remaining work: no service installation, credentials, live runtime state
+or production trading behavior was changed. The example declares historical
+integrity diagnostics; local registration timestamps cannot establish data
+independence. The OOS metric is mean fold net-PnL/spent-notional percentage, not
+portfolio performance. The cumulative square-root trade guard is a sample-size
+heuristic, not formal Bonferroni/FWER control; independent holdout/family validation
+and sustained clean paper observations remain necessary for an edge claim. Cache
+provenance checks validate the local broker-fetch format, not cryptographic broker
+authenticity. The public Python search remains explicitly labelled diagnostic;
+CLI session locking is not a lock for arbitrary external low-level writers.
+The real-cache gate and isolated real-ledger execution, independent reviews, full
+suite, credential-free committed fresh clone and commit remain pending with root.
+Task 2 source diff is frozen for review; no commit was made by the implementation agent.
+
+Task 2 spec review correction: the synthetic CLI ledger contains 3 rows with
+`evaluator_sha256: null`, despite the hash being present in evaluation identity.
+The CLI omitted forwarding the prepared hash. Success is every persisted row
+identifying the actual evaluator independently, verified by the existing real CLI
+fixture with an explicit hash assertion. Also update tools/README.md's stale
+fetch-failure description to the now-required registered contract and nonzero exit.
+Root reproduced the missing-hash regression through Make: **1 failed, 43 deselected
+in 0.37s**. After forwarding the prepared hash, the same focused check returned
+**1 passed, 43 deselected in 0.28s**; focused lint passed. The service documentation
+now states the external registered spec and fetch-failure behavior. Re-review pending.
+
+Task 1 status reconciliation: earlier references to pending independent review and
+commit are historical snapshots, now superseded. Root reported the focused repair
+accepted after spec/quality review and committed as **29d1eea** before Task 2
+implementation began. The remaining Task 1 integration/fresh-clone gates are still
+Task 6 work; they have not been inferred from focused tests or the commit.
+
+Task 2 real-cache preparation: `make research-register ENVFILE=/dev/null
+SPEC=/tmp/autopoiesis-research-repair.C9ugL0/diagnostic.spec
+PREREGISTRY=/tmp/autopoiesis-research-repair.C9ugL0/registry` registered the documented
+historical diagnostic example. `make research-check-tape` with that contract and
+the deployed replay directory failed nonzero: conflicting overlapping SPY price at
+**2026-10-07T16:10:00Z** in `SPY_5Min_rolling.json`. This is a successful refusal,
+not a successful dataset. Source cache is preserved. For the separate end-to-end
+integrity diagnostic, select the latest completed fetch (`SPY_5Min_rolling.json`,
+24,192 source rows, fetched October 12) before computing any result, copy it into an
+isolated cache, and use the same frozen declared window. Do not select on returns
+or treat the single-file diagnostic as remediation of the conflicting cache.
+
+Task 2 quality review correction plan: a registered instrument containing shell
+syntax reached recursive Make and executed the reviewer's harmless synthetic marker
+twice. Also a matching cached `PASSES` result with NaN was reused with exit zero.
+Success: reject invalid broker symbol grammar before exposing fetch arguments, and
+reject non-finite/malformed matching evaluation results before reuse, without
+resetting cumulative historical attempt counts. Add focused refusal regressions,
+then run research tests/lint and independent quality re-review. No shell probe will
+contact a broker or use operator credentials.
+
+Root quality regressions: **4 failed, 44 deselected in 0.46s** before fixes;
+**4 passed, 44 deselected in 0.37s** after symbol/result validation. Broader research
+suite then **136 passed in 6.91s**; one added contradictory PASS case gives
+**49 contract tests passed in 0.88s**, focused lint clean. Independent quality
+re-review approved with **49 passed in 0.81s**. Independent spec review also
+approved after ledger-hash/documentation corrections. Task 2 accepted.
+
+Single-fetch real diagnostic completed with the pre-quality-fix evaluator hash
+`1d568571d9c16ce7ec932893235e4e8d1ab5894c7cd3f1f72be1b6164db6b306`:
+**24,111 selected bars**, 81 outside-window exclusions, fingerprint
+`sha256:e3c2bf54eb495e8ccd82502485d7aaf7a239e2838c0d1ba8d83984e4acd75ea4`;
+11 recorded candidates, **4 OVERFIT, 7 INSUFFICIENT, 0 PASS**, zero persistence
+failures. This proves that version's real path ran, not alpha or scientific
+preregistration. Further evaluator accounting repairs have their own written plan
+`2026-10-12-backtest-accounting-repairs.md`; final real execution/repeat must be
+rerun with the final evaluator identity in task 6. No prior trial is relabelled.

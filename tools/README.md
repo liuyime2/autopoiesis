@@ -267,6 +267,7 @@ the broker and then runs `autopoiesis.research.driver`. It is a separate unit ra
 the daemon invokes because `check_production_research_separation` fails the gate when any
 production module imports the research package — letting the daemon run the search would break
 that separation for the sake of one scheduler, and a component that both searches and trades can
-grade itself. Its fetch is followed by `|| echo ...` so a broker outage yields "no new bars" and
-still runs the search, rather than silently stopping research; the search itself is not tolerant,
-because a missing cache is a real failure.
+grade itself. Set `AUTOPOIESIS_RESEARCH_SPEC` in the external configuration to an
+explicitly registered supported contract. The Make entry point verifies it before
+fetching its declared symbol, interval and window. Fetch failures stop the unit
+with a nonzero exit; it does not substitute an older cache for a failed fetch.

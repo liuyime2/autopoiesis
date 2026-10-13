@@ -34,12 +34,19 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_REGISTRY = ROOT / "runtime" / "autopoiesis" / "preregistered"
+DEFAULT_REGISTRY = Path("runtime") / "autopoiesis" / "preregistered"
+
+
+def registry_path(registry: Path | None = None) -> Path:
+    """Runtime storage relative to the working directory, never to installed source."""
+    return Path(registry if registry is not None else
+                os.getenv("AUTOPOIESIS_PREREGISTRY", str(DEFAULT_REGISTRY)))
 
 #: The fields a spec must carry to be falsifiable. Not a schema checked by a library: a reader (or a
 #: reviewer, or an agent) is the one who needs to see these, and the list here is checked literally
@@ -114,41 +121,25 @@ def _parse_utc(value: str) -> datetime:
     return moment
 
 
-def load_spec_from_text(text: str) -> dict:
-    """Parse a spec from text rather than a file, so a test can hold one inline.
-
-    The file path is the same parser: this writes nothing and calls the same field reader, so a
-    test's spec and a registered one cannot diverge in what they mean.
-    """
-    import tempfile
-
-    with tempfile.NamedTemporaryFile("w", suffix=".spec", delete=False,
-                                     encoding="utf-8") as handle:
-        handle.write(text)
-        name = handle.name
-    try:
-        return load_spec(Path(name))
-    finally:
-        Path(name).unlink(missing_ok=True)
-
-
-def load_spec(path: Path) -> dict:
-    """A spec file, as its key/value fields.
-
-    Text `key: value` lines, one per field, with `#` comments and blank lines ignored. Not JSON,
-    because a spec is read by a person as often as by a program and a format that needs a parser to
-    read is a format nobody proofs.
-    """
+def load_spec_from_text(text: str) -> dict[str, str]:
+    """Parse frozen declaration bytes without writing a temporary file."""
     fields: dict[str, str] = {}
-    for raw in Path(path).read_text(encoding="utf-8").splitlines():
+    for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
         if ":" not in line:
-            continue
+            raise ValueError(f"invalid spec line: {line!r}")
         key, _, value = line.partition(":")
-        fields[key.strip()] = value.strip()
+        key = key.strip()
+        if key in fields:
+            raise ValueError(f"duplicate spec field: {key}")
+        fields[key] = value.strip()
     return fields
+
+
+def load_spec(path: Path) -> dict[str, str]:
+    return load_spec_from_text(Path(path).read_text(encoding="utf-8"))
 
 
 def spec_hash(path: Path) -> str:
@@ -174,52 +165,82 @@ def check_spec(spec: dict) -> list[str]:
     return problems
 
 
-def register(spec_path: Path, registry: Path = DEFAULT_REGISTRY) -> dict:
-    """Copy a spec into the registry, named by its own hash, and return what was recorded.
-
-    The registry entry is the thing a later run verifies against, so a spec edited after
-    registration no longer matches it - which is the whole mechanism. Registering twice records the
-    second spec too rather than refusing: two different specs are two different experiments, and
-    silently dropping one would hide that a hypothesis moved.
-    """
+def register(spec_path: Path, registry: Path | None = None) -> dict:
+    """Register immutable bytes and metadata; identical registration keeps its first time."""
     spec_path = Path(spec_path)
-    spec = load_spec(spec_path)
+    frozen = spec_path.read_bytes()
+    spec = load_spec_from_text(frozen.decode("utf-8"))
     problems = check_spec(spec)
     if problems:
         raise SystemExit("the spec cannot be registered:\n  " + "\n  ".join(problems))
-
-    digest = spec_hash(spec_path)
-    registry.mkdir(parents=True, exist_ok=True)
+    registry = registry_path(registry)
+    digest = hashlib.sha256(frozen).hexdigest()
     target = registry / f"{digest}.spec"
-    target.write_text(spec_path.read_text(encoding="utf-8"), encoding="utf-8")
+    metadata = registry / f"{digest}.json"
+    if target.exists() or metadata.exists():
+        ok, problems, _payload = _verify_bytes(frozen, registry)
+        if not ok:
+            raise ValueError("existing registration is corrupt: " + "; ".join(problems))
+        return _payload
+    registry.mkdir(parents=True, exist_ok=True)
     payload = {
         "registered_at": datetime.now(timezone.utc).isoformat(),
         "sha256": digest,
         "source": str(spec_path),
-        "fields": {name: spec.get(name) for name in REQUIRED_FIELDS},
+        "fields": spec,
     }
-    (registry / f"{digest}.json").write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    # Exclusive creation refuses to rewrite history, including interrupted registrations.
+    with target.open("xb") as handle:
+        handle.write(frozen)
+        handle.flush()
+        os.fsync(handle.fileno())
+    with metadata.open("x", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
     return payload
 
 
-def verify(spec_path: Path, registry: Path = DEFAULT_REGISTRY) -> tuple[bool, list[str]]:
-    """Is this spec byte-identical to the one registered for its own hash?"""
-    spec_path = Path(spec_path)
-    digest = spec_hash(spec_path)
+def _verify_bytes(frozen: bytes, registry: Path | None = None) -> tuple[bool, list[str], dict]:
+    digest = hashlib.sha256(frozen).hexdigest()
+    registry = registry_path(registry)
     registered = registry / f"{digest}.spec"
+    metadata = registry / f"{digest}.json"
     if not registered.exists():
-        return False, [
-            f"no spec registered under {digest}; a hypothesis stated after the fact is a "
-            "description of the data, not a hypothesis"
-        ]
-    if registered.read_bytes() != spec_path.read_bytes():
-        return False, ["the registered copy differs from the file on disk"]
-    problems = check_spec(load_spec(spec_path))
-    if problems:
-        return False, [f"the registered spec is not checkable: {problem}" for problem in problems]
-    return True, []
+        return False, [f"no spec registered under {digest}; a hypothesis stated after the fact "
+                       "is a description of the data, not a hypothesis"], {}
+    try:
+        if registered.read_bytes() != frozen:
+            return False, ["the registered copy differs from the file on disk"], {}
+        payload = json.loads(metadata.read_text(encoding="utf-8"))
+        fields = load_spec_from_text(frozen.decode("utf-8"))
+        if payload.get("sha256") != digest or payload.get("fields") != fields:
+            return False, ["registration metadata does not match spec bytes and fields"], {}
+        registered_at = _parse_utc(payload["registered_at"])
+        if registered_at > datetime.now(timezone.utc):
+            return False, ["registration timestamp is in the future"], {}
+        if not isinstance(payload.get("source"), str) or not payload["source"]:
+            return False, ["registration metadata has no source"], {}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        return False, [f"invalid registration metadata: {exc}"], {}
+    problems = check_spec(fields)
+    return not problems, problems, payload
+
+
+def load_verified_spec(spec_path: Path, registry: Path | None = None) -> tuple[dict, str, dict]:
+    """One immutable read controls registration checks, execution fields and identity."""
+    frozen = Path(spec_path).read_bytes()
+    ok, problems, registration = _verify_bytes(frozen, registry)
+    if not ok:
+        raise ValueError("unverified research spec: " + "; ".join(problems))
+    return (load_spec_from_text(frozen.decode("utf-8")), hashlib.sha256(frozen).hexdigest(),
+            registration)
+
+
+def verify(spec_path: Path, registry: Path | None = None) -> tuple[bool, list[str]]:
+    """Verify the same frozen bytes against both stored bytes and first-registration metadata."""
+    ok, problems, _registration = _verify_bytes(Path(spec_path).read_bytes(), registry)
+    return ok, problems
 
 
 def check_tape(bars, spec: dict | None = None) -> TapeReport:
@@ -261,7 +282,7 @@ def check_tape(bars, spec: dict | None = None) -> TapeReport:
         price = getattr(bar, "price", None)
         if price is None:
             price = getattr(bar, "close", None)
-        if timestamp is None:
+        if not isinstance(timestamp, datetime):
             report.problems.append(f"bar {index} has no timestamp")
             continue
         if timestamp.tzinfo is None:
@@ -276,7 +297,8 @@ def check_tape(bars, spec: dict | None = None) -> TapeReport:
         if timestamp in seen:
             report.problems.append(f"bar {index} repeats the timestamp {timestamp}")
         seen.add(timestamp)
-        if not isinstance(price, (int, float)) or price != price or price <= 0:
+        if (isinstance(price, bool) or not isinstance(price, (int, float))
+                or not math.isfinite(price) or price <= 0):
             report.problems.append(f"bar {index} at {timestamp} has an unusable price {price!r}")
         if start is not None and timestamp < start:
             report.problems.append(f"bar {index} at {timestamp} is before the declared window")
@@ -296,18 +318,18 @@ def main(argv: list[str] | None = None) -> int:
 
     reg = sub.add_parser("register", help="register a spec before the run")
     reg.add_argument("spec")
-    reg.add_argument("--registry", default=str(DEFAULT_REGISTRY))
+    reg.add_argument("--registry", default=None)
 
     ver = sub.add_parser("verify", help="check a spec against its registration")
     ver.add_argument("spec")
-    ver.add_argument("--registry", default=str(DEFAULT_REGISTRY))
+    ver.add_argument("--registry", default=None)
 
     chk = sub.add_parser("check-spec", help="check a spec is complete and checkable")
     chk.add_argument("spec")
 
     args = parser.parse_args(argv)
     if args.command == "register":
-        payload = register(Path(args.spec), Path(args.registry))
+        payload = register(Path(args.spec), Path(args.registry) if args.registry else None)
         print(f"registered {payload['sha256'][:16]}... from {payload['source']}")
         print(f"  hypothesis: {payload['fields'].get('hypothesis')}")
         print(f"  instrument: {payload['fields'].get('instrument')} over "
@@ -318,7 +340,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "verify":
-        ok, problems = verify(Path(args.spec), Path(args.registry))
+        ok, problems = verify(Path(args.spec), Path(args.registry) if args.registry else None)
         if ok:
             print("verify: the spec is byte-identical to the one registered before the run")
             return 0

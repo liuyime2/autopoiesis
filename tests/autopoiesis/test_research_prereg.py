@@ -6,8 +6,8 @@ is a different file and the verification says so. The data-quality gate is the o
 same question - a verdict computed from a tape that is not the tape the spec declared is a number
 with no meaning that looks exactly like one with some.
 
-Both are exercised against real tapes and real defects, because a gate only ever tested on clean
-fixtures is a gate nobody has run.
+These are synthetic unit-test fixtures, including malformed tapes. Real market
+integrity evidence is recorded separately in the execution plan.
 """
 
 from __future__ import annotations
@@ -207,42 +207,35 @@ def test_an_absent_window_bound_is_not_a_rejection(module):
     assert report.usable, report.problems
 
 
-def test_the_tape_the_driver_loads_is_the_one_the_gate_checks(module):
-    """Same code path, or the gate proves something about a series the search never reads.
+def test_the_tape_the_driver_loads_is_the_one_the_gate_checks(module, tmp_path, monkeypatch):
+    """The actual tempfile cache and shared CLI gate consume identical synthetic rows."""
+    import json
 
-    This is the defect the two halves had before they shared a loader: the gate assembled the merged
-    tape itself and the driver applied its own window, so a gate could pass while the search ran on
-    something else. Both now call `driver._load_real_bars`, which is the only place that decides
-    what "the tape for this symbol, in this window" means.
-    """
-    import importlib.util
+    from tools import check_research_tape
 
-    driver_spec = importlib.util.spec_from_file_location(
-        "driver_under_prereg", ROOT / "src" / "autopoiesis" / "research" / "driver.py"
-    )
-    driver = importlib.util.module_from_spec(driver_spec)
-    sys.modules["driver_under_prereg"] = driver
-    driver_spec.loader.exec_module(driver)
+    from autopoiesis.research import driver, prereg
 
-    bars = [_Bar(T0 + timedelta(minutes=5 * i), 100.0 + i) for i in range(6)]
-
-    class _FakeCache:
-        def __init__(self, stored):
-            self.stored = stored
-
-        def exists(self):
-            return True
-
-    # The window the spec declares, applied by the driver, is the series the gate then judges.
-    loaded, _provenance, _ignored = driver._load_real_bars(
-        _FakeCache({}), "SPY", (T0, T0 + timedelta(minutes=10))
-    ) if False else (bars[:3], "", [])
-
-    kept = [bar for bar in bars if T0 <= bar.timestamp <= T0 + timedelta(minutes=10)]
-    assert [b.timestamp for b in loaded] == [b.timestamp for b in kept], (
-        "the loader must return exactly the window the spec declares"
-    )
-    report = module.check_tape(loaded, module.load_spec_from_text(SPEC))
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    rows = [{"t": (T0 + timedelta(minutes=5*i)).isoformat(),
+             "o": 100.0+i, "h": 100.0+i, "l": 100.0+i, "c": 100.0+i}
+            for i in range(40)]
+    (cache / "SPY_5Min_test.json").write_text(json.dumps({"symbol": "SPY",
+        "interval": "5Min", "provenance": "alpaca historical bars; not synthetic", "bars": rows}))
+    spec_path = tmp_path / "synthetic.spec"
+    spec_path.write_text(SPEC.replace("rule: the existing candidate grid, selection on the earliest 60% of days",
+        "rule: threshold_grid_v1").replace("primary_metric: out-of-sample return percentage after cost",
+        "primary_metric: oos_return_pct_after_cost_v1").replace("2026-04-12T19:40:00Z",
+        "2026-04-10T16:00:00Z") + "interval: 5Min\nthresholds: 0.002\ncandidate_budget: 2\n"
+        "evaluator: walk_forward_v1\nn_folds: 2\nmin_train_bars: 20\n"
+        "commission_pct: 0.005\nslippage_pct: 0.005\n")
+    monkeypatch.setenv("AUTOPOIESIS_PREREGISTRY", str(tmp_path / "registry"))
+    prereg.register(spec_path)
+    prepared = driver.prepare_research(cache, "SPY", spec_path)
+    assert len(prepared.bars) == 31
+    assert prepared.bars[-1].timestamp == T0 + timedelta(minutes=150)
+    assert check_research_tape.main([str(spec_path), str(cache)]) == 0
+    report = module.check_tape(prepared.bars, prepared.contract)
     assert report.usable, report.problems
 
 

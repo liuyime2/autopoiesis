@@ -302,3 +302,19 @@ def test_cached_last_bar_reads_a_mixed_cache_without_dying_on_it(tmp_path, monke
     fetcher = _fetcher(tmp_path)
     fetcher.OUT_DIR = cache  # type: ignore[attr-defined]
     assert fetcher.cached_last_bar("SPY") == newest
+
+
+def test_explicit_cache_and_interval_name_identify_the_fetched_tape(tmp_path):
+    """Synthetic broker fixture: the CLI cache matches the next research loader input."""
+    default_cache = tmp_path / "default"
+    default_cache.mkdir()
+    selected_cache = tmp_path / "selected"
+    fetcher = _fetcher(default_cache)
+    fetcher.client_from_env = lambda: _client_returning([100.0, 101.0])
+    assert fetcher.main(["x", "QQQ", "2026-04-04T13:30:00Z", "2026-10-03T20:00:00Z",
+                         "1Hour", "--cache", str(selected_cache)]) == 0
+    files = list(selected_cache.glob("*.json"))
+    assert len(files) == 1
+    assert files[0].name == "QQQ_1Hour_2026-04-04_2026-10-03.json"
+    assert json.loads(files[0].read_text())["symbol"] == "QQQ"
+    assert not list(default_cache.glob("*.json"))

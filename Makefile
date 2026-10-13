@@ -147,21 +147,26 @@ REPLAY_END ?=
 REPLAY_INTERVAL ?= 5Min
 REPLAY_ROLLING ?= 0
 REPLAY_CACHE ?= runtime/autopoiesis/replay
+SPEC ?= $(AUTOPOIESIS_RESEARCH_SPEC)
+PREREGISTRY ?= $(if $(AUTOPOIESIS_PREREGISTRY),$(AUTOPOIESIS_PREREGISTRY),runtime/autopoiesis/preregistered)
+RESEARCH_TRIALS ?= $(if $(AUTOPOIESIS_RESEARCH_TRIALS),$(AUTOPOIESIS_RESEARCH_TRIALS),runtime/autopoiesis/research_trials.jsonl)
 
 fetch-replay-bars:
 	@test -n "$(REPLAY_START)" || (echo "REPLAY_START is required (UTC ISO-8601)" >&2; exit 2)
 	@test -n "$(REPLAY_END)" || (echo "REPLAY_END is required (UTC ISO-8601)" >&2; exit 2)
-	@$(PY) tools/fetch_replay_bars.py "$(REPLAY_SYMBOL)" "$(REPLAY_START)" "$(REPLAY_END)" "$(REPLAY_INTERVAL)" $(if $(filter 1 true yes,$(REPLAY_ROLLING)),ROLLING,)
+	@$(PY) tools/fetch_replay_bars.py "$(REPLAY_SYMBOL)" "$(REPLAY_START)" "$(REPLAY_END)" "$(REPLAY_INTERVAL)" $(if $(filter 1 true yes,$(REPLAY_ROLLING)),ROLLING,) --cache "$(REPLAY_CACHE)"
 
 research-search:
-	@$(PY) -m autopoiesis.research.driver "$(REPLAY_CACHE)" "$(REPLAY_SYMBOL)"
+	@test -n "$(SPEC)" || (echo "SPEC=<registered supported .spec> is required" >&2; exit 2)
+	@$(PY) -m autopoiesis.research.driver "$(REPLAY_CACHE)" "$(REPLAY_SYMBOL)" "$(SPEC)" --registry "$(PREREGISTRY)" --trials "$(RESEARCH_TRIALS)"
 
 research-run:
-	@test -n "$(REPLAY_START)" || (echo "REPLAY_START is required (UTC ISO-8601)" >&2; exit 2)
-	@test -n "$(REPLAY_END)" || (echo "REPLAY_END is required (UTC ISO-8601)" >&2; exit 2)
-	@$(MAKE) research-install
-	@$(MAKE) fetch-replay-bars
-	@$(MAKE) research-search
+	@test -n "$(SPEC)" || (echo "SPEC=<registered supported .spec> is required" >&2; exit 2)
+	@contract_args="$$( $(PY) tools/check_research_tape.py "$(SPEC)" --registry "$(PREREGISTRY)" --fetch-arguments )" || exit $$?; \
+	  readarray -t fields <<< "$$contract_args"; \
+	  $(MAKE) research-install && \
+	  $(MAKE) fetch-replay-bars REPLAY_SYMBOL="$${fields[0]}" REPLAY_START="$${fields[1]}" REPLAY_END="$${fields[2]}" REPLAY_INTERVAL="$${fields[3]}" REPLAY_ROLLING=0 && \
+	  $(MAKE) research-search REPLAY_SYMBOL="$${fields[0]}"
 
 # Must stay green. If this ever fails, the gate cannot be trusted and every other
 # result from it is meaningless.
@@ -547,13 +552,13 @@ journal-drill:
 
 research-register:
 	@test -n "$(SPEC)" || (echo "SPEC=<path to a .spec file> is required" >&2; exit 2)
-	@$(PY) -m autopoiesis.research.prereg register $(SPEC)
+	@$(PY) -m autopoiesis.research.prereg register "$(SPEC)" --registry "$(PREREGISTRY)"
 
 research-verify:
 	@test -n "$(SPEC)" || (echo "SPEC=<path to a .spec file> is required" >&2; exit 2)
-	@$(PY) -m autopoiesis.research.prereg verify $(SPEC)
+	@$(PY) -m autopoiesis.research.prereg verify "$(SPEC)" --registry "$(PREREGISTRY)"
 
 research-check-tape:
 	@test -n "$(SPEC)" || (echo "SPEC=<path to a .spec file> is required" >&2; exit 2)
 	@test -n "$(REPLAY_CACHE)" || (echo "REPLAY_CACHE=<bar cache dir> is required" >&2; exit 2)
-	@$(PY) tools/check_research_tape.py $(SPEC) $(REPLAY_CACHE)
+	@$(PY) tools/check_research_tape.py "$(SPEC)" "$(REPLAY_CACHE)" --symbol "$(REPLAY_SYMBOL)" --registry "$(PREREGISTRY)"
