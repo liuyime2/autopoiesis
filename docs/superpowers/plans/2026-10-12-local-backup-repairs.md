@@ -159,3 +159,37 @@ is lost with `/run` at reboot, as the existing transient installer states. Exist
 transient Ollama/research/report deployment choices are outside this focused unit.
 No local directory provides resilience to host loss. No retention deletion is added.
 Semantic PnL availability remains whatever the recorded journal can establish.
+
+## Real local recovery and hourly scheduling (2026-10-13)
+
+Independent spec/quality reviews approved commit `0ee9170`. Real read-only commands
+through Make on the main journal produced a completed 5-file backup (219,034,423
+bytes) at `runtime/backups/20261013T042445Z-fc7750573671`; restoring into an isolated
+scratch directory matched all bytes and semantic figures. Full `make journal-drill
+ENVFILE=/dev/null JOURNAL_RUNTIME=<main runtime>` returned PASS: 2,326 cycles,
+21,671 events, zero unparsed lines, four journal generations, CERTIFIED archive,
+47 closed lots, realized 757.95, unrealized 89.59, assumed cost 35.818876. Commands
+and raw outputs are retained privately in `/tmp/autopoiesis-audit-real-{backup,restore,drill}.log`.
+These figures describe recorded paper-account accounting, not portfolio return.
+
+Scheduling baseline measured with `systemctl --user show quant-backup.timer`:
+LoadState=not-found, ActiveState=inactive. Success: install only the credential-free
+backup service/timer, validate units, run one actual scheduled service, verify its
+exit status and new completed snapshot, then enable hourly persistent timer and
+inspect next-run time. No trading service restart is needed. Minimum configuration
+renders the reviewed service against the retained repair worktree/interpreter but
+explicitly points JOURNAL_RUNTIME and BACKUP_ROOT at the main runtime. Preserve the
+worktree until normal source deployment updates this service path. This completes
+local journal scheduling only; host loss, offsite storage, full-state recovery and
+retention policy remain recorded follow-ups. No existing backup is deleted.
+
+Scheduling execution: reviewed service/timer rendered into the manager's durable
+`$HOME/.config/systemd/user`, `systemd-analyze --user verify` passed, and an actual
+`systemctl --user start quant-backup.service` exited 0 / Result=success, publishing
+`runtime/backups/20261013T043537Z-04070b58fa63`. System journal records start
+00:35:37 EDT and completion 00:36:03 EDT. `enable --now quant-backup.timer` reports
+enabled/active, next run 2026-10-13 01:01:30 EDT. The trading daemon remained active
+with the same PID 2800047. These measurements establish this first local scheduled
+service execution, not future uninterrupted operation or reboot/host-loss recovery.
+The service path uses the retained repair worktree and explicit main journal paths;
+update it during eventual normal deployment before deleting that worktree.

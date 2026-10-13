@@ -245,7 +245,7 @@ retention budget are archived oldest first before ordinary rotation to preserve 
 publishes it under `runtime/backups/<UTC timestamp>-<unique id>/`. No credentials are read by the
 scheduled service. `JOURNAL_RUNTIME=/absolute/runtime` and `BACKUP_ROOT=/absolute/backups` select
 explicit locations. Existing copies are retained; operators must provision storage and arrange
-retention rather than expecting automatic deletion. The installed `quant-backup.timer` runs hourly
+retention rather than expecting automatic deletion. The installed backup timer runs hourly
 and catches up a missed run with `Persistent=true`; persistent installation verifies the unit and
 checks `enable --now` and its active state. Installation itself does not run a backup immediately.
 
@@ -271,14 +271,16 @@ reads those files is GitHub. `make verify` runs it as `workflow-jobs-reachable`.
 ## Service templates
 
 `autopoiesis.service.in`, `watchdog.service.in`, `ollama.service.in`, `research.service.in`,
-`report.service.in` (the timer units ship as files, `tools/watchdog.timer`, `tools/research.timer`
-and `tools/report.timer`, which `autopoiesis` copies into place) —
+`report.service.in`, `backup.service.in` (the timer units ship as files,
+`tools/watchdog.timer`, `tools/research.timer`, `tools/report.timer` and
+`tools/backup.timer`, which `autopoiesis` copies into place) —
 substituted by `autopoiesis install-service`, which uses `systemd_unit_dir.sh` to ask
 the systemd user manager where it actually searches rather than trusting the shell's
 `XDG_CONFIG_HOME`. Installing to the latter produces files systemd never opens, while
 `systemctl is-enabled` still answers "enabled".
 
-The timers are `watchdog.timer` and `research.timer`. They ship as files and `autopoiesis` copies
+The timers are `watchdog.timer`, `research.timer`, `report.timer` and `backup.timer`.
+They ship as files and `autopoiesis` copies
 them into place, rather than being templated inline, because a timer has no `ExecStart` to
 substitute into. That makes them the units here that are not `.in` templates.
 
