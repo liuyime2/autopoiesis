@@ -128,3 +128,12 @@ RSI 只改研究方法和下一轮实验优先级，不给系统改 Guardian、�
 05:38 EDT 对旧 daemon 只读确认：PID 2800047 仍是 active/running，heartbeat RUNNING、broker 最近读取成功、market-closed maintenance、cycle/error 0/0；其代码指纹仍为旧 `60d5aa8d767ce067`。旧 30 秒停机窗口和旧代码未被动过。本轮可说“本地源码检查 + 新克隆通过”，不可说“生产 daemon 已更新”或“开盘已验证”。
 
 GitHub 对完整提交 `da2da73bf9b3812aa2cd1e1b87cd67faff783c7f` 启动 run **38378167116**：release 与 Python **3.10 / 3.11 / 3.12** 四个 job 均为 success。三个版本各自的 install、lint、type、tests、offline smoke、self-test 和 integration gate 完成。该 commit 的 fresh-clone 日志记录实际 clone SHA 为 `dbd55c2`；`da2da73` 只增加原始日志和路线状态文字，代码/测试树没有变化。PR #10 仍 open、未合并。旧 daemon 尚未更新，因此生产部署与当天市场会话验证仍是待执行关口。
+
+
+## 实际部署增量（2026-10-13 06:08 EDT）
+
+见 [本次盘前/部署原始证据](evidence/market-open-readiness-2026-10-13.md)。新 paper daemon PID 3184440 正常运行，源码 fingerprint `9fb9066d820f27c9`；实际风险值与账户管理配置保持原值；startup reconciliation 为 matched。旧 daemon 合作停止退出码 0，未 SIGKILL；原 journal 及 204 个应用状态文件本地核验完成；新本地 journal backup timer 06:01 成功。本次没有外部异地副本。
+
+真实 `make smoke` 06:08 EDT exit 0：账户 ACTIVE、6 个 us_equity 持仓、完整挂单 reader 共 0 个挂单；crypto ACTIVE 与 options level 3 只是券商账户许可。早间真实盘前 readiness 06:02 EDT 为 READY：模型有效响应与 SPY provenance 存在，market closed / scheduler false，决策 HOLD 0，Guardian 以 STALE_DATA 拒绝，无订单；报告仍标 profitability UNPROVEN、其他 attention coverage UNOBSERVED。闭市 open verifier 报 WAIT / SESSION_NOT_OPEN，scheduled Make wrapper exit 0。纽约时间 08:45 preflight、09:45 和 10:30 open verifier 已实际装为 active timers，未来观察尚未发生。
+
+新源码、全新克隆、exact SHA CI均有证据；最终执行计划仅留下实际停机时长未计时及上述未来 session evidence 两项。没有新 session cycle/fill 或真实盈利结果，也没有证明 RSI。
