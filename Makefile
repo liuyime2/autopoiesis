@@ -501,6 +501,24 @@ release-check: dist
 		&& echo "configs/paper.env.example from the sdist: ok"
 	@test -f runtime/release-src/autopoiesis-*/examples/minimal_cycle.py \
 		&& echo "examples/ from the sdist: ok"
+	@# A disposable example registration proves installed storage, not a research result.
+	@installed_python="$(CURDIR)/runtime/release-check/bin/python"; \
+	  workspace="$(CURDIR)/runtime/release-check/workspace"; \
+	  spec=( "$(CURDIR)"/runtime/release-src/autopoiesis-*/configs/research.spec.example ); \
+	  mkdir -p "$$workspace" && cd "$$workspace" && \
+	  env -i AUTOPOIESIS_ENV_FILE="$$workspace/absent.env" XDG_CONFIG_HOME="$$workspace/config" \
+	  "$$installed_python" -c 'import os, subprocess, sys, sysconfig; from pathlib import Path; import autopoiesis; from autopoiesis.research import prereg; \
+	assert "PYTHONPATH" not in os.environ and "AUTOPOIESIS_PREREGISTRY" not in os.environ; \
+	assert not Path(os.environ["AUTOPOIESIS_ENV_FILE"]).exists(); \
+	site = Path(sysconfig.get_path("purelib")).resolve(); \
+	assert site.is_relative_to(Path(sys.prefix).resolve()); \
+	assert all(Path(module.__file__).resolve().is_relative_to(site) for module in (autopoiesis, prereg)); \
+	spec = Path(sys.argv[1]); \
+	subprocess.run([sys.executable, "-m", "autopoiesis.research.prereg", "register", str(spec)], check=True); \
+	subprocess.run([sys.executable, "-m", "autopoiesis.research.prereg", "verify", str(spec)], check=True); \
+	registry = Path.cwd() / "runtime/autopoiesis/preregistered"; digest = prereg.spec_hash(spec); \
+	assert (registry / (digest + ".spec")).is_file() and (registry / (digest + ".json")).is_file(); \
+	print("installed example register/verify in the working-directory registry: ok")' "$${spec[0]}"
 	@echo "release-check: the sdist installs and runs what the README claims it runs"
 
 
