@@ -51,6 +51,9 @@ from autopoiesis.strategy_engine import (
 #: Calendar days a strategy stays PAUSED before it may be re-examined at all.
 PAUSED_REVIEW_DAYS = 3
 
+#: Long scheduler/backoff waits check the stop flag at least this often.
+COOPERATIVE_WAIT_POLL_SECONDS = 1.0
+
 
 def source_fingerprint() -> str:
     """A short digest of the `autopoiesis` package as it is on disk right now.
@@ -98,7 +101,7 @@ class AgentDaemon:
         config: AgentConfig,
         loop,
         health: HealthMonitor | None = None,
-        sleep: Callable[[float], None] = time.sleep,
+        sleep: Callable[[float], None] | None = None,
         now: Callable[[], datetime] | None = None,
         scheduler=None,
         startup_reconciler=None,
@@ -123,7 +126,7 @@ class AgentDaemon:
         self.config = config
         self.loop = loop
         self.health = health or HealthMonitor(config.heartbeat_path)
-        self.sleep = sleep
+        self.sleep = sleep if sleep is not None else self._cooperative_sleep
         self.now = now or (lambda: datetime.now(tz=timezone.utc))
         self.scheduler = scheduler
         self.startup_reconciler = startup_reconciler
@@ -242,6 +245,17 @@ class AgentDaemon:
 
     def stop(self) -> None:
         self._stop_requested = True
+
+    def _cooperative_sleep(self, seconds: float) -> None:
+        """Keep normal cadence while bounding how long a stop waits for idle sleep."""
+        if seconds < 0:
+            raise ValueError("sleep length must be non-negative")
+        deadline = time.monotonic() + seconds
+        while not self._stop_requested:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(remaining, COOPERATIVE_WAIT_POLL_SECONDS))
 
     def _should_trade_now(self) -> bool:
         """Is the market open, and does the broker answer?

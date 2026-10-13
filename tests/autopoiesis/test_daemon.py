@@ -1,5 +1,6 @@
 import os
 import signal
+import time
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -179,6 +180,52 @@ def test_signal_stop_boundary_performs_no_io(tmp_path, monkeypatch):
     daemon._request_stop(signal.SIGTERM, None)
     assert daemon._stop_requested
     assert calls == []
+
+
+@pytest.mark.parametrize("oversleep", [0.0, 0.25])
+def test_default_wait_preserves_duration_with_bounded_sleeps(tmp_path, monkeypatch, oversleep):
+    """Synthetic clock advances prove polling respects the original monotonic deadline."""
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop())
+    elapsed = 0.0
+    sleeps = []
+
+    def sleep(seconds):
+        nonlocal elapsed
+        sleeps.append(seconds)
+        elapsed += seconds + oversleep
+
+    monkeypatch.setattr("autopoiesis.daemon.time.monotonic", lambda: elapsed)
+    monkeypatch.setattr("autopoiesis.daemon.time.sleep", sleep)
+    daemon.sleep(2.5)
+    assert elapsed == pytest.approx(2.5)
+    assert all(0 < seconds <= 1.0 for seconds in sleeps)
+    assert sleeps == ([1.0, 1.0, 0.5] if not oversleep else [1.0, 1.0])
+
+
+def test_default_wait_does_not_return_before_requested_duration(tmp_path):
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop())
+    started = time.monotonic()
+    daemon.sleep(0.03)
+    assert time.monotonic() - started >= 0.03
+
+
+def test_explicit_sleep_callback_keeps_its_contract_even_after_stop(tmp_path):
+    class Sleep:
+        def __init__(self):
+            self.calls = []
+
+        def __bool__(self):
+            return False
+
+        def __call__(self, seconds):
+            self.calls.append(seconds)
+
+    callback = Sleep()
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop(), sleep=callback)
+    daemon.stop()
+    assert daemon.sleep is callback
+    daemon.sleep(30)
+    assert callback.calls == [30]
 
 
 def test_stop_boundary_after_maintenance_skips_clock_and_sleep(tmp_path, monkeypatch):
