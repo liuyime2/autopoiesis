@@ -1,4 +1,9 @@
+import json
+import subprocess
+import sys
+from dataclasses import replace
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -76,6 +81,7 @@ def test_stop_daemon_sends_sigterm_and_cleans_after_exit(tmp_path, monkeypatch):
 
 
 def append_evidence(journal, *, return_pct=0.11):
+    """Synthetic account-only history; no agent allocation or aligned equity."""
     batch = BrokerEvidenceBatch(
         generated_at=datetime.now(tz=timezone.utc),
         window_start=datetime(2026, 6, 10, tzinfo=timezone.utc),
@@ -111,36 +117,62 @@ def test_evidence_report_without_broker_evidence_is_unproven(tmp_path, capsys):
     assert "missing_fill_price_and_broker_activity" in output
 
 
-def test_verify_profit_target_fails_without_broker_evidence(tmp_path, capsys):
-    cfg = config(tmp_path)
+@pytest.mark.parametrize("return_pct", [None, 0.11, 0.02, -0.11, 2.0])
+def test_synthetic_account_history_cannot_prove_agent_profit_target(tmp_path, capsys, return_pct):
+    cfg = replace(config(tmp_path), profit_target_return_pct=1.25)
+    if return_pct is not None:
+        append_evidence(JsonlJournal(cfg.journal_path), return_pct=return_pct)
+    assert JsonlJournal(cfg.journal_path).read_all() == []
 
     exit_code = _verify_profit_target(cfg)
 
-    output = capsys.readouterr().out
-    assert exit_code == 1
-    assert '"status": "unproven"' in output
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == output["exit_code"] == 2
+    assert output["status"] == "unproven"
+    assert output["comparison_status"] == "UNKNOWN"
+    assert "agent allocation" in output["comparison_reason"]
+    assert "aligned rolling equity" in output["comparison_reason"]
+    assert output["satisfied"] is False
+    assert output["target_daily_return_pct"] == 1.25
+    assert output["account_return_pct"] == return_pct
+    assert output["account_return_scope"] == "account_only_diagnostic"
+    assert output["paper_only"] is True
 
 
-def test_verify_profit_target_fails_below_threshold(tmp_path, capsys):
-    cfg = config(tmp_path)
-    append_evidence(JsonlJournal(cfg.journal_path), return_pct=0.02)
-
-    exit_code = _verify_profit_target(cfg)
-
-    output = capsys.readouterr().out
-    assert exit_code == 1
-    assert '"status": "not satisfied"' in output
-
-
-def test_verify_profit_target_succeeds_only_with_broker_verified_threshold(tmp_path, capsys):
-    cfg = config(tmp_path)
-    append_evidence(JsonlJournal(cfg.journal_path), return_pct=0.11)
-
-    exit_code = _verify_profit_target(cfg)
-
-    output = capsys.readouterr().out
-    assert exit_code == 0
-    assert '"status": "satisfied"' in output
+@pytest.mark.parametrize(("returncode", "report", "collected"), [
+    (2, {"exit_code": 2, "status": "unproven", "comparison_status": "UNKNOWN", "satisfied": False}, True),
+    (1, "Traceback: synthetic exception", False),
+    (1, "{malformed", False),
+    (2, "{malformed", False),
+    (2, {"exit_code": 1, "status": "unproven", "comparison_status": "UNKNOWN", "satisfied": False}, False),
+    (0, {"exit_code": 2, "status": "unproven", "comparison_status": "UNKNOWN", "satisfied": False}, False),
+    (2, {"exit_code": 2, "status": "satisfied", "comparison_status": "UNKNOWN", "satisfied": False}, False),
+    (2, {"exit_code": 2, "status": "unproven", "comparison_status": "UNKNOWN", "satisfied": True}, False),
+])
+def test_make_evaluate_collects_only_matching_measurements(tmp_path, returncode, report, collected):
+    """Synthetic subprocess reports exercise the real Make recipe without broker access."""
+    root = Path(__file__).resolve().parents[2]
+    (tmp_path / "Makefile").write_text((root / "Makefile").read_text())
+    runtime = tmp_path / "runtime" / "autopoiesis"
+    runtime.mkdir(parents=True)
+    (runtime / "journal.jsonl").touch()
+    fake = tmp_path / "fake-command"
+    output = json.dumps(report) if isinstance(report, dict) else report
+    fake.write_text(
+        f"#!{sys.executable}\nimport subprocess, sys\n"
+        "if sys.argv[1:] == ['python', '-m', 'autopoiesis.cli', '--verify-profit-target']:\n"
+        f"    print({output!r})\n    raise SystemExit({returncode})\n"
+        "raise SystemExit(subprocess.call([sys.executable, *sys.argv[2:]]))\n"
+    )
+    fake.chmod(0o755)
+    result = subprocess.run(
+        ["make", "--no-print-directory", "evaluate", "ENVFILE=/dev/null", f"CONDA_RUN={fake}"],
+        cwd=tmp_path, text=True, capture_output=True,
+    )
+    assert (result.returncode == 0) is collected, result.stdout + result.stderr
+    if collected:
+        assert "UNKNOWN" in result.stdout
+        assert "target met" not in result.stdout
 
 
 def test_help_renders_without_crashing(capsys):
@@ -167,6 +199,8 @@ def test_help_renders_without_crashing(capsys):
     # The flags an operator needs to discover the system.
     for flag in ("--daemon", "--status", "--doctor", "--once"):
         assert flag in out, f"{flag} missing from --help output"
+    assert "configured" in out
+    assert "10 percent" not in out
 
 
 def test_archive_baseline_attestation_requires_and_records_operator_evidence(tmp_path, monkeypatch, capsys):

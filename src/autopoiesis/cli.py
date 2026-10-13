@@ -18,9 +18,7 @@ from autopoiesis.daemon import AgentDaemon
 from autopoiesis.data_gateway import AlpacaDataGateway
 from autopoiesis.evaluator import (
     OWNER_FILLS_KEY,
-    PNL_EVIDENCE_ACCOUNT_VERIFIED,
     PNL_EVIDENCE_MISSING,
-    PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
     DeterministicEvaluator,
     confirmed_fill_activities,
     owner_fill_activities,
@@ -69,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Journal the account owner's fills of allowlisted symbols from the full fill history (read-only).",
     )
     parser.add_argument("--evidence-report", action="store_true", help="Report broker-backed PnL evidence from journal and latest ingest.")
-    parser.add_argument("--verify-profit-target", action="store_true", help="Verify the 10 percent daily paper-profit target using broker evidence only.")
+    parser.add_argument("--verify-profit-target", action="store_true", help="Report the configured daily paper-profit target in percentage points; UNKNOWN until agent allocation and aligned equity are available.")
     parser.add_argument("--max-cycles", type=int, default=None, help="Optional controlled daemon cycle limit for smoke tests.")
     parser.add_argument("--doctor", action="store_true", help="Check the whole system and exit non-zero on any fault.")
     parser.add_argument(
@@ -808,28 +806,21 @@ def _verify_profit_target(config: AgentConfig) -> int:
         owner_fills=owner_fill_activities(journal),
     )
     pnl = report.pnl
+    # Broker account history establishes provenance, not the agent's capital or return.
     result = {
-        "target_daily_return_pct": 0.10,
+        "target_daily_return_pct": config.profit_target_return_pct,
         "pnl_evidence": report.pnl_evidence,
         "satisfied": False,
         "status": "unproven",
+        "comparison_status": "UNKNOWN",
+        "comparison_reason": "agent allocation, cash flows and aligned rolling equity history are unavailable",
+        "exit_code": 2,
         "account_return_pct": None if pnl is None else pnl.account_return_pct,
+        "account_return_scope": "account_only_diagnostic",
         "paper_only": config.mode == "paper",
     }
-    if pnl is None or report.pnl_evidence not in {PNL_EVIDENCE_ACCOUNT_VERIFIED, PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED}:
-        print(json.dumps(result, indent=2, sort_keys=True))
-        return 1
-    if pnl.account_return_pct is None:
-        print(json.dumps(result, indent=2, sort_keys=True))
-        return 1
-    if pnl.account_return_pct >= 0.10:
-        result["satisfied"] = True
-        result["status"] = "satisfied"
-        print(json.dumps(result, indent=2, sort_keys=True))
-        return 0
-    result["status"] = "not satisfied"
     print(json.dumps(result, indent=2, sort_keys=True))
-    return 1
+    return 2
 
 
 def _latest_evidence_batch(journal: JsonlJournal) -> BrokerEvidenceBatch | None:

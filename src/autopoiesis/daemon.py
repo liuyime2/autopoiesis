@@ -17,9 +17,7 @@ from autopoiesis.broker_evidence import latest_evidence_batch
 from autopoiesis.config import AgentConfig
 from autopoiesis.curriculum import StructuredCurriculumAgent
 from autopoiesis.evaluator import (
-    PNL_EVIDENCE_ACCOUNT_VERIFIED,
     PNL_EVIDENCE_MISSING,
-    PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
     DeterministicEvaluator,
     confirmed_fill_activities,
     owner_fill_activities,
@@ -1144,29 +1142,26 @@ class AgentDaemon:
             owner_fills=owner_fill_activities(self.journal),
         )
         pnl = report.pnl
+        # Broker account history cannot establish the agent's capital or return.
         status = "unproven"
-        satisfied = False
-        if pnl is not None and report.pnl_evidence in {PNL_EVIDENCE_ACCOUNT_VERIFIED, PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED} and pnl.account_return_pct is not None:
-            if pnl.account_return_pct >= self.config.profit_target_return_pct:
-                status = "satisfied"
-                satisfied = True
-            else:
-                status = "not satisfied"
         # Only write a journal event when the target status transitions, so a
-        # routine "not satisfied" reading does not flood the log.
+        # routine "unproven" reading does not flood the log.
         if status == self._last_profit_target_status:
             return
         self._last_profit_target_status = status
         self._append_event(
             "PROFIT_TARGET_CHECKED",
-            status="SUCCESS" if satisfied else "SKIPPED",
+            status="SKIPPED",
             message=f"profit target {status}",
             payload={
                 "target_daily_return_pct": self.config.profit_target_return_pct,
                 "pnl_evidence": report.pnl_evidence,
-                "satisfied": satisfied,
+                "satisfied": False,
                 "status": status,
+                "comparison_status": "UNKNOWN",
+                "comparison_reason": "agent allocation, cash flows and aligned rolling equity history are unavailable",
                 "account_return_pct": None if pnl is None else pnl.account_return_pct,
+                "account_return_scope": "account_only_diagnostic",
                 "paper_only": self.config.mode == "paper",
             },
         )

@@ -420,37 +420,28 @@ validate-data:
 		echo "validate-data: runtime state parses and is internally consistent"; \
 	fi
 
-# Score what actually happened, using broker evidence only.
-#
-# The exit code is deliberately swallowed. `--verify-profit-target` exits non-zero when the
-# 10% daily target is not met, which right now it is not - and that is a measurement, not a
-# broken build. Wiring it into `make pipeline` unchanged would have made the pipeline fail
-# every day until the agent is profitable, which teaches an operator to ignore the target
-# entirely: the one number the project exists to move would become noise. So the report is
-# printed with its verdict intact and the stage succeeds, and a genuine failure - an
-# unreadable journal, missing credentials - still surfaces because the report cannot be
-# produced at all.
-# `--verify-profit-target` exits 1 when the 10% daily target is not met, which is a
-# measurement, and 2 when it cannot produce the report at all, which is a failure. An earlier
-# version used `|| true`, which swallowed both, so a missing interpreter, a crash and an unmet
-# target were indistinguishable - and the comment claiming a genuine failure still surfaced
-# was simply wrong. Only the absence of a report fails this stage.
+# Collect the configured target measurement. Account-only history leaves agent
+# performance UNKNOWN (exit 2), not a proven pass or failure. A complete JSON
+# report must match its process exit, status, comparison_status and satisfied
+# fields; a Python exception also exits 1 and must fail this stage. Successful
+# collection preserves the verdict and never means the profitability target passed.
 EVAL_REPORT := runtime/autopoiesis/evaluate.txt
 
 evaluate:
 	@mkdir -p runtime/autopoiesis
 	@if [ ! -f runtime/autopoiesis/journal.jsonl ]; then \
 		echo "evaluate: no journal yet; run 'make run' for at least one cycle first"; \
-	elif $(CONDA_RUN) python -m autopoiesis.cli --verify-profit-target > $(EVAL_REPORT); then \
-		cat $(EVAL_REPORT); \
-		echo "evaluate: target met"; \
 	else \
-		rc=$$?; cat $(EVAL_REPORT); \
-		if [ $$rc -gt 1 ]; then \
-			echo "evaluate: FAILED (exit $$rc): the report could not be produced"; \
-			exit $$rc; \
+		rc=0; $(CONDA_RUN) python -m autopoiesis.cli --verify-profit-target > $(EVAL_REPORT) || rc=$$?; \
+		if $(PY) -c 'import json, sys; p = json.load(open(sys.argv[1])); rc = int(sys.argv[2]); expected = {0: ("satisfied", "PASS", True), 1: ("not satisfied", "FAIL", False), 2: ("unproven", "UNKNOWN", False)}; valid = isinstance(p, dict) and rc in expected and p.get("exit_code") == rc and (p.get("status"), p.get("comparison_status")) == expected[rc][:2] and p.get("satisfied") is expected[rc][2]; sys.exit(0 if valid else 1)' $(EVAL_REPORT) $$rc; then \
+			cat $(EVAL_REPORT); \
+			echo "evaluate: measurement collected; the report contains the target verdict"; \
+		else \
+			cat $(EVAL_REPORT); \
+			echo "evaluate: FAILED (exit $$rc): invalid or inconsistent measurement"; \
+			if [ $$rc -ne 0 ]; then exit $$rc; fi; \
+			exit 1; \
 		fi; \
-		echo "evaluate: target NOT met (exit 1). That is a measurement, not a gate failure."; \
 	fi
 reproduce:
 	@mkdir -p runtime/autopoiesis

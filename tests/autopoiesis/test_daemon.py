@@ -3,6 +3,7 @@ import signal
 from dataclasses import replace
 from datetime import datetime, timezone
 
+import pytest
 from synthetic_evidence import synthetic_spec
 
 from autopoiesis.config import AgentConfig
@@ -455,6 +456,38 @@ def test_daemon_market_closed_runs_maintenance_without_trading(tmp_path):
     assert "PNL_EVIDENCE_RECORDED" in event_types
     assert "PROFIT_TARGET_CHECKED" in event_types
     assert reflection_memory.load().evaluation["pnl_evidence"] == "broker_portfolio_history_verified"
+
+
+@pytest.mark.parametrize("return_pct", [None, 0.11, 0.02, -0.11, 2.0])
+def test_synthetic_account_target_is_unproven_and_deduplicated(tmp_path, return_pct):
+    """Synthetic broker-shaped account history cannot attribute returns to the agent."""
+    cfg = replace(config(tmp_path), profit_target_return_pct=1.25)
+    journal = JsonlJournal(cfg.journal_path)
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(), journal=journal)
+    evidence = None
+    if return_pct is not None:
+        now = datetime.now(tz=timezone.utc)
+        evidence = BrokerEvidenceBatch(
+            generated_at=now, window_start=now, window_end=now,
+            portfolio_history=(PortfolioHistoryPoint(
+                timestamp=now, equity=100_000, profit_loss=0, profit_loss_pct=return_pct,
+            ),),
+        )
+    daemon._verify_profit_target(evidence)
+    daemon._verify_profit_target(evidence)
+    events = journal.read_events("PROFIT_TARGET_CHECKED")
+    assert len(events) == 1
+    assert events[0].status == "SKIPPED"
+    payload = events[0].payload
+    assert payload["status"] == "unproven"
+    assert payload["comparison_status"] == "UNKNOWN"
+    assert "agent allocation" in payload["comparison_reason"]
+    assert "aligned rolling equity" in payload["comparison_reason"]
+    assert payload["satisfied"] is False
+    assert payload["target_daily_return_pct"] == 1.25
+    assert payload["account_return_pct"] == return_pct
+    assert payload["account_return_scope"] == "account_only_diagnostic"
+    assert payload["paper_only"] is True
 
 
 def test_daemon_market_open_runs_cycle(tmp_path):
