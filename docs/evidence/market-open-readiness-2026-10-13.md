@@ -283,17 +283,31 @@ the same finding.
 
 ### What the session produced that was not expected
 
-**`trend-follow-20260824-001` is now stranded, and it is the more serious of the two.** Its
-`cumulative_cycles` reached 52, which is exactly `PROBATION_CYCLES * (1 + MAX_PROBATION_RESTARTS)`
-= the full granted budget, so `_needs_probation` answers false and the selector will never
-serve it again. Its lifecycle is `PROBATION`, it has never submitted an order, and its offline
-validation reports `INCONCLUSIVE_INSUFFICIENT_EVIDENCE` on 0 informative decisions out of 33.
+**Correction to an earlier claim in this file.** An interim reading of this section stated
+that `trend-follow-20260824-001` was stranded and that SPY therefore had no servable strategy.
+That was inferred from `_needs_probation` arithmetic, not measured, and it is wrong. The real
+selector was asked directly at 17:13 EDT via a read-only preflight against the 2026-10-14
+session, and it reports **SPY `selectable=true`**, with the preview served by
+`trend-follow-20261003-001`. The strategy has `probation_restarts=59` and about 43 cumulative
+cycles against a granted budget of 52, so it still has budget; the "52" in the lifecycle
+message is the evaluator's own counter and is not the same number. The published claim is
+withdrawn. Commit `bd1cd13` carries it in its message and is not rewritten.
 
-This is the stranding the `submitted_orders <= 0` branch's own comment describes - "out of the
-queue, not ACTIVE, not PAUSED, not RETIRED" - arriving through the mechanism that comment
-promised would prevent it. Returning the candidate to probation cannot unstrand it, because
-the budget that return was meant to refill is the one that has just been exhausted. SPY, a
-configured symbol with a 32-share position, therefore has no servable strategy at all.
+Measured per-symbol coverage, from the real selector:
+
+| symbol | strategies in library | servable (PROBATION/ACTIVE, enabled) | state |
+|---|---|---|---|
+| SPY | 77 | **20** | heavily over-supplied, 33 of them PAUSED variants of the same idea |
+| TLT | 1 | 1 | `fixed-size-tlt-sell-001`, trading |
+| XLE | 1 | 1 | `fixed-size-xle-sell-001`, admitted during the session |
+| XLF | 1 | 1 | `fixed-size-xlf-sell-001`, admitted during the session |
+| **BIL** | 1 | **0** | its only strategy is the one retired by the staleness misclassification |
+| **XLB** | **0** | **0** | never had a strategy at all; holds 1 share |
+
+So the two real coverage gaps are BIL, which is recoverable through a re-admission path, and
+XLB, which has no strategy because none was ever admitted rather than because one was lost.
+SPY is the opposite problem: twenty servable candidates for one symbol, of which several carry
+restart counters of 33, 59, 66 and 362 that stopped affecting anything past the third.
 
 **The curriculum failed twice with the identical error** - `constrained response contained no
 JSON object`, at 10:10:04 and again at 16:47:34. Both curriculum attempts today failed the same
