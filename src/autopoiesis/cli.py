@@ -52,7 +52,10 @@ from autopoiesis.trade_counter import TradeCounter
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the minimum Alpaca paper-trading agent.")
     parser.add_argument("--check-env", action="store_true", help="Check external dependencies without trading.")
-    parser.add_argument("--once", action="store_true", help="Run one paper-trading cycle.")
+    parser.add_argument(
+        "--once", action="store_true",
+        help="Run the paper daemon for at most one cycle; exit without a cycle when the scheduler is closed.",
+    )
     parser.add_argument("--daemon", action="store_true", help="Run the 24x7 paper-trading daemon.")
     parser.add_argument("--status", action="store_true", help="Print daemon heartbeat status.")
     parser.add_argument("--stop", action="store_true", help="Send SIGTERM to the daemon pidfile process.")
@@ -314,50 +317,7 @@ def _execution_sink(config, client, journal):
 
 
 def _run_once(config: AgentConfig) -> int:
-    missing = config.missing_alpaca_credentials()
-    if missing:
-        print(json.dumps({"error": "missing Alpaca credentials", "missing": missing}, sort_keys=True))
-        return 1
-
-    if not config.is_paper_endpoint():
-        print(json.dumps({"error": "Alpaca base URL must be paper trading"}, sort_keys=True))
-        return 1
-
-    try:
-        from autopoiesis.broker_client import create_alpaca_client
-    except ImportError as exc:
-        print(json.dumps({"error": "alpaca-trade-api is not installed", "detail": str(exc)}, sort_keys=True))
-        return 1
-
-    client = create_alpaca_client(
-        key_id=config.alpaca_api_key or "",
-        secret_key=config.alpaca_secret_key or "",
-        base_url=config.alpaca_base_url,
-    )
-    loop = TradingLoop(
-        data_gateway=AlpacaDataGateway(client=client),
-        decision_engine=OllamaDecisionEngine(
-            base_url=config.ollama_base_url,
-            model=config.model,
-            gpu_devices=config.gpu_devices,
-            timeout=config.llm_timeout_seconds,
-        ),
-        guardian=Guardian(
-            allowlist=config.allowlist,
-            max_position_value=config.max_position_value,
-            max_daily_loss=config.max_daily_loss,
-        ),
-        executor=_execution_sink(config, client, JsonlJournal(config.journal_path)),
-        journal=JsonlJournal(config.journal_path),
-        mode=config.mode,
-        trade_counter=TradeCounter(journal=JsonlJournal(config.journal_path)),
-    )
-    record = loop.run_once(config.symbols[0])
-    if record is None:
-        print(json.dumps({"error": "broker data unavailable; see journal CYCLE_FAILED event"}, sort_keys=True))
-        return 1
-    print(record.model_dump_json(indent=2))
-    return 0
+    return _run_daemon(config, max_cycles=1)
 
 
 def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
@@ -381,6 +341,12 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         secret_key=config.alpaca_secret_key or "",
         base_url=config.alpaca_base_url,
     )
+    daemon = _build_agent_daemon(config, client)
+    return daemon.run(max_cycles=max_cycles)
+
+
+def _build_agent_daemon(config: AgentConfig, client) -> AgentDaemon:
+    """Assemble the production pipeline without running or reconciling it."""
     journal = JsonlJournal(config.journal_path)
     strategy_library = StrategyLibrary(config.strategy_dir)
     knowledge_library = KnowledgeLibrary(config.knowledge_dir)
@@ -499,7 +465,7 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         trade_counter=TradeCounter(journal=journal),
         manage_account=config.whole_account,
     )
-    daemon = AgentDaemon(
+    return AgentDaemon(
         config=config,
         loop=loop,
         journal=journal,
@@ -530,7 +496,6 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         reflect_every=config.reflect_every,
         curriculum_every=config.curriculum_every,
     )
-    return daemon.run(max_cycles=max_cycles)
 
 
 def _ollama_curriculum_transport(config: AgentConfig):

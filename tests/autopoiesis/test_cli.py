@@ -298,3 +298,179 @@ def test_ambiguous_order_runbook_contains_fail_closed_operator_steps():
         "operator identity, timestamp, evidence reference",
     ):
         assert required in content
+
+
+def _synthetic_entry_config(tmp_path, **overrides):
+    """Synthetic paper configuration; every writable path is isolated from deployment."""
+    return replace(
+        config(tmp_path), knowledge_dir=tmp_path / "knowledge",
+        curriculum_enabled=False, **overrides,
+    )
+
+
+@pytest.fixture
+def entry_no_network(monkeypatch):
+    """Synthetic entry tests must fail if any real broker or model HTTP call is attempted."""
+    def forbidden_request(*args, **kwargs):
+        pytest.fail("synthetic entry fixture attempted external HTTP")
+
+    monkeypatch.setattr("requests.Session.request", forbidden_request)
+
+
+class _SyntheticClosedBroker:
+    """Synthetic closed clock and empty order list; no network or submissions."""
+
+    def __init__(self):
+        self.calls = []
+
+    def get_clock(self):
+        from types import SimpleNamespace
+
+        self.calls.append("clock")
+        return SimpleNamespace(is_open=False)
+
+    def get_orders(self, **kwargs):
+        self.calls.append("orders")
+        return []
+
+    def submit_order(self, **kwargs):
+        self.calls.append("submit")
+        pytest.fail("a closed or competing entry must never submit an order")
+
+
+def test_once_delegates_to_bounded_daemon_and_preserves_exit_code(tmp_path, monkeypatch, entry_no_network):
+    """Synthetic delegate isolates the public one-cycle lifecycle contract."""
+    from autopoiesis import cli
+
+    cfg = _synthetic_entry_config(tmp_path)
+    calls = []
+
+    def run_daemon(received, *, max_cycles):
+        calls.append((received, max_cycles))
+        return 7
+
+    monkeypatch.setattr(cli, "_run_daemon", run_daemon)
+    monkeypatch.setattr(
+        "autopoiesis.broker_client.create_alpaca_client",
+        lambda **kwargs: _SyntheticClosedBroker(),
+    )
+
+    assert cli._run_once(cfg) == 7
+    assert calls == [(cfg, 1)]
+
+
+@pytest.mark.parametrize(("confidence", "trades_today", "exposure_cap", "reason"), [
+    (0.7, 0, 2000, "decision confidence below minimum"),
+    (0.95, 3, 2000, "max trades per day reached"),
+    (0.95, 0, 50, "exposure"),
+])
+def test_shared_builder_enforces_configured_risk_limits(
+    tmp_path, entry_no_network, confidence, trades_today, exposure_cap, reason,
+):
+    """Synthetic fresh snapshot tests effective Guardian refusals, without execution."""
+    from autopoiesis import cli
+    from autopoiesis.llm_decision import HybridDecisionEngine
+    from autopoiesis.models import AccountSnapshot, DataSnapshot, TradeDecision
+
+    cfg = _synthetic_entry_config(
+        tmp_path, min_confidence=0.9, max_trades_per_day=3,
+        max_total_exposure=exposure_cap, max_account_value=100_000,
+        shorts="shadow", universe="account", manage_account=True,
+    )
+    assert callable(getattr(cli, "_build_agent_daemon", None)), "shared builder is missing"
+    client = _SyntheticClosedBroker()
+    daemon = cli._build_agent_daemon(cfg, client)
+    snapshot = DataSnapshot(
+        symbol="SPY", timestamp=datetime.now(timezone.utc), market_open=True,
+        # The schema accepts production source names; these fixture values are synthetic.
+        last_price=100, source="alpaca",
+        account=AccountSnapshot(equity=10_000, cash=10_000, buying_power=10_000,
+                                portfolio_value=10_000, daily_loss=0),
+    )
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=1,
+                             confidence=confidence, rationale="synthetic risk regression")
+
+    result = daemon.loop.guardian.review(decision, snapshot, trades_today=trades_today)
+
+    assert not result.approved
+    assert reason in result.reason
+    assert daemon.loop.guardian.shorts == "shadow"
+    assert daemon.loop.guardian.universe == "account"
+    assert daemon.loop.manage_account is True
+    assert isinstance(daemon.loop.decision_engine, HybridDecisionEngine)
+    assert daemon.loop.decision_engine.risk_limits["manage_account"] is True
+    assert daemon.loop.decision_engine.risk_limits["max_total_exposure"] == exposure_cap
+    assert daemon.startup_reconciler.client is client
+    assert daemon.scheduler.clock_provider == client.get_clock
+    assert client.calls == [], "construction must not contact the broker"
+    assert daemon.journal.read_all() == []
+    assert daemon.journal.read_events() == []
+    assert not cfg.pidfile_path.exists()
+    assert not cfg.heartbeat_path.exists()
+    assert not cfg.strategy_dir.exists()
+    assert not cfg.knowledge_dir.exists()
+
+
+def test_once_rejects_active_daemon_pid_before_broker_or_loop(tmp_path, monkeypatch, entry_no_network):
+    """Synthetic PID collision exercises the real exclusive-writer entry boundary."""
+    from autopoiesis import cli
+    from autopoiesis.daemon import DaemonAlreadyRunningError
+
+    cfg = _synthetic_entry_config(tmp_path)
+    owner = str(os.getpid())
+    cfg.pidfile_path.write_text(owner)
+    client = _SyntheticClosedBroker()
+    monkeypatch.setattr("autopoiesis.broker_client.create_alpaca_client", lambda **kwargs: client)
+
+    with pytest.raises(DaemonAlreadyRunningError):
+        cli._run_once(cfg)
+
+    assert cfg.pidfile_path.read_text() == owner
+    assert client.calls == []
+    assert not cfg.heartbeat_path.exists()
+    assert JsonlJournal(cfg.journal_path).read_all() == []
+    assert JsonlJournal(cfg.journal_path).read_events() == []
+
+
+def test_once_closed_scheduler_reconciles_then_exits_without_cycle_or_order(tmp_path, monkeypatch, entry_no_network):
+    """Synthetic closed broker clock drives the real scheduler and daemon entry path."""
+    from autopoiesis import cli
+    from autopoiesis.health import HealthMonitor
+
+    cfg = _synthetic_entry_config(tmp_path)
+    client = _SyntheticClosedBroker()
+    monkeypatch.setattr("autopoiesis.broker_client.create_alpaca_client", lambda **kwargs: client)
+    # Maintenance is covered by daemon tests. Isolate it here from broker evidence/model calls.
+    monkeypatch.setattr(cli.AgentDaemon, "_maintenance", lambda self: None)
+
+    assert cli._run_once(cfg) == 0
+
+    assert client.calls == ["orders", "clock"]
+    journal = JsonlJournal(cfg.journal_path)
+    assert journal.read_all() == []
+    assert [event.event_type for event in journal.read_events()] == ["ORDER_RECONCILIATION_REVIEWED"]
+    heartbeat = HealthMonitor(cfg.heartbeat_path).read()
+    assert heartbeat.status == "STOPPED"
+    assert heartbeat.cycle_count == 0
+    assert not cfg.pidfile_path.exists()
+
+
+def test_make_operator_help_matches_checked_commands(tmp_path):
+    """Copied Makefile dry runs exercise operator entry points without service changes."""
+    root = Path(__file__).resolve().parents[2]
+    (tmp_path / "Makefile").write_text((root / "Makefile").read_text())
+    result = subprocess.run(
+        ["make", "--no-print-directory", "help", "ENVFILE=/dev/null"],
+        cwd=tmp_path, text=True, capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "reports without gating" not in result.stdout
+    assert "lint + type + test" in result.stdout
+    assert "read-only broker" in result.stdout
+    assert "make install-service" in result.stdout
+    dry_run = subprocess.run(
+        ["make", "--no-print-directory", "--dry-run", "install-service", "ENVFILE=/dev/null"],
+        cwd=tmp_path, text=True, capture_output=True,
+    )
+    assert dry_run.returncode == 0, dry_run.stderr
+    assert dry_run.stdout.strip() == "./autopoiesis install-service"

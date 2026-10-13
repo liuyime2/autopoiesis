@@ -80,7 +80,7 @@ endif
 .DEFAULT_GOAL := help
 .PHONY: help setup install check lint lint-files type test test-provenance-host smoke smoke-offline fast fast-no-broker daily-report benchmark broker-latency-sample \
         verify verify-self-test doctor audit integrity classes classes-list \
-        run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc \
+        install-service run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc \
         site refresh-figures benchmark-json dist release-check fresh-clone example-cycle cli-help \
         attest-archive-baseline fetch-replay-bars research-search research-run \
         journal-backup journal-local-backup journal-restore journal-drill \
@@ -101,10 +101,10 @@ help:
 	@echo "make classes          list the check classes and their test files"
 	@echo "make lint             ruff over src/ tools/ tests/ examples/"
 	@echo "make lint-files FILES=...  run ruff on selected files for fast failure isolation"
-	@echo "make type             mypy over src/autopoiesis; reports without gating"
-	@echo "make check            lint + test (no broker, no credentials)"
+	@echo "make type             mypy over src/autopoiesis; non-zero on any finding"
+	@echo "make check            lint + type + test (no broker, no credentials)"
 	@echo "make test             unit and integration tests only"
-	@echo "make smoke            one real cycle against the paper broker"
+	@echo "make smoke            read-only broker connection and snapshot verification"
 	@echo "make broker-latency-sample COUNT=20 read-only clock/account operation latency against paper"
 	@echo "make smoke-offline    the widest check needing no broker and no credentials"
 	@echo "make fast             lint + test + smoke + verify"
@@ -122,6 +122,7 @@ help:
 	@echo "make evaluate         score the current paper record: strategies, PnL, counterfactuals"
 	@echo "make pipeline         validate-data -> test -> evaluate -> reproduce (run make install first)"
 	@echo "make status-page      a read-only static snapshot of current state"
+	@echo "make install-service install the systemd user units"
 	@echo "make run|stop|restart the trading daemon"
 	@echo "make status           daemon and account status"
 	@echo ""
@@ -287,6 +288,9 @@ classes:
 
 classes-list: classes
 
+install-service:
+	@./autopoiesis install-service
+
 run:
 	@systemctl --user start autopoiesis.service
 
@@ -344,9 +348,8 @@ example-cycle:
 cli-help:
 	@$(PY) -m autopoiesis.cli --help
 
-# Smoke: one real cycle end to end against the broker. This is the cheapest test
-# that touches the network and the model, and the first one that can catch a
-# broken API contract, a bad credential path or a decision that will not parse.
+# Smoke: read-only paper broker connection and data snapshot checks. This catches
+# broker API/configuration faults without running the model or submitting orders.
 smoke:
 	@$(CONDA_RUN) python tools/alpaca_smoke.py
 

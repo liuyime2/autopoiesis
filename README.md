@@ -239,8 +239,8 @@ for that reason, and CI runs the release check on the packaged path separately.
 4. Check the connection, then run it:
 
    ```bash
-   make smoke                      # one real cycle against the paper account
-   ./autopoiesis install-service      # systemd user units: daemon, Ollama, watchdog, research, report
+   make smoke                      # read-only broker connection and snapshot checks
+   make install-service            # systemd user units: daemon, Ollama, watchdog, research, report
    make run                        # start the daemon
    make status                     # alive? which strategy? last decision?
    make doctor                     # health of the running system, non-zero on any fault
@@ -261,8 +261,9 @@ Every task is a `make` target.
 | `make smoke-offline` | config and CLI end to end with `--skip-broker` | no |
 | `make verify` | the gate: 55 check classes; `CLASS=<name>` re-runs one | no¹ |
 | `make verify-self-test` | breaks the gate on purpose and checks it fails | no |
-| `make smoke` | one real cycle against the paper account | yes |
+| `make smoke` | read-only broker connection and snapshot checks | yes |
 | `make fast` | check + smoke + the gate | yes |
+| `make install-service` | install the systemd user units | no |
 | `make run` / `stop` / `restart` / `status` | control the daemon via systemd | yes |
 | `make doctor` | health of the running system | yes |
 | `make benchmark` | raw paper accounting and strategy diagnostics; current agent comparison UNKNOWN, exit 2 | journal |
@@ -277,6 +278,22 @@ report SKIP rather than FAIL.
 When the gate is red, read which class failed before concluding the code is wrong. Some
 classes judge the running system (for example, "is the model adding value?"). Those can fail
 on a trading result, while `make check` speaks only about the repository.
+
+Manual `--once` operation runs the same paper daemon with `max_cycles=1`: the shared
+strategy selection, frozen strategy provenance, hybrid decision engine, full Guardian
+configuration, startup reconciliation, and market scheduler all apply. It acquires the
+daemon's exclusive PID lock, so an active daemon refuses a competing single-cycle writer.
+During an open session it can submit a paper order and records its results through the
+daemon's journal and heartbeat; it also runs normal daemon maintenance. It is an operational
+command, with the daemon's exit status, rather than a read-only preview or a printed cycle
+report.
+
+When the broker scheduler reports closed, bounded mode exits without a trading cycle.
+A successful closed invocation proves that scheduling prevented trading; it does not
+prove a successful model decision, Guardian review of an order, broker submission, fill,
+or profitability. `make smoke` is read-only connection/data verification. The shared daemon
+builder only constructs the pipeline; construction does not run decisions, reconciliation,
+maintenance, or execution, although existing journal reads may acquire file locks.
 
 ## Reproducing the results
 
