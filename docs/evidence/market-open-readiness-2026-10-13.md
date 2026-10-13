@@ -325,6 +325,79 @@ Clock closed, next open 2026-10-14 09:30 EDT. Account ACTIVE, equity **99,771.90
 orders. Four positions: BIL 209 (+19.36), SPY 32 (+82.74), TLT 215 (-1,994.68), XLB 1 (+0.70).
 XLF was exited entirely during the day. 15 orders filled today across both sources.
 
-No return is claimed. Sell prices and cost basis are known and the book carries a large
+No return is claimed. Sell prices and cost basis is known and the book carries a large
 pre-existing unrealized loss on TLT; nothing here attributes any of it to decision quality, and
 the day's `PROFIT_TARGET_CHECKED` reads `profit target unproven`.
+
+## Deployment of the re-admission path — 17:24 to 17:40 EDT
+
+Source `712dad74d423eeef` deployed with the market closed, replacing `3619ff2ddac17037`.
+
+- Unit bytes preserved (14 files) at `/tmp/opencode/unit-backup-20261013-1720/`. Watchdog,
+  readiness and research timers paused around the switch.
+- **Cooperative stop measured at 4 s** against the 630 s budget, `Result=success`,
+  `ExecMainStatus=0`. Far below the 64 s of the mid-session switch earlier today, because with
+  the market closed no synchronous stage was in flight at SIGTERM - which is the first real
+  evidence that the stop budget is driven by in-flight stages rather than by a fixed cost.
+- Post-stop journal snapshot: **CERTIFIED**, 2,781 cycles, 22,286 events, four generations,
+  0 unparsed lines.
+- Application state checkpoint `predeploy-state-1731`: 220 files / 311.4 MB, every SHA-256
+  verified.
+- `make install-service` rendered ten units, all **byte-identical** to the running bytes;
+  mode, shadow, shorts and manage_account unchanged; `TimeoutStopSec=630`.
+- Started 17:31:45, PID **3492811**, `NRestarts=0`, fingerprint `712dad74d423eeef` matching
+  the on-disk source. `ORDER_RECONCILIATION_REVIEWED` `matched: true`. Broker read
+  independently: equity 99,771.88, **0** open orders, four positions intact.
+- Both readiness units reinstalled with the new fingerprint and
+  `DEPLOYMENT_AFTER=2026-10-13T17:31:45-04:00`; `systemctl --user show` confirms both load
+  `712dad74d423eeef`. All six timers armed.
+
+### What the repair does, verified against a copy of the live library
+
+Run read-only against a copy, so the live library was not touched:
+
+    BEFORE: fixed-size-bil-sell-001 | RETIRED | readmissions: 0
+            reason: severe operational failure rate 1.00
+      accepted = False
+      reason   = 23 candidate(s) are in probation, still short of the 13-cycle budget and
+                 able to act at the current price, which is the cap; admitting another cannot
+                 be evaluated and would further delay the strategies already waiting
+
+The id-duplicate refusal is gone: the proposal now reaches the rest of the gate. **It is then
+refused by the capacity check**, because the probation queue is full. The retirement is no
+longer the binding constraint; the queue is.
+
+### The queue is the actual bottleneck, measured
+
+| | |
+|---|---|
+| library total | **81** |
+| lifecycle | 23 PROBATION, 41 PAUSED, 16 RETIRED, 1 BASELINE, **0 ACTIVE** |
+| probation candidates short of budget and servable | **23** |
+| `max_probation_queue` | **13** |
+| probation candidates by symbol | **SPY 20**, TLT 1, XLE 1, XLF 1 |
+| by kind | 18 TREND_FOLLOW, 5 FIXED_SIZE |
+| probation candidates with `probation_restarts` past `MAX_PROBATION_RESTARTS` | 6 |
+| dormant probation | 0 |
+
+The gate has therefore been closed all day and is still closed: the backlog is 10 over its own
+cap, and nothing drains it because the only rule that removes a probation candidate requires
+it either to submit an order or to have never attempted one. Eighteen of the twenty-three are
+SPY `TREND_FOLLOW` variants distinguished only by `reference_price` (750 to 810 in five-dollar
+steps) and `threshold_pct` (0.012 to 0.03). SPY trades near 778, so nearly all of those bands
+bracket or sit just below the price and count as able to act.
+
+`PROBATION_CYCLES = 13` is calibrated in its own comment against `a FIXED_SIZE produces them at
+an observed 0.75-0.91 per selected cycle`, because the offline screen refuses to judge a
+strategy below ten informative decisions. The queue is full of TREND_FOLLOW, and the measured
+yield for that family is **0 informative decisions out of 33**. The budget and the screen are
+therefore incompatible for most of what is queued: a candidate can serve its whole budget and
+still be unjudgeable, and the only thing that happens next is another return to probation.
+
+This is the constraint behind the rest of the day. With 0 ACTIVE strategies and the gate
+closed, every cycle goes to probation candidates that cannot be screened, and the self-evolution
+loop cannot admit, promote or retire anything into a decision it could learn from. It is not a
+bug in one rule; it is a budget calibrated for one strategy family meeting a queue full of
+another. Recorded here and deliberately not fixed in this deployment, because raising
+`max_probation_queue` would reopen the gate by making the queue bigger, which is the shape of a
+solution that looks like progress and is not.
