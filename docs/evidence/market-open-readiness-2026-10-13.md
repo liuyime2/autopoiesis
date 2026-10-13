@@ -74,3 +74,68 @@ The installed timer fired on its own; this is scheduled evidence, not a manual i
 The collector's own peak memory was 3.3 GB. It builds a daemon instance to preview decisions; it is a separate process from the trading daemon and does not trade.
 
 This is preopen readiness only. It proves the scheduled path executes and the identity, account, calendar and refusal boundaries hold before 09:30; it contains no open-session cycle and no return.
+
+## Actual scheduled 09:45 open verification — 09:45:03 to 09:45:44 EDT
+
+The corrected cutoff let this run execute: it cleared `SESSION_NOT_OPEN` and then reached the session evidence, which is the first thing the broken value would have prevented. It reported **`FAIL`, exit 1, diagnostic `SESSION_QUOTE_NOT_FRESH`**, `Result=exit-code`, `ExecMainStatus=2`. The broker clock was `2026-10-13T13:45:29Z`, `market_open=true`, session 13:30Z–20:00Z, `scheduler_trade_now=true`.
+
+The daemon did real work before that verdict: `cycle_count=20`, `error_count=0`, `model_healthy=true`, `broker_healthy=true`, journal 2,346 cycles / 21,865 events, six positions, **0** open orders, **0** unresolved submissions.
+
+### Session cycles from the journal, 09:30–09:45 EDT
+
+21 real cycle records, every one `source=alpaca` and `market_open=true`. `quote_age` is the snapshot timestamp minus the quote timestamp; Guardian's limit is 900 s.
+
+| time | sym | quote_age_s | stale | action | qty | strategy | execution |
+|---|---|---|---|---|---|---|---|
+| 09:33:40 | SPY | 1 | no | HOLD | 0 | trend-follow-20260824-001 | SKIPPED |
+| 09:34:40 | BIL | 1546 | **yes** | SELL | 1 | fixed-size-bil-sell-001 | **REJECTED** |
+| 09:35:59 | TLT | 2 | no | SELL | 1 | fixed-size-tlt-sell-001 | **SUBMITTED** |
+| 09:37:26 | XLB | 12 | no | HOLD | 0 | — | SKIPPED |
+| 09:37:41 | XLE | 2 | no | HOLD | 0 | — | SKIPPED |
+| 09:37:56 | XLF | 11 | no | HOLD | 0 | — | SKIPPED |
+| 09:38:11 | BMBL | 30 | no | HOLD | 0 | — | SKIPPED |
+| 09:38:26 | SOXS | 1 | no | HOLD | 0 | — | SKIPPED |
+| 09:38:41 | PFAI | 119 | no | HOLD | 0 | — | **REJECTED** |
+| 09:38:56 | KORU | 10 | no | HOLD | 0 | — | SKIPPED |
+| 09:40:10 | SPY | 2 | no | HOLD | 0 | trend-follow-20260824-001 | SKIPPED |
+| 09:41:04 | BIL | 193 | no | HOLD | 0 | — | SKIPPED |
+| 09:41:19 | TLT | 4 | no | SELL | 1 | fixed-size-tlt-sell-001 | SKIPPED |
+| 09:42:44 | XLB | 8 | no | HOLD | 0 | — | SKIPPED |
+| 09:43:00 | XLE | 12 | no | HOLD | 0 | — | SKIPPED |
+| 09:43:16 | XLF | 2 | no | HOLD | 0 | — | SKIPPED |
+| 09:43:31 | BMBL | 23 | no | HOLD | 0 | — | SKIPPED |
+| 09:43:45 | SOXS | 4 | no | HOLD | 0 | — | SKIPPED |
+| 09:44:00 | SOXL | 3 | no | HOLD | 0 | — | SKIPPED |
+| 09:44:16 | KORU | 3 | no | HOLD | 0 | — | SKIPPED |
+| 09:45:29 | SPY | 11 | no | HOLD | 0 | trend-follow-20260824-001 | SKIPPED |
+
+XLB, XLE and XLF abstain with no strategy, exactly as the 08:45 coverage report predicted. BMBL, SOXS, PFAI, KORU and SOXL are the four `attention_slots` most-active names added by the round builder under `universe=tradable`; none is in the account, and only PFAI was refused.
+
+### The one executed order, reconciled against the broker
+
+TLT SELL 1 was Guardian-approved on a 2-second-old quote and submitted with durable write-ahead: `ORDER_SUBMISSION_INTENT` at 09:37:25 (`autopoiesis-69ff75e212473da32b2b8c2b`), `ORDER_SUBMISSION_ACKNOWLEDGED` with `order_id=214f5b8e-ceb5-43b4-baff-9e4593961ecf` and `broker_status=pending_new`. Provenance is frozen and complete: `fixed-size-tlt-sell-001`, `behavior_digest=0da1e85c…`, universe `('TLT',)`, PROBATION, with a rationale that names the 226-share position at $17,745 against the $25,000 cap and confidence against the 0.5 floor.
+
+The broker confirms the outcome independently: `status=filled`, `filled_qty=1`, `filled_avg_price=78.53`, `submitted_at=13:37:25.709692Z`, `filled_at=13:37:26.061456Z`, no replacement, no cancel, no failure. Open orders at 09:55 were **0**. Positions after the fill are six: BIL 209, SPY 32, TLT 225, XLB 1, XLE 2, XLF 2; account equity $99,805.72.
+
+The BIL cycle also records the model fallback working as designed: `llm_unavailable: ValueError: LLM response did not contain a JSON object`, and the fixed-size strategy was used instead.
+
+This is a real attributed execution on real fresh data. One filled share is not a return and not evidence of profitable decision making.
+
+### Why the gate failed, and two defects it exposed
+
+`SESSION_QUOTE_NOT_FRESH` is the 09:34:40 BIL record, and only that record: its quote was 1,546 s old against a 900 s limit because the bond ETF had not printed since the previous session. Guardian refused it, no order was sent, and the daemon carried on. The gate treats any stale-quote record in the window as a failure, so a correctly-refused data event is indistinguishable from a risky trade on stale data.
+
+`fixed-size-bil-sell-001` was retired 58 seconds later. `STRATEGY_LIFECYCLE_UPDATED` at 09:39:38 moved it PROBATION → RETIRED with reason `severe operational failure rate 1.00`. The cause is a live defect, not bad trading:
+
+- The BIL refusal reason is the interpolated message `'the price quote is 1611s stale, beyond the 900s limit'`.
+- `SYSTEM_REJECTION_REASONS` contains only the non-interpolated `'data snapshot is stale'`; `SYSTEM_REJECTION_REASON_PREFIXES` contains no staleness prefix.
+- `is_system_rejection()` therefore returns **False** for that message, so `strategy_fault_rejections` incremented, and with exactly one cycle in the window `failure_rate = 1.00` cleared the severe threshold.
+- `strategy_engine.py` already documents that this exact mechanism retired the library's only SELL-capable strategy before, and fixed it by adding prefixes for the interpolated messages that were reachable at the time. The interpolated staleness message was not among them.
+
+So a live, otherwise-healthy SELL strategy was permanently retired by the learner because a thinly traded symbol had no print in the first minutes of the session. This is the same defect class recurring, it happened 46 minutes into the new deployment, and it works directly against the RSI objective by destroying strategies on data events. No sample-size floor applies to the severe-failure rule either: one cycle was enough.
+
+`fixed-size-bil-sell-001` has not been hand-restored. Restoring it outside the admission gate is the failure mode the `strategy_engine` comment records, so it goes through the gate after the classification is fixed.
+
+Second defect, in the gate rather than the daemon: the readiness collector's safe-abstention predicate requires `execution.status == "SKIPPED"`, so PFAI's correctly-refused `selection_unavailable:` HOLD (`'symbol is priced below the minimum'`, 4.755 < the 5.0 floor, a price that slipped under the floor between the attention-name filter and the snapshot) would trip `SESSION_PROVENANCE_INVALID`. The collector does not model a mandate refusal as a safe abstention.
+
+Neither defect is fixed here, and neither may be fixed today to make a session verdict pass. The 10:30 run re-reads the same 09:30–10:30 window, which already contains the stale BIL record, so a second `SESSION_QUOTE_NOT_FRESH` FAIL is the expected and honest outcome. Widening `stale_after_seconds`, excluding the offending window, or relaxing the collector's per-record assertion would each convert a true finding into a green light.
