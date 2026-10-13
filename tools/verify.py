@@ -21,6 +21,7 @@ Two properties matter more than the tally:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -1184,19 +1185,15 @@ def check_type_checking_is_a_real_gate() -> Result:
 
 
 def check_unit_templates_have_no_host_paths() -> Result:
-    """A `.service.in` template must not contain a path from the machine that wrote it.
+    """Check every unit's host paths, explicit renderer ownership and substitutions.
 
-    `tools/ollama.service.in` carried an `ExecStart` pointing at one account's local ollama binary
-    and a matching OLLAMA_MODELS path, because that is where Ollama lives here. `autopoiesis`
-    substituted @ROOT@, @PYTHON@, @ENVBIN@ and @ENVFILE@ but not those, so every install on
-    any other machine produced a unit that systemd could not start - and the failure appears
-    at boot, long after the command that caused it returned success.
-
-    Both are placeholders now, with `autopoiesis` substituting them from OLLAMA_BIN and
-    OLLAMA_MODELS with sane defaults. This checks both halves: no absolute host path in a
-    template, and no placeholder left unsubstituted by the renderer.
+    Legacy units use actual shell render/copy calls. Readiness units use their existing
+    installer against synthetic private paths, capturing staged text without running commands.
     """
-    templates = sorted((ROOT / "tools").glob("*.service.in")) + sorted((ROOT / "tools").glob("*.timer"))
+    templates = sorted(
+        template for pattern in ("*.service.in", "*.timer", "*.timer.in")
+        for template in (ROOT / "tools").glob(pattern)
+    )
     if not templates:
         return Result("unit-templates-portable", SKIP, "no unit templates found")
     problems: list[str] = []
@@ -1209,14 +1206,85 @@ def check_unit_templates_have_no_host_paths() -> Result:
                 problems.append(
                     f"{template.name}:{line_no} hardcodes a host path: {line.strip()[:60]}"
                 )
-    # Every placeholder the renderer is expected to fill must actually be filled by it.
-    renderer = (ROOT / "autopoiesis").read_text(encoding="utf-8")
+    shell = "\n".join(line.split("#", 1)[0] for line in (ROOT / "autopoiesis").read_text().splitlines())
+    shell_owners = {
+        name: command for command, name in re.findall(
+            r'^\s*(render|cp)\s+"?(?:\$ROOT_DIR/)?tools/([-\w.]+)"?\s+', shell, re.MULTILINE,
+        )
+    }
+    render_bodies = re.findall(r"\brender\(\)\s*\{(.*?)^\s*\}", shell, re.MULTILINE | re.DOTALL)
+    shell_markers = set(re.findall(
+        r'(?:\bsed\s+-e|\n\s+-e)\s+"s\|@([A-Z_]+)@\|\$[A-Z_]+\|g"', "\n".join(render_bodies),
+    ))
+    readiness_names: tuple[str, ...] = ()
+    installer = None
+    try:
+        spec = importlib.util.spec_from_file_location("readiness_template_installer", ROOT / "tools/install_market_readiness.py")
+        if spec is None or spec.loader is None:
+            raise ValueError("readiness installer could not be loaded")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        readiness_names = tuple(installer.UNIT_NAMES)
+        if any(Path(name).name != name or not name.endswith((".service", ".timer")) for name in readiness_names):
+            raise ValueError("invalid readiness unit ownership")
+    except Exception as exc:
+        problems.append(f"readiness renderer cannot load ownership: {type(exc).__name__}")
+    readiness_templates = {name + ".in" for name in readiness_names}
     for template in templates:
-        for placeholder in set(re.findall(r"@([A-Z_]+)@", template.read_text(encoding="utf-8"))):
-            if f"@{placeholder}@" not in renderer:
+        if template.name in readiness_templates:
+            continue
+        owner = shell_owners.get(template.name)
+        if owner is None:
+            problems.append(f"{template.name} has no renderer owner")
+            continue
+        text = template.read_text(encoding="utf-8")
+        for placeholder in sorted(set(re.findall(r"@([A-Z_]+)@", text))):
+            if owner != "render" or placeholder not in shell_markers:
                 problems.append(
-                    f"{template.name} uses @{placeholder}@ but autopoiesis never substitutes it"
+                    f"{template.name} uses @{placeholder}@ but shell {owner} never substitutes it"
                 )
+        if "@" in re.sub(r"@([A-Z_]+)@", "", text):
+            problems.append(f"{template.name} has a malformed template marker")
+    if installer is not None and readiness_names:
+        try:
+            with tempfile.TemporaryDirectory(prefix="verify-readiness-") as directory:
+                base = Path(directory).resolve()
+                root, unit_dir, envfile = base / "synthetic-repo", base / "units", base / "external-env"
+                (root / "tools").mkdir(parents=True)
+                unit_dir.mkdir()
+                envfile.touch()
+                python = Path(sys.executable).resolve()
+                fingerprint, cutoff = "a" * 16, "2026-10-13T13:30:00+00:00"
+                values = {
+                    "ROOT": str(root), "PYTHON": str(python), "PYTHONDIR": str(python.parent),
+                    "ENVFILE": str(envfile), "FINGERPRINT": fingerprint, "AFTER": cutoff,
+                }
+                expected: dict[str, str] = {}
+                for name in readiness_names:
+                    template = ROOT / "tools" / (name + ".in")
+                    shutil.copyfile(template, root / "tools" / template.name)
+                    text = template.read_text()
+                    for marker, value in values.items():
+                        text = text.replace(f"@{marker}@", value)
+                    if "@" in text:
+                        raise ValueError(f"{template.name} has an unknown or malformed marker")
+                    expected[name] = text
+                staged: dict[str, str] = {}
+
+                def capture(command, *, check):
+                    if command[:3] == ["systemd-analyze", "--user", "verify"]:
+                        for path in command[3:]:
+                            unit = Path(path)
+                            staged[unit.name] = unit.read_text()
+
+                installer.install(
+                    root=root, python=python, envfile=envfile, expected_fingerprint=fingerprint,
+                    deployment_after=cutoff, unit_dir=unit_dir, runner=capture,
+                )
+                if staged != expected:
+                    raise ValueError("staged unit text differs from declared substitutions")
+        except Exception as exc:
+            problems.append(f"readiness renderer failed: {type(exc).__name__}: {exc}")
     if problems:
         return Result("unit-templates-portable", FAIL, f"{len(problems)}: {problems[:3]}")
     return Result(
