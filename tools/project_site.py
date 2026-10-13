@@ -332,7 +332,7 @@ def evidence(figures: Figures) -> list[str]:
         body.append('<p class="note">No signal ledger in the published figures, so the research '
                     'record reads UNKNOWN rather than as zero.</p>')
 
-    body.append('<h2>The risk budget these results were produced inside</h2>')
+    body.append('<h2>Risk configuration used for this measurement</h2>')
     body.append('<div class="tablewrap"><table><tr><th>limit</th><th class="num">value</th></tr>')
     for label, key in (('max position value', 'max_position_value'),
                        ('max total exposure', 'max_total_exposure'),
@@ -342,9 +342,9 @@ def evidence(figures: Figures) -> list[str]:
             body.append('<tr><td>' + html.escape(label) + '</td><td class="num">'
                         + format(budget[key], ',.2f') + '</td></tr>')
     body.append('</table></div>')
-    body.append('<p class="note">Enforced by the Guardian independently of the decision maker. '
-                'A decision maker that abstains on risk grounds is acting as a second risk '
-                'authority and can halt trading without appearing to.</p>')
+    body.append('<p class="note">These values come from the configuration used to collect '
+                'this measurement. Historical risk configuration and compliance are not '
+                'established by these values.</p>')
     return body
 
 
@@ -423,10 +423,11 @@ def safety(figures: Figures) -> list[str]:
         'happening.</p>',
         '<h2>What is not claimed</h2>',
         '<ul>'
-        '<li>Paper results are not live results. The broker fees are zero on paper, so the '
+        '<li>Paper results are not live results. No broker fees were observed in this paper '
+        'record. The '
         'reported net charges an explicitly assumed round-trip cost on the notional actually '
         'traded, and the page says so.</li>'
-        '<li>No figure here is a certification. The target is not met, and the record holds '
+        '<li>No figure here is a certification. The target remains unproven, and the record holds '
         'fewer trading days than the target window.</li>'
         '</ul>',
     ]

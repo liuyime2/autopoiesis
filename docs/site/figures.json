@@ -29,9 +29,9 @@
       },
       "risk_budget": {
         "max_daily_loss": 500.0,
-        "max_position_value": 25000.0,
-        "max_total_exposure": 90000.0,
-        "max_trades_per_day": 100
+        "max_position_value": 5000.0,
+        "max_total_exposure": 20000.0,
+        "max_trades_per_day": 10
       },
       "strategies": [
         {
@@ -104,8 +104,8 @@
     },
     "tests": {
       "test_files": 94,
-      "tests": 1505
+      "tests": 1506
     }
   },
-  "generated_at": "2026-10-13T04:56:41.481924+00:00"
+  "generated_at": "2026-10-13T05:22:53.826239+00:00"
 }

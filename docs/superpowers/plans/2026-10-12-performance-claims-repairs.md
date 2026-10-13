@@ -102,3 +102,69 @@ returned **8 passed in 0.19s**; `make site ENVFILE=/dev/null` regenerated all pa
 and scoped lint passed. Independent publication re-review approved source/pages,
 nulls/accounting consistency and absence of private paths/credentials. Refresh
 completed without publishing raw journal, fills, account positions or credentials.
+# Publication follow-up: configuration is not historical compliance
+
+Acceptance reconciliation: independent specification review passed **8 public-site
+tests in 0.21s**; independent quality review passed **8 in 0.23s** and closed the
+risk-history blocker. Both subsequently inspected the final fee/UNKNOWN wording
+and generated safety page, approved with no blocker. No historical risk evidence
+or fee data was fabricated to justify the corrected prose. Final committed-tree CI
+will also run the complete gate; its actual result is checked before delivery.
+
+Adjacent measured wording correction from quality review: one safety-page sentence
+asserts broker fees are zero on paper. The record only establishes observed fees=0.
+Success is wording limited to no broker fees observed in this paper record, with
+assumed friction still separate; change that sentence in the same renderer and
+rerun the existing public-site tests/Make generation and focused lint. This does
+not change fee data, risk settings or an execution/accounting path.
+
+Problem measured in the final independent review: **one evidence-page heading**
+asserts that the historical results were produced inside the displayed risk budget.
+The producer reads current AgentConfig; refreshing the same sealed historical journal
+under isolated defaults changed position/exposure/trade limits from
+25,000/90,000/100 to 5,000/20,000/10. Neither set establishes past compliance.
+
+Success: label the displayed values as configuration used for this measurement,
+explicitly state that historical risk configuration/compliance is not established,
+and retain the actual isolated-default measurements rather than invent historical
+limits. Minimum change: evidence-page heading and one explanatory paragraph in the
+existing renderer. No new production layer, data field, tests mirroring prose, risk
+change or alteration of real numbers. Run existing public-site tests and focused
+lint, regenerate via Make, then independent review of the rendered page and final
+gate/CI. This is a documentation/rendering correction; earlier source measurements
+retain their actual SHA and counts.
+
+Publication wording follow-up completed and frozen for independent review:
+only the evidence renderer's heading and explanatory paragraph changed. It now
+labels risk values as configuration used for this measurement and explicitly
+states that historical risk configuration/compliance are not established. Data
+fields, actual limits, accounting values, and Guardian rules remain unchanged.
+
+`make test ENVFILE=/dev/null TEST_ARGS='tests/autopoiesis/test_public_site.py'`
+returned **8 passed in 0.25s**. `make lint-files ENVFILE=/dev/null FILES='tools/project_site.py'`
+returned **All checks passed**. `make site ENVFILE=/dev/null` successfully regenerated
+the five public pages from the existing figures; no collector ran and no figures
+were changed by this follow-up. Render inspection found the new heading at
+`docs/site/evidence.html:101` and explicit historical-compliance qualification at
+line 108. `git diff --check -- tools/project_site.py docs/site/evidence.html`
+returned no findings. No new tests mirror the prose. Independent publication
+review and final-source gate/CI remain pending for this distinct wording change;
+earlier source evidence retains its actual SHA.
+
+Adjacent safety wording corrections are now frozen: the page states **No broker
+fees were observed in this paper record**, retains the explicitly assumed
+round-trip-cost explanation, and says **The target remains unproven** to match
+UNKNOWN rather than imply measured failure. No fee data, accounting, risk,
+execution path, or new tests changed.
+
+After the fee correction, the existing public-site tests returned **8 passed in
+0.21s**. After the final unproven-target wording correction,
+`make test ENVFILE=/dev/null TEST_ARGS='tests/autopoiesis/test_public_site.py'`
+returned **8 passed in 0.23s**; `make lint-files ENVFILE=/dev/null FILES='tools/project_site.py'`
+returned **All checks passed**; `make site ENVFILE=/dev/null` successfully
+regenerated all five pages. Render inspection confirms both qualified claims at
+`docs/site/safety.html:84`. `git diff --check -- tools/project_site.py docs/site/safety.html docs/site/evidence.html`
+returned no findings. The separate full-gate run started at the prior risk-wording
+freeze; these later safety-prose changes have their own focused checks and are
+not represented as same-source-SHA full-gate evidence. Independent review and
+exact committed-source CI publication evidence remain root integration work.
