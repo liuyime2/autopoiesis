@@ -47,6 +47,26 @@ FINDINGS = RUNTIME / "known_state_findings.json"
 #: strategies as having an unknown lifecycle.
 LIFECYCLES = {"PROBATION", "ACTIVE", "PAUSED", "RETIRED", "BASELINE"}
 
+#: The instant the strategy/symbol mismatch fix was deployed. Cycles journalled *before* it are the
+#: contaminated cohort: counted, excused, and printed. A mismatch journalled *after* it is a
+#: recurrence and fails the gate.
+#:
+#: The defect: `StrategySelector.select` filtered its population on `enabled` and lifecycle and on
+#: nothing else, so a strategy declaring `symbols=('SPY',)` was served for BIL, TLT, XLB, XLE, XLF,
+#: SOXS, NOK, BITO and ONDS cycles and priced against 91.50 or 6.65 instead of 777.54. Those cycles
+#: returned HOLD, so no order was ever placed in the wrong instrument and Guardian would have
+#: reviewed one if it had been - but a session's cycles were a rule evaluated where its parameters
+#: had no meaning, and the screens and lifecycle decisions recorded against them inherited that.
+#: Measured afterwards: 862 cycles in the retained window, all between 2026-10-08 and 2026-10-12,
+#: and zero before that. Seven lifecycle transitions and eight offline screens in that window rest
+#: on a sample base where 28-100% of each strategy's cycles were mismatched; `fixed-size-probe-0001`
+#: was paused for "no exploration evidence" with 102 of its 180 cycles on the wrong instrument.
+#:
+#: An instant rather than a count to keep current: it excuses everything already written and
+#: nothing written after it, so it cannot be widened to excuse a recurrence. When the journal
+#: rotates the cohort away, the entry and this note can go - the printed count is what says.
+MISMATCH_FIX_UTC = "2026-10-12T20:20:00+00:00"
+
 #: From models.StrategySpec: every field the selector and the Guardian read.
 REQUIRED_SPEC_FIELDS = (
     "strategy_id", "name", "kind", "symbols", "parameters",
@@ -247,6 +267,58 @@ def main(runtime: Path | None = None, findings: Path | None = None) -> int:
         for p in problems:
             print(f"  - {p}")
         return 1
+
+    # 6. A cycle's strategy must cover the symbol the cycle was about.
+    #
+    #    The registry check says what the system declares; this one says whether it honoured it.
+    #    `select` filtered its population on `enabled` and lifecycle and on nothing else, so for
+    #    four days a strategy declaring `symbols=('SPY',)` was served for BIL, TLT, XLB, XLE, XLF,
+    #    SOXS, NOK, BITO and ONDS cycles and priced there. Nothing noticed, because nothing looked:
+    #    `_declared_actions` is priced on the cycled symbol, so the mismatch looked like coverage.
+    #
+    #    A strategy absent from the registry - retired and pruned - cannot be judged and is
+    #    skipped, the same direction the admission check takes.
+    cohort = []
+    recurred = []
+    for record in cycles:
+        decision = record.get("decision") or {}
+        # The decision's own choice is what got priced. The record also carries a denormalised
+        # `strategy_id` at the top level; a record that writes only one of the two is still
+        # checked, and where both exist they name the same strategy.
+        sid = decision.get("strategy_id") or record.get("strategy_id")
+        if not sid:
+            continue
+        spec = declared.get(sid)
+        if spec is None:
+            continue
+        snapshot = record.get("snapshot") or {}
+        symbol = snapshot.get("symbol")
+        if not symbol or symbol in (spec.get("symbols") or ()):
+            continue
+        # The timestamp lives on the snapshot in a cycle record, not on the record.
+        stamped = str(snapshot.get("timestamp") or record.get("timestamp") or "")
+        if stamped < MISMATCH_FIX_UTC:
+            cohort.append((stamped, sid, symbol))
+        else:
+            recurred.append((stamped, sid, symbol))
+
+    if recurred:
+        # Emitted here rather than appended to `problems`: the block above that prints and returns
+        # on `problems` has already been evaluated by the time this loop runs, so appending to it
+        # would be a failure the gate records and then scores as a pass.
+        print(f"runtime integrity: FAIL ({len(recurred)} recurrence(s))")
+        print(
+            f"  - {len(recurred)} cycle(s) after {MISMATCH_FIX_UTC} selected a strategy that "
+            f"does not cover the cycle's symbol: {recurred[:5]}"
+        )
+        return 1
+    if cohort:
+        distinct = len({sid for _, sid, _ in cohort})
+        notes.append(
+            f"{len(cohort)} pre-fix cycle(s) selected a strategy for a symbol it does not "
+            f"cover, across {distinct} strategies, all before {MISMATCH_FIX_UTC}; counted and "
+            "excused, and no additional one may be recorded - see MISMATCH_FIX_UTC"
+        )
 
     print(
         f"runtime integrity: OK ({len(cycles)} cycles, {len(events)} events, "

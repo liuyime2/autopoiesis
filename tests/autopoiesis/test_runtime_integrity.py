@@ -186,3 +186,97 @@ def test_duplicate_knowledge_artifacts_fail(tmp_path):
         knowledge=[{"claim": "be careful"}, {"claim": "Be careful"}],
     )
     assert _run(tmp_path, runtime) == 1
+
+
+def _cycle_with_symbol(ts, symbol, sid="s1"):
+    """A cycle record whose strategy does not cover `symbol`."""
+    return {
+        "cycle_id": "", "strategy_id": sid,
+        "snapshot": {"timestamp": ts, "last_price": 91.5, "symbol": symbol},
+        "decision": {"action": "HOLD", "decision_source": "llm"},
+    }
+
+
+def test_a_strategy_served_for_a_symbol_it_does_not_cover_fails(tmp_path):
+    """The rule the four-day contamination would have been caught by.
+
+    """
+    # The checker's own boundary, so the planted violation is unambiguously after the fix.
+    after = "2099-01-01T00:00:00+00:00"
+    runtime = _runtime(
+        tmp_path,
+        strategies=[_spec(symbols=["SPY"])],
+        events=[("STRATEGY_ADMISSION_REVIEWED", "s1", {"accepted": True})],
+    )
+    rec = _cycle_with_symbol(after, "BIL")
+    rec["cycle_id"] = "c-bil"
+    with (runtime / "journal.jsonl").open("a") as fh:
+        fh.write(json.dumps(rec) + "\n")
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(checker, "MISMATCH_FIX_UTC", "2026-10-12T20:20:00+00:00")
+    try:
+        assert _run(tmp_path, runtime) == 1, (
+            "a cycle that selected a strategy for a symbol it does not cover is a recurrence and "
+            "must fail the gate, not be excused"
+        )
+    finally:
+        monkey.undo()
+
+
+def test_a_pre_fix_mismatch_is_counted_and_excused(tmp_path):
+    """The historical cohort is reported, not silently dropped and not a blocker.
+
+    The boundary does the work: a violation journalled before the fix instant is part of the
+    measured contamination and the note says how many there are, so the number is visible and
+    rotation can retire the entry. Nothing after the instant may add to it.
+    """
+    import contextlib
+    import io
+
+    before = "2026-10-09T15:00:00+00:00"
+    runtime = _runtime(
+        tmp_path,
+        strategies=[_spec(symbols=["SPY"])],
+        events=[("STRATEGY_ADMISSION_REVIEWED", "s1", {"accepted": True})],
+    )
+    rec = _cycle_with_symbol(before, "BIL")
+    rec["cycle_id"] = "c-old-bil"
+    with (runtime / "journal.jsonl").open("a") as fh:
+        fh.write(json.dumps(rec) + "\n")
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(checker, "MISMATCH_FIX_UTC", "2026-10-12T20:20:00+00:00")
+    try:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            code = checker.main(runtime=runtime,
+                                findings=tmp_path / "findings.json")
+        assert code == 0, "a pre-fix cycle is the measured defect, not a new one"
+        assert "pre-fix cycle(s)" in buffer.getvalue(), (
+            "the cohort must be counted out loud; an exemption nobody can see is a bypass"
+        )
+    finally:
+        monkey.undo()
+
+
+def test_a_strategy_absent_from_the_registry_is_not_judged(tmp_path):
+    """Retired and pruned strategies cannot be checked for coverage, so they are skipped.
+
+    Judging them would fail the gate for a file that no longer exists - the same direction the
+    admission check takes.
+    """
+    runtime = _runtime(
+        tmp_path,
+        strategies=[],
+        events=[("STRATEGY_ADMISSION_REVIEWED", "ghost", {"accepted": True})],
+    )
+    rec = {"cycle_id": "c-ghost", "strategy_id": "ghost",
+           "snapshot": {"timestamp": "2099-01-01T00:00:00+00:00", "symbol": "TLT",
+                        "last_price": 77.9},
+           "decision": {"action": "HOLD", "decision_source": "llm"}}
+    with (runtime / "journal.jsonl").open("a") as fh:
+        fh.write(json.dumps(rec) + "\n")
+    findings = tmp_path / "findings.json"
+    findings.write_text(json.dumps({"known_missing": [{"strategy_id": "ghost"}]}))
+    assert checker.main(runtime=runtime, findings=findings) == 0

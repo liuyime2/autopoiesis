@@ -91,3 +91,57 @@ doctor 仍报告 journal 旧 generations 已被轮转清除：校准、链与 ch
 7. 独立 holdout → shadow → 单候选有期限 paper probation → 连续完整 60 个有效交易日。当前 20 个有记录交易日不能直接算作连续合格窗口，不能承诺再过 40 天就达标。
 
 当前结论：paper 系统运行、风险保护有真实证据、演化机制在产生动作；可信 alpha 为 0，组合超额为负，受控 RSI 增益未证明。尚不能宣称系统开始正确盈利或达到 RSI 目标。
+
+---
+
+## 2026-10-12 收盘后补充：污染范围量化与常设门禁
+
+以下数字由命令实测得到，不是从上文推断。命令与输出记录在案。
+
+### 污染起点与总量
+
+保留窗口内 2326 条 cycle，1602 条带 `strategy_id`，其中 **862 条（53.8%）把策略配给了它不覆盖的标的**。按日期分布：
+
+```
+2026-06-11 .. 2026-10-07   15 个交易日   0 条错配   (0.0%)
+2026-10-08                 395 cycles   329 错配   (83.3%)
+2026-10-09                 328 cycles   295 错配   (89.9%)
+2026-10-12                 266 cycles   238 错配   (89.5%)
+```
+
+**起点是 2026-10-08，之前 15 个交易日零错配。** 污染集中在最近三个交易日，共 862 条，涉及 7 个策略。
+
+### 下游污染：7 个 lifecycle 判决 + 8 个 screen 裁决
+
+污染期（>= 10-08）共有 463 条 `STRATEGY_LIFECYCLE_UPDATED(applied)`，其中 6 条改变了生命周期状态，7 条相关判决如下：
+
+| 时间 | 策略 | 判决 | 错配样本 | 理由 |
+|---|---|---|---|---|
+| 10-08 15:31 | `tiny-fixed-size-001` | RETIRED | 0/48（**干净**，均在污染前） | offline validation rejected ... |
+| 10-08 15:56 | `trend-follow-20260727-001` | RETIRED | 0/59（20 条污染期样本） | 15 scored, 2 correct |
+| 10-12 14:35 | `fixed-size-probe-0001` | PAUSED | **102/180** | no exploration evidence |
+| 10-12 15:03 | `fixed-size-buy-20261003-001` | PAUSED | **18/18（100%）** | probation produced no exploration |
+| 10-12 17:44 | `trend-follow-20260818-001` | PAUSED | 0/13（13 条全在污染期） | probation produced no exploration |
+| 10-12 19:03 | `trend-follow-20260721-001` | PAUSED | **9/13** | probation produced no exploration |
+| 10-12 19:22 | `trend-follow-20260722-001` | PAUSED | **8/13** | probation produced no exploration |
+| 10-12 19:44 | `trend-follow-20260723-001` | PAUSED | **18/19** | probation produced no exploration |
+
+污染期的 `OFFLINE_VALIDATION_COMPLETED` 共 201 条：193 INCONCLUSIVE、**6 PASS_SCREENED**、2 REJECT_POOR_DECISIONS。被屏最多的 `fixed-size-probe-0001` 有 102/180 条错配样本。
+
+**限制**：journal 已轮转到 4 代，只覆盖保留窗口。上表的"干净/污染"只对可见记录的样本成立，不能追溯重跑更早的判决。
+
+### 为什么这些判决不能直接撤销
+
+`fixed-size-probe-0001` 被 PAUSED 的原因是"no exploration evidence"，而它 180 个周期里 102 个跑在错误标的上——它从未在 SPY 上被运行过。但手工把文件改回 `PROBATION` 正是这个项目明确移除的旁路（代码注释原文："hand-editing the files is exactly the bypass this project removed"）。判决记录在 journal 里，状态文件的 `lifecycle_reason` 会与 journal 不一致，且无法恢复被污染证据本该产生的新样本。**正确做法是等修复后的干净样本积累，让系统用自己的机制重新审议**（`_reconsider_paused` 需要 PAUSED 满 3 天 + screen PASS + 队列有空间）。
+
+### 新增常设门禁
+
+`tools/check_runtime_integrity.py` 增加第 6 条规则，由 `data-integrity` 门禁类执行：
+
+- 每条 cycle 的 `decision.strategy_id` 必须覆盖 `snapshot.symbol`；
+- 修复部署时刻以前（`MISMATCH_FIX_UTC = 2026-10-12T20:20:00+00:00`）的错配计入 cohort 并**打印数量**，不算失败；
+- 该时刻以后的任何错配是**复发，直接 FAIL**。
+
+边界取时刻而不是"当前数量"，因为时刻天然自限：它宽恕已写下的全部，不宽恕其后写下的任何一条，因此无法被放宽来豁免复发。当 journal 把 cohort 轮转出去，这一项和常量就可以删掉——打印出来的计数就是判断依据。
+
+**这个缺陷存在了 4 天（10-08 至 10-12）而没有任何门禁发现它**，因为选择器按标的过滤从来不是被检查的不变量。门禁现在检查它。
