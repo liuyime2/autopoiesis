@@ -139,3 +139,44 @@ So a live, otherwise-healthy SELL strategy was permanently retired by the learne
 Second defect, in the gate rather than the daemon: the readiness collector's safe-abstention predicate requires `execution.status == "SKIPPED"`, so PFAI's correctly-refused `selection_unavailable:` HOLD (`'symbol is priced below the minimum'`, 4.755 < the 5.0 floor, a price that slipped under the floor between the attention-name filter and the snapshot) would trip `SESSION_PROVENANCE_INVALID`. The collector does not model a mandate refusal as a safe abstention.
 
 Neither defect is fixed here, and neither may be fixed today to make a session verdict pass. The 10:30 run re-reads the same 09:30–10:30 window, which already contains the stale BIL record, so a second `SESSION_QUOTE_NOT_FRESH` FAIL is the expected and honest outcome. Widening `stale_after_seconds`, excluding the offending window, or relaxing the collector's per-record assertion would each convert a true finding into a green light.
+
+## Actual scheduled 10:30 open verification — 10:30:00 to 10:30:43 EDT
+
+It ran, and failed for the same reason, as predicted from the 09:45 evidence: `status=FAIL`, exit 1, `diagnostics=["SESSION_QUOTE_NOT_FRESH"]`, `ExecMainStatus=2`. Broker clock `2026-10-13T14:30:26Z`, `market_open=true`, `scheduler_trade_now=true`. Daemon `cycle_count=79`, `error_count=0`, model and broker healthy, six positions, **0** open orders, **0** unresolved submissions, journal 2,406 cycles / 21,900 events.
+
+### Whole session, 09:30–10:30 EDT, from the journal
+
+**80 cycle records, 0 errors.** 77 HOLD / 3 SELL. Executions 73 SKIPPED, 5 REJECTED, 2 SUBMITTED. Cycles per symbol: SPY 8, BIL 8, TLT 8, XLB 8, XLE 8, XLF 8, SOXL 7, BMBL 8, SOXS 8, CIFR 5, KORU 3, PFAI 1.
+
+**Both submitted orders filled, confirmed independently by the broker.** `214f5b8e…` TLT SELL 1 filled at 78.53 (09:37:25.709692Z → 09:37:26.061456Z); `48914161…` TLT SELL 1 filled at 78.33 (10:13:44.690167Z → 10:13:44.822342Z). TLT went 226 → 224 shares. Open orders at 10:35 were **0**; equity $99,762.25. Every submission has a durable `ORDER_SUBMISSION_INTENT`, an `ORDER_SUBMISSION_ACKNOWLEDGED`, and an `ORDER_FILL_SNAPSHOT`. Nothing is unresolved, nothing was replaced or cancelled.
+
+### The gate failure is structural, not incidental
+
+All four stale-quote cycles are BIL, and only BIL:
+
+| time | quote age | Guardian reason |
+|---|---|---|
+| 09:34:40 | 1546 s | the price quote is 1611s stale, beyond the 900s limit |
+| 09:58:31 | 1240 s | the price quote is 1253s stale, beyond the 900s limit |
+| 10:03:52 | 1561 s | the price quote is 1574s stale, beyond the 900s limit |
+| 10:12:06 | 2055 s | the price quote is 2068s stale, beyond the 900s limit |
+
+Half of BIL's eight cycles in the first hour carried a quote older than 900 s, with gaps of 20 to 34 minutes between prints. BIL is a bond ETF that does not trade continuously; after an overnight close, its next print arrives well past any freshness limit the system would care to trade on. Guardian refused all four and the session carried on, which is the correct behaviour.
+
+But `SESSION_QUOTE_NOT_FRESH` fails the whole window on any such record, so with BIL in `AUTOPOIESIS_SYMBOLS` **this gate cannot pass**. It is not a signal that something went wrong today; it is a gate that measures a property the configuration guarantees. Three of the four were also recorded as `REJECTED` rather than `SKIPPED` even though they were `HOLD 0` with no strategy, because Guardian checks staleness before the HOLD branch. Those would independently trip `SESSION_PROVENANCE_INVALID`, whose safe-abstention predicate only accepts `SKIPPED`.
+
+The honest reading of today is therefore two separate statements: the daemon behaved correctly on real data for a full hour with zero errors, and the certificate designed to grade it is unpassable for this symbol list. Both are recorded; neither is adjusted to make the other look better.
+
+### What the learner did to the live library in one hour
+
+`fixed-size-bil-sell-001` is now `RETIRED` on disk. `trend-follow-20260824-001` is now `PROBATION` with **`probation_restarts: 5`**, having been returned to probation five times between 10:02 and 10:24, each time for "served its full N-cycle probation budget without submitting an order" with N climbing 13, 14, 15, 15, 16. `MAX_PROBATION_RESTARTS` is **3**, so the restart cap is not binding on this path. `fixed-size-tlt-sell-001` is `PROBATION` with 0 restarts and is the only strategy that has traded.
+
+`OFFLINE_VALIDATION_COMPLETED` reports `trend-follow-20260824-001` as `INCONCLUSIVE_INSUFFICIENT_EVIDENCE` twice, at 09:53 with "only 0 informative decision(s) out of 3" and at 10:19 with "out of 6". The strategy that covers SPY produces decisions the evaluator never counts as informative, so it can never be screened, so it can never leave probation, so it is handed another budget. That loop is the mechanism behind the library's long-standing zero-ACTIVE state.
+
+The curriculum path also produced a false premise and one failure: `CURRICULUM_PROPOSED` at 09:56 asked for an exit path for TLT's 225 open shares "with no exit path in the current strategy set", while `fixed-size-tlt-sell-001` exists and had already sold. `STRATEGY_ADMISSION_REVIEWED` correctly refused the proposal as behaviourally identical to that strategy, and `OFFLINE_VALIDATION_COMPLETED` then returned INCONCLUSIVE for the near-duplicate `fixed-size-tlt-sell-002`. The admission gate did its job; the premise did not. `CURRICULUM_FAILED` with `ValueError` at 10:10.
+
+### Net tradable state after one hour of open session
+
+Six configured symbols: SPY held by a strategy that resets forever and never trades; BIL's only strategy retired by the staleness misclassification, leaving BIL uncovered; TLT the only symbol with a working strategy, which sold 2 shares; XLB, XLE and XLF uncovered. Four attention names and CIFR were cycled and could not act. Against a starting book of six positions, the measured result of the first hour is **two shares of TLT sold at 78.53 and 78.33**, no other symbol able to act, zero errors, zero unresolved submissions, and two certificate FAILs that are truthful.
+
+No profitability claim follows from this. Sell prices are known, the cost basis is known, and the position carries a large pre-existing unrealized loss; attributing any of it to the session is not something this evidence supports.

@@ -85,3 +85,21 @@ gate.
   re-checks the floor against a later snapshot, so a symbol can be selected at $5.00 and
   refused at $4.755. Decide which of the two is authoritative.
 - Deployment stop latency is still not measured, from the 06:08 deployment.
+
+## Added after the 10:30 run
+
+Unit B is larger than a probation sample floor and needs its own unit: `trend-follow-20260824-001`
+was returned to probation five times in 45 minutes and reached `probation_restarts: 5` against
+`MAX_PROBATION_RESTARTS = 3`, so the restart cap is not binding on that path. That is a livelock,
+not a slow promotion, and it is the mechanism behind the library's long-standing zero-ACTIVE
+state, so it blocks the RSI work the same way this staleness classification does.
+
+Unit C is structural rather than incidental. All four stale cycles of the 09:30-10:30 session are
+BIL, a bond ETF whose prints sit 20 to 34 minutes apart in the first hour after an overnight
+close. Four of BIL's eight cycles exceeded the 900 s limit, so `SESSION_QUOTE_NOT_FRESH` cannot
+pass with BIL in `AUTOPOIESIS_SYMBOLS`. Three of those were `HOLD 0` with no strategy recorded as
+`REJECTED` rather than `SKIPPED`, because Guardian checks staleness before the HOLD branch, which
+would independently trip `SESSION_PROVENANCE_INVALID`. Unit C therefore has to decide two things,
+not one: what a correctly-refused stale abstention means for the gate, and whether a configured
+symbol whose instrument cannot quote inside the freshness limit belongs in the configured symbol
+list at all. Neither may be answered by loosening `stale_after_seconds`.
