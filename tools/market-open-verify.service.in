@@ -1,0 +1,14 @@
+[Unit]
+Description=Read-only paper market session evidence
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+EnvironmentFile=@ENVFILE@
+Environment=PYTHONPATH=@ROOT@/src
+Environment=PATH=@PYTHONDIR@:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/make --no-print-directory -C @ROOT@ market-open-verify PY=@PYTHON@ ENVFILE=@ENVFILE@ EXPECTED_FINGERPRINT=@FINGERPRINT@ SCHEDULED=1 DEPLOYMENT_AFTER=@AFTER@
+TimeoutStartSec=1200
+UMask=0077
+Nice=10

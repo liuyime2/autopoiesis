@@ -1,0 +1,12 @@
+[Unit]
+Description=Observe actual paper session evidence after the New York open
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 09:45:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 10:30:00 America/New_York
+AccuracySec=30s
+Persistent=true
+Unit=market-open-verify.service
+
+[Install]
+WantedBy=timers.target

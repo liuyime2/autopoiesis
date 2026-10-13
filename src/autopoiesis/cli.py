@@ -345,9 +345,13 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
     return daemon.run(max_cycles=max_cycles)
 
 
-def _build_agent_daemon(config: AgentConfig, client) -> AgentDaemon:
+def _build_agent_daemon(
+    config: AgentConfig, client, *, journal: JsonlJournal | None = None,
+) -> AgentDaemon:
     """Assemble the production pipeline without running or reconciling it."""
-    journal = JsonlJournal(config.journal_path)
+    if journal is not None and journal.path.resolve() != config.journal_path.resolve():
+        raise ValueError("supplied journal path does not match agent configuration")
+    journal = journal if journal is not None else JsonlJournal(config.journal_path)
     strategy_library = StrategyLibrary(config.strategy_dir)
     knowledge_library = KnowledgeLibrary(config.knowledge_dir)
     reflection_memory = ReflectionMemory(config.journal_path.parent / "reflection.json")

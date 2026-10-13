@@ -594,3 +594,36 @@ research-check-tape:
 	@test -n "$(SPEC)" || (echo "SPEC=<path to a .spec file> is required" >&2; exit 2)
 	@test -n "$(REPLAY_CACHE)" || (echo "REPLAY_CACHE=<bar cache dir> is required" >&2; exit 2)
 	@$(PY) tools/check_research_tape.py "$(SPEC)" "$(REPLAY_CACHE)" --symbol "$(REPLAY_SYMBOL)" --registry "$(PREREGISTRY)"
+
+# Read-only observations of the actual paper process. Required source identity is
+# deliberately supplied by the operator; it is never inferred into a passing verdict.
+EXPECTED_FINGERPRINT ?=
+DEPLOYMENT_AFTER ?=
+READINESS_OUTPUT ?=
+SCHEDULED ?= 0
+READINESS_ROOT ?= $(CURDIR)
+READINESS_PYTHON ?=
+READINESS_ENVFILE ?= $(ENVFILE)
+READINESS_UNIT_DIR ?= $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/systemd/user
+export EXPECTED_FINGERPRINT DEPLOYMENT_AFTER DATE READINESS_OUTPUT SCHEDULED
+export READINESS_ROOT READINESS_PYTHON READINESS_ENVFILE READINESS_UNIT_DIR
+
+.PHONY: market-preflight market-open-verify source-fingerprint install-readiness-timers
+market-preflight:
+	@$(PY) -c 'import os, runpy, sys; assert os.environ["SCHEDULED"] in {"0", "1"}, "SCHEDULED must be 0 or 1"; args = ["--phase", "preopen", "--expected-fingerprint", os.environ["EXPECTED_FINGERPRINT"]]; args += ["--session-date", os.environ["DATE"]] if os.environ.get("DATE") else []; args += ["--output", os.environ["READINESS_OUTPUT"]] if os.environ.get("READINESS_OUTPUT") else []; args += ["--scheduled"] if os.environ["SCHEDULED"] == "1" else []; sys.exit(runpy.run_path("tools/market_readiness.py")["main"](args))'
+
+market-open-verify:
+	@$(PY) -c 'import os, runpy, sys; assert os.environ["SCHEDULED"] in {"0", "1"}, "SCHEDULED must be 0 or 1"; args = ["--phase", "open", "--expected-fingerprint", os.environ["EXPECTED_FINGERPRINT"]]; args += ["--after", os.environ["DEPLOYMENT_AFTER"]] if os.environ.get("DEPLOYMENT_AFTER") else []; args += ["--session-date", os.environ["DATE"]] if os.environ.get("DATE") else []; args += ["--output", os.environ["READINESS_OUTPUT"]] if os.environ.get("READINESS_OUTPUT") else []; args += ["--scheduled"] if os.environ["SCHEDULED"] == "1" else []; sys.exit(runpy.run_path("tools/market_readiness.py")["main"](args))'
+
+source-fingerprint:
+	@$(PY) -c 'from autopoiesis.daemon import source_fingerprint; print(source_fingerprint())'
+
+# Explicitly requested installation only. Validate every substituted value before
+# rendering, verify all four units, then reload and enable the two reporting timers.
+install-readiness-timers:
+	@$(PY) tools/install_market_readiness.py
+
+# Narrow type verification for operator tools without running a repository gate.
+type-files:
+	@test -n "$(FILES)" || (echo "FILES is required" >&2; exit 2)
+	@$(CONDA_RUN) mypy $(FILES)
