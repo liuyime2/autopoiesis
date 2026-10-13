@@ -816,7 +816,7 @@ class AgentDaemon:
         ]
 
     def _curriculum_proposal(self) -> None:
-        if self.reflection_memory is None or self.curriculum_agent is None:
+        if self._stop_requested or self.reflection_memory is None or self.curriculum_agent is None:
             return
         try:
             reflection = self.reflection_memory.load()
@@ -824,33 +824,51 @@ class AgentDaemon:
                 return
             strategies = self.strategy_library.list() if self.strategy_library else []
             exploration_summary = self._recent_exploration_summary()
+            if self._stop_requested:
+                return
             self._record_no_exploration_lesson(exploration_summary)
             # Retry once on transport/connection errors — the LLM endpoint
             # (Ollama) can transiently time out under load. A single retry with
             # a 5-second backstop is sufficient; anything worse should surface
             # as a curriculum failure event for operator attention.
             try:
+                prior_rejections = self._recent_rejections()
+                open_positions = self._open_book()
+                last_price, symbol = self._last_market()
+                if self._stop_requested:
+                    return
                 task = self.curriculum_agent.propose(
                     reflection=reflection,
                     current_strategies=strategies,
                     recent_exploration_summary=exploration_summary,
-                    prior_rejections=self._recent_rejections(),
+                    prior_rejections=prior_rejections,
                     guardian_max_position_value=self.config.max_position_value,
-                    open_positions=self._open_book(),
-                    last_price=self._last_market()[0],
-                    symbol=self._last_market()[1],
+                    open_positions=open_positions,
+                    last_price=last_price,
+                    symbol=symbol,
                 )
             except (ConnectionError, TimeoutError, OSError):
+                # Keep the actual transport failure, but never start another
+                # request after stop, including a stop during preparation.
+                if self._stop_requested:
+                    raise
                 self.sleep(5)
+                if self._stop_requested:
+                    raise
+                prior_rejections = self._recent_rejections()
+                open_positions = self._open_book()
+                last_price, symbol = self._last_market()
+                if self._stop_requested:
+                    raise
                 task = self.curriculum_agent.propose(
                     reflection=reflection,
                     current_strategies=strategies,
                     recent_exploration_summary=exploration_summary,
-                    prior_rejections=self._recent_rejections(),
+                    prior_rejections=prior_rejections,
                     guardian_max_position_value=self.config.max_position_value,
-                    open_positions=self._open_book(),
-                    last_price=self._last_market()[0],
-                    symbol=self._last_market()[1],
+                    open_positions=open_positions,
+                    last_price=last_price,
+                    symbol=symbol,
                 )
             strategy_id = task.strategy_spec.strategy_id if task.strategy_spec is not None else None
             # A fallback task is a hard-coded constant, not model output. It is
@@ -878,12 +896,17 @@ class AgentDaemon:
                     "recent_exploration_summary": exploration_summary,
                 },
             )
+            if self._stop_requested:
+                return
             if task.task_type == "STRATEGY_SPEC" and task.strategy_spec and self.strategy_admission is not None:
                 # Give admission the real prices so a TREND_FOLLOW anchored to
                 # a fabricated level is rejected instead of entering the library.
                 self.strategy_admission.set_market_prices(self._last_known_prices())
+                strategy_results = self._strategy_results()
+                if self._stop_requested:
+                    return
                 result = self.strategy_admission.admit(
-                    task.strategy_spec, self._strategy_results()
+                    task.strategy_spec, strategy_results
                 )
                 self._append_event(
                     "STRATEGY_ADMISSION_REVIEWED",
@@ -893,6 +916,8 @@ class AgentDaemon:
                     task_id=task.task_id,
                     payload={"accepted": result.accepted, "reason": result.reason},
                 )
+                if self._stop_requested:
+                    return
                 # Offline validation runs on the candidate's *existing* recorded
                 # decisions, not on a replay of its rule. In this system a strategy
                 # is context handed to the model, not an executable rule, so a

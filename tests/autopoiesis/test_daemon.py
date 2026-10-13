@@ -19,6 +19,7 @@ from autopoiesis.learning_evidence import capture
 from autopoiesis.models import (
     AccountSnapshot,
     BrokerEvidenceBatch,
+    CurriculumTask,
     CycleRecord,
     DataSnapshot,
     ExecutionResult,
@@ -697,6 +698,202 @@ def test_daemon_records_curriculum_failure(tmp_path):
     assert events
     assert all(event.status == "FAILED" for event in events)
     assert events[-1].payload["error_type"] == "RuntimeError"
+
+
+@pytest.mark.parametrize(
+    ("stop_at", "proposal_count", "admission_count"),
+    [
+        ("entry", 0, 0),
+        ("reflection", 0, 0),
+        ("strategies", 0, 0),
+        ("summary", 0, 0),
+        ("lesson", 0, 0),
+        ("rejections", 0, 0),
+        ("book", 0, 0),
+        ("market", 0, 0),
+        ("proposal", 1, 0),
+        ("proposal_audit", 1, 0),
+        ("prices", 1, 0),
+        ("set_prices", 1, 0),
+        ("results", 1, 0),
+        ("admission", 1, 1),
+        ("admission_audit", 1, 1),
+    ],
+)
+def test_curriculum_stop_boundary_preserves_completed_audits(
+    tmp_path, monkeypatch, stop_at, proposal_count, admission_count
+):
+    """Synthetic stage stops retain real local results without starting later stages."""
+    task = CurriculumTask(
+        task_id="synthetic-stop-task", task_type="STRATEGY_SPEC",
+        summary="synthetic boundary proposal", rationale="synthetic fixture",
+        strategy_spec=synthetic_spec("synthetic-stop-strategy"),
+    )
+    calls = []
+
+    class SyntheticCurriculum:
+        def propose(self, **kwargs):
+            calls.append(("proposal", daemon._stop_requested))
+            if stop_at == "proposal":
+                daemon.stop()
+            return task
+
+    daemon, journal, memory, library = make_daemon_with_learning(
+        tmp_path, curriculum_agent=SyntheticCurriculum()
+    )
+    daemon.loop.run_once("SPY")
+    daemon._reflect()
+    admission = daemon.strategy_admission
+    original_admit = admission.admit
+    original_append = daemon._append_event
+    original_lesson = daemon._record_no_exploration_lesson
+    lesson_calls = []
+
+    def lesson(summary):
+        lesson_calls.append(daemon._stop_requested)
+        original_lesson(summary)
+
+    def admit(*args, **kwargs):
+        calls.append(("admission", daemon._stop_requested))
+        result = original_admit(*args, **kwargs)
+        if stop_at == "admission":
+            daemon.stop()
+        return result
+
+    def append(event_type, **kwargs):
+        original_append(event_type, **kwargs)
+        if (stop_at, event_type) in {
+            ("proposal_audit", "CURRICULUM_PROPOSED"),
+            ("admission_audit", "STRATEGY_ADMISSION_REVIEWED"),
+        }:
+            daemon.stop()
+
+    monkeypatch.setattr(admission, "admit", admit)
+    monkeypatch.setattr(daemon, "_append_event", append)
+    monkeypatch.setattr(daemon, "_record_no_exploration_lesson", lesson)
+    monkeypatch.setattr(
+        daemon, "_screen_candidate",
+        lambda strategy_id: calls.append(("screen", daemon._stop_requested)),
+    )
+    preparations = {
+        "reflection": (memory, "load"),
+        "strategies": (library, "list"),
+        "summary": (daemon, "_recent_exploration_summary"),
+        "lesson": (daemon, "_record_no_exploration_lesson"),
+        "rejections": (daemon, "_recent_rejections"),
+        "book": (daemon, "_open_book"),
+        "market": (daemon, "_last_market"),
+        "prices": (daemon, "_last_known_prices"),
+        "set_prices": (admission, "set_market_prices"),
+        "results": (daemon, "_strategy_results"),
+    }
+    if stop_at in preparations:
+        owner, method = preparations[stop_at]
+        original = getattr(owner, method)
+
+        def stop_after_preparation(*args, **kwargs):
+            result = original(*args, **kwargs)
+            daemon.stop()
+            return result
+
+        monkeypatch.setattr(owner, method, stop_after_preparation)
+    elif stop_at == "entry":
+        daemon.stop()
+
+    daemon._curriculum_proposal()
+
+    expected_calls = [("proposal", False)] if proposal_count else []
+    if admission_count:
+        expected_calls.append(("admission", False))
+    assert calls == expected_calls
+    assert lesson_calls == (
+        [] if stop_at in {"entry", "reflection", "strategies", "summary"} else [False]
+    )
+    proposals = journal.read_events("CURRICULUM_PROPOSED")
+    admissions = journal.read_events("STRATEGY_ADMISSION_REVIEWED")
+    assert len(proposals) == proposal_count
+    assert len(admissions) == admission_count
+    assert not journal.read_events("CURRICULUM_FAILED")
+    if proposals:
+        assert proposals[0].status == "SUCCESS"
+        assert proposals[0].task_id == task.task_id
+        assert proposals[0].strategy_id == task.strategy_spec.strategy_id
+    if admissions:
+        assert admissions[0].status == "ACCEPTED"
+        assert admissions[0].payload["accepted"] is True
+    assert [spec.strategy_id for spec in library.list()] == (
+        [task.strategy_spec.strategy_id] if admission_count else []
+    )
+
+
+@pytest.mark.parametrize("stop_at", ["transport", "backoff", "retry_context", "none", "exhausted"])
+def test_curriculum_transport_retry_respects_stop_boundary(tmp_path, monkeypatch, stop_at):
+    """Synthetic transport failures exercise the actual structured agent's retry path."""
+    spec = synthetic_spec("synthetic-retry-strategy").model_copy(update={
+        "kind": "FIXED_SIZE", "parameters": {"action": "BUY", "quantity": 1, "confidence": 0.6},
+    })
+    task = CurriculumTask(
+        task_id="synthetic-retry-task", task_type="STRATEGY_SPEC",
+        summary="synthetic retry proposal", rationale="synthetic fixture", strategy_spec=spec,
+    )
+    calls = []
+    waits = []
+    screens = []
+
+    def transport(context):
+        calls.append(daemon._stop_requested)
+        if len(calls) == 1 or stop_at == "exhausted":
+            if stop_at == "transport":
+                daemon.stop()
+            raise TimeoutError("synthetic transport timeout")
+        return task.model_dump_json()
+
+    daemon, journal, _, library = make_daemon_with_learning(
+        tmp_path, curriculum_agent=StructuredCurriculumAgent(transport=transport)
+    )
+    daemon.loop.run_once("SPY")
+    daemon._reflect()
+
+    def backoff(seconds):
+        waits.append((seconds, daemon._stop_requested))
+        if stop_at == "backoff":
+            daemon.stop()
+
+    daemon.sleep = backoff
+    monkeypatch.setattr(daemon, "_screen_candidate", lambda strategy_id: screens.append(strategy_id))
+    original_rejections = daemon._recent_rejections
+
+    def rejections():
+        result = original_rejections()
+        if stop_at == "retry_context" and calls:
+            daemon.stop()
+        return result
+
+    monkeypatch.setattr(daemon, "_recent_rejections", rejections)
+
+    daemon._curriculum_proposal()
+
+    assert calls == ([False] if stop_at in {"transport", "backoff", "retry_context"} else [False, False])
+    assert waits == ([] if stop_at == "transport" else [(5, False)])
+    if stop_at == "none":
+        assert not journal.read_events("CURRICULUM_FAILED")
+        assert len(journal.read_events("CURRICULUM_PROPOSED")) == 1
+        reviewed = journal.read_events("STRATEGY_ADMISSION_REVIEWED")
+        assert len(reviewed) == 1
+        assert reviewed[0].status == "REJECTED"
+        assert reviewed[0].message == "curriculum progression requires HOLD_BASELINE before trading skills"
+        assert library.list() == []
+        assert screens == [spec.strategy_id]
+    else:
+        failures = journal.read_events("CURRICULUM_FAILED")
+        assert len(failures) == 1
+        assert failures[0].status == "FAILED"
+        assert failures[0].message == "synthetic transport timeout"
+        assert failures[0].payload["error_type"] == "TimeoutError"
+        assert not journal.read_events("CURRICULUM_PROPOSED")
+        assert not journal.read_events("STRATEGY_ADMISSION_REVIEWED")
+        assert library.list() == []
+        assert screens == []
 
 
 def test_daemon_computes_recent_no_exploration_summary(tmp_path):
