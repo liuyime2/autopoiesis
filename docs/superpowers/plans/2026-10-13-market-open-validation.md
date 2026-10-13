@@ -26,7 +26,7 @@ Pre-open READY means: exact verified source loaded; paper host/mode; unchanged o
 Open-session PASS requires new real journal records from the expected session, fresh real snapshots, matching decision/snapshot/strategy provenance, approved-only attributed submissions, no duplicate or unresolved intents, honest fill/feedback state, no unexpected errors and bounded risk. HOLD or no fill is not a failure, and does not prove profitable decision making. Outcomes beyond their horizon remain pending. No forced order to manufacture an execution PASS.
 
 - [x] 1. Read-only operational audit. Run `make doctor` and bounded `make broker-latency-sample COUNT=5` against the existing deployment. Inspect only nonsecret configuration, runtime paths, library readiness, model residency and next broker session. Audit service templates and all relevant consumers for shared-runtime/source correctness. Record actionable failures; market-closed and missing forward outcomes remain distinct from failures.
-- [ ] 2. Write a bounded correction plan for each measured gap before code edits. Prefer existing commands; add a read-only readiness probe only if existing tools cannot collect the required real evidence safely. Use labelled synthetic refusal tests for any new nontrivial probe; run through Make and review specification then quality. Do not create a second trading loop.
+- [x] 2. Write a bounded correction plan for each measured gap before code edits. Prefer existing commands; add a read-only readiness probe only if existing tools cannot collect the required real evidence safely. Use labelled synthetic refusal tests for any new nontrivial probe; run through Make and review specification then quality. Do not create a second trading loop.
 - [ ] 3. Prepare a concrete deployment and rollback checkpoint. Use `make journal-backup`, preserve local strategy/knowledge/configuration state without copying credentials into the repository, retain the existing user edit and old service definitions. Verify the new source against actual operator settings before stopping. Declare a single shared runtime location; avoid switching to an empty worktree runtime.
 - [ ] 4. Deploy the verified repair for paper validation. Validate rendered units with systemd-analyze; use the existing Make entry for a cooperative stop/restart. Do not kill through an in-flight order, bypass PID protection or weaken Guardian. Confirm actual process-loaded fingerprint, unchanged paper/risk settings, startup reconciliation, active heartbeat and required timers. Record rollback conditions and measured stop/start timing.
 - [ ] 5. Run the real minimum loop safely. With actual clock closed, verify real data/decision/Guardian refusal and no new broker submissions; never label a synthetic test as this execution. Confirm actual installed/runtime source, valid decision metadata and local journal append/recovery. While the daemon is active, collect read-only decisions rather than run another trader. Resolve any observed fault before marking preflight READY.
@@ -107,3 +107,37 @@ Its measured baseline is 68 focused passes, but the current equity pipeline has
 no options/crypto adapter and truncation safeguards differ between trading and
 readiness. Resolve account visibility and unsupported-instrument/order-list
 boundaries before the source deployment; do not enable unsupported trading.
+
+Units 5 and 6 are accepted in 47fccb1 and e28a2f1: whole-account order completeness,
+finite numeric data and explicit equity asset boundaries passed **211** focused
+tests plus **125** safety regressions; latest recorded signed/fractional account
+context passed **7** direct and **145** related tests. Each received independent
+specification then quality approval. Actual `make smoke` at **03:48:21 EDT** read
+six us_equity long/integer holdings, complete zero open orders, ACTIVE account and
+crypto status, and options approved/trading levels 3. Options/crypto permissions
+do not supply missing adapters; XLB/XLE/XLF strategy coverage, fractional orders
+and whole-account short cover remain pending in the asset-scope evidence document.
+
+Final combined source review through e28a2f1 approved without blockers, but the
+subsequent actual full check found **1 failed / 1,693 passed / 6 skipped / 1 warning
+in 210.38s**. This supersedes the earlier passing full result for final acceptance.
+The stale recorded D1 audit is fixed in b4e7253: independent specification and
+quality each ran **25** governance tests and the retained **62/62** defect checks.
+The writer-thread warning is a separate test acceptance gap, planned in
+`2026-10-13-bounded-durability-verification.md`; it remains pending until its own
+review and the new frozen whole-suite run. Deployment steps 4–6 are still pending.
+
+Additional read-only actual library inventory through a temporary Make `--eval`
+recipe using the existing `StrategyLibrary.list()` against the main runtime returned
+**79 parsed / 0 rejected** (BASELINE 1, PROBATION 22, PAUSED 41, RETIRED 15).
+Private result: `/tmp/autopoiesis-strategy-inventory-20261013.json`. No files were
+moved or repaired. Nested historical quarantine files are outside the loader's
+root-only glob; a broader filesystem count is not a current parse-failure count.
+
+Unit 8 is accepted in 2fe3bb4: the corrected bounded journal test requires thirty
+completed appends/scans and worker termination; a synthetic writer timeout now
+fails rather than producing a passing warning. Related regressions **83 passed**,
+independent specification **28 passed in 2.97s**, subsequent quality **28 passed
+in 3.03s**. Production locks are unchanged. All eight bounded units have written
+targets and two-stage reviews; final combined re-review and the new whole-suite,
+fresh clone and CI remain required before deployment.
