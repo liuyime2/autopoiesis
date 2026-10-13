@@ -82,7 +82,11 @@ def lesson_effects(
     shown_by: dict[str, list[float]] = {}
     withheld_by: dict[str, list[float]] = {}
     days_by: dict[str, set[str]] = {}
+    from autopoiesis.learning_evidence import eligible
+
     for record in records:
+        if not eligible(record):
+            continue
         decision = record.decision
         if decision.decision_source != "llm" or decision.lesson_ids is None:
             continue
@@ -117,6 +121,37 @@ def lesson_effects(
 class KnowledgeLibrary:
     def __init__(self, directory: Path | str):
         self.directory = Path(directory)
+        self._verified_journal_sources: dict[str, CycleRecord] = {}
+        self._verified_lessons: dict[str, str] = {}
+
+    def verify_journal_sources(self, records: Sequence[CycleRecord]) -> None:
+        """Refresh once per maintenance, never scan the journal in a trading cycle."""
+        self._verified_journal_sources = {r.cycle_id: r for r in records}
+        self._verified_lessons = {}
+        for artifact in self.list(status="ACCEPTED"):
+            self.verify_lesson(artifact)
+
+    def journal_source_digest(self, refs: tuple[str, ...]) -> str | None:
+        from autopoiesis.learning_evidence import source_digest
+
+        return source_digest(refs, self._verified_journal_sources)
+
+    def verify_lesson(self, artifact: KnowledgeArtifact) -> None:
+        from autopoiesis.learning_evidence import ELIGIBILITY_VERSION
+
+        digest = self.journal_source_digest(artifact.source_refs)
+        if (digest and artifact.eligibility_version == ELIGIBILITY_VERSION
+                and digest == artifact.verified_source_digest):
+            self._verified_lessons[artifact.artifact_id] = digest
+
+    def lesson_verified(self, artifact: KnowledgeArtifact) -> bool:
+        from autopoiesis.learning_evidence import ELIGIBILITY_VERSION
+
+        if artifact.source_kind != "journal":
+            return True
+        return bool(artifact.eligibility_version == ELIGIBILITY_VERSION
+                    and artifact.verified_source_digest
+                    and self._verified_lessons.get(artifact.artifact_id) == artifact.verified_source_digest)
 
     def save(self, artifact: KnowledgeArtifact) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)

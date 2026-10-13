@@ -2,6 +2,8 @@ import os
 from dataclasses import replace
 from datetime import datetime, timezone
 
+from synthetic_evidence import synthetic_spec
+
 from autopoiesis.config import AgentConfig
 from autopoiesis.curriculum import StructuredCurriculumAgent
 from autopoiesis.daemon import AgentDaemon, DaemonAlreadyRunningError
@@ -10,6 +12,7 @@ from autopoiesis.health import HealthMonitor
 from autopoiesis.journal import JsonlJournal
 from autopoiesis.knowledge_admission import KnowledgeAdmission
 from autopoiesis.knowledge_library import KnowledgeLibrary
+from autopoiesis.learning_evidence import capture
 from autopoiesis.models import (
     AccountSnapshot,
     BrokerEvidenceBatch,
@@ -60,7 +63,7 @@ def config(tmp_path, *, symbols=("SPY",), interval=1):
 
 
 class FakeLoop:
-    def __init__(self, journal=None, strategy_id=None, action="HOLD", quantity=0, status="SKIPPED", confidence=0.1):
+    def __init__(self, journal=None, strategy_id=None, action="HOLD", quantity=0, status="SKIPPED", confidence=0.1, strategy_spec=None):
         self.symbols = []
         self.journal = journal
         self.strategy_id = strategy_id
@@ -68,6 +71,8 @@ class FakeLoop:
         self.quantity = quantity
         self.status = status
         self.confidence = confidence
+        # Synthetic selected behavior is explicitly part of this fixture.
+        self.strategy_spec = strategy_spec or (synthetic_spec(strategy_id) if strategy_id else None)
 
     def run_once(self, symbol):
         self.symbols.append(symbol)
@@ -84,7 +89,7 @@ class FakeLoop:
         record = CycleRecord(
             cycle_id=f"cycle-{len(self.symbols)}",
             snapshot=snapshot,
-            decision=TradeDecision(symbol=symbol, action=self.action, quantity=self.quantity, confidence=self.confidence, rationale="test", strategy_id=self.strategy_id),
+            decision=TradeDecision(symbol=symbol, action=self.action, quantity=self.quantity, confidence=self.confidence, rationale="test", strategy_id=self.strategy_id, strategy_provenance=capture(self.strategy_spec) if self.strategy_spec else None),
             guardian=GuardianResult(approved=True, reason="approved"),
             execution=ExecutionResult(status=self.status, order_id=None, filled_quantity=0, message="test"),
             strategy_id=self.strategy_id,
@@ -101,7 +106,7 @@ class FailingLoop:
 
 class FailingReflectionMemory(ReflectionMemory):
     def reflect(self, records, evidence=None, fills=None, seeded_fills=None,
-                cumulative_cycles=None, cumulative_trade_attempts=None):
+                cumulative_cycles=None, cumulative_trade_attempts=None, full_records=None):
         raise RuntimeError("reflection boom")
 
 
@@ -513,11 +518,12 @@ def _scored_cycle(cycle_id, *, price, horizon_price, hours_ago=48):
     )
 
     def _record(cid, snap):
+        spec = _spec("s1").model_copy(update={"parameters": {"action": "BUY", "quantity": 1, "confidence": .7}})
         return CycleRecord(
             cycle_id=cid,
             snapshot=snap,
             decision=TradeDecision(
-                symbol="SPY", action="BUY", quantity=1, confidence=0.7, rationale="t", strategy_id="s1"
+                symbol="SPY", action="BUY", quantity=1, confidence=0.7, rationale="t", strategy_id="s1", strategy_provenance=capture(spec)
             ),
             guardian=GuardianResult(approved=True, reason="approved"),
             execution=ExecutionResult(
@@ -787,7 +793,7 @@ def test_daemon_persists_lifecycle_updates(tmp_path):
             rationale="test",
         )
     )
-    loop = FakeLoop(journal=journal, strategy_id="trial", action="BUY", quantity=1, status="SUBMITTED", confidence=0.8)
+    loop = FakeLoop(journal=journal, strategy_id="trial", action="BUY", quantity=1, status="SUBMITTED", confidence=0.8, strategy_spec=strategy_library.load("trial"))
     daemon = AgentDaemon(
         config=cfg,
         loop=loop,
@@ -818,6 +824,9 @@ def test_daemon_persists_lifecycle_updates(tmp_path):
         timestamp=_dt.now(tz=_tz.utc), status="SUCCESS",
         message="screened", strategy_id="trial",
         payload={"strategy_id": "trial", "verdict": "PASS_SCREENED",
+                 "eligibility_version": 1,
+                 "strategy_provenance": capture(strategy_library.load("trial")).model_dump(mode="json"),
+                 "source_cycle_ids": ["cycle-1"],
                  "reason": "screened", "scored": 12, "good_holds": 9,
                  "good_hold_ratio": 0.75},
     ))
@@ -1184,6 +1193,7 @@ def test_the_lesson_that_is_published_quotes_the_day_adjusted_margin(tmp_path, m
         "decision": TradeDecision(
             symbol="SPY", action="HOLD", quantity=0, confidence=0.6, rationale="r",
             strategy_id="hold-strategy", decision_source="llm",
+            strategy_provenance=capture(synthetic_spec("hold-strategy")),
         ),
     })
     journal.append(llm_record)

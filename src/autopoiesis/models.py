@@ -544,13 +544,9 @@ class PnLEvidence(BaseModel):
     #: `market_return_pct` above, is what `strategy_excess_vs_market_pct` subtracts.
     strategy_market_return_pct: dict[str, float] = Field(default_factory=dict)
     #: Per strategy, `strategy_return_pct` minus `strategy_market_return_pct`. This is the
-    #: project's success metric and nothing else reported it: the promotion gate
-    #: screens on decision quality, which the counterfactual ledger measures, and
-    #: that ledger cannot see this number by construction - a trade's return there
-    #: is holding from the same instant less cost, so every decision shows an excess
-    #: of exactly the assumed cost over holding. See
-    #: The holding benchmark's denominator was corrected in the archive's dated log; the
-    #: current definition is in `evaluator.py`.
+    #: per-strategy peak-exposure diagnostic. Its denominator and exposure window
+    #: do not establish portfolio alpha or the project's profitability target.
+    #: The current diagnostic definition is in `evaluator.py`.
     strategy_excess_vs_market_pct: dict[str, float] = Field(default_factory=dict)
     unattributed_pnl: float | None = None
     window_start: datetime | None = None
@@ -602,6 +598,16 @@ class PnLEvidence(BaseModel):
         if source == "missing":
             return source
         return _require_real_source(source)
+
+
+class StrategyProvenance(BaseModel):
+    """Immutable decision-time behavior; lifecycle changes do not alter it."""
+
+    model_config = ConfigDict(frozen=True)
+    strategy_id: str
+    universe: tuple[str, ...]
+    behavior_json: str
+    behavior_digest: str
 
 
 class StrategySpec(BaseModel):
@@ -753,6 +759,8 @@ class KnowledgeArtifact(BaseModel):
     created_at: datetime
     status: KnowledgeArtifactStatus = "PROPOSED"
     rationale: str = Field(min_length=1)
+    eligibility_version: int = 0
+    verified_source_digest: str | None = None
 
     @field_validator("artifact_id")
     @classmethod
@@ -799,6 +807,9 @@ class StrategyEvaluation(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     strategy_id: str = Field(min_length=1)
+    eligibility_version: int = 0
+    strategy_provenance: StrategyProvenance | None = None
+    source_cycle_ids: tuple[str, ...] = ()
     cycles: int = Field(ge=0)
     #: Cycles this strategy was selected for across the whole journal, as opposed to
     #: `cycles`, which counts only the reflection window. See `StrategyResult` for why
@@ -836,6 +847,9 @@ class StrategyEvaluation(BaseModel):
 
 
 class EvaluationReport(BaseModel):
+    raw_cumulative_cycles: dict[str, int] = Field(default_factory=dict)
+    raw_cumulative_trade_attempts: dict[str, int] = Field(default_factory=dict)
+    learning_exclusions: dict[str, int] = Field(default_factory=dict)
     model_config = ConfigDict(frozen=True)
 
     generated_at: datetime
@@ -880,6 +894,8 @@ class StrategyResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     strategy_id: str = Field(min_length=1)
+    eligibility_version: int = 0
+    behavior_digest: str | None = None
     #: Cycles this strategy was selected for, **within the reflection window**.
     #: This is a freshness measure: error and rejection rates, the score and the
     #: exploration floor are all recent-behaviour judgements and belong here.
@@ -1027,6 +1043,7 @@ class TradeDecision(BaseModel):
     confidence: float = Field(ge=0, le=1)
     rationale: str = Field(min_length=1)
     strategy_id: str | None = None
+    strategy_provenance: StrategyProvenance | None = None
     #: Which model produced this decision, e.g. "qwen3.8:27b".
     #:
     #: This is provenance, and it was missing. Every decision recorded

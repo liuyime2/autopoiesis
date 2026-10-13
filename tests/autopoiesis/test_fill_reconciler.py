@@ -17,6 +17,7 @@ cannot evolve no matter how the reward function is shaped.
 from datetime import datetime, timezone
 
 import pytest
+from synthetic_evidence import synthetic_clean_record
 
 from autopoiesis.evaluator import PNL_EVIDENCE_MISSING, DeterministicEvaluator
 from autopoiesis.fill_reconciler import FILL_EVENT, FillReconciler
@@ -59,7 +60,7 @@ class FakeClient:
 
 
 def _submitted_cycle(coid, strategy_id="buyer", quantity=2, symbol="SPY", action="BUY"):
-    return CycleRecord(
+    return synthetic_clean_record(CycleRecord(
         cycle_id=f"c-{coid}",
         snapshot=DataSnapshot(
             symbol=symbol,
@@ -83,7 +84,7 @@ def _submitted_cycle(coid, strategy_id="buyer", quantity=2, symbol="SPY", action
             message="new",
         ),
         strategy_id=strategy_id,
-    )
+    ))
 
 
 @pytest.fixture

@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 import pytest
+from synthetic_evidence import synthetic_clean_record
 
 from autopoiesis.evaluator import (
     PNL_EVIDENCE_ACCOUNT_VERIFIED,
@@ -52,7 +53,7 @@ def make_record(
             daily_loss=0,
         ),
     )
-    return CycleRecord(
+    return synthetic_clean_record(CycleRecord(
         cycle_id=cycle_id,
         snapshot=snapshot,
         decision=TradeDecision(
@@ -73,7 +74,7 @@ def make_record(
         ),
         strategy_id=strategy_id,
         error=error,
-    )
+    ))
 
 
 def test_evaluator_empty_window_reports_missing_pnl_evidence():
@@ -574,7 +575,8 @@ def test_verified_pnl_reaches_the_metrics_layer_without_cycles_in_the_window():
         ),
     )
 
-    report = DeterministicEvaluator().evaluate([closed], evidence=evidence)
+    opened = make_record(cycle_id="old-buy", action="BUY", quantity=1, strategy_id="opener", last_price=700)
+    report = DeterministicEvaluator().evaluate([closed], evidence=evidence, full_records=[opened, closed])
 
     metrics = report.strategy_metrics
     assert metrics["opener"].realized_pnl == 100.0

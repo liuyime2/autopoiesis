@@ -29,6 +29,7 @@ from autopoiesis.health import HealthMonitor
 from autopoiesis.journal import JsonlJournal
 from autopoiesis.knowledge_admission import KnowledgeAdmission
 from autopoiesis.knowledge_library import lesson_effects
+from autopoiesis.learning_evidence import ELIGIBILITY_VERSION, capture, valid_provenance
 from autopoiesis.loop import FAIL_CLOSED_RATIONALE
 from autopoiesis.models import (
     BrokerEvidenceBatch,
@@ -365,7 +366,7 @@ class AgentDaemon:
         if self.cycle_count % self.curriculum_every == 0 and self.curriculum_agent is not None:
             self._curriculum_proposal()
 
-    def _cumulative_cycles_by_strategy(self) -> tuple[dict[str, int], dict[str, int]]:
+    def _cumulative_cycles_by_strategy(self, records=None) -> tuple[dict[str, int], dict[str, int]]:
         """Lifetime service per strategy: cycles served, and BUY/SELL decisions made.
 
         The reflection window is `reflection_window` records - 50 by default, about
@@ -384,7 +385,7 @@ class AgentDaemon:
         attempts: dict[str, int] = {}
         if self.journal is None:
             return cycles, attempts
-        for record in self.journal.read_all():
+        for record in self.journal.read_all() if records is None else records:
             strategy_id = record.decision.strategy_id
             if not strategy_id:
                 continue
@@ -398,15 +399,19 @@ class AgentDaemon:
         if self.journal is None or self.reflection_memory is None:
             return
         try:
-            recent = self.journal.last_n(self.config.reflection_window)
-            cumulative_cycles, cumulative_trade_attempts = self._cumulative_cycles_by_strategy()
+            full_records = self.journal.read_all()
+            if self.knowledge_admission is not None:
+                self.knowledge_admission.knowledge_library.verify_journal_sources(full_records)
+            recent = full_records[-self.config.reflection_window:]
+            cumulative_cycles, cumulative_trade_attempts = self._cumulative_cycles_by_strategy(full_records)
             reflection = self.reflection_memory.reflect(
                 recent,
                 evidence=evidence,
                 fills=self._confirmed_fills(),
-                seeded_fills=self._confirmed_fill_activities(),
+                seeded_fills=self._confirmed_fill_activities(full_records),
                 cumulative_cycles=cumulative_cycles,
                 cumulative_trade_attempts=cumulative_trade_attempts,
+                full_records=full_records,
             )
             self.reflection_memory.save(reflection)
             self._append_event(
@@ -437,7 +442,7 @@ class AgentDaemon:
             )
 
     def _screen_candidate(
-        self, strategy_id: str, *, _events=None, _latest_payloads=None, _day_up=None
+        self, strategy_id: str, *, _events=None, _latest_payloads=None, _day_up=None, _spec=None
     ) -> None:
         """Screen a candidate on the decisions it has actually produced.
 
@@ -463,11 +468,15 @@ class AgentDaemon:
         if self.journal is None:
             return
         try:
+            spec = _spec or next((s for s in self.strategy_library.list() if s.strategy_id == strategy_id), None) if self.strategy_library else None
             decisions = offline_validation.collect_decisions(
                 self.journal.read_events("COUNTERFACTUAL_EVALUATED")
                 if _events is None else _events,
                 strategy_id,
+                strategy=spec,
             )
+            if spec is None:
+                decisions = []
             result = offline_validation.validate(
                 decisions, strategy_id=strategy_id, day_up=_day_up
             )
@@ -481,6 +490,11 @@ class AgentDaemon:
             )
             return
         payload = result.to_payload()
+        payload.update({
+            "eligibility_version": ELIGIBILITY_VERSION,
+            "strategy_provenance": capture(spec).model_dump(mode="json") if spec else None,
+            "source_cycle_ids": [d.cycle_id for d in decisions],
+        })
         if _latest_payloads is not None and _latest_payloads.get(strategy_id) == payload:
             return
         self._append_event(
@@ -521,6 +535,7 @@ class AgentDaemon:
         if self.journal is None:
             return {}
         latest: dict[str, object] = {}
+        current = {s.strategy_id: capture(s).behavior_digest for s in self.strategy_library.list()} if self.strategy_library else {}
         try:
             events = (
                 _validation
@@ -531,6 +546,13 @@ class AgentDaemon:
             return {}
         for event in events:
             if not event.strategy_id:
+                continue
+            p = valid_provenance(event.payload.get("strategy_provenance"))
+            if (event.payload.get("eligibility_version") != ELIGIBILITY_VERSION or p is None
+                    or p.strategy_id != event.strategy_id
+                    or current.get(event.strategy_id) != p.behavior_digest
+                    or (event.payload.get("scored", 0) and not event.payload.get("source_cycle_ids"))):
+                latest.pop(event.strategy_id, None)
                 continue
             latest[event.strategy_id] = offline_validation.OfflineValidationResult.from_payload(
                 event.strategy_id, event.payload, event.event_id
@@ -570,17 +592,21 @@ class AgentDaemon:
             self._screen_candidate(
                 spec.strategy_id, _events=events, _latest_payloads=latest_payloads,
                 _day_up=day_up,
+                _spec=spec,
             )
 
-    def _recorded_counterfactual_verdicts(self, events) -> dict[str, str]:
+    def _recorded_counterfactual_verdicts(self, events) -> dict[str, tuple]:
         """The verdict last journalled for each cycle, as `{cycle_id: verdict}`."""
-        recorded: dict[str, str] = {}
+        recorded: dict[str, tuple] = {}
         for event in events:
             payload = event.payload if isinstance(event.payload, dict) else {}
             for row in coerce.field_dict_tuple(payload.get("rows"), "payload.rows"):
                 cycle_id = coerce.field_str(row.get("cycle_id"), "row.cycle_id")
                 if cycle_id:
-                    recorded[cycle_id] = coerce.field_str(row.get("verdict"), "row.verdict")
+                    recorded[cycle_id] = (
+                        coerce.field_str(row.get("verdict"), "row.verdict"),
+                        row.get("eligibility_version"), row.get("eligibility"), row.get("strategy_provenance"),
+                    )
         return recorded
 
     def _record_counterfactuals(self, *, _events) -> None:
@@ -631,7 +657,9 @@ class AgentDaemon:
         fresh = [
             row
             for row in report.rows
-            if recorded.get(row.cycle_id) != row.verdict
+            if recorded.get(row.cycle_id) != (
+                row.verdict, row.eligibility_version, row.eligibility, row.strategy_provenance,
+            )
         ]
         if not fresh:
             # Every decision already carries the verdict it has now, so there is
@@ -663,6 +691,12 @@ class AgentDaemon:
                         "cycle_id": row.cycle_id,
                         "action": row.action,
                         "strategy_id": row.strategy_id,
+                        "symbol": row.symbol,
+                        "decision_symbol": row.decision_symbol,
+                        "decision_strategy_id": row.decision_strategy_id,
+                        "strategy_provenance": row.strategy_provenance,
+                        "eligibility_version": row.eligibility_version,
+                        "eligibility": row.eligibility,
                         "decided_at": row.decided_at.isoformat(),
                         "price_at_decision": row.price_at_decision,
                         "price_at_horizon": row.price_at_horizon,
@@ -861,6 +895,8 @@ class AgentDaemon:
         validation_events = None
         self._appended = []
         if self.journal is not None:
+            if self.knowledge_admission is not None:
+                self.knowledge_admission.knowledge_library.verify_journal_sources(self.journal.read_all())
             self._record_pnl_evidence(evidence)
             self._verify_profit_target(evidence)
             # One read of the counterfactual ledger, shared. It used to be parsed
@@ -1007,10 +1043,10 @@ class AgentDaemon:
             )
             return None
 
-    def _confirmed_fill_activities(self):
+    def _confirmed_fill_activities(self, records=None):
         if self.journal is None:
             return []
-        return confirmed_fill_activities(self.journal, self.journal.read_all())
+        return confirmed_fill_activities(self.journal, self.journal.read_all() if records is None else records)
 
     def _record_pnl_evidence(self, evidence: BrokerEvidenceBatch | None) -> None:
         if self.journal is None:
@@ -1181,6 +1217,7 @@ class AgentDaemon:
         records = self.journal.read_all()
         if not records:
             return
+        self.knowledge_admission.knowledge_library.verify_journal_sources(records)
         verdicts = {
             row.cycle_id: row.verdict
             # The same symbol and cost the ledger is scored with. Left at the defaults, this
@@ -1373,7 +1410,7 @@ class AgentDaemon:
         reflection = self.reflection_memory.load()
         if reflection is None:
             return []
-        return self.reflection_memory.strategy_results(reflection)
+        return self.reflection_memory.strategy_results(reflection, self.strategy_library.list() if self.strategy_library else [])
 
     def _manage_strategy_lifecycle(self, *, _validation=None) -> None:
         if self.lifecycle_manager is None or self.strategy_library is None or self.reflection_memory is None:
@@ -1381,7 +1418,7 @@ class AgentDaemon:
         reflection = self.reflection_memory.load()
         if reflection is None:
             return
-        results = self.reflection_memory.strategy_results(reflection)
+        results = self.reflection_memory.strategy_results(reflection, self.strategy_library.list())
         # Phase 6: promotion is evidence-gated, so the lifecycle review is given the
         # offline validation verdict for each strategy. Without this the gate would
         # see "no evidence" for everyone and block every promotion permanently -

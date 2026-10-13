@@ -46,7 +46,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
+from autopoiesis.learning_evidence import ELIGIBILITY_VERSION, eligibility
 from autopoiesis.models import CycleRecord
 
 #: The authoritative verdict set. This module produces these, so it owns them.
@@ -141,6 +143,11 @@ class CounterfactualRow:
     #: Probe value, in percent, of the action taken minus the rule's action: what departing
     #: from the rule was worth. Zero when they agree; None when unpaired or unscored.
     override_value_pct: float | None = None
+    eligibility_version: int = ELIGIBILITY_VERSION
+    eligibility: str = "UNKNOWN_PROVENANCE"
+    strategy_provenance: dict | None = None
+    decision_strategy_id: str | None = None
+    decision_symbol: str | None = None
 
     @property
     def pending(self) -> bool:
@@ -206,14 +213,13 @@ class CounterfactualReport:
 
 
 def _price_series(records: list[CycleRecord], symbol: str) -> list[tuple[datetime, float, CycleRecord]]:
-    """Real quotes for `symbol`, in observation order, with repeats collapsed.
+    """Timestamped real quotes, independent of decision attribution and price moves.
 
-    A quote identical to the one before it is not a new observation - the gateway
-    is reporting the same last trade because nothing traded in between. Keeping
-    them made half the "horizons" a move of exactly zero, which is an artefact of
-    the polling interval rather than a fact about the market.
+    Equal prices at distinct times are observed zero returns. Removing them
+    conditions horizon selection on a subsequent move and can manufacture gaps.
+    Equal timestamps retain journal order; no price is averaged or invented.
     """
-    ordered = sorted(
+    return sorted(
         (
             (record.snapshot.timestamp, record.snapshot.last_price, record)
             for record in records
@@ -221,12 +227,6 @@ def _price_series(records: list[CycleRecord], symbol: str) -> list[tuple[datetim
         ),
         key=lambda item: item[0],
     )
-    series: list[tuple[datetime, float, CycleRecord]] = []
-    for item in ordered:
-        if series and series[-1][1] == item[1]:
-            continue
-        series.append(item)
-    return series
 
 
 def _horizon_quote(
@@ -293,6 +293,13 @@ def evaluate(
 
     report = CounterfactualReport()
     for index, (decided_at, price, record) in enumerate(series):
+        provenance = record.decision.strategy_provenance
+        attribution: dict[str, Any] = {
+            "eligibility": eligibility(record),
+            "strategy_provenance": provenance.model_dump(mode="json") if provenance else None,
+            "decision_strategy_id": record.decision.strategy_id,
+            "decision_symbol": record.decision.symbol,
+        }
         action = record.decision.action
         if action not in _DIRECTION:
             continue
@@ -305,6 +312,7 @@ def evaluate(
             # scored honestly is labelled, not filled in with a guess.
             report.rows.append(
                 CounterfactualRow(
+                    **attribution,
                     cycle_id=record.cycle_id, symbol=symbol, action=action,
                     quantity=int(record.decision.quantity),
                     strategy_id=record.strategy_id, decided_at=decided_at,
@@ -342,6 +350,7 @@ def evaluate(
 
         report.rows.append(
             CounterfactualRow(
+                **attribution,
                 cycle_id=record.cycle_id, symbol=symbol, action=action,
                 quantity=int(record.decision.quantity),
                 strategy_id=record.strategy_id, decided_at=decided_at,

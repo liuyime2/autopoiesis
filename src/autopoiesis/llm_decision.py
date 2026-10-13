@@ -10,10 +10,12 @@ import requests
 
 from autopoiesis import coerce, regime
 from autopoiesis.coerce import is_number
+from autopoiesis.learning_evidence import capture
 from autopoiesis.models import (
     DataSnapshot,
     KnowledgeArtifact,
     NewsItem,
+    StrategyProvenance,
     TradeDecision,
 )
 
@@ -274,6 +276,8 @@ class HybridDecisionEngine:
         self.last_news_error: str | None = None
         #: The selected strategy's own decision for the snapshot `_context` last built.
         self._rule_decision: TradeDecision | None = None
+        self._selected_spec = None
+        self._selected_provenance: StrategyProvenance | None = None
         #: (shown, withheld) lesson ids for the snapshot `_context` last built.
         self._lesson_split: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
 
@@ -322,12 +326,22 @@ class HybridDecisionEngine:
             update["rule_action"] = rule.action
         if decision.action == (rule.action if rule is not None else decision.action):
             update["override_reason"] = None
-        if isinstance(selected, str) and selected and not decision.strategy_id:
-            update["strategy_id"] = selected
+        update["strategy_id"] = selected
+        update["strategy_provenance"] = self._selected_provenance
         return decision.model_copy(update=update)
 
     def _fallback(self, snapshot: DataSnapshot, reason: str) -> TradeDecision:
-        decision = self.policy_engine.decide_snapshot(snapshot)
+        if self._rule_decision is not None:
+            decision = self._rule_decision
+        elif self._selected_spec is not None:
+            decision = TradeDecision(
+                symbol=snapshot.symbol, action="HOLD", quantity=0, confidence=0,
+                rationale="selected strategy could not produce a fallback decision",
+                strategy_id=self._selected_spec.strategy_id,
+                strategy_provenance=self._selected_provenance,
+            )
+        else:
+            decision = self.policy_engine.decide_snapshot(snapshot)
         return decision.model_copy(
             update={
                 "decision_source": "fallback_policy_engine",
@@ -345,10 +359,13 @@ class HybridDecisionEngine:
         strategy_id = None
         selected_spec = None
         self._rule_decision = None
+        self._selected_spec = None
+        self._selected_provenance = None
         try:
+            strategies = self.policy_engine.strategy_library.list()
             selected = self.policy_engine.selector.select(
-                self.policy_engine.strategy_library.list(),
-                self._results(),
+                strategies,
+                self._results(strategies),
                 # Coverage is evaluated at the real price, not on paper. A
                 # TREND_FOLLOW nominally covers both sides but only emits the one
                 # its reference price points at, and the live one is anchored to a
@@ -369,14 +386,9 @@ class HybridDecisionEngine:
             )
             if selected is not None:
                 strategy_id = selected.strategy_id
-                selected_spec = next(
-                    (
-                        strategy
-                        for strategy in self.policy_engine.strategy_library.list()
-                        if strategy.strategy_id == selected.strategy_id
-                    ),
-                    None,
-                )
+                selected_spec = selected
+                self._selected_spec = selected
+                self._selected_provenance = capture(selected)
         except Exception:
             strategy_id = None
         executor = getattr(self.policy_engine, "executor", None)  # no executor, no rule to run
@@ -721,7 +733,9 @@ class HybridDecisionEngine:
         if self.lessons is None or strategy_id is None:
             return []
         try:
-            return list(self.lessons(strategy_id))[: self.max_lessons]
+            library = getattr(self.policy_engine, "knowledge_library", None)
+            return [a for a in self.lessons(strategy_id)
+                    if a.source_kind != "journal" or (library is not None and library.lesson_verified(a))][: self.max_lessons]
         except Exception:
             return []
 
@@ -743,11 +757,11 @@ class HybridDecisionEngine:
         except (TypeError, ValueError):
             return None
 
-    def _results(self):
+    def _results(self, strategies=None):
         engine = self.policy_engine
         if engine.reflection_memory is None:
             return []
         record = engine.reflection_memory.load()
         if record is None:
             return []
-        return engine.reflection_memory.strategy_results(record)
+        return engine.reflection_memory.strategy_results(record, strategies if strategies is not None else engine.strategy_library.list())

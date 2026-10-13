@@ -50,7 +50,7 @@ class PolicyEngine:
         if self.reflection_memory is not None:
             reflection = self.reflection_memory.load()
             if reflection is not None:
-                results = self.reflection_memory.strategy_results(reflection)
+                results = self.reflection_memory.strategy_results(reflection, strategies)
 
         # The same arguments the LLM path selects with, so the fallback cannot serve a
         # different strategy than the model would have been asked about. It omitted the
@@ -127,7 +127,7 @@ class PolicyEngine:
             artifacts = self.knowledge_library.list(status="ACCEPTED")
         except Exception:
             return []
-        lessons = [a for a in artifacts if a.artifact_type == "LESSON"]
+        lessons = [a for a in artifacts if a.artifact_type == "LESSON" and self.knowledge_library.lesson_verified(a)]
         # Deduplicate before truncating, not after. Slicing first meant the five
         # lesson slots were filled by the first five artifacts in library order,
         # and this library's order is dominated by one statement - so the decision

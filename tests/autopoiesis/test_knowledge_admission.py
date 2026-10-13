@@ -45,6 +45,9 @@ def test_knowledge_admission_rejects_duplicate_artifact_id(tmp_path):
 def test_knowledge_admission_accepts_cited_journal_artifact(tmp_path):
     library = KnowledgeLibrary(tmp_path / "knowledge")
     admission = KnowledgeAdmission(knowledge_library=library)
+    from test_calibration import _record
+
+    library.verify_journal_sources([_record("cycle-1", .6)])  # Explicit synthetic citation.
 
     result = admission.admit(make_artifact(artifact_id="lesson-one", source_kind="journal", source_refs=("cycle-1",)))
 

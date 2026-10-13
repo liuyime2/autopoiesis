@@ -13,6 +13,7 @@ from autopoiesis.models import (
     CycleRecord,
     ReflectionRecord,
     StrategyResult,
+    StrategySpec,
 )
 
 
@@ -28,6 +29,7 @@ class ReflectionMemory:
         seeded_fills: Sequence[BrokerFillActivity] | None = None,
         cumulative_cycles: Mapping[str, int] | None = None,
         cumulative_trade_attempts: Mapping[str, int] | None = None,
+        full_records: list[CycleRecord] | None = None,
     ) -> ReflectionRecord:
         evaluation = DeterministicEvaluator().evaluate(
             records,
@@ -36,6 +38,7 @@ class ReflectionMemory:
             seeded_fills=seeded_fills,
             cumulative_cycles=cumulative_cycles,
             cumulative_trade_attempts=cumulative_trade_attempts,
+            full_records=full_records,
         )
         strategy_metrics = {
             sid: ev.model_dump(mode="json") for sid, ev in evaluation.strategy_metrics.items()
@@ -70,13 +73,25 @@ class ReflectionMemory:
             return None
         return ReflectionRecord.model_validate_json(self.path.read_text(encoding="utf-8"))
 
-    def strategy_results(self, record: ReflectionRecord) -> list[StrategyResult]:
+    def strategy_results(
+        self, record: ReflectionRecord, strategies: list[StrategySpec] | None = None,
+    ) -> list[StrategyResult]:
+        from autopoiesis.learning_evidence import ELIGIBILITY_VERSION, capture, valid_provenance
+
+        current = {s.strategy_id: capture(s).behavior_digest for s in strategies or []}
+        results = []
         if record.strategy_metrics:
-            results = []
             for strategy_id, metrics in record.strategy_metrics.items():
+                p = valid_provenance(metrics.get("strategy_provenance"))
+                if (metrics.get("eligibility_version") != ELIGIBILITY_VERSION or p is None
+                        or p.strategy_id != strategy_id or not metrics.get("source_cycle_ids")
+                        or (strategies is not None and current.get(strategy_id) != p.behavior_digest)):
+                    continue
                 results.append(
                     StrategyResult(
                         strategy_id=strategy_id,
+                        eligibility_version=ELIGIBILITY_VERSION,
+                        behavior_digest=p.behavior_digest,
                         cycles=coerce.field_int(metrics.get("cycles"), f"{strategy_id}.cycles"),
                         cumulative_cycles=coerce.field_int(
                             metrics.get("cumulative_cycles", 0), f"{strategy_id}.cumulative_cycles"
@@ -131,17 +146,21 @@ class ReflectionMemory:
                         ),
                     )
                 )
-            return results
-
-        return [
-            StrategyResult(
-                strategy_id=strategy_id,
-                cycles=record.window_cycles,
-                submitted_orders=record.submitted_orders,
-                rejected_orders=record.rejected_orders,
-                errors=record.error_count,
-                score=score,
-                evaluated_at=record.generated_at,
-            )
-            for strategy_id, score in record.strategy_scores.items()
-        ]
+        # Service budgets consume raw history even when learning cannot use it.
+        raw_cycles = coerce.field_count_dict(record.evaluation.get("raw_cumulative_cycles", {}), "raw_cumulative_cycles")
+        raw_attempts = coerce.field_count_dict(record.evaluation.get("raw_cumulative_trade_attempts", {}), "raw_cumulative_trade_attempts")
+        for sid, metrics in record.strategy_metrics.items():
+            # A legacy cache cannot certify learning, but discarding its recorded
+            # consumed budgets would grant a new probation allowance on upgrade.
+            raw_cycles[sid] = max(raw_cycles.get(sid, 0), coerce.field_int(metrics.get("cumulative_cycles", 0), f"{sid}.cumulative_cycles"))
+            raw_attempts[sid] = max(raw_attempts.get(sid, 0), coerce.field_int(metrics.get("cumulative_trade_attempts", 0), f"{sid}.cumulative_trade_attempts"))
+        clean = {r.strategy_id for r in results}
+        for sid, count in raw_cycles.items():
+            if sid not in clean and count > 0:
+                results.append(StrategyResult(
+                    strategy_id=sid, cycles=0, cumulative_cycles=count,
+                    cumulative_trade_attempts=raw_attempts.get(sid, 0),
+                    submitted_orders=0, rejected_orders=0, errors=0,
+                    score=0, evaluated_at=record.generated_at,
+                ))
+        return results

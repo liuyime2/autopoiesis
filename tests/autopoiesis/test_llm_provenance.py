@@ -152,7 +152,13 @@ def test_llm_receives_admitted_lessons(tmp_path):
     from autopoiesis.models import KnowledgeArtifact, TradeDecision
 
     knowledge = KnowledgeLibrary(tmp_path / "knowledge")
-    knowledge.save(
+    from test_calibration import _record
+
+    from autopoiesis.knowledge_admission import KnowledgeAdmission
+
+    knowledge.verify_journal_sources([_record("synthetic-source", .6)])
+    admission = KnowledgeAdmission(knowledge_library=knowledge)
+    admission.admit(
         KnowledgeArtifact(
             artifact_id="k1",
             artifact_type="LESSON",
@@ -161,7 +167,7 @@ def test_llm_receives_admitted_lessons(tmp_path):
             answer="a",
             summary="s1 stalls below 0.6 confidence",
             source_kind="journal",
-            source_refs=["s1"],
+            source_refs=["synthetic-source"],
             tags=["s1"],
             created_at=NOW,
             rationale="r",
@@ -873,6 +879,7 @@ def test_a_decision_is_attributed_to_the_selected_strategy():
 
     class _Spec:
         strategy_id = "exit-1"
+        symbols = ("SPY",)  # Synthetic selected universe, captured at decision time.
         kind = "FIXED_SIZE"
         parameters = {"action": "SELL", "quantity": 1, "confidence": 0.7}
         max_position_value = 1000.0

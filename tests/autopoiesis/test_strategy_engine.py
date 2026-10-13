@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from autopoiesis.learning_evidence import capture
 from autopoiesis.models import AccountSnapshot, DataSnapshot, StrategyResult, StrategySpec
 from autopoiesis.strategy_engine import (
     INCUMBENT_SHARE,
@@ -231,6 +232,7 @@ def test_lifecycle_manager_promotes_probation_after_successful_exposure():
     manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     strategy = make_spec(strategy_id="trial", kind="FIXED_SIZE", lifecycle="PROBATION", action="BUY", quantity=1)
     result = StrategyResult(strategy_id="trial", cycles=3, cumulative_cycles=3, cumulative_trade_attempts=3, submitted_orders=3, rejected_orders=0, errors=0, score=1.0, evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=3)
+    result = result.model_copy(update={"eligibility_version": 1, "behavior_digest": capture(strategy).behavior_digest})
 
     # Phase 6: this strategy has acted and has clean operational metrics, but it has
     # no verifiable outcome yet. It is not promoted - the contract requires evidence,
@@ -506,6 +508,7 @@ def test_a_served_candidate_is_judged_on_a_thin_window():
                          action="BUY", quantity=1)
     result = StrategyResult(
         strategy_id="served", cycles=2, cumulative_cycles=13, cumulative_trade_attempts=5,
+        eligibility_version=1, behavior_digest=capture(strategy).behavior_digest,
         submitted_orders=5, rejected_orders=0, errors=0, score=0.9,
         evaluated_at=datetime.now(tz=timezone.utc), trade_attempts=5,
     )
@@ -591,6 +594,7 @@ def test_lifecycle_manager_retires_broker_verified_negative_pnl():
         rejected_orders=0,
         errors=0,
         realized_pnl=-1.0,
+        eligibility_version=1, behavior_digest=capture(strategy).behavior_digest,
         pnl_evidence="broker_strategy_closed_lot_pnl_verified",
         score=0.2,
         evaluated_at=datetime.now(tz=timezone.utc),
@@ -749,6 +753,7 @@ def test_broker_verified_negative_pnl_retires_without_cycles_in_the_window():
         errors=0,
         score=0.5,
         realized_pnl=-25.0,
+        eligibility_version=1, behavior_digest=capture(strategy).behavior_digest,
         pnl_evidence=PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
     )
 
@@ -949,10 +954,11 @@ def test_verified_positive_pnl_drives_the_promotion_and_is_recorded_as_the_reaso
         trade_attempts=5,
         strategy_fault_rejections=0,
         realized_pnl=362.66,
+        eligibility_version=1, behavior_digest=capture(strategy).behavior_digest,
         pnl_evidence=PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
     )
 
-    decisions = StrategyLifecycleManager().review([strategy], [result])
+    decisions = StrategyLifecycleManager().review([strategy], [result], {strategy.strategy_id: _evidence(strategy_id=strategy.strategy_id)})
 
     assert len(decisions) == 1
     assert decisions[0].new_lifecycle == "ACTIVE"
@@ -1015,6 +1021,7 @@ def test_no_closed_lot_needs_decision_evidence_not_operational_metrics():
     )
     result = StrategyResult(
         strategy_id="no-lots",
+        eligibility_version=1, behavior_digest=capture(strategy).behavior_digest,
         evaluated_at=datetime.now(tz=timezone.utc),
         cycles=5,
         cumulative_cycles=PROBATION_CYCLES,
@@ -1339,7 +1346,7 @@ def test_a_clean_strategy_with_evidence_is_promoted():
     would silently stop the lifecycle from ever advancing."""
     manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
     [decision] = manager.review(
-        [_probation_spec()], [_clean_result()], {"p1": _evidence()}
+        [_probation_spec()], [_clean_result().model_copy(update={"eligibility_version": 1, "behavior_digest": capture(_probation_spec()).behavior_digest})], {"p1": _evidence()}
     )
 
     assert decision.new_lifecycle == "ACTIVE"
@@ -1359,10 +1366,8 @@ def test_the_gate_states_what_is_missing():
     assert reason and "not a pass" in reason
 
 
-def test_broker_verified_pnl_still_promotes_without_offline_evidence():
-    """The evidence gate supplements PnL, it does not replace it. A strategy with a
-    closed lot and verified PnL has the strongest evidence available and must not be
-    held back by a screen that has nothing to say."""
+def test_broker_verified_pnl_requires_clean_attribution_and_offline_evidence():
+    """Synthetic raw PnL labels cannot bypass attribution or the offline gate."""
     from autopoiesis.evaluator import PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
     from autopoiesis.models import StrategyResult
 
@@ -1374,10 +1379,11 @@ def test_broker_verified_pnl_still_promotes_without_offline_evidence():
         evaluated_at=datetime.now(tz=timezone.utc),
     )
     manager = StrategyLifecycleManager(min_active_cycles=3, probation_cycles=3)
-    [decision] = manager.review([_probation_spec()], [result])
-
+    assert manager.review([_probation_spec()], [result]) == []
+    clean = result.model_copy(update={"eligibility_version": 1, "behavior_digest": capture(_probation_spec()).behavior_digest})
+    assert manager.review([_probation_spec()], [clean]) == []
+    [decision] = manager.review([_probation_spec()], [clean], {"p1": _evidence()})
     assert decision.new_lifecycle == "ACTIVE"
-    assert "broker-verified realized PnL" in decision.reason
 
 
 # --- the probation queue is not served blind to whether a strategy can act ----

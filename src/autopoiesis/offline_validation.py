@@ -178,6 +178,7 @@ class OfflineValidationResult:
 def collect_decisions(
     counterfactual_events: Iterable[object],
     strategy_id: str,
+    *, strategy=None,
 ) -> list[DecisionRecord]:
     """Pull this strategy's decisions and verdicts out of the journalled rows.
 
@@ -186,13 +187,19 @@ def collect_decisions(
     recomputes nothing, so the screen cannot disagree with what was recorded.
     """
     latest: dict[str, DecisionRecord] = {}
+    from autopoiesis.learning_evidence import row_eligible
+
     for event in counterfactual_events:
         payload = coerce.field_dict(coerce.field_of(event, "payload"), "event.payload")
         for row in coerce.field_dict_tuple(payload.get("rows"), "payload.rows"):
-            if coerce.field_str(row.get("strategy_id"), "row.strategy_id") != strategy_id:
-                continue
             cycle_id = coerce.field_str(row.get("cycle_id"), "row.cycle_id")
             if not cycle_id:
+                continue
+            if coerce.field_str(row.get("strategy_id"), "row.strategy_id") != strategy_id:
+                latest.pop(cycle_id, None)
+                continue
+            if not row_eligible(row, strategy):
+                latest.pop(cycle_id, None)
                 continue
             decided_at = row.get("decided_at")
             # A strategy is judged on what its own rule decided. Where the cycle recorded the
@@ -233,10 +240,15 @@ def day_direction(
     and are left out, as they are from the verdicts. Latest row per cycle.
     """
     latest: dict[str, tuple[str, float]] = {}
+    from autopoiesis.learning_evidence import row_eligible
+
     for event in counterfactual_events:
         payload = coerce.field_dict(coerce.field_of(event, "payload"), "event.payload")
         for row in coerce.field_dict_tuple(payload.get("rows"), "payload.rows"):
             cycle_id = coerce.field_str(row.get("cycle_id"), "row.cycle_id")
+            if not row_eligible(row):
+                latest.pop(cycle_id, None)
+                continue
             decided_at = row.get("decided_at")
             net = coerce.field_float(row.get("net_return_pct"), "row.net_return_pct")
             if cycle_id and decided_at and net is not None:

@@ -403,7 +403,12 @@ def test_admitted_lessons_reach_the_decision(tmp_path):
     library = StrategyLibrary(tmp_path / "strategies")
     library.save(_spec("s1"))
     knowledge = KnowledgeLibrary(tmp_path / "knowledge")
-    knowledge.save(_artifact())
+    from test_calibration import _record
+
+    from autopoiesis.knowledge_admission import KnowledgeAdmission
+
+    knowledge.verify_journal_sources([_record("s1", .6)])  # Explicit synthetic cited cycle.
+    assert KnowledgeAdmission(knowledge_library=knowledge).admit(_artifact()).accepted
 
     engine = PolicyEngine(strategy_library=library, knowledge_library=knowledge)
     decision = engine.decide_snapshot(_snapshot())
@@ -441,7 +446,7 @@ def test_a_broken_knowledge_library_cannot_stop_a_trading_cycle(tmp_path):
     decision = engine.decide_snapshot(_snapshot())
 
     assert decision.action == "BUY"
-    assert "k1 produced no exploration evidence" in decision.rationale
+    assert "lessons:" not in decision.rationale, "unverifiable lessons are withheld while the trading cycle continues"
 
 
 def test_a_raising_knowledge_library_cannot_stop_a_trading_cycle(tmp_path):

@@ -239,7 +239,11 @@ def build_rows(
 ) -> list[CalibrationRow]:
     """Pair each decision with the verdict that was later scored against it."""
     rows: list[CalibrationRow] = []
+    from autopoiesis.learning_evidence import eligible
+
     for record in records:
+        if not eligible(record):
+            continue
         decision = getattr(record, "decision", None)
         if decision is None or decision.decision_source != source:
             continue

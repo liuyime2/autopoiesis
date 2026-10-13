@@ -714,7 +714,7 @@ def _check_champion_and_search(
         record = memory.load()
         if record is not None:
             results_by_id = {
-                r.strategy_id: r for r in memory.strategy_results(record)
+                r.strategy_id: r for r in memory.strategy_results(record, strategies)
             }
     except Exception:
         results_by_id = {}

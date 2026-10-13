@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from synthetic_evidence import synthetic_provenance
 
 from autopoiesis.doctor import DoctorReport, _check_knowledge_value
 from autopoiesis.knowledge_library import KnowledgeLibrary
@@ -45,8 +46,16 @@ def _library(tmp_path, artifacts):
     path = tmp_path / "knowledge"
     path.mkdir(exist_ok=True)
     library = KnowledgeLibrary(path)
+    # Explicit synthetic journal provenance for these lesson-selection fixtures.
+    from test_calibration import _record
+
+    from autopoiesis.learning_evidence import source_digest
+
+    source = _record("c1", .6)
+    digest = source_digest(("c1",), {"c1": source})
     for artifact in artifacts:
-        library.save(artifact)
+        library.save(artifact.model_copy(update={"eligibility_version": 1, "verified_source_digest": digest}))
+    library.verify_journal_sources([source])
     return library
 
 
@@ -193,8 +202,11 @@ def _ablated(n_days, shown_value, withheld_value, per_day=4, jitter=0.01):
             value = (shown_value if shown else withheld_value) + (jitter if k % 4 < 2 else -jitter)
             records.append(SimpleNamespace(
                 cycle_id=cid,
-                snapshot=SimpleNamespace(timestamp=t0 + timedelta(days=d, minutes=5 * k)),
+                strategy_id="synthetic-strategy",
+                snapshot=SimpleNamespace(symbol="SPY", timestamp=t0 + timedelta(days=d, minutes=5 * k)),
                 decision=SimpleNamespace(decision_source="llm",
+                                         strategy_id="synthetic-strategy", symbol="SPY",
+                                         strategy_provenance=synthetic_provenance(),
                                          lesson_ids=("L",) if shown else (),
                                          lessons_withheld=() if shown else ("L",)),
             ))

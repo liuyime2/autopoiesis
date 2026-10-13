@@ -125,7 +125,33 @@ class DeterministicEvaluator:
         cumulative_cycles: Mapping[str, int] | None = None,
         owner_fills: Sequence[BrokerFillActivity] | None = None,
         cumulative_trade_attempts: Mapping[str, int] | None = None,
+        full_records: list[CycleRecord] | None = None,
     ) -> EvaluationReport:
+        from autopoiesis.learning_evidence import ELIGIBILITY_VERSION, eligibility, eligible
+
+        sources = full_records if full_records is not None else records
+        raw_cycles: dict[str, int] = dict(cumulative_cycles or {})
+        raw_attempts: dict[str, int] = dict(cumulative_trade_attempts or {})
+        exclusions: dict[str, int] = {}
+        for record in sources:
+            sid = record.decision.strategy_id
+            if sid and cumulative_cycles is None:
+                raw_cycles[sid] = raw_cycles.get(sid, 0) + 1
+            if sid and cumulative_trade_attempts is None and record.decision.action in {"BUY", "SELL", "SHORT", "COVER"}:
+                raw_attempts[sid] = raw_attempts.get(sid, 0) + 1
+            reason = eligibility(record)
+            if reason != "ELIGIBLE":
+                exclusions[reason] = exclusions.get(reason, 0) + 1
+        # New behavior must earn fresh evidence. Select the latest actually
+        # recorded clean behavior, never infer a historical universe from files.
+        latest_provenance = {}
+        for record in sources:
+            if eligible(record) and record.strategy_id and record.decision.strategy_provenance:
+                latest_provenance[record.strategy_id] = record.decision.strategy_provenance
+
+        def current_evidence(record: CycleRecord) -> bool:
+            return (eligible(record) and record.strategy_id in latest_provenance
+                    and record.decision.strategy_provenance == latest_provenance[record.strategy_id])
         buckets: dict[str, _StrategyBucket] = {}
         guardian_rejections: dict[str, int] = {}
         action_counts = {"BUY": 0, "SELL": 0, "HOLD": 0}
@@ -199,7 +225,7 @@ class DeterministicEvaluator:
                 guardian_rejected += 1
                 guardian_rejections[record.guardian.reason] = guardian_rejections.get(record.guardian.reason, 0) + 1
 
-            if strategy_id:
+            if strategy_id and current_evidence(record):
                 bucket = buckets.setdefault(strategy_id, _StrategyBucket(strategy_id=strategy_id))
                 bucket.add(record, notional, resolved_fill=resolved_fill)
 
@@ -211,18 +237,97 @@ class DeterministicEvaluator:
             observed_delta = last_equity - first_equity
 
         pnl = _pnl_evidence(records, evidence, seeded_fills or (), owner_fills=owner_fills or ())
-        for strategy_id, realized_pnl in pnl.strategy_realized_pnl.items():
+        # Raw accounting above retains all fills. Learning additionally requires
+        # both originating journal orders for every contributing closed lot.
+        def origin(record):
+            return (record.strategy_id, record.decision.strategy_provenance,
+                    record.snapshot.symbol, record.decision.action, record.decision.quantity)
+
+        clean_orders: dict[str, CycleRecord] = {}
+        invalid_orders: set[str] = set()
+        aliases: dict[str, set[str]] = {}
+        # An alias cannot be rehabilitated by a later clean occurrence.
+        for record in sources:
+            keys = {key for key in (record.execution.order_id, record.execution.client_order_id) if key}
+            for key in keys:
+                aliases.setdefault(key, set()).update(keys)
+                previous = clean_orders.get(key)
+                if not current_evidence(record) or (previous and origin(previous) != origin(record)):
+                    invalid_orders.add(key)
+                clean_orders[key] = record
+
+        # A confirmed fill may assign the broker ID after a timed-out submit.
+        # Link it through an already recorded origin; conflicts still taint the
+        # whole identity, and an activity with no journal origin cannot create one.
+        confirmed_candidates = _fill_candidates(evidence)[0] if evidence else ()
+        for activity in (*confirmed_candidates, *(seeded_fills or ())):
+            keys = {key for key in (activity.order_id, activity.client_order_id) if key}
+            origins = [clean_orders[key] for key in keys if key in clean_orders]
+            if not origins:
+                continue
+            candidate = origins[0]
+            expected_side = {"BUY": "BUY", "COVER": "BUY", "SELL": "SELL", "SHORT": "SELL"}.get(candidate.decision.action)
+            if (any(origin(record) != origin(candidate) for record in origins)
+                    or activity.symbol != candidate.snapshot.symbol or activity.side != expected_side
+                    or (activity.strategy_id and activity.strategy_id != candidate.strategy_id)):
+                invalid_orders.update(keys)
+            for key in keys:
+                aliases.setdefault(key, set()).update(keys)
+                clean_orders.setdefault(key, candidate)
+
+        # Preserve observed relationships across partial retries; a later record
+        # lacking one ID cannot erase the tainted identity's other aliases.
+        pending = list(invalid_orders)
+        while pending:
+            for key in aliases[pending.pop()] - invalid_orders:
+                invalid_orders.add(key)
+                pending.append(key)
+
+        def clean_side(*aliases):
+            origins = [clean_orders.get(key) for key in aliases if key]
+            if not origins or any(record is None for record in origins):
+                return None
+            candidate = origins[0]
+            if candidate is None:
+                return None
+            keys = (*aliases, candidate.execution.order_id, candidate.execution.client_order_id)
+            if any(key in invalid_orders for key in keys if key):
+                return None
+            if any(origin(record) != origin(candidate) for record in origins if record is not None):
+                return None
+            return candidate
+
+        def clean_lot(lot) -> bool:
+            bought = clean_side(lot.buy_client_order_id, lot.buy_order_id)
+            sold = clean_side(lot.sell_client_order_id, lot.sell_order_id)
+            if bought is None or sold is None:
+                return False
+            opener, closer = (bought, sold) if lot.direction == "LONG" else (sold, bought)
+            return (
+                opener.strategy_id == lot.strategy_id
+                and closer.strategy_id == (lot.closing_strategy_id or lot.strategy_id)
+                and bought.snapshot.symbol == lot.symbol == sold.snapshot.symbol
+                and bought.decision.action in {"BUY", "COVER"}
+                and sold.decision.action in {"SELL", "SHORT"}
+            )
+        for strategy_id in pnl.strategy_realized_pnl:
+            lots = [lot for lot in pnl.closed_lots if lot.strategy_id == strategy_id and clean_lot(lot)]
+            if not lots:
+                continue
             # Not `if strategy_id in buckets`. A strategy can close a lot without
             # appearing in the current cycle window, and the old guard dropped
             # broker-verified PnL on the floor in exactly that case - the number was
             # computed, reported in pnl.strategy_realized_pnl, and then discarded
             # before the lifecycle layer could see it, with no log line.
             bucket = buckets.setdefault(strategy_id, _StrategyBucket(strategy_id=strategy_id))
-            bucket.realized_pnl = realized_pnl
-            bucket.fees = pnl.strategy_fees.get(strategy_id, 0.0)
+            bucket.realized_pnl = sum(lot.realized_pnl for lot in lots)
+            bucket.fees = sum(lot.buy_fees + lot.sell_fees for lot in lots)
             bucket.pnl_evidence = pnl.status
 
         return EvaluationReport(
+            raw_cumulative_cycles=raw_cycles,
+            raw_cumulative_trade_attempts=raw_attempts,
+            learning_exclusions=exclusions,
             generated_at=datetime.now(tz=timezone.utc),
             window_cycles=len(records),
             submitted_orders=submitted,
@@ -251,10 +356,17 @@ class DeterministicEvaluator:
             pnl=pnl,
             strategy_metrics={
                 strategy_id: bucket.to_evaluation(
-                    (cumulative_cycles or {}).get(strategy_id, 0),
-                    (cumulative_trade_attempts or {}).get(strategy_id, 0),
-                )
+                    raw_cycles.get(strategy_id, 0),
+                    raw_attempts.get(strategy_id, 0),
+                ).model_copy(update={
+                    "eligibility_version": ELIGIBILITY_VERSION,
+                    "strategy_provenance": latest_provenance[strategy_id],
+                    "source_cycle_ids": tuple(
+                        r.cycle_id for r in sources if current_evidence(r) and r.strategy_id == strategy_id
+                    ),
+                })
                 for strategy_id, bucket in buckets.items()
+                if strategy_id in latest_provenance
             },
         )
 

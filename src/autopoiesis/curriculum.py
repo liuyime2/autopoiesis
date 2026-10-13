@@ -366,6 +366,17 @@ class StructuredCurriculumAgent:
         # ~6.6kB and the model reads it as a table instead of four lists to join.
         metrics = (reflection.strategy_metrics if reflection else None) or {}
         scores = (reflection.strategy_scores if reflection else None) or {}
+        from autopoiesis.learning_evidence import ELIGIBILITY_VERSION, capture, valid_provenance
+
+        verified = {}
+        for spec in strategies:
+            row = metrics.get(spec.strategy_id) or {}
+            p = valid_provenance(row.get("strategy_provenance"))
+            if (row.get("eligibility_version") == ELIGIBILITY_VERSION and row.get("source_cycle_ids")
+                    and p is not None and p.behavior_digest == capture(spec).behavior_digest):
+                verified[spec.strategy_id] = row
+        metrics = verified
+        scores = {sid: score for sid, score in scores.items() if sid in verified}
         return [
             {
                 "strategy_id": spec.strategy_id,

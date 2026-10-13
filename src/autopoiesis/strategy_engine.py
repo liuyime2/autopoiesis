@@ -245,6 +245,10 @@ class StrategyLifecycleManager:
         result: StrategyResult | None,
         evidence: object | None = None,
     ) -> StrategyLifecycleDecision | None:
+        from autopoiesis.learning_evidence import ELIGIBILITY_VERSION, capture
+
+        clean_result = bool(result is not None and getattr(result, "eligibility_version", 0) == ELIGIBILITY_VERSION
+                            and getattr(result, "behavior_digest", None) == capture(strategy).behavior_digest)
         if strategy.lifecycle in {"BASELINE", "PAUSED", "RETIRED"}:
             return None
         # A screen verdict that says REJECT retires the strategy here, in the rule set,
@@ -267,14 +271,18 @@ class StrategyLifecycleManager:
             return StrategyLifecycleDecision(strategy, "RETIRED", rejection)
         if result is None:
             return None
+        if result.pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED and not clean_result:
+            return None
 
-        # Broker-verified PnL stands on its own, so the PnL rule is evaluated
+        # Clean broker PnL can retire without recent cycles, so its loss rule is evaluated
         # before the cycle-count gate. A strategy can open a lot in one window and
         # have it closed in a later one, leaving zero cycles in the reflection
         # window; requiring cycles > 0 first meant the only PnL-driven transition
         # in the system was unreachable for exactly the strategies that had real
         # PnL to report. Every other rule below is cycle-based and keeps its gate.
         if (
+            clean_result
+            and
             result.pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
             and result.realized_pnl is not None
             and result.realized_pnl < 0
@@ -318,11 +326,12 @@ class StrategyLifecycleManager:
             # matters. Probation is still earned by cycles - a single lucky trade
             # does not shorten it - but once the cycle bar is met, broker-verified
             # realized PnL is what decides the outcome, and the journal records
-            # which. Without a closed lot there is no PnL to judge on, so
-            # promotion falls back to the operational metrics rather than blocking
-            # a strategy that may simply have nothing to close.
+            # which. Attribution and the offline screen still gate promotion;
+            # raw accounting labels cannot substitute for clean learning evidence.
             if (
-                result.pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+                clean_result
+                and self._promotion_evidence_gate(evidence) is None
+                and result.pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
                 and result.realized_pnl is not None
             ):
                 return StrategyLifecycleDecision(
@@ -398,6 +407,8 @@ class StrategyLifecycleManager:
                     ),
                     update={"probation_restarts": strategy.probation_restarts + 1},
                 )
+            if not clean_result:
+                return None
             gate = self._promotion_evidence_gate(evidence)
             if gate is not None:
                 return None
@@ -479,8 +490,7 @@ class StrategyLifecycleManager:
             return "offline validation rejected its recorded decisions"
         return (
             f"offline validation verdict is {verdict!r}, which is not a pass; "
-            "promotion requires either broker-verified PnL from a closed lot or "
-            "decision quality that cleared the evidence gate"
+            "promotion requires clean attribution and decision quality that cleared the evidence gate"
         )
 
     def _is_degenerate_no_exploration(self, strategy: StrategySpec, result: StrategyResult) -> bool:
@@ -861,6 +871,17 @@ class StrategyExecutor:
         self,
         strategy: StrategySpec,
         snapshot: DataSnapshot,
+        prices: Sequence[float] | None = None,
+    ) -> TradeDecision:
+        from autopoiesis.learning_evidence import capture
+
+        decision = self._decide(strategy, snapshot, prices)
+        return decision.model_copy(update={
+            "strategy_id": strategy.strategy_id, "strategy_provenance": capture(strategy),
+        })
+
+    def _decide(
+        self, strategy: StrategySpec, snapshot: DataSnapshot,
         prices: Sequence[float] | None = None,
     ) -> TradeDecision:
         """`prices` are earlier observed prices, oldest first, ending before `snapshot`.
