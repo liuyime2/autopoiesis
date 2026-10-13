@@ -396,8 +396,63 @@ still be unjudgeable, and the only thing that happens next is another return to 
 
 This is the constraint behind the rest of the day. With 0 ACTIVE strategies and the gate
 closed, every cycle goes to probation candidates that cannot be screened, and the self-evolution
-loop cannot admit, promote or retire anything into a decision it could learn from. It is not a
-bug in one rule; it is a budget calibrated for one strategy family meeting a queue full of
-another. Recorded here and deliberately not fixed in this deployment, because raising
-`max_probation_queue` would reopen the gate by making the queue bigger, which is the shape of a
-solution that looks like progress and is not.
+loop cannot admit, promote or retire anything into a decision it could learn from. Recorded here
+rather than fixed, because raising `max_probation_queue` would reopen the gate by making the
+queue bigger, which is the shape of a solution that looks like progress and is not.
+
+### Why the queue is full: diagnosed, and the earlier reading corrected
+
+The obvious reading - that `PROBATION_CYCLES = 13` is calibrated for FIXED_SIZE's yield and
+cannot work for TREND_FOLLOW's - was measured and is **wrong**. The offline screen is not
+short of budget; it has almost nothing to judge.
+
+`trend-follow-20260824-001` has 43 decisions in the screen and **0 informative**, every one
+`PENDING`. The counterfactual scores a decision as a one-share probe over the next
+`DEFAULT_HORIZON_HOURS = 24`, so a decision is `PENDING` until a real quote exists at or
+after that horizon. Every one of those 43 was decided on 2026-10-13. They are not missing;
+they are not due yet.
+
+The rows that *were* graded - 9 of them, verdicts GOOD_HOLD, NEUTRAL, NOT_EXECUTED - are all
+pre-2026-10-13 cycles, and all nine fail `row_eligible` because their
+`strategy_provenance` is `None`. Measured across the whole journal:
+
+| date | SPY cycles attributed to a strategy **with** provenance | **without** |
+|---|---|---|
+| 2026-06-11 … 2026-10-12 | **0** | 473 |
+| 2026-10-13 | **46** | **0** |
+
+Every attributed SPY decision before today was recorded without strategy provenance, so the
+screen refuses to attribute it - correctly, because it cannot prove which strategy produced a
+decision whose behaviour digest it never saw. Those rows cannot be repaired: the provenance was
+never written down.
+
+So the order of causes is the opposite of the one first assumed:
+
+1. Provenance was not being recorded at all until the source deployed at 05:53 today.
+2. Every historical decision is therefore permanently unscoreable, and the screen has been
+   reading them as silence for weeks.
+3. Since the fix, 46 provenance-carrying SPY decisions exist. They become gradeable once 24
+   hours of forward quotes exist - that is, from **2026-10-14 afternoon**.
+4. Until then `scored` is 0, every candidate is `INCONCLUSIVE`, nothing is promoted, nothing is
+   retired for a bad decision, and the probation backlog stays over its cap.
+
+**Nothing here calls for a larger probation budget.** The budget is not the constraint; the
+elapsed time since the provenance fix is. Calibrating per strategy family would have scaled a
+number against a screen that was not measuring the thing the budget buys.
+
+The testable prediction this leaves: `trend-follow-20260824-001` holds 43 of today's 46
+provenance-carrying SPY decisions, and the screen needs ten informative ones. After the
+2026-10-14 session produces forward quotes for them, that strategy's
+`OFFLINE_VALIDATION_COMPLETED` should report `scored` above zero for the first time in the
+journal's history, and the probation queue should begin to drain. If it does not, the cause is
+somewhere else and this diagnosis is wrong.
+
+Two more measured facts from the same dig. The counterfactual only ever evaluates **SPY** - all
+493 `COUNTERFACTUAL_EVALUATED` events carry `symbol: SPY` and no other symbol has a row - so
+`fixed-size-tlt-sell-001`, `fixed-size-xle-sell-001` and `fixed-size-xlf-sell-001`, the three
+strategies that actually traded today, have **zero** decisions in the screen and cannot be
+judged on any horizon. And `day_direction` returns **0 days** over these rows, so the
+day-adjusted gate has never had a base rate to read a strategy's ratio against.
+
+The scoring itself is sound: across 213,416 rows in the journal there are 189,912 non-`PENDING`
+verdicts, so the grader works when it has gradeable input.
