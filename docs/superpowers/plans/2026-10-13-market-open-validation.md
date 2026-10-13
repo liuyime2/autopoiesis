@@ -168,3 +168,32 @@ remains flag-only, risk/order boundaries unchanged, final stop inventory **630s*
 Final combined re-review and frozen full check are running; fresh clone and exact
 CI must follow, then the operational steps. Nine accepted source units do not
 constitute actual deployed-source or open-session verification.
+
+The final review of f4e3232 confirmed the default wait fix but found a separate
+curriculum stage boundary: synthetic actual transport call flags **[False, True]**
+prove a new retry after stop, and completed proposals/admissions could start later
+stages. Unit 10's pre-edit plan is `2026-10-13-curriculum-stop-boundaries.md`.
+Its implementation has **177** focused passes and specification approval; quality
+and final acceptance remain pending here.
+
+Actual committed c2fa05d fresh-clone execution completed **8 PASS / 1 FAIL**,
+with empty credentials and Python 3.10. Its two full suites each passed **1,713 /
+6 skipped**; the final gate was **54/55**, **2,816** executions across **94** files.
+The portable-unit gate incorrectly assigned the dedicated readiness templates to
+the legacy renderer and omitted timer.in discovery. The independent diagnosis and
+pre-edit target are in `2026-10-13-readiness-template-portability.md` (unit 11).
+Private failed raw log retained at
+`/tmp/autopoiesis-open-fresh-clone-c2fa05d.failed.log`; a new final clone is required.
+The actual old local backup at **05:02:07 EDT** completed success/exit 0.
+
+Units 10 and 11 received independent SPEC and QUALITY approval (177 and 126 focused passes respectively). The frozen full check passed 1,747 / 6 skipped in 88.01s, thread warnings fatal. Final combined review found one remaining internal curriculum request boundary: parser retry observed [False, True], and two-phase model generation starts phase B inside one outer call. Unit 12 is planned in `2026-10-13-curriculum-request-stop.md`; the final full/fresh/CI certificate remains pending. Review also records the existing transient-installer Ollama substitution gap as a separate follow-up; the intended persistent installation is independently verified.
+
+Unit 12 accepted: the final independent combined review and two focused SPEC/QUALITY reviews confirm the callback checks every underlying actual curriculum HTTP request, including internal phase/retry boundaries. The synthetic boundary suite is 10 cases; independent reviews each passed 241 related tests. Frozen final `make check ENVFILE=/dev/null TEST_ARGS='-W error::pytest.PytestUnhandledThreadExceptionWarning'` passed **1,757 / 6 skipped in 47.53s**, mypy covers 49 source files with no issues. Source fingerprint for this frozen, uncommitted unit12 tree is `9fb9066d820f27c9`. Fresh committed-tree clone, exact current PR CI, runtime deployment and session results remain pending.
+
+## 2026-10-13 complete project status and follow-up execution plan
+
+The concise current-state matrix, remaining work by dependency, package entry conditions, repeatable commands, success/no-go criteria, and open-source/web scope are consolidated in [IMPLEMENTATION_ROADMAP_2026-10-13.md](../IMPLEMENTATION_ROADMAP_2026-10-13.md). It is the executable follow-up index; the existing RSI plan retains the detailed experimental methodology and dated evidence retains the history.
+
+Unit 10 accepted in `9aa026e`; unit 11 accepted in `0b2c319`; unit 12 accepted in `b9922be`. Each has a written target and independent specification/quality approval. Current final source `make check` is **1,757 passed / 6 skipped in 47.53s**, warnings fatal; `make type` reports 49 source files with no issues. This source SHA's committed-tree fresh clone, four exact GitHub PR CI jobs and actual paper deployment/session observation are still required. Unit 11 also records the pre-existing `install-transient` Ollama-render gap; intended persistent installer is used, no transient installer success is claimed.
+
+The latest actual research window produced **0 PASS** (1 OVERFIT, 10 INSUFFICIENT of 11 new trials). This confirms an honest negative/insufficient result, not alpha. Current holdings remain six us_equity positions, 0 complete open orders at the earlier read time. Options/crypto permissions are visible but their project adapters do not exist. XLB/XLE/XLF are uncovered; fractions and account-external short cover remain incomplete. No claim of whole-account arbitrary-asset autonomous execution is supported.
