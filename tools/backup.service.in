@@ -1,0 +1,11 @@
+[Unit]
+Description=autopoiesis verified local journal backup
+Documentation=file://@ROOT@/tools/README.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+Environment=PATH=@ENVBIN@:/usr/local/bin:/usr/bin:/bin
+# No credential file is read. Make selects the declared interpreter explicitly.
+ExecStart=/usr/bin/make journal-local-backup ENVFILE=/dev/null CONDA_RUN= VIRTUAL_ENV=@ENVBIN@/.. JOURNAL_RUNTIME=@ROOT@/runtime/autopoiesis BACKUP_ROOT=@ROOT@/runtime/backups
+UMask=0077

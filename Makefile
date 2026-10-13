@@ -83,7 +83,7 @@ endif
         run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc \
         site refresh-figures benchmark-json dist release-check \
         attest-archive-baseline fetch-replay-bars research-search research-run \
-        journal-backup journal-restore journal-drill \
+        journal-backup journal-local-backup journal-restore journal-drill \
         research-register research-verify research-check-tape
 
 help:
@@ -527,16 +527,25 @@ benchmark-json:
 # This proves a snapshot can be taken and restored on this host. It does not ship anything
 # anywhere: an off-site copy is a deployment decision these targets make possible and do not make.
 
+JOURNAL_RUNTIME ?= runtime/autopoiesis
+BACKUP_ROOT ?= runtime/backups
+
 journal-backup:
-	@$(PY) tools/journal_snapshot.py snapshot $(DEST)
+	@test -n "$(DEST)" || (echo "DEST=<snapshot dir> is required" >&2; exit 2)
+	@$(PY) tools/journal_snapshot.py --runtime "$(JOURNAL_RUNTIME)" snapshot "$(DEST)"
+
+journal-local-backup:
+	@env -u ALPACA_API_KEY -u ALPACA_SECRET_KEY -u APCA_API_KEY_ID -u APCA_API_SECRET_KEY \
+	  -u OPENAI_API_KEY -u ANTHROPIC_API_KEY AUTOPOIESIS_ENV_FILE=/dev/null \
+	  $(PY) tools/journal_snapshot.py --runtime "$(JOURNAL_RUNTIME)" backup "$(BACKUP_ROOT)"
 
 journal-restore:
 	@test -n "$(SRC)" || (echo "SRC=<snapshot dir> is required" >&2; exit 2)
 	@test -n "$(DEST)" || (echo "DEST=<scratch dir> is required" >&2; exit 2)
-	@$(PY) tools/journal_snapshot.py restore $(SRC) $(DEST)
+	@$(PY) tools/journal_snapshot.py --runtime "$(JOURNAL_RUNTIME)" restore "$(SRC)" "$(DEST)"
 
 journal-drill:
-	@$(PY) tools/journal_snapshot.py drill
+	@$(PY) tools/journal_snapshot.py --runtime "$(JOURNAL_RUNTIME)" drill
 
 
 # --- pre-registered research -----------------------------------------------------------------

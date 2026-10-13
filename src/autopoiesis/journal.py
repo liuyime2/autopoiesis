@@ -203,9 +203,6 @@ class JsonlJournal:
         Durable intents and legacy ambiguous ERROR rows count conservatively, while a
         CycleRecord for the same client order ID does not count a second time.
         """
-        paths = self.history_paths()
-        if not paths:
-            return 0
         attempts: set[str] = set()
         intent_ids: set[str] = set()
         date_text = day.isoformat()
@@ -221,6 +218,9 @@ class JsonlJournal:
         # reader that concluded the agent had never run. A limit that can silently stop
         # limiting is worse than no limit, because the report says it is in force.
         with self._read_lock(), contextlib.ExitStack() as stack:
+            paths = self.history_paths()
+            if not paths:
+                return 0
             handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in paths]
             for line in itertools.chain.from_iterable(handles):
                 if date_text not in line:
@@ -343,10 +343,13 @@ class JsonlJournal:
         paths = self._archive_paths()
         # `.N` holds the oldest generation, so the backups read in descending index order
         # (oldest first) and the live file comes last because it is the newest.
-        for index in range(self.backups, 0, -1):
-            candidate = self.path.with_suffix(self.path.suffix + f".{index}")
-            if candidate.exists():
-                paths.append(candidate)
+        prefix = self.path.name + "."
+        rotated = [
+            candidate for candidate in self.path.parent.glob(prefix + "*")
+            if candidate.is_file() and candidate.name[len(prefix):].isdigit()
+            and int(candidate.name[len(prefix):]) > 0
+        ]
+        paths.extend(sorted(rotated, key=lambda p: int(p.name[len(prefix):]), reverse=True))
         if self.path.exists():
             paths.append(self.path)
         return paths
@@ -370,9 +373,6 @@ class JsonlJournal:
         return [p for p in archived if p.is_file()]
 
     def _scan(self, model, *, limit, keep=None):
-        paths = self.history_paths()
-        if not paths:
-            return [], 0
         collected: deque | None = deque(maxlen=limit) if limit else None
         kept: list = []
         dropped = 0
@@ -381,6 +381,9 @@ class JsonlJournal:
         # the lock per generation could interleave a rotation between reads and duplicate
         # or skip records.
         with self._read_lock(), contextlib.ExitStack() as stack:
+          paths = self.history_paths()
+          if not paths:
+              return [], 0
           handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in paths]
           for line in itertools.chain.from_iterable(handles):
                 stripped = line.strip()
@@ -431,6 +434,20 @@ class JsonlJournal:
             return
         if self.path.stat().st_size + incoming <= self.max_bytes:
             return
+        # Imported history or a lowered retention budget can leave generations
+        # older than the normal horizon. Archive those oldest first, before the
+        # normal oldest retained file, or the reader's archive-first order flips.
+        prefix = self.path.name + "."
+        deep_generations = [
+            generation for generation in self.history_paths()
+            if generation.name.startswith(prefix)
+            and generation.name[len(prefix):].isdigit()
+            and int(generation.name[len(prefix):]) > max(self.backups, 0)
+        ]
+        if deep_generations:
+            self._validate_archive_manifest(self._manifest_for_rotation())
+            for generation in deep_generations:
+                self._archive_generation(generation)
         oldest = self.path.with_suffix(self.path.suffix + f".{self.backups}")
         if self.backups <= 0:
             # `backups = 0` asks the journal to keep nothing but the live file. That is a
@@ -590,12 +607,7 @@ class JsonlJournal:
     def _has_existing_history(self) -> bool:
         if self.path.exists() and self.path.stat().st_size:
             return True
-        if any(
-            self.path.with_suffix(self.path.suffix + f".{index}").exists()
-            for index in range(1, self.backups + 1)
-        ):
-            return True
-        return bool(self._archive_paths())
+        return any(path != self.path for path in self.history_paths())
 
     def _locked(self):
         """Exclusive, for appends."""

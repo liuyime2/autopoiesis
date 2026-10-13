@@ -217,8 +217,7 @@ case "$cmd" in
       # from drifting - a stage timeout that grows leaves the template untouched and only the
       # derived budget moves, so a unit installed before the change is stale in a way
       # `shutdown-budget-covers-every-stage` detects.
-      STOP_BUDGET="$(PYTHONPATH="$ROOT_DIR/src$${PYTHONPATH:+:$$PYTHONPATH}" \
-        "$PYTHON_BIN" "$ROOT_DIR/tools/shutdown_budget.py" --budget-only)" || {
+      STOP_BUDGET="$("$PYTHON_BIN" "$ROOT_DIR/tools/shutdown_budget.py" --budget-only)" || {
         echo "FATAL: could not derive the shutdown budget" >&2
         exit 2
       }
@@ -245,12 +244,17 @@ case "$cmd" in
     cp "$ROOT_DIR/tools/research.timer" "$unit_dir/quant-research.timer"
     render "$ROOT_DIR/tools/report.service.in"     "quant-report.service"
     cp "$ROOT_DIR/tools/report.timer" "$unit_dir/quant-report.timer"
-    systemd-analyze verify "$unit_dir/$SERVICE_NAME" "$unit_dir/ollama.service" \
+    render "$ROOT_DIR/tools/backup.service.in"     "quant-backup.service"
+    cp "$ROOT_DIR/tools/backup.timer" "$unit_dir/quant-backup.timer"
+    if ! systemd-analyze verify "$unit_dir/$SERVICE_NAME" "$unit_dir/ollama.service" \
         "$unit_dir/quant-watchdog.service" "$unit_dir/quant-research.service" \
-        "$unit_dir/quant-report.service" 2>&1 \
-        | grep -viE "not found|canonical" | head -5
-    systemctl --user daemon-reload
-    echo "wrote 8 unit files to $unit_dir"
+        "$unit_dir/quant-report.service" "$unit_dir/quant-backup.service" \
+        "$unit_dir/quant-backup.timer"; then
+      echo "FATAL: rendered units failed verification; none were enabled" >&2
+      exit 1
+    fi
+    systemctl --user daemon-reload || exit 1
+    echo "wrote 10 unit files to $unit_dir"
 
     # Verify the manager can actually SEE them before claiming success. The
     # manager resolves unit paths from its own start-time environment, so a
@@ -275,7 +279,7 @@ case "$cmd" in
     # false-success as a unit in a directory the manager never opens: it looks configured and does
     # nothing. This is why quant-research.timer sat `inactive (dead)` with `Trigger: n/a` while
     # the watchdog next to it was `active (waiting)`.
-    for t in quant-watchdog.timer quant-research.timer quant-report.timer; do
+    for t in quant-watchdog.timer quant-research.timer quant-report.timer quant-backup.timer; do
       if systemctl --user enable --now "$t" 2>/dev/null; then
         if systemctl --user is-active --quiet "$t"; then
           echo "  enabled and running $t"
@@ -311,8 +315,7 @@ case "$cmd" in
     # Not persistent across a manager restart or a reboot; see the note below.
     RUN_UNITS="/run/user/$(id -u)/systemd/user"
     [ -d "$RUN_UNITS" ] || { echo "FATAL: $RUN_UNITS does not exist" >&2; exit 2; }
-    STOP_BUDGET="$(PYTHONPATH="$ROOT_DIR/src$${PYTHONPATH:+:$$PYTHONPATH}" \
-      "$PYTHON_BIN" "$ROOT_DIR/tools/shutdown_budget.py" --budget-only)" || {
+    STOP_BUDGET="$("$PYTHON_BIN" "$ROOT_DIR/tools/shutdown_budget.py" --budget-only)" || {
       echo "FATAL: could not derive the shutdown budget" >&2
       exit 2
     }
@@ -328,6 +331,9 @@ case "$cmd" in
     render tools/autopoiesis.service.in  "$SERVICE_NAME"
     render tools/watchdog.service.in   quant-watchdog.service
     cp "$ROOT_DIR/tools/watchdog.timer" "$RUN_UNITS/quant-watchdog.timer"
+    render tools/backup.service.in      quant-backup.service
+    cp "$ROOT_DIR/tools/backup.timer" "$RUN_UNITS/quant-backup.timer"
+    systemd-analyze verify "$RUN_UNITS/quant-backup.service" "$RUN_UNITS/quant-backup.timer" || exit 1
     # A transient unit with the same name shadows the file unit and, once it is
     # gone, the manager keeps reporting "Unit not found" for the file unit too.
     # Clear any transient record before reloading.
@@ -341,9 +347,11 @@ case "$cmd" in
     # quota on this host, so it always fails. It is also meaningless for units
     # living in /run, which is tmpfs. Start them, and say plainly that they are
     # not reboot-persistent.
-    for u in ollama.service "$SERVICE_NAME" quant-watchdog.timer; do
+    failed=0
+    for u in ollama.service "$SERVICE_NAME" quant-watchdog.timer quant-backup.timer; do
       if ! systemctl --user list-unit-files 2>/dev/null | grep -q "^$u "; then
         echo "  $u is not visible to the manager" >&2
+        failed=$((failed + 1))
         continue
       fi
       # Clear any tripped start-limit first. StartLimitBurst=5 in 900s exists
@@ -358,11 +366,17 @@ case "$cmd" in
           echo "  started $u"
         else
           echo "  $u start returned 0 but is $state" >&2
+          failed=$((failed + 1))
         fi
       else
         echo "  FAILED to start $u" >&2
+        failed=$((failed + 1))
       fi
     done
+    if [ "$failed" -ne 0 ]; then
+      echo "FATAL: $failed transient units did not start; installation is incomplete" >&2
+      exit 1
+    fi
     echo
     echo "These live in /run, so they are lost on reboot or a manager restart."
     echo "For permanent enablement, free a few MB under \$HOME so that"

@@ -23,7 +23,7 @@ identity: every file's sha256 in the snapshot manifest matches the file that was
 proves nothing was corrupted in transit and is the easy half. The second is *semantic* identity:
 the restored journal is read through this project's own reader and evaluator, and the figures that
 depend on it - cycle count, event count, first and last timestamp, closed lots, realized and
-unrealized PnL, the assumed cost - are compared against the live record. A file can be byte-identical
+unrealized PnL, the assumed cost - are compared against the sealed snapshot. A file can be byte-identical
 and still be a record of a different system if it is the wrong file; the figures are what catch that.
 
 **What is not claimed.** This snapshots and restores on one host. It does not ship anything
@@ -37,11 +37,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import sys
 import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -87,7 +90,12 @@ class Comparison:
 
     @property
     def identical(self) -> bool:
-        return all(a == b for a, b in self.fields.values())
+        return (
+            all(a == b for a, b in self.fields.values())
+            and "ledger_error" not in self.fields
+            and all(value == 0 for value in self.fields.get("unparsed_lines", (0, 0)))
+            and self.fields.get("archive_recovery") == ("CERTIFIED", "CERTIFIED")
+        )
 
     def render(self) -> str:
         if not self.fields:
@@ -124,11 +132,12 @@ def _relative(path: Path, runtime: Path) -> str:
 def record_files(runtime: Path) -> RecordFiles:
     """The live journal, its rotated generations, the archived ones and the manifest."""
     live = runtime / "journal.jsonl"
-    rotated = []
-    for index in range(1, 20):
-        candidate = runtime / f"journal.jsonl.{index}"
-        if candidate.exists():
-            rotated.append(candidate)
+    prefix = "journal.jsonl."
+    rotated = sorted(
+        (p for p in runtime.glob(prefix + "*") if p.is_file()
+         and p.name[len(prefix):].isdigit() and int(p.name[len(prefix):]) > 0),
+        key=lambda p: int(p.name[len(prefix):]), reverse=True,
+    )
     archive_dir = runtime / "journal-archive"
     archived = sorted(p for p in archive_dir.glob("*.jsonl") if p.is_file()) if archive_dir.exists() else []
     manifest = archive_dir / "journal-manifest.json"
@@ -143,17 +152,17 @@ def record_files(runtime: Path) -> RecordFiles:
 def snapshot(runtime: Path, destination: Path) -> dict:
     """Copy the record into `destination` and write a manifest describing what was copied.
 
-    The manifest records each file's sha256 and size, plus the *semantic* figures of the source -
+    The manifest records each copied file's sha256 and size, plus its *semantic* figures -
     cycle count, event count, first and last timestamp - so a restored copy can be compared against
-    what the snapshot claims to hold, not merely against itself. Without those, `verify` could only
+    what the snapshot claims to hold. Shared locking makes the copied bytes one source boundary.
+    Without those, `verify` could only
     prove a snapshot is internally consistent, which is a weaker claim than the one a recovery
     decision needs.
     """
     if destination.exists() and any(destination.iterdir()):
         raise SystemExit(f"refusing to snapshot into a non-empty directory: {destination}")
-    files = record_files(runtime)
-    if not files.all_paths():
-        raise SystemExit(f"no journal record under {runtime}; nothing to snapshot")
+    from autopoiesis.atomicio import write_json_atomic
+    from autopoiesis.journal import JsonlJournal
 
     destination.mkdir(parents=True, exist_ok=True)
     copied: list[dict[str, object]] = []
@@ -161,20 +170,24 @@ def snapshot(runtime: Path, destination: Path) -> dict:
     # snapshot that the manifest does not name is a file `verify` reports as unlisted, which is
     # what it did on the first run of this against the live record - the restored archive would
     # then be untrusted for want of a file that was there all along.
+    with JsonlJournal(runtime / "journal.jsonl")._read_lock():
+        files = record_files(runtime)
+        if not files.all_paths():
+            raise SystemExit(f"no journal record under {runtime}; nothing to snapshot")
+        for source in files.all_paths():
+            relative = _relative(source, runtime)
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+    # The writer resumes immediately after copying. Hashing, fsync and evaluation
+    # concern only these sealed files and cannot race a subsequent live append.
     for source in files.all_paths():
-        # The relative path from the runtime directory is preserved: `journal-archive/r000000.jsonl`
-        # stays under `journal-archive/`. A flat copy would put the archive where `history_paths()`
-        # does not look, and the restored record would read as the live generations alone.
         relative = _relative(source, runtime)
         target = destination / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-        copied.append({
-            "name": relative,
-            "bytes": source.stat().st_size,
-            "sha256": _sha256(source),
-        })
-    figures = semantic_figures(runtime)
+        with target.open("rb") as handle:
+            os.fsync(handle.fileno())
+        copied.append({"name": relative, "bytes": target.stat().st_size, "sha256": _sha256(target)})
+    figures = semantic_figures(destination)
     payload = {
         "schema_version": 1,
         "source_runtime": str(runtime),
@@ -182,9 +195,7 @@ def snapshot(runtime: Path, destination: Path) -> dict:
         "manifest": _relative(files.manifest, runtime) if files.manifest else None,
         "figures": figures,
     }
-    (destination / SNAPSHOT_MANIFEST).write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    write_json_atomic(destination / SNAPSHOT_MANIFEST, payload)
     return payload
 
 
@@ -271,7 +282,7 @@ def semantic_figures(runtime: Path) -> dict:
     """
     from autopoiesis.journal import JsonlJournal
 
-    journal = JsonlJournal(runtime / "journal.jsonl")
+    journal = JsonlJournal(runtime / "journal.jsonl", lock=False)
     figures: dict[str, object] = {}
     records = journal.read_all()
     events = journal.read_events()
@@ -283,6 +294,22 @@ def semantic_figures(runtime: Path) -> dict:
     figures["first_cycle"] = stamps[0].isoformat() if stamps else None
     figures["last_cycle"] = stamps[-1].isoformat() if stamps else None
     figures["generations"] = len(journal.history_paths())
+    raw_lines = 0
+    for path in journal.history_paths():
+        with path.open(encoding="utf-8") as handle:
+            raw_lines += sum(bool(line.strip()) for line in handle)
+    figures["unparsed_lines"] = raw_lines - len(records) - len(events)
+    if journal.archive_manifest_path.exists():
+        status = journal.archive_manifest_status()
+        figures["archive_recovery"] = (
+            "CERTIFIED" if status["valid"] and status["trusted"] else "UNSUPPORTED"
+        )
+        figures["archive_reason"] = status["reason"]
+    else:
+        # Do not call archive_manifest_status on absent manifests: on an empty
+        # record it writes an automatic baseline into the sealed directory.
+        figures["archive_recovery"] = "UNKNOWN"
+        figures["archive_reason"] = "archive manifest missing; baseline is not certified"
 
     # The ledger figures the evaluator's headline is built from: closed lots, realized and
     # unrealized PnL, and the assumed cost. These are the numbers a recovery has to reproduce, and
@@ -301,9 +328,49 @@ def semantic_figures(runtime: Path) -> dict:
         figures["unrealized_pnl"] = pnl.unrealized_pnl
         figures["assumed_cost"] = round(sum(pnl.assumed_cost.values()), 6)
         figures["pnl_evidence_status"] = pnl.status
-    except Exception as exc:  # a record too old for the current evaluator still restores
+    except Exception as exc:  # Bytes are preserved, but this is not a working ledger proof.
         figures["ledger_error"] = type(exc).__name__
     return figures
+
+
+def backup(runtime: Path, directory: Path) -> Path:
+    """Publish a durable, verified local journal backup; retain all previous backups."""
+    def sync_directory(path: Path) -> None:
+        # The ordinary atomic writer tolerates unsupported directory fsync. A
+        # backup must propagate it instead of claiming durability after failure.
+        fd = os.open(str(path), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    directory = directory.resolve()
+    directory.mkdir(parents=True, exist_ok=True)
+    # Existing directories may be left by a failed earlier attempt. Sync their
+    # ancestor entries on every attempt; existence is not proof of durability.
+    for parent in (directory, *directory.parents):
+        sync_directory(parent)
+    name = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:12]
+    staging = directory / (".staging-" + name)
+    completed = directory / name
+    try:
+        payload = snapshot(runtime, staging)
+        ok, problems = verify(staging)
+        figures = payload["figures"]
+        if ("ledger_error" in figures or figures.get("unparsed_lines", 0)
+                or figures.get("archive_recovery") != "CERTIFIED"):
+            problems.append("semantic recovery unsupported: " + json.dumps(figures, sort_keys=True))
+        if not ok or problems:
+            raise SystemExit("backup was not published:\n  " + "\n  ".join(problems))
+        for child in sorted((p for p in staging.rglob("*") if p.is_dir()), reverse=True):
+            sync_directory(child)
+        sync_directory(staging)
+        os.replace(staging, completed)
+        sync_directory(directory)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return completed
 
 
 def compare(source: Path, restored: Path) -> Comparison:
@@ -356,7 +423,7 @@ def drill(runtime: Path) -> tuple[bool, str]:
         report = [
             f"snapshot: {len(json.loads((snap / SNAPSHOT_MANIFEST).read_text())['files'])} file(s)",
             f"restored copy matches the snapshot byte for byte: {'yes' if ok else 'no'}",
-            "figures, live against restored:",
+            "figures, sealed snapshot against restored:",
             comparison.render(),
         ]
         if problems:
@@ -372,6 +439,9 @@ def main(argv: list[str] | None = None) -> int:
     snap = sub.add_parser("snapshot", help="write the record into DEST")
     snap.add_argument("destination")
 
+    scheduled = sub.add_parser("backup", help="atomically publish a verified local backup")
+    scheduled.add_argument("directory")
+
     check = sub.add_parser("verify", help="check a snapshot in DIR")
     check.add_argument("directory")
 
@@ -383,6 +453,10 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     runtime = _runtime_from_arg(args.runtime)
+
+    if args.command == "backup":
+        print(f"backup published: {backup(runtime, Path(args.directory))}")
+        return 0
 
     if args.command == "snapshot":
         payload = snapshot(runtime, Path(args.destination))
@@ -403,7 +477,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "restore":
         restore(Path(args.source), Path(args.destination), runtime)
         print(f"restored {args.source} into {args.destination}")
-        return 0
+        comparison = compare(Path(args.source), Path(args.destination))
+        print(comparison.render())
+        return 0 if comparison.identical else 1
 
     ok, report = drill(runtime)
     print(report)

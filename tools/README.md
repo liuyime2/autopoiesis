@@ -230,17 +230,37 @@ measurement.
 **`journal_snapshot.py`** snapshots the whole journal record - live file, rotated generations,
 the archived ones and the archive manifest, each under its runtime-relative path - and restores it
 into a scratch directory. `make journal-drill` does the whole path and compares the restored copy
-against the live record twice: byte for byte against the snapshot's manifest, and then on the
-figures the ledger produces - closed lots, realized and unrealized PnL, the assumed cost. On the
-real record that comparison is 47 closed lots, +757.95 realized, +98.64 unrealized, 35.818876 cost,
-identical live and restored.
+against the sealed snapshot twice: byte for byte against its manifest, and then on the
+figures the ledger produces - closed lots, realized and unrealized PnL, the assumed cost. A PASS
+means those figures are identical sealed and restored on that execution. A shared journal lock
+covers discovery and copying, including all
+actual numeric generations; hashing and evaluation use the copy after releasing the writer.
+Unparsed lines, ledger exceptions or a missing/invalid/unattested archive manifest prevent a
+semantic recovery PASS even when bytes agree. A manual snapshot can preserve such bytes; the
+completed backup target requires the same verified archive baseline the runtime integrity gate
+uses. It never invents an attestation for legacy history. Numeric generations outside the writer's
+retention budget are archived oldest first before ordinary rotation to preserve chronology.
+
+`make journal-local-backup ENVFILE=/dev/null` stages, fsyncs and verifies a backup, then atomically
+publishes it under `runtime/backups/<UTC timestamp>-<unique id>/`. No credentials are read by the
+scheduled service. `JOURNAL_RUNTIME=/absolute/runtime` and `BACKUP_ROOT=/absolute/backups` select
+explicit locations. Existing copies are retained; operators must provision storage and arrange
+retention rather than expecting automatic deletion. The installed `quant-backup.timer` runs hourly
+and catches up a missed run with `Persistent=true`; persistent installation verifies the unit and
+checks `enable --now` and its active state. Installation itself does not run a backup immediately.
+
+Run `make journal-drill ENVFILE=/dev/null JOURNAL_RUNTIME=/absolute/runtime` to prove recovery
+in disposable directories. Restore with `make journal-restore ENVFILE=/dev/null
+JOURNAL_RUNTIME=/absolute/live-runtime SRC=/absolute/backup DEST=/absolute/scratch` and compare
+the sealed ledger figures. This protects journal history on one host. Strategy files, knowledge,
+operating policies, host loss and offsite durability require separate recovery arrangements.
 
 The relative paths are the point. `history_paths()` finds the archive under
 `journal-archive/`, so a flattened copy is a record whose own reader cannot see part of it - the
 first version of this tool flattened them, and only the generation count in the drill caught it.
 `restore` refuses to write to the configured runtime directory: restoring a stale snapshot over the
-live record destroys the only copy that was right. `snapshot`, `restore` and the drill all verify
-before acting, and a snapshot that does not verify is not restored at all.
+live record destroys the only copy that was right. Restore verifies bytes before copying and its
+CLI checks semantic equality afterwards. A snapshot that does not verify is not restored at all.
 
 **`check_workflow_jobs.py`** asserts every workflow file's `jobs:` contains the jobs it defines.
 It exists because a `release` job appended to `ci.yml` at column 0 instead of under `jobs:` is
