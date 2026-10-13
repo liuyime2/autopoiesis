@@ -10,6 +10,7 @@ result, and nothing in the suite noticed.
 """
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -51,6 +52,7 @@ class FakeOrder:
         self.side = side
         self.qty = qty
         self.status = status
+        self.id = "synthetic-order"
 
 
 class FakeClient:
@@ -78,20 +80,24 @@ class FakeClient:
         self._guard("get_latest_trade")
         return FakeTrade(self._price)
 
+    def get_asset(self, symbol):
+        self._guard("get_asset")
+        return SimpleNamespace(**{"class": "us_equity"})
+
     def list_positions(self):
         self._guard("list_positions")
         return self._positions
 
-    def list_orders(self, status=None):
+    def list_orders(self, status=None, limit=None):
         self._guard("list_orders")
-        return self._orders
+        return self._orders[:limit or 50]
 
 
 def test_gateway_uses_method_names_that_exist_on_the_real_alpaca_client():
     """The exact regression: wrong client method names, silently swallowed."""
     tradeapi = pytest.importorskip("alpaca_trade_api")
 
-    for method in ("list_positions", "list_orders", "get_clock", "get_account", "get_latest_trade"):
+    for method in ("list_positions", "list_orders", "get_clock", "get_account", "get_latest_trade", "get_asset"):
         assert hasattr(tradeapi.REST, method), f"REST.{method} is required by AlpacaDataGateway"
 
     for removed in ("get_all_positions", "get_orders"):
@@ -149,6 +155,9 @@ def test_wrong_method_name_on_client_is_surfaced_not_hidden():
         def get_account(self):
             return FakeAccount()
 
+        def get_asset(self, symbol):
+            return SimpleNamespace(**{"class": "us_equity"})
+
         def get_latest_trade(self, symbol):
             return FakeTrade()
 
@@ -202,3 +211,62 @@ def test_snapshot_source_is_the_broker():
     snapshot = AlpacaDataGateway(client=FakeClient()).snapshot("SPY")
 
     assert snapshot.source == "alpaca"
+
+
+@pytest.mark.parametrize("count", [51, 499])
+def test_synthetic_snapshot_reads_orders_beyond_sdk_default(count):
+    client = FakeClient(orders=[FakeOrder() for _ in range(count)])
+    assert len(AlpacaDataGateway(client=client).snapshot("SPY").open_orders) == count
+
+
+def test_synthetic_snapshot_refuses_a_full_order_page():
+    client = FakeClient(orders=[FakeOrder() for _ in range(500)])
+    with pytest.raises(BrokerDataUnavailable, match="open orders"):
+        AlpacaDataGateway(client=client).snapshot("SPY")
+
+
+@pytest.mark.parametrize("asset_class", [None, "", "unknown", "us_option", "crypto"])
+def test_synthetic_unsupported_asset_is_refused_before_stock_quote(asset_class):
+    client = FakeClient()
+    client.get_asset = lambda symbol: SimpleNamespace(**{"class": asset_class})
+    quoted = []
+    client.get_latest_trade = lambda symbol: quoted.append(symbol) or FakeTrade()
+    with pytest.raises(BrokerDataUnavailable, match="asset"):
+        AlpacaDataGateway(client=client).snapshot("SPY")
+    assert quoted == []
+
+
+def test_synthetic_missing_asset_metadata_is_refused_before_stock_quote():
+    client = FakeClient(fail={"get_asset"})
+    quoted = []
+    client.get_latest_trade = lambda symbol: quoted.append(symbol) or FakeTrade()
+    with pytest.raises(BrokerDataUnavailable, match="asset"):
+        AlpacaDataGateway(client=client).snapshot("SPY")
+    assert quoted == []
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+@pytest.mark.parametrize("field", ["cash", "buying_power", "equity", "portfolio_value", "last_equity",
+                                  "position_qty", "position_market_value", "order_qty", "price"])
+def test_synthetic_gateway_refuses_nonfinite_broker_risk_numbers(field, value):
+    client = FakeClient(positions=[FakePosition()])
+    if field.startswith("position_"):
+        setattr(client._positions[0], field.removeprefix("position_"), value)
+    elif field == "order_qty":
+        client._orders = [FakeOrder(qty=value)]
+    elif field == "price":
+        client._price = value
+    else:
+        setattr(client._account, field, value)
+    with pytest.raises(BrokerDataUnavailable):
+        AlpacaDataGateway(client=client).snapshot("SPY")
+
+
+def test_synthetic_equity_snapshot_keeps_unsupported_holdings_in_whole_account_exposure():
+    positions = [FakePosition(symbol="BTCUSD", market_value=1000),
+                 FakePosition(symbol="OPTION", market_value=2000)]
+    positions[0].asset_class = "crypto"
+    positions[1].asset_class = "us_option"
+    snapshot = AlpacaDataGateway(client=FakeClient(positions=positions)).snapshot("SPY")
+    assert {position.symbol for position in snapshot.positions} == {"BTCUSD", "OPTION"}
+    assert sum(abs(position.market_value) for position in snapshot.positions) == 3000

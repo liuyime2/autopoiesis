@@ -2,8 +2,8 @@
 
 审查日期：2026-10-13。用户明确要求范围包括期权、加密货币等资产。
 本文区分资产可见性、券商账户权限、策略覆盖及可验证的交易能力；仅有
-账户 ACTIVE 或股票下单入口，不足以证明多资产控制。真实账户权限清点待运行，
-以下实现范围来自当前代码及只读离线审查。
+账户 ACTIVE 或股票下单入口，不足以证明多资产控制。以下范围来自代码、只读
+离线审查和下述真实账户权限清点；交易服务加载新修复仍待部署确认。
 
 | 资产或操作 | 当前项目能力 | 尚未完成的验收 |
 | --- | --- | --- |
@@ -27,7 +27,31 @@
 只读审查基线为 68 项相关测试通过。随后账户边界单元的模拟 RED 实测
 17 failed / 25 deselected：包含 SDK 默认 50 条导致漏读挂单，以及未知、crypto、
 options 资产进入股票报价路径。模拟结果用于证明软件缺陷，不能冒充真实账户
-包含这些资产或已有真实下单失败。修复、独立复审和真实清点结果随后补录。
+包含这些资产或已有真实下单失败。修复经规格和质量独立复审通过；规格实测
+211 passed，质量实测 211 passed 加 125 项安全回归通过。最终整库、fresh clone、
+CI 及实际新源码部署仍待完成。
+
+## 实际只读清点
+
+在账户边界代码冻结后执行 `make smoke`，使用原外部 operator env；退出 0。
+券商 clock 为 **2026-10-13 03:48:21 EDT**，market closed，下次开盘为当天
+09:30 EDT。完整 open-order reader 返回 **0 个挂单**，未达到 500 条满页。
+6 个实际持仓为 **BIL、SPY、TLT、XLB、XLE、XLF**，全部 broker 分类
+**us_equity**、long、整数数量；本次不存在期权、crypto、short 或分数残余持仓。
+held 与 configured/allowlist 合并得到 10 个标的，其实际 metadata 都报告
+us_equity、active、tradable=true。这个清点没有运行股票报价、模型或订单入口。
+
+实际账户 `status=ACTIVE`、`crypto_status=ACTIVE`，
+`options_approved_level=3`、`options_trading_level=3`；
+trading_blocked、account_blocked、trade_suspended_by_user 全部 false。
+因此可以确认账户报告这些权限，不能据此确认当前项目可正确交易期权或 crypto。
+现金、购买力和每个持仓数值也成功读取；私人原始日志
+`/tmp/autopoiesis-account-inventory-20261013.log` 权限 **0600**，不发布财务明细。
+
+可选择冻结策略目前覆盖 SPY/BIL/TLT，**XLB/XLE/XLF 未覆盖**。账户管理授权和
+可交易资产名单已经包含它们，但没有合格策略时仍 HOLD；任意资产可自主买卖、
+完整逐资产策略管理及盈利目标尚未达成。全账户 short 与 fractional 机制也不能
+因为本次真实账户恰好没有这些持仓而标记完成。
 
 下一步按以下验收顺序推进，不能通过扩大 allowlist 或放松 Guardian 跳过：
 

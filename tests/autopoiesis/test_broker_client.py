@@ -159,3 +159,81 @@ def test_the_session_override_forwards_positional_arguments_and_forces_the_timeo
     assert isinstance(sent["send_kwargs"].get("timeout"), Timeout), (
         "the override's whole purpose is to bound every call with a fresh timeout"
     )
+
+
+@pytest.mark.parametrize("bad_orders", [None, {}, [object()], [SimpleNamespace(id="x", symbol="SPY", side="buy", qty="nan", status="new")]])
+def test_synthetic_open_order_reader_refuses_unknown_contents(bad_orders):
+    from autopoiesis.broker_client import list_open_orders
+
+    client = SimpleNamespace(list_orders=lambda **kwargs: bad_orders)
+    with pytest.raises(RuntimeError):
+        list_open_orders(client)
+
+
+def test_synthetic_smoke_inventories_all_classes_without_quotes(monkeypatch, capsys):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("alpaca_smoke", ROOT / "tools" / "alpaca_smoke.py")
+    smoke = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(smoke)
+    calls = []
+
+    def asset(symbol):
+        calls.append(("asset", symbol))
+        if symbol == "MISSING":
+            raise LookupError("synthetic metadata outage")
+        return SimpleNamespace(symbol=symbol, **{"class": {
+            "SPY": "us_equity", "OPTION": "us_option", "BTCUSD": "crypto",
+        }[symbol]}, tradable=True, fractionable=False)
+
+    positions = [SimpleNamespace(symbol=symbol, asset_class=kind, side="long", qty="1",
+                                 market_value="10", avg_entry_price="10", unrealized_pl="0") for symbol, kind in (
+        ("SPY", "us_equity"), ("OPTION", "us_option"), ("BTCUSD", "crypto"))]
+    client = SimpleNamespace(
+        get_clock=lambda: SimpleNamespace(timestamp="synthetic", is_open=False, next_open="later", next_close="later"),
+        get_account=lambda: SimpleNamespace(status="ACTIVE", equity="100", cash="50", buying_power="50",
+                                            portfolio_value="100", last_equity="100", trading_blocked=False,
+                                            account_blocked=False, trade_suspended_by_user=False,
+                                            options_approved_level=2, options_buying_power="20",
+                                            non_marginable_buying_power="30", crypto_status="ACTIVE"),
+        list_positions=lambda: positions,
+        list_orders=lambda **kwargs: calls.append(("orders", kwargs)) or [],
+        get_asset=asset,
+    )
+    # This synthetic read-only broker deliberately exposes no quote/model/mutation method.
+    config = _config()
+    config.symbols = ("SPY", "MISSING")
+    monkeypatch.setattr(smoke.AgentConfig, "from_env", lambda: config)
+    monkeypatch.setattr(smoke, "create_alpaca_client", lambda **kwargs: client)
+    assert smoke.main() == 0
+    output = capsys.readouterr().out
+    for observed in ("us_equity", "us_option", "crypto", "options_approved_level: 2",
+                     "options_trading_level: UNKNOWN", "trading_blocked: False",
+                     "account_blocked: False", "trade_suspended_by_user: False",
+                     "options_buying_power: 20", "non_marginable_buying_power: 30", "crypto_status: ACTIVE",
+                     "MISSING", "UNKNOWN", "UNSUPPORTED", "Open orders complete: True"):
+        assert observed in output
+    assert {symbol for name, symbol in calls if name == "asset"} == {"SPY", "OPTION", "BTCUSD", "MISSING"}
+    assert ("orders", {"status": "open", "limit": 500}) in calls
+    assert "test-key" not in output and "test-secret" not in output
+
+
+@pytest.mark.parametrize("orders", [None, [object()], [object()] * 500])
+def test_synthetic_smoke_reports_incomplete_open_orders(monkeypatch, capsys, orders):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("alpaca_smoke", ROOT / "tools" / "alpaca_smoke.py")
+    smoke = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(smoke)
+    client = SimpleNamespace(get_clock=lambda: SimpleNamespace(), get_account=lambda: SimpleNamespace(),
+                             list_positions=list, list_orders=lambda **kwargs: orders,
+                             get_asset=lambda symbol: SimpleNamespace(**{"class": "us_equity"}))
+    config = _config()
+    config.symbols = ("SPY",)
+    monkeypatch.setattr(smoke.AgentConfig, "from_env", lambda: config)
+    monkeypatch.setattr(smoke, "create_alpaca_client", lambda **kwargs: client)
+    assert smoke.main() == 1
+    output = capsys.readouterr().out
+    assert "Open orders complete: False" in output
+    for field in ("crypto_status", "non_marginable_buying_power", "options_buying_power"):
+        assert f"{field}: UNKNOWN" in output

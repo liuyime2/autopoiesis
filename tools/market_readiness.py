@@ -15,7 +15,7 @@ from typing import cast
 from zoneinfo import ZoneInfo
 
 from autopoiesis.atomicio import write_json_atomic
-from autopoiesis.broker_client import create_alpaca_client
+from autopoiesis.broker_client import create_alpaca_client, list_open_orders
 from autopoiesis.cli import _build_agent_daemon
 from autopoiesis.config import AgentConfig
 from autopoiesis.daemon import source_fingerprint
@@ -148,8 +148,10 @@ def _broker_state(client):
     for flag in ("trading_blocked", "account_blocked", "trade_suspended_by_user"):
         _require(getattr(account, flag, None) is False, "ACCOUNT_BLOCKED_OR_UNKNOWN")
     positions = client.list_positions()
-    orders = client.list_orders(status="open", limit=500)
-    _require(len(orders) < 500, "OPEN_ORDERS_INCOMPLETE")
+    try:
+        orders = list_open_orders(client)
+    except RuntimeError:
+        raise ObservationRefused("OPEN_ORDERS_INCOMPLETE") from None
     snapshots = tuple(OpenOrderSnapshot(
         symbol=str(order.symbol), side=cast("Side", str(order.side).upper()), quantity=float(order.qty), status=str(order.status),
     ) for order in orders)

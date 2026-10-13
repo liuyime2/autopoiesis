@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from autopoiesis.journal import JsonlJournal
 from autopoiesis.models import (
     AccountSnapshot,
@@ -44,12 +46,14 @@ class FakeAlpacaClient:
     def __init__(self, open_order_ids=None):
         self._open_orders = open_order_ids or []
 
-    def list_orders(self, status: str = "open"):
-        return [type("Order", (), {"id": oid})() for oid in self._open_orders]
+    def list_orders(self, status: str = "open", limit: int = 50):
+        assert status == "open" and limit == 500
+        return [type("Order", (), {"id": oid, "symbol": "SPY", "side": "buy", "qty": "1", "status": "new"})()
+                for oid in self._open_orders[:limit]]
 
 
 class FailingAlpacaClient:
-    def list_orders(self, status: str = "open"):
+    def list_orders(self, status: str = "open", limit: int = 50):
         raise RuntimeError("broker unavailable")
 
 
@@ -106,6 +110,18 @@ def test_reconciler_reports_unmatched_when_broker_fetch_fails(tmp_path):
 
     report = reconciler.reconcile()
 
+    assert report.matched is False
+    assert "fetch failed" in report.message
+
+
+@pytest.mark.parametrize("orders", [None, [object()], [object()] * 500])
+def test_synthetic_reconciler_refuses_incomplete_open_order_inventory(tmp_path, orders):
+    class Broker:
+        def list_orders(self, status="open", limit=50):
+            assert status == "open" and limit == 500
+            return orders
+
+    report = OrderReconciler(client=Broker(), journal=JsonlJournal(tmp_path / "journal.jsonl")).reconcile()
     assert report.matched is False
     assert "fetch failed" in report.message
 
@@ -240,7 +256,8 @@ class _ChainClient:
         self._raise_for_id = set(raise_for_id)
         self.queried_ids: list[str] = []
 
-    def list_orders(self, status: str = "open"):
+    def list_orders(self, status: str = "open", limit: int = 50):
+        assert status == "open" and limit == 500
         return []
 
     def get_order_by_client_order_id(self, coid):

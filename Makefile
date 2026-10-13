@@ -104,7 +104,7 @@ help:
 	@echo "make type             mypy over src/autopoiesis; non-zero on any finding"
 	@echo "make check            lint + type + test (no broker, no credentials)"
 	@echo "make test             unit and integration tests only"
-	@echo "make smoke            read-only broker connection and snapshot verification"
+	@echo "make smoke            read-only broker whole-account and asset inventory"
 	@echo "make broker-latency-sample COUNT=20 read-only clock/account operation latency against paper"
 	@echo "make smoke-offline    the widest check needing no broker and no credentials"
 	@echo "make fast             lint + test + smoke + verify"
@@ -348,8 +348,8 @@ example-cycle:
 cli-help:
 	@$(PY) -m autopoiesis.cli --help
 
-# Smoke: read-only paper broker connection and data snapshot checks. This catches
-# broker API/configuration faults without running the model or submitting orders.
+# Smoke: read-only whole-account paper broker and asset inventory, independent of
+# stock quotes. Quote/decision readiness is audited by the market-readiness targets.
 smoke:
 	@$(CONDA_RUN) python tools/alpaca_smoke.py
 

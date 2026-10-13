@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -12,6 +13,38 @@ from urllib3.util import Timeout
 from autopoiesis.config import is_paper_endpoint
 
 SUPPORTED_SDK_VERSION = "3.2.0"
+ORDER_PAGE_LIMIT = 500
+
+
+def list_open_orders(client: Any) -> list[Any]:
+    """Read one complete raw order list through the pinned SDK, or refuse it.
+
+    A full page cannot prove completeness. Missing or malformed rows cannot prove
+    an empty/conflict-free book either; every risk and audit consumer shares this boundary.
+    """
+    try:
+        orders = client.list_orders(status="open", limit=ORDER_PAGE_LIMIT)
+    except Exception as exc:
+        raise RuntimeError(f"open order read failed ({type(exc).__name__})") from exc
+    if not isinstance(orders, list):
+        raise RuntimeError("open order list is unavailable or invalid")
+    if len(orders) >= ORDER_PAGE_LIMIT:
+        raise RuntimeError("OPEN_ORDERS_INCOMPLETE: broker returned a full page of open orders")
+    for order in orders:
+        for field in ("id", "symbol", "status"):
+            value = getattr(order, field, None)
+            if not isinstance(value, str) or not value.strip():
+                raise RuntimeError(f"open order has invalid {field}")
+        if str(getattr(order, "side", "")).lower() not in {"buy", "sell"}:
+            raise RuntimeError("open order has invalid side")
+        quantity = getattr(order, "qty", None)
+        try:
+            valid = quantity is not None and not isinstance(quantity, bool) and math.isfinite(float(quantity)) and float(quantity) > 0
+        except (TypeError, ValueError, OverflowError):
+            valid = False
+        if not valid:
+            raise RuntimeError("open order has invalid qty")
+    return orders
 
 
 @dataclass(frozen=True)

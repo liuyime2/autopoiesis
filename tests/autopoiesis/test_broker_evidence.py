@@ -297,3 +297,21 @@ def test_a_truncation_on_one_ingest_does_not_follow_the_next():
     assert first.status == "PARTIAL"
     assert second.status == "SUCCESS"
     assert second.missing_reasons == ()
+
+
+@pytest.mark.parametrize("count", [51, 499, 500])
+def test_synthetic_historical_order_pages_are_explicit_and_complete(count):
+    calls = []
+
+    class OrdersClient(Client):
+        def list_orders(self, status="open", limit=50, after=None, until=None):
+            calls.append((status, limit))
+            return super().list_orders() * min(count, limit)
+
+    batch = BrokerEvidenceProvider(client=OrdersClient()).ingest(**WIDE)
+    assert calls == [("all", 500)]
+    assert batch.status == ("PARTIAL" if count == 500 else "SUCCESS")
+    if count == 500:
+        assert any("full page" in reason for reason in batch.missing_reasons)
+    else:
+        assert len(batch.orders) == count

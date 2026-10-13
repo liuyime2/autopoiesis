@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import cast
 
+from autopoiesis.broker_client import ORDER_PAGE_LIMIT
 from autopoiesis.coerce import datetime_utc
 from autopoiesis.models import (
     BrokerEvidenceBatch,
@@ -83,13 +84,12 @@ class BrokerEvidenceProvider:
     def _fetch_orders(self, window_start: datetime, window_end: datetime) -> list[BrokerOrderSnapshot]:
         after = _api_time(window_start)
         until = _api_time(window_end)
-        if hasattr(self.client, "list_orders"):
-            raw_orders = self.client.list_orders(status="all", after=after, until=until)
-        elif hasattr(self.client, "get_orders"):
-            raw_orders = self.client.get_orders(status="all", after=after, until=until)
-        else:
-            raise AttributeError("client has no list_orders/get_orders")
-        return [order for order in (self._normalize_order(item) for item in raw_orders or []) if order is not None]
+        raw_orders = self.client.list_orders(status="all", limit=ORDER_PAGE_LIMIT, after=after, until=until)
+        if not isinstance(raw_orders, list):
+            raise RuntimeError("broker order history is unavailable or invalid")
+        if len(raw_orders) >= ORDER_PAGE_LIMIT:
+            raise RuntimeError("broker returned a full page of orders; historical evidence is incomplete")
+        return [order for order in (self._normalize_order(item) for item in raw_orders) if order is not None]
 
     def _fetch_activities(self, window_start: datetime, window_end: datetime) -> list[BrokerFillActivity]:
         if not hasattr(self.client, "get_activities"):

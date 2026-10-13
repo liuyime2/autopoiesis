@@ -329,7 +329,8 @@ class _SyntheticClosedBroker:
         self.calls.append("clock")
         return SimpleNamespace(is_open=False)
 
-    def get_orders(self, **kwargs):
+    def list_orders(self, status="open", limit=50):
+        assert status == "open" and limit == 500
         self.calls.append("orders")
         return []
 
@@ -537,6 +538,7 @@ def synthetic_readiness(tmp_path, monkeypatch, *, opened=False):
         get_calendar=lambda **kwargs: [SimpleNamespace(date=now.date(), open=time(9, 30), close=time(16))],
         get_account=lambda: account, list_positions=list, list_orders=lambda **kwargs: [],
         get_latest_trade=lambda symbol: SimpleNamespace(price=100, timestamp=now),
+        get_asset=lambda symbol: SimpleNamespace(**{"class": "us_equity"}),
     )
     calls = []
     original_builder = tool._build_agent_daemon

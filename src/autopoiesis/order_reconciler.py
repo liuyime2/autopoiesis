@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from autopoiesis.broker_client import list_open_orders
 from autopoiesis.journal import JsonlJournal
 from autopoiesis.models import JournalEvent, JournalEventStatus, JournalEventType
 from autopoiesis.submission_state import SubmissionJournalError, project_submission_state
@@ -436,15 +437,5 @@ class OrderReconciler:
         ))
 
     def _open_order_ids(self) -> tuple[str, ...]:
-        if hasattr(self.client, "list_orders"):
-            orders = self.client.list_orders(status="open")
-        else:
-            orders = self.client.get_orders(status="open")
-        ids = []
-        for order in orders:
-            order_id = str(getattr(order, "id", ""))
-            if order_id:
-                ids.append(order_id)
-        return tuple(ids)
-
+        return tuple(order.id for order in list_open_orders(self.client))
 

@@ -144,9 +144,16 @@ reads no order - and writes `runtime/autopoiesis/reports/<date>.txt`:
 the lifecycle decisions: every strategy's state must be explained by a journalled
 decision, and every file in the library must have a recorded admission verdict.
 
-**`alpaca_smoke.py`** is a read-only connectivity probe against the paper API — clock,
-account, positions, orders. `make smoke` runs it. It was originally `test_alpaca.py` at
-the repository root, where pytest imported a network-calling module on every run.
+**`alpaca_smoke.py`** is the read-only whole-account paper inventory. `make smoke`
+prints the clock, cash/equity/buying powers, account blocking flags, crypto status and options levels,
+every held position's broker class, and metadata for held/configured symbols.
+Missing fields and unreadable asset metadata stay UNKNOWN. It requests 500 open orders
+and refuses a full page or invalid contents rather than claiming completeness.
+No stock quotes, model or order/account writes are needed. US equities have an existing
+adapter subject to Guardian, market and coverage checks; options, crypto and unknown
+classes remain unsupported. Keep financial output in private runtime evidence.
+It was originally `test_alpaca.py` at the repository root, where pytest imported a
+network-calling module on every run.
 
 **`broker_latency_sample.py`** samples clock/account SDK operation latency against the
 configured paper endpoint only. Run `make broker-latency-sample COUNT=20`; each iteration

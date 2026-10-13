@@ -31,6 +31,7 @@ from autopoiesis import (
     strategy_engine,
 )
 from autopoiesis.atomicio import write_json_atomic
+from autopoiesis.broker_client import list_open_orders
 from autopoiesis.broker_evidence import latest_evidence_batch
 from autopoiesis.config import AgentConfig
 from autopoiesis.evaluator import (
@@ -1181,7 +1182,7 @@ def _check_broker(report: DoctorReport, config: AgentConfig, client, skip: bool)
     )
     try:
         positions = client.list_positions()
-        orders = client.list_orders(status="open")
+        orders = list_open_orders(client)
     except Exception as exc:
         report.add("broker positions", FAIL, f"{type(exc).__name__}: {exc}")
         return
