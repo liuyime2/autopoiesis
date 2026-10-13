@@ -255,3 +255,62 @@ under the new deployment in the verified window, so the claim that it works rest
 tests and their measured red-to-green, not on a live refusal yet being attributed correctly.
 The next BIL staleness event is the real test, and the attribution is observable in the next
 `REFLECTION_GENERATED` payload.
+
+## Session close under the fixed source — 14:09:16 to 16:47 EDT
+
+The daemon ran the remainder of the session unchanged: one PID, `NRestarts=0`, 130 cycles,
+`error_count=0`, no cycle carrying an error, last cycle at 16:02:54.
+
+- 130 cycles across 11 symbols: SPY, BIL, TLT, XLB, XLE, XLF each 13; BMBL, CIFR and SOXS
+  each 13; NOK 9; SOXL 4. 125 HOLD and 5 SELL. 124 SKIPPED, 5 SUBMITTED, 1 REJECTED.
+- **Zero retirements.** Every lifecycle event after the switch is a
+  `PROBATION -> PROBATION` return. Under the old source one strategy was retired in the first
+  46 minutes of the session.
+
+### The fix was exercised live, once
+
+At 15:31:21 EDT, BIL's quote was 1,102 s old and Guardian refused it with
+`'the price quote is 1115s stale, beyond the 900s limit'` - the interpolated message that
+`is_system_rejection` returned `False` for this morning. Under the deployed code it returns
+**True**, and no retirement followed.
+
+The honest limit of that evidence: the cycle carried no strategy, because
+`fixed-size-bil-sell-001` had already been retired, so the charge would not have been
+attributed to anything under the old code either. What the live run proves is that the
+classification is correct on the real message string. That it protected a specific strategy is
+not demonstrated, and it will not be until BIL has a strategy to protect. The two findings are
+the same finding.
+
+### What the session produced that was not expected
+
+**`trend-follow-20260824-001` is now stranded, and it is the more serious of the two.** Its
+`cumulative_cycles` reached 52, which is exactly `PROBATION_CYCLES * (1 + MAX_PROBATION_RESTARTS)`
+= the full granted budget, so `_needs_probation` answers false and the selector will never
+serve it again. Its lifecycle is `PROBATION`, it has never submitted an order, and its offline
+validation reports `INCONCLUSIVE_INSUFFICIENT_EVIDENCE` on 0 informative decisions out of 33.
+
+This is the stranding the `submitted_orders <= 0` branch's own comment describes - "out of the
+queue, not ACTIVE, not PAUSED, not RETIRED" - arriving through the mechanism that comment
+promised would prevent it. Returning the candidate to probation cannot unstrand it, because
+the budget that return was meant to refill is the one that has just been exhausted. SPY, a
+configured symbol with a 32-share position, therefore has no servable strategy at all.
+
+**The curriculum failed twice with the identical error** - `constrained response contained no
+JSON object`, at 10:10:04 and again at 16:47:34. Both curriculum attempts today failed the same
+way, which makes it a reproducible defect in the constrained-generation path rather than a
+transient model failure.
+
+**The curriculum keeps proposing a strategy that already exists.** Two admissions were refused
+after the switch: at 14:55:54 with `strategy_id already exists; duplicate admission rejected`,
+and at 15:40:01 as `behaviourally identical to existing strategy 'fixed-size-tlt-sell-001'`.
+The gate is doing its job; the proposal path is not reading the current book before asking.
+
+### Closing account state, read from the broker at 17:08 EDT
+
+Clock closed, next open 2026-10-14 09:30 EDT. Account ACTIVE, equity **99,771.90**, **0** open
+orders. Four positions: BIL 209 (+19.36), SPY 32 (+82.74), TLT 215 (-1,994.68), XLB 1 (+0.70).
+XLF was exited entirely during the day. 15 orders filled today across both sources.
+
+No return is claimed. Sell prices and cost basis are known and the book carries a large
+pre-existing unrealized loss on TLT; nothing here attributes any of it to decision quality, and
+the day's `PROFIT_TARGET_CHECKED` reads `profit target unproven`.
