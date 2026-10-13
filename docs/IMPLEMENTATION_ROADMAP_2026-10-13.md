@@ -4,25 +4,25 @@
 
 ## 当前结论
 
-项目已经具备可审计的 paper 交易主路径、whole-account 只读清点、Guardian 风控、paper 下单/恢复基础设施、预注册研究工具和策略生命周期/反思/课程提案机制。最新源码修复仍在 PR 分支，当前运行的 daemon 尚未切换到它。项目尚无通过合同的 alpha，没有证明 LLM 决策净增益，没有证明受控递归自我改进 RSI 的收益，也没有完成统一资金口径下的长期 paper 组合超额验收。现在的状态是**准备做新源码 paper 验证**，不是已经验证能持续正确挣钱。
+项目已经具备可审计的 paper 交易主路径、whole-account 只读清点、Guardian 风控、paper 下单/恢复基础设施、预注册研究工具和策略生命周期/反思/课程提案机制。**截至 2026-10-13 06:16 EDT**，修复源码已部署到 paper daemon，fingerprint `9fb9066d820f27c9`；本地全套检查、隔离 fresh clone、提交 `da2da73` 的四项 GitHub CI 都通过。真实账户只读 smoke 和闭市安全探针通过，开盘定时器已安装，但当日正式开盘观察还没发生。
 
-最新源代码 check 在本地实际通过 1,757 项、6 项跳过；完整的新提交树克隆及远端当前 SHA CI 尚待本轮重跑。账户权限、代码适配、当下持仓和成交验证是四种不同事实，不可互相替代。
+项目仍没有通过研究合同的 alpha，没有证明 LLM 决策净增益，没有证明受控递归自我改进 RSI 的收益，也没有完成统一资金口径下的长期 paper 组合超额验收。当前状态是**部署已完成、等待开盘 paper 观察**，不是已经验证能持续正确挣钱。账户权限、代码适配、持仓覆盖、实际成交和盈利是不同事实，不可互相替代。
 
 ## 按领域看已经有的证据和缺口
 
 | 领域 | 当前实测/实现 | 仍不能声称完成 |
 |---|---|---|
-| 源码与测试 | 12 个有边界的单元修复通过独立复审；最新 `make check ENVFILE=/dev/null TEST_ARGS='-W error::pytest.PytestUnhandledThreadExceptionWarning'` 为 1,757 passed / 6 skipped，mypy 49 个源码文件无问题；unit-template 门禁覆盖 14 个模板，55 个 gate 类未删减 | 新鲜隔离克隆成功和最新 PR CI 仍需按最终 commit 重跑；测试不能证明生产账户或实际开盘行为 |
-| 当前进程 | 只读观察到旧 paper daemon PID 2800047，源码指纹 `60d5aa8d767ce067`，market-closed maintenance；旧源码尚未加载本分支 | 新提交、新 heartbeat、启动协调和开盘后的实际决策仍未验证 |
-| 账户 | 真实只读清点：6 个 us_equity 长仓 BIL、SPY、TLT、XLB、XLE、XLF，0 个完整读取的挂单；账户 ACTIVE，crypto status ACTIVE，options approved/trading level 3 | 这些许可不表示本项目有期权/加密交易适配。新持仓/余额/挂单需部署后重查 |
+| 源码与测试 | 12 个有边界的单元修复通过独立复审；`make check` 为 1,757 passed / 6 skipped，mypy 49 个源码文件无问题；fresh clone 9/9，unit-template 门禁覆盖 14 个模板；提交 `da2da73` 的 release 与 Python 3.10/3.11/3.12 四项 CI 成功 | PR #10 仍 open/unmerged；测试不能证明生产账户或实际开盘行为 |
+| 当前进程 | 新 paper daemon PID 3184440，fingerprint `9fb9066d820f27c9`，active/running、零重启；startup reconciliation matched；watchdog 在 06:16:38 EDT 自动触发成功 | 当日市场尚未开盘；08:45/09:45/10:30 的真实开盘时段观察仍待发生 |
+| 账户 | 06:08 EDT 真实只读清点：6 个 us_equity 长仓 BIL、SPY、TLT、XLB、XLE、XLF，0 个完整读取的挂单；账户 ACTIVE，crypto status ACTIVE，options approved/trading level 3 | 这些许可不表示本项目有期权/加密交易适配。后续需重复核对新持仓、余额及挂单 |
 | 股票/ETF覆盖 | 股票/ETF 有行情、Guardian 和 paper 订单流水；whole-account `manage_account` 已启用。已冻结可选策略实际覆盖 SPY、BIL、TLT | XLB/XLE/XLF 目前安全地 HOLD；fractional 数量无法精确清零；short=shadow，整账户外部 short 回补未实现。不可称所有持仓均受策略管理 |
 | 期权、加密及其他 | 未实现期权/crypto 专用订单适配、行情/生命周期/账务模型；未知 instrument 会拒绝走普通股票路径 | 不支持任意资产买卖。期权合约/乘数/指派/到期风险，crypto 24/7 时钟/精度/费用均需独立实现和验收 |
-| 订单/风控 | 已有持久 intent、歧义提交阻断、对账/部分成交快照、整账户订单完整性、paper host 和 Guardian 检查；禁止自动降低硬限额 | 新部署后真实 startup reconciliation、停机期间恢复、替换链和首个实时开盘周期仍待验证。不因“希望成交”而放宽风险或强行下单 |
+| 订单/风控 | 已有持久 intent、歧义提交阻断、对账/部分成交快照、整账户订单完整性、paper host 和 Guardian 检查；新部署 startup reconciliation matched；禁止自动降低硬限额 | 停机期间恢复、替换链与首个正式开盘周期仍待验证。不因“希望成交”而放宽风险或强行下单 |
 | 研究与 alpha | 实际拉取/校验 24,237 根真实 SPY 五分钟 bars；完整研究台账有 154 个试验，其中新增 11 个为 1 OVERFIT、10 INSUFFICIENT、0 PASS；重跑新增 0 个试验、回测 | 该窗口在注册研究合同之前已经开始，不是独立预注册/holdout。当前有效 alpha = 0。不能用模拟数据、候选数或策略数量宣布发现 alpha |
 | 交易收益 | 历史 paper 日志曾记净诊断 PnL +811.72；历史报表资本分母按策略峰值敞口相加，不是同步组合权益，且成本/agent-owner 归属口径不满足目标 | 组合净收益率、同步 SPY/现金超额、置信区间和 drawdown 目标为 UNKNOWN/未通过；20 个记录日期也不是连续、完整 60 个有效交易日 |
 | 决策与 RSI | 当前有反思、任务提案、策略准入和生命周期代码；修复后的停止检查禁止停止后新启课程阶段/模型请求 | 没有 control/treatment research episode。系统能提出并筛选任务不等于它已从试验结果学会如何改进研究，也不等于利润提升 |
-| 基础设施 | Make 单一任务入口、服务模板、1200-cycle 配置、合作停止预算、真实 journal 本地恢复和 hourly backup timer 已存在；研究合同和运行状态采集工具已实现 | 最新代码部署、全运行态快照、定期恢复演练、异地备份目标/主机损失恢复、运行成功监控和新 timer 实际触发待确认。无异地存储目标，不要假称异地已完成 |
-| 开源体验 | 去除 min-agent/min_agent 活跃代码引用的先前扫描为 0；pyproject 声明依赖；源码、Make、CI、fresh-clone 文档存在 | 本轮最终克隆/CI 尚未完成；完整贡献/发布门槛及真实网页无障碍/移动端/隐私验收仍待做。已有 HTML/页面代码不是可发布站点验收 |
+| 基础设施 | Make 单一任务入口、服务模板、1200-cycle 配置、合作停止预算；部署前 certified journal 与 204 个运行态文件 SHA 核验；本地 backup timer 成功；watchdog 自动触发成功 | 完整异路径恢复演练、异地备份目标/主机损失恢复、60 日监控和新 readiness timer 实际触发待确认。无异地存储目标，不要假称异地已完成 |
+| 开源体验 | 去除 min-agent/min_agent 活跃代码引用的先前扫描为 0；pyproject 声明依赖；源码、Make、CI、fresh-clone 文档存在；当前 source SHA 的 clone 与 CI 证据通过 | 完整贡献/发布门槛及真实网页无障碍/移动端/隐私验收仍待做。已有 HTML/页面代码不是可发布站点验收 |
 
 本轮证据详情分别在[账户资产范围](evidence/account-asset-scope-2026-10-13.md)、[开盘验证计划](superpowers/plans/2026-10-13-market-open-validation.md)、[当前修复记录](evidence/rsi-repairs-2026-10-13.md)和[历史 RSI 审计](evidence/rsi-status-audit-2026-10-12.md)。历史数字只描述相应时点及其口径。
 
@@ -32,36 +32,33 @@
 
 paper 路径只使用真实数据；测试夹具必须明确标成 synthetic。继续禁止 live 交易、伪造研究、模型 shell 执行、跳过市场开市检查、跳过 Guardian、自动松绑硬风险。成交、盈利、RSI 和资产覆盖只有出现相应真实证据后才能标绿。
 
-## 当前优先执行项
+## 当前执行队列（按依赖顺序）
 
-### 0. 结束本轮 source 与发布核验
+### 0. 已完成：source 与发布核验
 
 **起点**：本路线文件写入时，source 已提交到 `codex/rsi-audit-repairs`；本地整套 check 为绿，单位 12 两轮复审已批准；更早 c2fa05d 独立克隆为 8/9，明确失败在 unit template 门禁。新模板门禁修复已审查，但包含最新源码和所有 14 个模板的新克隆尚未运行。
 
-**执行**：
+以下是已完成结果（不是需要重复执行的步骤）：
 
-1. 运行 `make check ENVFILE=/dev/null TEST_ARGS='-W error::pytest.PytestUnhandledThreadExceptionWarning'`，若源代码/测试后续有任何更改必须重跑。
-2. 通过 Make 入口从最终已提交 tree 做新 Python 环境克隆：`make fresh-clone ENVFILE=/dev/null PYTHON=/localscratch/liuyime2/conda_env/llm/bin/python`。要求每个步骤成功、gate 55/55 类，保存原始实际成功日志；若失败，保留失败证据并先写测量计划修复。
-3. 将成功克隆日志按原样提交，再 push 现有 PR #10。检查**PR 当前头 SHA**的四个 CI job（Python 3.10/3.11/3.12 gate 与 release）全部 success；旧 SHA CI 不能替代。
-4. 最终 combined review 确认没有未解决 source blocker。PR 保持 open/unmerged，直到授权合并并且合并基线另行复验。
+1. `make check` 对本轮 source 通过 1,757 项、6 项跳过；mypy 检查 49 个源码文件、零问题。
+2. `make fresh-clone` 在隔离 Python 3.10.18 环境通过 9/9；55/55 gate classes、2,900 次执行、94 个测试文件；凭证和 XDG 配置均移除。
+3. 原始克隆证据已提交；PR source commit `da2da73` 的四个 GitHub Actions job（Python 3.10/3.11/3.12 与 release）均成功。
+4. 最终独立复审没有 source blocker；PR #10 仍 open/unmerged。合并授权与合并基线验证仍是单独关口。
 
-**通过条件**：本地全套、credentials-free fresh clone、指定 SHA 四个 CI job、完整 PR diff/review 全部通过；日志 commit under test 等于实际 clone SHA。不通过时 NO-GO，不部署。
+**验收结果**：本地全套、credentials-free fresh clone、提交 `da2da73` 四个 CI job 均通过；原始 fresh-clone 日志记录实际测试 tree `dbd55c2`，随后日志按原样提交。PR #10 保持 open/unmerged。此次源码/克隆/CI 关口 PASS；PR 最终合并后的基线仍需重新验证。
 
-### 1. 纸交易源码切换和本次开盘观测
+### 1. 已完成部署；待完成当日真实开盘 paper 观测
 
 **执行前**：核对 broker clock/market calendar、当前 process PID/cwd/fingerprint、heartbeat 和交易服务状态；确认老进程处于 market-closed maintenance sleep，backup/研究/report/watchdog 不会同时写共享状态；检查真实 systemd user unitdir `/home/liuyime2/.config/systemd/user`。operator env 只从外部配置读取，不在 shell 输出中暴露凭证。
 
-**执行**：
+部署步骤已完成并记录在 [实际部署证据](evidence/market-open-readiness-2026-10-13.md)。不要重复停止/安装服务。剩余执行项：
 
-1. 保存每个原 unit 的精确字节、timeout 和启停状态；已有用户 prereg.py 修改的 SHA 必须与审查起点一致。
-2. 暂停 watchdog、research、report、backup 等可能竞争写入的 timer/service；确认当前备份任务完成。保留现有 2,326-cycle journal snapshot 证明。协作停止旧 daemon；其旧 wait 可达 675 秒，临时 stop grace 705 秒仅供这一次安全停止。禁止 SIGKILL 穿过 journal/order 写入。退出后立即去掉临时 override，再确认新预算 630 秒。
-3. 在旧进程退出后，先复制完整停止时点 journal 和可变策略/知识/反思/研究状态至私有 checkpoint，逐项核验清单与 SHA。备份应覆盖状态而非凭证；旧 journal 不覆盖、不重置。把修复 worktree `runtime/` 与主运行态合并为唯一 shared runtime，验证 journal、lock、library/cache 路径指向同一位置。
-4. 用已 CI 通过的 worktree 调用现有 `make install-service ENVFILE=<外部 env>` 渲染服务；逐个实际路径用 `systemd-analyze --user verify` 验证。风险配置保留 paper、MAX_DAILY_CYCLES=1200、MAX_POSITION_VALUE=25000、MAX_TOTAL_EXPOSURE=90000、MAX_TRADES_PER_DAY=100、SHADOW=0、SHORTS=shadow 和现有 symbol/allowlist。核对启动主机是 Alpaca paper。
-5. `make run ENVFILE=<外部 env>` 启动单一 daemon。核对 PID/cwd、工作树 fingerprint 与 heartbeat 等值；检查旧进程完全退出、startup reconciliation 通过、账户和订单同步完整、journal 可追加。停用/恢复 timer 的每次变更都检查 manager 实际 active state，而非只看 enable 成功。
-6. 按计划安装 08:45 preflight、09:45 与 10:30 open verifier。`make market-preflight` 要求真实行情、一个覆盖标的真实模型决策、Guardian 在市场关闭/行情拒绝时安全拒绝、零新订单；`make market-open-verify` 在开市前的实际结论只能 WAIT，不能硬造 open PASS。
-7. 09:45/10:30 读取只读报告和真实 paper journal：检查新 session cycles、每条 strategy.symbol 覆盖 snapshot.symbol、冻结 provenance、Guardian、提交 intent/ack ID、拒单/成交/成本、误差、fallback、未完成 fills。覆盖不足/无成交可以是 HOLD/WAIT；只能按报告契约解释，不能算盈利或整体交易成功。
+1. 当前已启用 08:45 preflight、09:45 与 10:30 open verifier timers；逐个读取结果，不把 active/enabled 当执行通过。
+2. 在每个到期点之后，读取只读报告和真实 paper journal：核验新 session cycles、每条 strategy.symbol 覆盖 snapshot.symbol、冻结 provenance、Guardian、提交 intent/ack ID、拒单/成交/成本、错误、fallback、未完成 fills。
+3. 若结果为 NO-GO/WAIT，按诊断修复具体根因后重复同一检查；保持单一 daemon，不并行启动第二个 trader。任何新增订单都必须经过现有 Guardian、市场时间与 paper broker 路径。
+4. 在后续每个交易日重复账户/订单对账与完整性监控，开始新的 60 个有效交易日序列；缺失或不一致的日子按预先定义的规则标记，不补造、不推断。
 
-**通过条件**：当前进程运行新指纹；风险配置逐项一致；唯一 writer 和本地可恢复 checkpoint；服务与 timers 真正 active；pre-open read-only PASS；open-session observation truthful。任何项失败都保持纸交易/停止新增交易，保存证据、定位 root cause、不要自动回退到已知 provenance 有缺陷的旧代码。新源码已准备不表示本次开盘必然有可交易机会或有利润。
+**通过条件**：pre-open/readiness timers 的真实报告符合契约；至少一条完整 open-session cycle 有真实新数据、source/provenance、Guardian 与 broker 对账证据；没有未解释订单或 journal 不一致。无交易机会可安全 HOLD，但这只证明安全运行，不证明 alpha/盈利。任何项失败都保持 paper 模式、停止新增交易并保留证据；不回退到已知 provenance 有缺陷的旧代码。
 
 ### 2. 账户完整性与逐资产可控范围
 
