@@ -23,7 +23,7 @@ Pre-open READY means: exact verified source loaded; paper host/mode; unchanged o
 
 Open-session PASS requires new real journal records from the expected session, fresh real snapshots, matching decision/snapshot/strategy provenance, approved-only attributed submissions, no duplicate or unresolved intents, honest fill/feedback state, no unexpected errors and bounded risk. HOLD or no fill is not a failure, and does not prove profitable decision making. Outcomes beyond their horizon remain pending. No forced order to manufacture an execution PASS.
 
-- [ ] 1. Read-only operational audit. Run `make doctor` and bounded `make broker-latency-sample COUNT=5` against the existing deployment. Inspect only nonsecret configuration, runtime paths, library readiness, model residency and next broker session. Audit service templates and all relevant consumers for shared-runtime/source correctness. Record actionable failures; market-closed and missing forward outcomes remain distinct from failures.
+- [x] 1. Read-only operational audit. Run `make doctor` and bounded `make broker-latency-sample COUNT=5` against the existing deployment. Inspect only nonsecret configuration, runtime paths, library readiness, model residency and next broker session. Audit service templates and all relevant consumers for shared-runtime/source correctness. Record actionable failures; market-closed and missing forward outcomes remain distinct from failures.
 - [ ] 2. Write a bounded correction plan for each measured gap before code edits. Prefer existing commands; add a read-only readiness probe only if existing tools cannot collect the required real evidence safely. Use labelled synthetic refusal tests for any new nontrivial probe; run through Make and review specification then quality. Do not create a second trading loop.
 - [ ] 3. Prepare a concrete deployment and rollback checkpoint. Use `make journal-backup`, preserve local strategy/knowledge/configuration state without copying credentials into the repository, retain the existing user edit and old service definitions. Verify the new source against actual operator settings before stopping. Declare a single shared runtime location; avoid switching to an empty worktree runtime.
 - [ ] 4. Deploy the verified repair for paper validation. Validate rendered units with systemd-analyze; use the existing Make entry for a cooperative stop/restart. Do not kill through an in-flight order, bypass PID protection or weaken Guardian. Confirm actual process-loaded fingerprint, unchanged paper/risk settings, startup reconciliation, active heartbeat and required timers. Record rollback conditions and measured stop/start timing.
@@ -58,3 +58,20 @@ journal/locks/library/cache/log paths coherent. The installer rewrites ten units
 and starts timers; retain exact previous unit bytes/states and stop watchdog timer
 and any running watchdog oneshot around cooperative stop/start. Verify rendered
 units and actual source, not installer exit alone. Do not replace the journal.
+
+Actual `make smoke` exit 0 at October 13 02:04:52 EDT: broker clock closed,
+next open **October 13 09:30 EDT**, next close 16:00 EDT, account ACTIVE,
+six positions and zero open orders. This is real broker/snapshot evidence only;
+the smoke command does not invoke the decision engine or Guardian.
+
+Unit 1 is accepted in cc76d1a: independent spec review reran **116 passed /
+1 skipped**, subsequent quality review reran **12 passed / 31 deselected**.
+Missing strategy selection now abstains before the model and cannot reselect
+through fallback. This proves synthetic attribution boundaries, not an order.
+
+Deployment checkpoint: exact prior ten service/timer bytes and unit states retained
+privately in `/tmp/autopoiesis-open-rollback-20261013/units`; the preexisting main
+prereg.py diff is preserved. `make journal-backup` with the real JOURNAL_RUNTIME
+completed exit 0 into that private checkpoint: five files, 2,326 cycles,
+21,695 events, four generations, zero unparsed lines, recovery **CERTIFIED**.
+Strategy/knowledge state and the actual switch remain pending.
