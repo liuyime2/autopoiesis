@@ -25,6 +25,28 @@ class StrategyAdmissionResult:
     strategy_id: str
 
 
+#: Retirement reasons the current evidence still supports, whatever is proposed afterwards.
+#:
+#: `broker-verified negative realized PnL` is a statement about money that has already
+#: happened, broker-confirmed, so nothing about the present makes it untrue. A strategy
+#: retired for it stays retired, and allowing otherwise would turn this path into a way to
+#: re-run a strategy the account has already been charged for losing on.
+#:
+#: Deliberately not here: "severe operational failure rate N", which is what retired
+#: `fixed-size-bil-sell-001` on 2026-10-13. That reason is a rate over refusals, and the
+#: staleness fix removed an entire class of refusal that was being charged into it. A
+#: recorded reason is only as durable as the attribution behind it.
+NON_EXPIRING_RETIREMENT_REASONS = ("broker-verified negative realized PnL",)
+
+#: How many times a retired strategy may be put back on PROBATION through this gate.
+#:
+#: One. Re-admission is meant to undo a retirement that turned out to be wrong; a second one
+#: means the first was not an error but a disagreement with the gate, which is what the
+#: screen and the promotion path are for. Unbounded, this becomes a retire-and-reinstate loop
+#: in which the lifecycle events themselves become the learning evidence.
+MAX_READMISSIONS = 1
+
+
 class StrategyAdmission:
     def __init__(
         self,
@@ -155,12 +177,36 @@ class StrategyAdmission:
     def admit(
         self, strategy: StrategySpec, results: Sequence[StrategyResult] | None = None
     ) -> StrategyAdmissionResult:
+        # An id the library already holds is only a duplicate if the strategy behind it is
+        # still in play. A RETIRED one is not: it was removed on evidence, and if that evidence
+        # turns out to have been wrong there is no other way back through this gate, because
+        # a different id cannot take a behavioural slot a retired strategy still occupies.
+        #
+        # Measured 2026-10-13. `fixed-size-bil-sell-001` was retired with
+        # "severe operational failure rate 1.00", charged for one cycle in which Guardian
+        # correctly refused a 1546-second-old quote - a refusal the market caused and the
+        # strategy could not have influenced. The staleness attribution behind that is fixed.
+        # At 14:55:54 EDT the curriculum proposed this exact strategy id, rediscovering the
+        # need for a BIL exit on its own, and this branch refused it as
+        # "strategy_id already exists; duplicate admission rejected". The gate was blocking
+        # the system's own repair of a mistake the gate had caused.
+        retired: StrategySpec | None = None
         if self.strategy_library.exists(strategy.strategy_id):
-            return StrategyAdmissionResult(
-                accepted=False,
-                reason="strategy_id already exists; duplicate admission rejected",
-                strategy_id=strategy.strategy_id,
-            )
+            # A file that exists but will not parse counts as held: overwriting it would
+            # destroy the record of whatever is wrong with it.
+            existing = self.strategy_library.try_load(strategy.strategy_id)
+            if existing is None or existing.lifecycle != "RETIRED":
+                return StrategyAdmissionResult(
+                    accepted=False,
+                    reason="strategy_id already exists; duplicate admission rejected",
+                    strategy_id=strategy.strategy_id,
+                )
+            blocked = self._readmission_refusal(existing)
+            if blocked is not None:
+                return StrategyAdmissionResult(
+                    accepted=False, reason=blocked, strategy_id=strategy.strategy_id,
+                )
+            retired = existing
 
         backlog = self.probation_backlog(results)
         dormant = self.dormant_probation(results)
@@ -199,16 +245,47 @@ class StrategyAdmission:
             )
 
         lifecycle = "BASELINE" if strategy.kind == "HOLD_BASELINE" else "PROBATION"
-        self.strategy_library.save(
-            strategy.model_copy(
-                update={"lifecycle": lifecycle, "lifecycle_reason": review.reason}
+        updates: dict[str, object] = {"lifecycle": lifecycle}
+        if retired is not None:
+            # Both reasons, because the file is the only place a later reader learns why a
+            # retired id is serving again. Overwriting `lifecycle_reason` with the new
+            # verdict would erase the mistake the re-admission is correcting.
+            updates["lifecycle_reason"] = (
+                f"re-admitted after retirement: {retired.lifecycle_reason}; {review.reason}"
             )
-        )
+            updates["readmissions"] = retired.readmissions + 1
+        else:
+            updates["lifecycle_reason"] = review.reason
+        self.strategy_library.save(strategy.model_copy(update=updates))
         return StrategyAdmissionResult(
             accepted=True,
-            reason="approved",
+            reason=(
+                f"re-admitted after retirement: {retired.lifecycle_reason}"
+                if retired is not None else "approved"
+            ),
             strategy_id=strategy.strategy_id,
         )
+
+    def _readmission_refusal(self, existing: StrategySpec) -> str | None:
+        """Why this retired strategy may not be put back, or None if it may.
+
+        A retirement the evidence still supports must not be reversible by proposing the
+        strategy again, and a re-admission that can happen twice is a loop rather than a
+        repair.
+        """
+        if existing.readmissions >= MAX_READMISSIONS:
+            return (
+                f"re-admission refused: already re-admitted {existing.readmissions} time(s) "
+                f"and the limit is {MAX_READMISSIONS}; this is a disagreement with the gate, "
+                f"not an error in it"
+            )
+        for reason in NON_EXPIRING_RETIREMENT_REASONS:
+            if existing.lifecycle_reason.startswith(reason):
+                return (
+                    f"re-admission refused: retired for '{reason}', which the evidence still "
+                    f"supports; nothing about the present makes it untrue"
+                )
+        return None
 
     def _reference_price_rejection_reason(self, strategy: StrategySpec) -> str | None:
         """Reject a TREND_FOLLOW that cannot trade, in either direction.

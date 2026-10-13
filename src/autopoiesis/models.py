@@ -648,6 +648,26 @@ class StrategySpec(BaseModel):
     #: retries, not an attempt limit: nothing here decides that a strategy has had enough
     #: chances. That stays with the screen and the promotion gate, which judge outcomes.
     probation_restarts: int = Field(default=0, ge=0)
+    #: How many times this strategy has been re-admitted after a retirement.
+    #:
+    #: Retirement is terminal in the sense that nothing reopens it by itself, and until
+    #: 2026-10-13 it was terminal in the stronger sense that the admission gate could not
+    #: reopen it either: `admit` refused any id the library already held, without looking at
+    #: the lifecycle, so a strategy retired for a reason that later turned out to be wrong had
+    #: no route back except editing the live library by hand.
+    #:
+    #: Measured live that afternoon. `fixed-size-bil-sell-001` was retired at 09:39:38 EDT
+    #: with "severe operational failure rate 1.00", charged for one cycle in which Guardian
+    #: correctly refused a 1546-second-old quote - a refusal the market, not the strategy,
+    #: caused. The staleness attribution that let that happen is fixed. At 14:55:54 EDT the
+    #: curriculum proposed `fixed-size-bil-sell-001` by name, rediscovering the need on its
+    #: own, and the gate refused it as "strategy_id already exists; duplicate admission
+    #: rejected". The self-healing was blocked by the thing meant to authorise it.
+    #:
+    #: This is a bound on how many times the gate will reverse its own retirement, not a
+    #: count of chances a strategy gets to trade. The retired reasons that do not expire -
+    #: broker-verified negative realized PnL - are refused before this is consulted at all.
+    readmissions: int = Field(default=0, ge=0)
     created_at: datetime
     rationale: str = Field(min_length=1)
 

@@ -1583,7 +1583,16 @@ def test_the_reason_is_written_when_the_lifecycle_is_written():
     lifecycle_writes = inspect.getsource(daemon.AgentDaemon)
     assert 'model_copy(update={"lifecycle": decision.new_lifecycle' not in lifecycle_writes
     assert '"lifecycle_reason": decision.reason' in lifecycle_writes
-    assert '"lifecycle_reason": review.reason' in inspect.getsource(strategy_admission)
+    admission_writes = inspect.getsource(strategy_admission)
+    # Every path that writes the lifecycle writes the reason with it. There are two in
+    # `admit` - the ordinary admission and the re-admission of a retired id - and the
+    # re-admission one has to carry the original retirement reason forward, because the file
+    # is the only place that survives to say why a retired id is serving again.
+    assert admission_writes.count('updates["lifecycle_reason"]') == 2, (
+        "admission must write lifecycle_reason on both the ordinary and the re-admission path"
+    )
+    assert 'updates["lifecycle_reason"] = review.reason' in admission_writes
+    assert "re-admitted after retirement: {retired.lifecycle_reason}" in admission_writes
 
 
 # --------------------------------------------------------------------------
