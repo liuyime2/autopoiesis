@@ -432,7 +432,7 @@ evaluate:
 	@if [ ! -f runtime/autopoiesis/journal.jsonl ]; then \
 		echo "evaluate: no journal yet; run 'make run' for at least one cycle first"; \
 	else \
-		rc=0; $(CONDA_RUN) python -m autopoiesis.cli --verify-profit-target > $(EVAL_REPORT) || rc=$$?; \
+		rc=0; $(PY) -m autopoiesis.cli --verify-profit-target > $(EVAL_REPORT) || rc=$$?; \
 		if $(PY) -c 'import json, sys; p = json.load(open(sys.argv[1])); rc = int(sys.argv[2]); expected = {0: ("satisfied", "PASS", True), 1: ("not satisfied", "FAIL", False), 2: ("unproven", "UNKNOWN", False)}; valid = isinstance(p, dict) and rc in expected and p.get("exit_code") == rc and (p.get("status"), p.get("comparison_status")) == expected[rc][:2] and p.get("satisfied") is expected[rc][2]; sys.exit(0 if valid else 1)' $(EVAL_REPORT) $$rc; then \
 			cat $(EVAL_REPORT); \
 			echo "evaluate: measurement collected; the report contains the target verdict"; \

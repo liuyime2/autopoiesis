@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from dataclasses import replace
@@ -173,6 +174,47 @@ def test_make_evaluate_collects_only_matching_measurements(tmp_path, returncode,
     if collected:
         assert "UNKNOWN" in result.stdout
         assert "target met" not in result.stdout
+
+
+def test_make_evaluate_uses_workspace_source_over_foreign_pythonpath(tmp_path):
+    """Synthetic empty journal and foreign package exercise the actual CLI entry point."""
+    root = Path(__file__).resolve().parents[2]
+    (tmp_path / "Makefile").write_text((root / "Makefile").read_text())
+    (tmp_path / "src").symlink_to(root / "src", target_is_directory=True)
+    runtime = tmp_path / "runtime" / "autopoiesis"
+    runtime.mkdir(parents=True)
+    journal = runtime / "journal.jsonl"
+    journal.touch()
+    foreign = tmp_path / "foreign" / "autopoiesis"
+    foreign.mkdir(parents=True)
+    (foreign / "__init__.py").touch()
+    marker = tmp_path / "foreign-cli-ran"
+    (foreign / "cli.py").write_text(
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).touch()\n"
+        "raise RuntimeError('synthetic foreign CLI must not be selected')\n"
+    )
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(("AUTOPOIESIS_", "ALPACA_", "APCA_"))}
+    env.update({
+        "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""),
+        "PYTHONPATH": str(foreign.parent),
+        "AUTOPOIESIS_JOURNAL": str(journal),
+        "AUTOPOIESIS_MODE": "paper",
+    })
+    result = subprocess.run(
+        ["make", "--no-print-directory", "evaluate", "ENVFILE=/dev/null", "CONDA_BIN=", "CONDA_RUN="],
+        cwd=tmp_path, env=env, text=True, capture_output=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not marker.exists(), "the entry point must bypass the foreign package"
+    report = json.loads((runtime / "evaluate.txt").read_text())
+    assert report["exit_code"] == 2
+    assert report["comparison_status"] == "UNKNOWN"
+    assert report["status"] == "unproven"
+    assert report["satisfied"] is False
+    assert report["account_return_scope"] == "account_only_diagnostic"
+    assert journal.read_text() == "", "the read-only CLI must leave the synthetic journal empty"
 
 
 def test_help_renders_without_crashing(capsys):

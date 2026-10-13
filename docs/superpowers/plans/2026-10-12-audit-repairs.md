@@ -55,6 +55,13 @@ cycles lack frozen decision-time provenance and are excluded from learning.
   make check, UTC tests, required verify gates and credential-free fresh clone on
   committed changes. Reconcile RSI plan/evidence/docs. Publish a reviewable branch
   and inspect GitHub CI if authentication permits; never report local as remote.
+- [ ] 6a. Actual-entry follow-up: Make evaluate selected the ambient old package
+  despite fresh-install CI passing. Select current checkout source, reproduce with
+  a foreign-package test, independently review and rerun the real sealed journal.
+  Those checks are complete; new committed-source clone, full gate and exact
+  latest CI are required before closing this follow-up. Details are recorded in
+  `2026-10-13-profit-target-consumers.md`; previous Task 6 evidence remains bound
+  to cd2874e/003688a rather than relabelled.
 
 ## Evidence and follow-up
 

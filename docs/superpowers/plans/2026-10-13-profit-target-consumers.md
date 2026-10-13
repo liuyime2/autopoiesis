@@ -90,3 +90,66 @@ Final source cd2874e passed real fresh clone (nine steps, 55/55 classes) and rem
 CI run 38348912218 (all three Python gate jobs plus release SUCCESS). Root serial
 full gate passed 55/55 classes / 2,489 executions / zero failures after clone-log
 completion. Documentation-only evidence publication follows; no later source edit.
+
+## Real-entry follow-up: ambient installed CLI
+
+After final CI, root actually ran Make evaluate on the sealed real restored
+journal with credentials disabled. Baseline: recipe exit 1 (Make command exit 2); producer JSON contained
+account_return_pct=0.0, status="not satisfied", no exit_code/comparison_status.
+The matching-report validator correctly refused it. `evaluate` still invoked
+`$(CONDA_RUN) python -m ...`, so the Conda environment's older editable installation
+was selected instead of this checkout. Fresh installation CI could not expose
+this ambient-source mismatch.
+
+Success: the actual Make entry invokes the local source through existing `$(PY)`,
+regardless of a foreign/old package in PYTHONPATH/site-packages. Add a synthetic
+foreign-package regression before the one-line Make change; preserve all report
+failure validation. Rerun focused Make/CLI checks and real sealed-journal evaluate,
+then independent spec/quality review. New source SHA gets its own committed clone
+and remote CI; keep earlier green results bound to their actual SHA. No orders,
+production restart or source architecture change. This is an unresolved integration
+follow-up until actual evaluate returns a collected UNKNOWN measurement.
+
+Implementation follow-up (frozen for independent review): before the Make edit,
+`make test ENVFILE=/dev/null TEST_ARGS='tests/autopoiesis/test_cli.py -k workspace_source'`
+returned **1 failed, 21 deselected**. The isolated test copied the actual Makefile,
+linked this checkout's src, created an empty explicitly synthetic journal, and
+inherited a foreign PYTHONPATH package that raised when selected. Its failure
+showed the foreign CLI was selected; the report validator correctly rejected it.
+
+The sole production change replaces the producer's `$(CONDA_RUN) python` with
+existing `$(PY)`. Collector validation remains unchanged. After that line change,
+`make test ENVFILE=/dev/null TEST_ARGS='tests/autopoiesis/test_cli.py -k "workspace_source or make_evaluate"'`
+returned **9 passed, 13 deselected in 2.90s**. The real CLI now collected UNKNOWN
+from the isolated synthetic journal, never selected the foreign CLI, and left the
+journal empty. This is an entry-point regression test, not market evidence.
+
+`make test ENVFILE=/dev/null TEST_ARGS='tests/autopoiesis/test_cli.py tests/autopoiesis/test_daemon.py tests/autopoiesis/test_research_fetch_make.py'`
+returned **88 passed in 3.76s**. `make lint-files ENVFILE=/dev/null FILES='tests/autopoiesis/test_cli.py'`
+returned **All checks passed**; `git diff --check -- Makefile tests/autopoiesis/test_cli.py`
+returned no findings. Existing test file count stays **94**. No Python production
+source changed. Actual sealed-journal evaluation, independent reviews, and
+committed-source clone/CI remain pending for this follow-up; previous green
+results retain their original source SHA.
+
+Independent follow-up specification review: **9 passed / 13 deselected in 2.55s**,
+no blocker. Independent quality review: **9 passed / 13 deselected in 2.83s**,
+focused lint and diff checks clean, no blocker. Both inspected actual source
+selection and the unchanged failure validator, not just mocked output.
+
+Root repeated `make evaluate ENVFILE=/dev/null
+AUTOPOIESIS_JOURNAL=/tmp/autopoiesis-audit-restored-20261013/journal.jsonl` against
+the real sealed restored record: **Make command exit 0**, producer `exit_code=2`,
+`comparison_status=UNKNOWN`, `status=unproven`, `satisfied=false`, and
+`account_return_scope=account_only_diagnostic`. The missing agent allocation,
+cash flows and aligned rolling equity remain the explicit comparison reason.
+The empty placeholder required by Make's root-journal existence guard was removed
+by an EXIT trap; the input remained the sealed real restored record, not that
+placeholder. Raw private log: `/tmp/autopoiesis-audit-real-evaluate-fixed.log`.
+Conda's stderr reports the producer's intentional exit 2; collection succeeds only
+after the matching JSON validator accepts it. No credential, order or restart.
+Committed-source fresh clone and latest remote CI remain integration follow-ups.
+
+Root full `make check ENVFILE=/dev/null` after this follow-up exited 0:
+**1,500 passed / 6 skipped in 77.70s**, lint clean, mypy 49 source files clean.
+Private original output: `/tmp/autopoiesis-audit-workspace-entry-check.log`.
