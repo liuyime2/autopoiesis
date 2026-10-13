@@ -178,7 +178,7 @@ class AgentDaemon:
         signal.signal(signal.SIGINT, self._request_stop)
         try:
             self._heartbeat("RUNNING", "daemon started")
-            if not self._startup_reconcile():
+            if not self._stop_requested and not self._startup_reconcile():
                 return 1
             while not self._stop_requested:
                 # One failure boundary for the whole loop, not one per call site.
@@ -204,17 +204,25 @@ class AgentDaemon:
                         f"maintenance error, continuing to trade: "
                         f"{type(exc).__name__}: {exc}",
                     )
+                if self._stop_requested:
+                    break
                 if max_cycles is not None and self.cycle_count >= max_cycles:
                     break
                 if self.scheduler is not None and not self._should_trade_now():
+                    if self._stop_requested:
+                        break
                     self._heartbeat("RUNNING", "market closed; maintenance only")
                     if max_cycles is not None:
                         break
-                    self.sleep(self._sleep_seconds())
+                    if not self._stop_requested:
+                        self.sleep(self._sleep_seconds())
                     continue
+                if self._stop_requested:
+                    break
                 if self.daily_cycle_count >= self.config.max_daily_cycles:
                     self._heartbeat("BACKING_OFF", "max daily cycles reached")
-                    self.sleep(self._sleep_seconds())
+                    if not self._stop_requested:
+                        self.sleep(self._sleep_seconds())
                     continue
                 round_started = time.monotonic()
                 for symbol in self._round_symbols():
@@ -252,6 +260,8 @@ class AgentDaemon:
         does not turn into a tight retry loop against it, and it resets the moment a call succeeds -
         so a single stall costs one skipped round rather than the session.
         """
+        if self._stop_requested:
+            return False
         try:
             open_now = self.scheduler.should_trade_now()
             self._record_broker(True)
@@ -271,7 +281,8 @@ class AgentDaemon:
                 message=f"broker clock unreadable, not trading this round: "
                         f"{type(exc).__name__}: {exc}",
             )
-            self.sleep(delay)
+            if not self._stop_requested:
+                self.sleep(delay)
             return False
         if self._clock_failures:
             # Only worth recording when something had actually gone wrong.
@@ -279,10 +290,20 @@ class AgentDaemon:
         return bool(open_now)
 
     def _run_symbol(self, symbol: str) -> None:
+        if self._stop_requested:
+            return
+        # One count per attempted cycle, including exceptions after run_once.
+        # Reporting or maintenance failures cannot turn one cycle into two.
+        self.cycle_count += 1
+        self.daily_cycle_count += 1
         try:
             record = self.loop.run_once(symbol)
-            self.cycle_count += 1
-            self.daily_cycle_count += 1
+            if record is not None:
+                self.last_cycle_id = record.cycle_id
+            if self._stop_requested:
+                if record is None:
+                    self.error_count += 1
+                return
             if self.on_cycle_count is not None:
                 # Reported even when the cycle failed, so the number stays monotone and never
                 # skips. A cadence measured against a counter that jumped would be a cadence
@@ -294,7 +315,8 @@ class AgentDaemon:
                 self.error_count += 1
                 self._heartbeat("BACKING_OFF", f"broker data unavailable for {symbol}")
                 return
-            self.last_cycle_id = record.cycle_id
+            if self._stop_requested:
+                return
             # Whether the model answered, recorded from the one signal that says so.
             #
             # `decision_source == "llm"` means it did. `fallback_policy_engine` means it did not -
@@ -312,17 +334,19 @@ class AgentDaemon:
             # the flag at its last known value, which is the honest statement: nothing new is
             # known about the model from a cycle that did not ask it.
             self._post_cycle_model_flag(record)
+            if self._stop_requested:
+                return
             self._post_cycle()
-            self._heartbeat("RUNNING", f"completed cycle for {symbol}")
+            if not self._stop_requested:
+                self._heartbeat("RUNNING", f"completed cycle for {symbol}")
         except Exception as exc:
-            self.cycle_count += 1
-            self.daily_cycle_count += 1
             self.error_count += 1
             self._heartbeat("BACKING_OFF", f"cycle error for {symbol}: {exc}")
 
-    def _request_stop(self, signum, _frame) -> None:  # pragma: no cover - signal wiring is integration behavior
+    def _request_stop(self, _signum, _frame) -> None:
+        # Signals may interrupt a journal append. Do not reenter IO or its lock;
+        # the ordinary run loop writes the final heartbeat after the boundary.
         self._stop_requested = True
-        self._heartbeat("STOPPING", f"received signal {signum}")
 
     def _startup_reconcile(self) -> bool:
         if self.startup_reconciler is None:
@@ -358,11 +382,18 @@ class AgentDaemon:
             self.daily_cycle_count = 0
 
     def _post_cycle(self) -> None:
-        if self.journal is None or self.reflection_memory is None:
+        if self._stop_requested or self.journal is None or self.reflection_memory is None:
             return
         if self.cycle_count % self.reflect_every == 0:
-            self._reflect(evidence=self._latest_evidence_batch())
+            evidence = self._latest_evidence_batch()
+            if self._stop_requested:
+                return
+            self._reflect(evidence=evidence)
+            if self._stop_requested:
+                return
             self._manage_strategy_lifecycle()
+            if self._stop_requested:
+                return
         if self.cycle_count % self.curriculum_every == 0 and self.curriculum_agent is not None:
             self._curriculum_proposal()
 
@@ -572,7 +603,7 @@ class AgentDaemon:
         ones, because "we cannot tell yet" is a result worth having on the record
         and it is what stops a thin strategy from being treated as validated.
         """
-        if self.journal is None or self.strategy_library is None:
+        if self._stop_requested or self.journal is None or self.strategy_library is None:
             return
         events = (
             self.journal.read_events("COUNTERFACTUAL_EVALUATED")
@@ -586,7 +617,11 @@ class AgentDaemon:
         )
         # Once per pass, over every strategy's rows: the base rate each screen is read against.
         day_up = offline_validation.day_direction(events)
+        if self._stop_requested:
+            return
         for spec in self.strategy_library.list():
+            if self._stop_requested:
+                break
             if spec.lifecycle in {"RETIRED"}:
                 continue
             self._screen_candidate(
@@ -868,7 +903,7 @@ class AgentDaemon:
             )
 
     def _maintenance(self) -> None:
-        if not self._due(self.last_maintenance_at, self.config.maintenance_interval_seconds):
+        if self._stop_requested or not self._due(self.last_maintenance_at, self.config.maintenance_interval_seconds):
             return
         # Beat before the work, not only after it. The heartbeat used to be written
         # once per loop iteration, after this method returned, so a maintenance
@@ -884,11 +919,21 @@ class AgentDaemon:
         # 900s later, so the check keeps its ability to catch a real hang; only the
         # honest "I am working" silence is removed.
         self._heartbeat("RUNNING", "maintenance in progress")
+        if self._stop_requested:
+            return
         self._resolve_unresolved_submissions()
+        if self._stop_requested:
+            return
         self._resolve_pending_fills()
+        if self._stop_requested:
+            return
         evidence = self._latest_evidence_batch()
+        if self._stop_requested:
+            return
         if self._due(self.last_evidence_at, self.config.evidence_interval_seconds):
             evidence = self._ingest_broker_evidence()
+            if self._stop_requested:
+                return
         # Bound before the branch below: `_manage_strategy_lifecycle` runs after it and
         # takes the same read, and a name bound only inside the `if` would be undefined
         # on the path where there is no journal - which is the path the tests exercise.
@@ -897,17 +942,27 @@ class AgentDaemon:
         if self.journal is not None:
             if self.knowledge_admission is not None:
                 self.knowledge_admission.knowledge_library.verify_journal_sources(self.journal.read_all())
+                if self._stop_requested:
+                    return
             self._record_pnl_evidence(evidence)
+            if self._stop_requested:
+                return
             self._verify_profit_target(evidence)
+            if self._stop_requested:
+                return
             # One read of the counterfactual ledger, shared. It used to be parsed
             # twice per pass - once here and once in `_screen_all_strategies` - and
             # each read grew with the journal, so the cost of every maintenance pass
             # rose with the number of passes that had already run.
             counterfactual_events = self.journal.read_events("COUNTERFACTUAL_EVALUATED")
+            if self._stop_requested:
+                return
             # Also read once. `_offline_evidence_by_strategy` parsed every validation
             # event on every pass already, so this adds no scan - it removes one - and
             # the same read is what tells the screen whether a verdict actually moved.
             validation_events = self.journal.read_events("OFFLINE_VALIDATION_COMPLETED")
+            if self._stop_requested:
+                return
             # Each stage hands what it appended to the next, so a pass acts on its own
             # results. The screen used to run on the read taken before the counterfactuals
             # were recorded, and the lifecycle on the read taken before the screen - so every
@@ -915,24 +970,36 @@ class AgentDaemon:
             # verdict reached the lifecycle one pass after that.
             mark = len(self._appended)
             self._record_counterfactuals(_events=counterfactual_events)
+            if self._stop_requested:
+                return
             counterfactual_events = [
                 *counterfactual_events,
                 *self._appended_since(mark, "COUNTERFACTUAL_EVALUATED"),
             ]
             self._record_calibration_lesson()
+            if self._stop_requested:
+                return
             self._retire_lessons_without_effect()
+            if self._stop_requested:
+                return
             mark = len(self._appended)
             self._screen_all_strategies(
                 _events=counterfactual_events, _validation=validation_events
             )
+            if self._stop_requested:
+                return
             validation_events = [
                 *validation_events,
                 *self._appended_since(mark, "OFFLINE_VALIDATION_COMPLETED"),
             ]
         if self.reflection_memory is not None and self._due(self.last_reflection_at, self.config.reflection_interval_seconds):
             self._reflect(evidence=evidence)
+            if self._stop_requested:
+                return
         if self.curriculum_agent is not None and self.reflection_memory is not None and self._due(self.last_curriculum_at, self.config.curriculum_interval_seconds):
             self._curriculum_proposal()
+            if self._stop_requested:
+                return
         self._manage_strategy_lifecycle(_validation=validation_events)
         self.last_maintenance_at = self.now()
 

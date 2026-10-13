@@ -1,4 +1,5 @@
 import os
+import signal
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -167,6 +168,192 @@ class FakeReconciler:
             extra_broker_orders=("broker-extra",) if not self.matched else (),
             message="matched" if self.matched else "broker has open orders not found in journal",
         )
+
+
+def test_signal_stop_boundary_performs_no_io(tmp_path, monkeypatch):
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop())
+    calls = []
+    monkeypatch.setattr(daemon, "_heartbeat", lambda *args: calls.append(args))
+    daemon._request_stop(signal.SIGTERM, None)
+    assert daemon._stop_requested
+    assert calls == []
+
+
+def test_stop_boundary_after_maintenance_skips_clock_and_sleep(tmp_path, monkeypatch):
+    calls = []
+
+    class Scheduler:
+        def should_trade_now(self):
+            calls.append("clock")
+            return False
+
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop(), scheduler=Scheduler(),
+                         sleep=lambda seconds: calls.append("sleep"))
+    monkeypatch.setattr(daemon, "_maintenance", daemon.stop)
+    assert daemon.run() == 0
+    assert calls == []
+
+
+def test_stop_boundary_between_maintenance_stages_skips_later_work(tmp_path, monkeypatch):
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop())
+    calls = []
+
+    def stop_first_stage():
+        calls.append("unresolved")
+        daemon.stop()
+
+    monkeypatch.setattr(daemon, "_resolve_unresolved_submissions", stop_first_stage)
+    monkeypatch.setattr(daemon, "_resolve_pending_fills", lambda: calls.append("fills"))
+    monkeypatch.setattr(daemon, "_latest_evidence_batch", lambda: calls.append("evidence"))
+    monkeypatch.setattr(daemon, "_ingest_broker_evidence", lambda: calls.append("ingest"))
+    monkeypatch.setattr(daemon, "_manage_strategy_lifecycle", lambda **kwargs: calls.append("lifecycle"))
+    daemon._maintenance()
+    assert calls == ["unresolved"]
+
+
+def test_stop_boundary_after_run_once_skips_post_cycle_work(tmp_path, monkeypatch):
+    loop = FakeLoop()
+    daemon = AgentDaemon(config=config(tmp_path), loop=loop)
+    run_once = loop.run_once
+    calls = []
+
+    def stop_and_return_record(symbol):
+        daemon.stop()
+        return run_once(symbol)
+
+    monkeypatch.setattr(loop, "run_once", stop_and_return_record)
+    monkeypatch.setattr(daemon, "_post_cycle", lambda: calls.append("post-cycle"))
+    daemon._run_symbol("SPY")
+    assert daemon.cycle_count == daemon.daily_cycle_count == 1
+    assert calls == []
+
+
+def test_clock_failure_stop_boundary_skips_backoff_sleep(tmp_path):
+    calls = []
+
+    class Scheduler:
+        def should_trade_now(self):
+            daemon.stop()
+            raise RuntimeError("synthetic clock failure")
+
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop(), scheduler=Scheduler(),
+                         sleep=lambda seconds: calls.append(seconds))
+    assert not daemon._should_trade_now()
+    assert calls == []
+
+
+def test_completed_cycle_is_counted_exactly_once_when_callback_raises(tmp_path):
+    def failed_callback(count):
+        raise RuntimeError("synthetic callback failure")
+
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop(), on_cycle_count=failed_callback)
+    daemon.last_cycle_id = "previous-cycle"
+    daemon._run_symbol("SPY")
+    assert daemon.cycle_count == daemon.daily_cycle_count == 1
+    assert daemon.error_count == 1
+    assert daemon.last_cycle_id == "cycle-1"
+
+
+def test_completed_cycle_is_counted_exactly_once_when_post_cycle_raises(tmp_path, monkeypatch):
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop())
+
+    def failed_post_cycle():
+        raise RuntimeError("synthetic post-cycle failure")
+
+    monkeypatch.setattr(daemon, "_post_cycle", failed_post_cycle)
+    daemon._run_symbol("SPY")
+    assert daemon.cycle_count == daemon.daily_cycle_count == 1
+    assert daemon.error_count == 1
+
+
+def test_stop_boundary_between_strategy_screens_skips_later_candidates(tmp_path, monkeypatch):
+    cfg = config(tmp_path)
+    library = StrategyLibrary(cfg.strategy_dir)
+    library.save(synthetic_spec("first"))
+    library.save(synthetic_spec("second"))
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(), strategy_library=library,
+                         journal=JsonlJournal(cfg.journal_path))
+    calls = []
+
+    def stop_first_screen(strategy_id, **kwargs):
+        calls.append(strategy_id)
+        daemon.stop()
+
+    monkeypatch.setattr(daemon, "_screen_candidate", stop_first_screen)
+    daemon._screen_all_strategies()
+    assert calls == ["first"]
+
+
+def test_stop_boundary_during_post_cycle_reflection_skips_lifecycle_and_curriculum(tmp_path, monkeypatch):
+    cfg = config(tmp_path)
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(), journal=JsonlJournal(cfg.journal_path),
+                         reflection_memory=ReflectionMemory(tmp_path / "reflection.json"),
+                         curriculum_agent=CapturingCurriculum(), reflect_every=1, curriculum_every=1)
+    daemon.cycle_count = 1
+    calls = []
+
+    def stop_during_reflection(**kwargs):
+        calls.append("reflection")
+        daemon.stop()
+
+    monkeypatch.setattr(daemon, "_reflect", stop_during_reflection)
+    monkeypatch.setattr(daemon, "_manage_strategy_lifecycle", lambda **kwargs: calls.append("lifecycle"))
+    monkeypatch.setattr(daemon, "_curriculum_proposal", lambda: calls.append("curriculum"))
+    daemon._post_cycle()
+    assert calls == ["reflection"]
+
+
+def test_stop_boundary_before_symbol_entry_starts_no_new_cycle(tmp_path):
+    loop = FakeLoop()
+    daemon = AgentDaemon(config=config(tmp_path), loop=loop)
+    daemon.stop()
+    daemon._run_symbol("SPY")
+    assert loop.symbols == []
+    assert daemon.cycle_count == daemon.daily_cycle_count == 0
+
+
+def test_stop_boundary_before_clock_entry_starts_no_new_broker_call(tmp_path, monkeypatch):
+    calls = []
+    scheduler = FakeScheduler(True)
+    monkeypatch.setattr(scheduler, "should_trade_now", lambda: calls.append("clock") or True)
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop(), scheduler=scheduler)
+    daemon.stop()
+    assert not daemon._should_trade_now()
+    assert calls == []
+
+
+def test_startup_stop_boundary_skips_reconciliation_but_keeps_cleanup(tmp_path, monkeypatch):
+    """Synthetic stop at the first heartbeat must not launch a broker stage."""
+    calls = []
+
+    class Reconciler(FakeReconciler):
+        def reconcile(self):
+            calls.append("broker-reconcile")
+            return super().reconcile()
+
+    cfg = config(tmp_path)
+    loop = FakeLoop()
+    daemon = AgentDaemon(config=cfg, loop=loop, startup_reconciler=Reconciler(True))
+    release_lock = daemon._release_lock
+    previous_signals = (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT))
+
+    def stop_at_startup(status, message):
+        calls.append(status)
+        if status == "RUNNING":
+            daemon.stop()
+
+    def release_and_record():
+        release_lock()
+        calls.append("lock-released")
+
+    monkeypatch.setattr(daemon, "_heartbeat", stop_at_startup)
+    monkeypatch.setattr(daemon, "_append_event", lambda *args, **kwargs: calls.append("reconcile-event"))
+    monkeypatch.setattr(daemon, "_release_lock", release_and_record)
+    assert daemon.run() == 0
+    assert calls == ["RUNNING", "STOPPED", "lock-released"]
+    assert loop.symbols == []
+    assert not cfg.pidfile_path.exists()
+    assert (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT)) == previous_signals
 
 
 def test_daemon_runs_cycles_and_writes_heartbeat(tmp_path):
