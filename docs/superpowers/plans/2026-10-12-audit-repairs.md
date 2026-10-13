@@ -19,6 +19,12 @@ passed in 315.80s. Research uses 134456 bars despite a six-month declaration;
 862/1602 attributed cycles have symbol mismatch. These are baseline observations,
 not claims about a new run. Reproduce focused failures before changing their cause.
 
+Clarification from the actual immutable-provenance audit: the prior 862/1602
+"mismatch" count compared historical symbols with today's mutable strategy
+universe. It is not proof of an immutable decision/snapshot mismatch. The new
+read-only audit measures zero such symbol mismatches, but all 2,326 historical
+cycles lack frozen decision-time provenance and are excluded from learning.
+
 - [x] 1. Deterministic CI and truthful provenance. Reproduce the VIX test under UTC;
   use explicit synthetic test dates without weakening the four-day production
   freshness rule. Fix Git status detection and remove accidental production-host
@@ -29,28 +35,70 @@ not claims about a new run. Reproduce focused failures before changing their cau
   writing site-packages. Reject conflicting overlapping bars. Test refusals before
   backtests/ledger writes, exact repeat identity and supported rule constraints.
   Run the gate on an isolated copy of real cached bars; report actual outcomes.
-- [ ] 3. Exclude contaminated learning evidence. Trace all journal consumers;
+- [x] 3. Exclude contaminated learning evidence. Trace all journal consumers;
   centralize eligibility, preserve accounting/history, record exclusions, snapshot
   strategy universe for future decisions and refuse unknown historical attribution
   for strategy learning. Test mismatches at real consumers and audit real journal
   read-only. No retroactive invented strategy universes or lifecycle reversals.
-- [ ] 4. Correct performance claims. Trace capital denominator and benchmark
+- [x] 4. Correct performance claims. Trace capital denominator and benchmark
   alignment. Replace unsupported relative-return claims with a verifiable contract
   or explicit unavailable status; keep owner flows separate and preserve real PnL.
   Test overlapping exposures/owner flows and run real read-only benchmark.
-- [ ] 5. Reliability and remaining gaps. Inspect backups, health, stop budgets and
+- [x] 5. Reliability and remaining gaps. Inspect backups, health, stop budgets and
   deploy entry points. Repair measured defects with focused regression tests; run
   snapshot/restore in disposable paths. Offsite durability and long-term RSI uplift
   remain pending if an external destination or new real observations are needed.
   Operator clarification: no offsite destination exists; complete reliable local
   backups now. Offsite deployment remains a recorded follow-up, not a requirement
   that can be satisfied by another directory on this host.
-- [ ] 6. Integration evidence. Independent spec/code review after each unit. Run
+- [x] 6. Integration evidence. Independent spec/code review after each unit. Run
   make check, UTC tests, required verify gates and credential-free fresh clone on
   committed changes. Reconcile RSI plan/evidence/docs. Publish a reviewable branch
   and inspect GitHub CI if authentication permits; never report local as remote.
 
 ## Evidence and follow-up
+
+Integration reconciliation (2026-10-13): Task 3 accepted as `20af2ba` after both
+reviews and the real UNKNOWN-attribution audit. Task 4 benchmark/public repair
+accepted as `72c03b0`/`2f68e5a` with real sealed accounting and publication review.
+Final integration review found pre-existing CLI/daemon account-only profit-target
+success paths; a new recorded follow-up unit `2026-10-13-profit-target-consumers.md`
+is required before claiming all profitability verdict consumers are reconciled.
+Task 5 accepted local backup `0ee9170` plus real restore/drill and hourly service
+proof (`2305edb`), and cooperative stopping `996d895` after closing both additional
+review blockers. Actual production shutdown timing and trading-source deployment
+remain follow-ups. Offsite storage is pending by the user's explicit local-only
+choice, not silently dropped. Installed sdist workspace registration passed actual
+and independent release-check (`0fe69e8`).
+
+Latest completed full check before the target-consumer follow-up: **1,484 passed /
+6 skipped in 36.18s**, lint clean, 49-file mypy clean. Gate self-test passed. Initial
+full verify found an actual tools-documentation naming mismatch, corrected and
+independently rerun (37 tools documented). It also encountered the self-test's
+temporary canary because root ran these two checks concurrently; serial focused
+crash-recovery then passed 285 tests. A subsequent full gate read an incomplete
+fresh-clone log while the harness rewrote it; that invocation is not accepted.
+Final gate must run after the final clone log is complete, with no self-test mutation.
+
+First actual clone setup failed because the host's default Python 3.12 lacks
+venv/ensurepip; failure was correctly recorded. Explicit Python 3.10 created a
+new independent virtualenv and is completing the nine Make steps. GitHub PR #10
+is published. Its initial exact source `0fe69e8` passed all four remote jobs
+(gate Python 3.10/3.11/3.12 and release); that is not proof for later commits.
+
+Final research diagnostic under accepted accounting/evaluator code: evaluator
+4501e3a03f4895726b38a5e699475666342b7f70bd09ad3e0b7332199e44e6ea,
+identity 78b5241f4745caf70d416b682259e9a9a1dd08bb81d751c18fb3e3642e929bd5.
+Same explicit registered spec and real 24,111-bar tape described below. Retained
+the earlier 11 trials: 22 cumulative attempts, required-trades heuristic 47;
+11 new backtests, 4 OVERFIT / 7 INSUFFICIENT / 0 PASS, no unrecorded outcome.
+Measured `/usr/bin/time make research-search ENVFILE=/dev/null ...`: 52.96s wall,
+50.55s user, 2.27s system, max RSS 195,416KB. Exact repeat: 6.22s wall, 0 backtests,
+11 cached outcomes, still 22 cumulative attempts, same verdicts. This proves
+identity/cache/ledger behavior on real data, not alpha or scientific preregistration:
+the spec was registered after the historical window started. Original conflicting
+live cache remains preserved and refused; operational canonical-cache choice is
+still required before enabling scheduled research under this contract.
 
 Task 1 accepted after independent spec and quality reviews. The quality review
 identified a host Git signing dependency in the disposable fixture; after disabling
@@ -306,3 +354,28 @@ failures. This proves that version's real path ran, not alpha or scientific
 preregistration. Further evaluator accounting repairs have their own written plan
 `2026-10-12-backtest-accounting-repairs.md`; final real execution/repeat must be
 rerun with the final evaluator identity in task 6. No prior trial is relabelled.
+
+## Final accepted source evidence (2026-10-13)
+
+Final integration review's account-target gap was fixed and independently reviewed
+in **cd2874e**. Full check after that source: **1,499 passed / 6 skipped in 38.25s**,
+lint clean and 49-file mypy clean. Actual committed-source fresh clone on explicit
+Python 3.10.18: exit 0, **9 steps PASS, zero FAIL**, new empty venv/config;
+**1,498 passed / 7 skipped**, 55/55 gate classes and 2,488 test executions. The
+extra skipped host configuration check is expected with disposable empty XDG config.
+After clone-log completion, root serial `make verify ENVFILE=/dev/null` exited 0:
+**55/55 classes, 2,489 executions, zero failures across 94 files**. Original log
+is retained verbatim; trailing output padding is not manually edited into evidence.
+
+Actual remote CI for source cd2874e: run **38348912218**, gate Python
+3.10/3.11/3.12 and release all completed SUCCESS. Published review branch is PR #10.
+Final documentation/evidence commit changes no production source; inspect that
+latest PR SHA's CI separately before delivery. All source-repair tasks accepted;
+the RSI/alpha/profitability/deployment/offsite/full-state follow-ups remain open in
+`docs/evidence/rsi-repairs-2026-10-13.md`, not erased or marked as achieved.
+
+Actual first automatic hourly backup trigger was observed at 01:01:30 EDT,
+completed successfully at 01:02:02, ExecMainStatus=0/Result=success. Trading daemon
+remained active with PID 2800047 and old source. Final public refresh from the same
+sealed real journal succeeded; collected tests 1,505 in 94 files, unchanged net
+paper accounting and UNKNOWN portfolio comparison. No order or risk change.

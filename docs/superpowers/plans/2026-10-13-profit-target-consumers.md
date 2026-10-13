@@ -29,8 +29,8 @@ and a newly committed fresh clone after this source change. No broker orders or
 production daemon restart. All previous passing evidence retains its actual SHA.
 
 - [x] Red reproduction and surgical producer/consumer repair.
-- [ ] Focused verification complete below; independent spec/quality reviews pending.
-- [ ] Integration/fresh-clone/remote-CI proof on final source.
+- [x] Focused verification and independent spec/quality reviews complete below.
+- [x] Integration/fresh-clone/remote-CI proof on final source `cd2874e` completed below.
 
 ## Consumer repair evidence (2026-10-13)
 
@@ -85,3 +85,8 @@ path changed. Root full `make check ENVFILE=/dev/null` after this frozen repair:
 **1,499 passed / 6 skipped in 38.25s**, lint clean and 49-file mypy clean. Both
 reviews closed; committed-source clone, full final gate and exact remote CI remain
 integration evidence rather than inferred from these checks.
+
+Final source cd2874e passed real fresh clone (nine steps, 55/55 classes) and remote
+CI run 38348912218 (all three Python gate jobs plus release SUCCESS). Root serial
+full gate passed 55/55 classes / 2,489 executions / zero failures after clone-log
+completion. Documentation-only evidence publication follows; no later source edit.

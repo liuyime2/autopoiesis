@@ -41,8 +41,8 @@ durability. User has explicitly chosen reliable local backups first.
 - [x] Fix journal discovery under lock and snapshot sealed-byte consistency.
 - [x] Refuse unsupported semantic recovery and atomically publish durable backups.
 - [x] Add credential-free Make/systemd entry, installer rendering and PYTHONPATH fix.
-- [ ] Independent review and actual read-only drill by parent. Focused checks below pass.
-- [ ] Daemon stop boundary repair is a separate follow-up after learning review.
+- [x] Independent reviews and actual read-only backup/restore/drill completed below.
+- [x] Daemon stop boundary follow-up accepted as `996d895`, with independent review.
 
 Verification: `make test ENVFILE=/dev/null TEST_ARGS='tests/autopoiesis/test_journal.py
 tests/autopoiesis/test_journal_rotation_recovery.py tests/autopoiesis/test_journal_snapshot.py'`,
@@ -122,7 +122,7 @@ and invalid/missing manifest recovery regressions before modifying source.
 
 - [x] Reproduce invalid archive semantic certification and deep rotation reordering.
 - [x] Repair each root cause and rerun focused recovery tests; lint/types pending below.
-- [ ] Quality/spec re-review and actual read-only recovery proof by parent.
+- [x] Quality/spec re-review and actual read-only recovery proof completed below.
 
 Red `make test ENVFILE=/dev/null TEST_ARGS='tests/autopoiesis/test_journal_snapshot.py
 -k archive_integrity tests/autopoiesis/test_journal.py -k "archive_integrity or
@@ -193,3 +193,10 @@ with the same PID 2800047. These measurements establish this first local schedul
 service execution, not future uninterrupted operation or reboot/host-loss recovery.
 The service path uses the retained repair worktree and explicit main journal paths;
 update it during eventual normal deployment before deleting that worktree.
+
+First actual hourly timer trigger was observed (not just a manual service start):
+`LastTriggerUSec=2026-10-13 01:01:30 EDT`; journal confirms service start at that
+time, published `runtime/backups/20261013T050130Z-db3c455ce565` at 01:02:01 and
+successful completion at 01:02:02. Result=success, ExecMainStatus=0, next trigger
+02:01:55 EDT. This validates an automatic hourly invocation on this host; reboot,
+long-term uninterrupted scheduling and host-loss resilience are still not inferred.

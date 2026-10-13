@@ -82,7 +82,7 @@ Verification sequence (all synthetic regression fixtures explicitly identified):
 - [x] Verify historical lesson admission, cache refresh and production consumer wiring.
 - [x] Run focused tests, lint/type checks and real read-only gate audit (commands below).
 - [x] Reconcile README counts and run broad regressions excluding concurrent Task 4 tests.
-- [ ] Parent integration/fresh-clone verification and independent reviews remain Task 6.
+- [x] Parent integration/fresh-clone verification and independent reviews completed in Task 6.
 
 The parent execution plan records that planning-with-files is unavailable; this
 separate written plan supplies the documentation gate. Task 2 source is frozen

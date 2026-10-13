@@ -18,7 +18,7 @@ throwaway virtualenv. No dependencies or new production API. Verify by executing
 make release-check, then independent spec/quality review. Record exact output.
 
 - [x] Add the installed CLI check through Make and execute it.
-- [ ] Independent review and reconciliation.
+- [x] Independent spec/quality reviews and actual release-check reconciliation below.
 
 Implementation: the existing sdist virtualenv now creates a fresh
 `runtime/release-check/workspace` directory and changes into it. One failure-propagating

@@ -22,7 +22,7 @@ filesystem IO and an in-flight request still must finish before the boundary.
 
 - [x] Reproduce handler IO, later maintenance/clock/sleep, post-cycle and double-count defects.
 - [x] After learning-evidence review releases daemon.py, make minimal boundary repair.
-- [ ] Independent review pending; focused daemon/shutdown regressions and lint/type pass below.
+- [x] Independent reviews closed both follow-up blockers; focused regressions and lint/type pass below.
 
 Source is intentionally frozen while the earlier learning change is being reviewed.
 Verify with `make test ENVFILE=/dev/null TEST_ARGS='tests/autopoiesis/test_daemon.py

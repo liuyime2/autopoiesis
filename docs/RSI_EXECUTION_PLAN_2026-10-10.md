@@ -4,6 +4,42 @@
 计划基线：提交 `c32f41176cc47ab46b017d705edaec45aab0cc8e`。
 范围：研究和判断可交易信号、决策质量、递归改进研究过程，以及支撑这些工作的可靠运行基础设施。本文件是计划，不表示下述目标已实现。
 
+## 当前修复复核（2026-10-13）
+
+本轮在 `codex/rsi-audit-repairs` 隔离实施，PR #10；交易服务仍运行原源码，
+主工作树既有 prereg.py 修改保留。已修复并独立复审：UTC/主机配置依赖、
+研究强制合同/真实数据与试验身份、回测双边成本和逐步权益回撤、冻结决策时
+学习证据及订单别名污染、组合收益 UNKNOWN 口径、密封一致性备份与深层归档、
+合作式停止边界/计数/完成 ID，以及非 editable 安装后的 runtime 注册位置。
+
+真实研究诊断 24,111 bars，11 个新候选为 4 OVERFIT / 7 INSUFFICIENT / 0 PASS；
+52.96s，重复 6.22s 且 0 新回测。该合同在历史窗口之后注册，不能充当科学预注册
+或 alpha。实际历史审计 2,326 cycles 全部缺少新冻结 provenance；其中 1,602 个
+有策略归属的原始周期/核算仍保留，学习资格 UNKNOWN。先前 862/1602 是相对于
+今天可变 universe 的比较；实际冻结 decision/snapshot 标的冲突为 0，不补造历史。
+
+纸上净核算 811.72，组合资本/收益率/同步基准/超额不可测量。20 个不同记录日期
+不证明连续有效交易日或 60 日窗口。公共历史 signal ledger 173 verdicts / 129
+hypotheses，与当前研究试验分开。账户目标 CLI/daemon 的遗留误判已在 `cd2874e`
+修复并通过规格/质量复审，现统一 UNKNOWN；不把整账户涨幅认定为 agent 达标。
+
+用户确认尚无异地目标：先完成本地可靠备份。真实 5 文件备份、隔离恢复及完整 drill
+逐字节/语义一致（2,326 cycles、21,671 events、0 未解析行、CERTIFIED archive）；
+小时持久化 timer 已启用，首次实际 backup service exit 0。仅是 journal 本地恢复，
+异地/完整状态/主机损失恢复和留存政策仍未完成。
+
+最终代码 `cd2874e` 完整检查 1,499 passed / 6 skipped；远端三 Python 版本 gate
+加 release 均通过。独立 Python 3.10 全新 venv 克隆九步骤通过（1,498 passed /
+7 skipped，空配置隔离），55 类门禁零失败。最终工作树 gate 为 55/55 类、
+2,489 次测试执行、0 失败。后续只补证据的提交也须核对最新 CI，不以旧 SHA
+的绿色代替最新状态。
+完整命令、后续状态和边界见 [本轮修复记录](evidence/rsi-repairs-2026-10-13.md)。
+
+原计划 A/G 的可靠性和实验前提明显推进；B 尚无有效 alpha，C 尚无 LLM 配对增益，
+D 的冻结 control/treatment episodes 尚未证明 RSI，E 的新候选准入和 F 的同步
+60 日组合证据仍未完成。下一顺序：审查合入/部署并验证新周期 → canonical 数据与
+事前冻结合同 → agent 资金/同步权益及决策配对 → 受控 RSI 对照 → holdout/shadow/paper。
+
 ## 执行进度记录（2026-10-11）
 
 已完成并有证据的基础设施工作：隔离工作树中的 watchdog stale-heartbeat 恢复修复已提交（`ed51c55`），当时完整测试为 1195 passed / 3 skipped、verify 为 52 类零失败；优雅停机审计已记录为独立结论（`505449d`），确认 30 秒 SIGKILL 记录无法归因具体阶段，且 Alpaca 请求没有有限 timeout，因此不能据此直接加大 `TimeoutStopSec`；只读 paper broker 延迟样本已真实执行一次：SDK 3.2.0、20 次 clock + 20 次 account、40 次请求成功、0 失败，合并 p50 25.036ms / p95 27.248ms / max 90.247ms。采样器、精确 SDK pin、此次测试/verify 和结果限制见 `docs/superpowers/plans/2026-10-10-broker-latency-baseline.md`：最终 make check 为 1209 passed / 3 skipped，verify 为 52 类 0 失败、1906 次测试执行，mypy 45 个源文件零问题。
