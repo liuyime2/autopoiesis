@@ -105,6 +105,20 @@ SYSTEM_REJECTION_REASON_PREFIXES = (
     "agent exposure ",
     "account total ",
     "total exposure exceeds hard limit",
+    # The two staleness labels `_stale_reason` interpolates into
+    # "the {label} is {age}s {direction}, beyond the {limit}s limit". The non-interpolated
+    # branch's exact text is already in SYSTEM_REJECTION_REASONS above; these two were the
+    # reachable strings that were missing from it.
+    #
+    # Measured live 2026-10-13, the first open session after deploying 9fb9066d820f27c9:
+    # BIL's quote was 1546s old against the 900s limit, Guardian refused with "the price
+    # quote is 1611s stale, beyond the 900s limit", and 58 seconds later
+    # fixed-size-bil-sell-001 was retired with "severe operational failure rate 1.00" on the
+    # strength of that one cycle. The refusal was correct - the strategy cannot make a thinly
+    # traded bond ETF print - and it destroyed a working SELL strategy. Four such refusals
+    # occurred in the first hour, so this was not a one-off message.
+    "the snapshot is ",
+    "the price quote is ",
 )
 
 

@@ -85,6 +85,87 @@ gate.
   re-checks the floor against a later snapshot, so a symbol can be selected at $5.00 and
   refused at $4.755. Decide which of the two is authoritative.
 - Deployment stop latency is still not measured, from the 06:08 deployment.
+- `tools/self_evolution_probe.py` reports three problems on the clean committed tree:
+  `the STRATEGY_LIFECYCLE_UPDATED stage never fired`, `no lifecycle ruling was produced,
+  so selection pressure never acted on the scored evidence`, and `the screen never scored a
+  decision, so no evidence reached the lifecycle`. Measured identically with and without the
+  Unit A change, so it is a pre-existing red baseline and not a consequence of it. It is the
+  tool that exists to demonstrate the RSI objective, and it currently demonstrates nothing.
+
+## Outcome, 2026-10-13 13:50 EDT
+
+One unit shipped, one was withdrawn, one became a pinning test, one stays deferred.
+
+### Unit A - shipped
+
+`SYSTEM_REJECTION_REASON_PREFIXES` gained `"the snapshot is "` and `"the price quote is "`,
+the two labels `_stale_reason` interpolates into its message. 14 lines in
+`src/autopoiesis/evaluator.py`, no behaviour outside the classification changed.
+`stale_after_seconds` stays 900 and Guardian still refuses every stale quote; only the
+learner stops charging the refusal to the strategy.
+
+`tests/autopoiesis/test_staleness_not_strategy_fault.py`, 21 tests. Red-to-green measured by
+reverting the source file and re-running: **7 of the 21 fail without the change**, including
+`test_a_stale_refusal_alone_cannot_retire_a_strategy`, which returns
+`RETIRED / 'severe operational failure rate 1.00'` on the unpatched tree. The staleness
+messages are produced by running the real Guardian over both labels and both directions
+rather than copied as literals, so a rewording cannot silently reclassify them again, and the
+four refusals `evaluator.py` deliberately leaves charged are pinned as still charged.
+
+### Unit B - withdrawn, with the evidence that withdrew it
+
+The premise was that one fault rejection on one cycle should not retire a strategy. The
+repository already decided the opposite on purpose: `test_genuine_rejection_storms_still_retire`
+asserts that cycles=2 with 2 fault rejections returns RETIRED, and the module's own comment
+records that a terminal verdict for the unevaluable case was tried here and reverted because
+it shortened the evidence run until `self_evolution_probe.py` could score nothing.
+
+More decisively, the live incident does not need the floor. With Unit A in place the BIL
+cycle charges zero fault rejections, so `failure_rate` is 0 and no retirement follows. The
+floor would have been a second, larger behaviour change guarding a defect that was a
+symptom. It is recorded here rather than deleted so the next reader knows it was considered
+and why it lost. A pinned test now asserts that one genuine fault on one cycle still
+retires, so the decision is explicit rather than accidental.
+
+### B2 - investigated, no change, and the first reading was wrong
+
+`trend-follow-20260824-001` reached `probation_restarts: 5` against `MAX_PROBATION_RESTARTS = 3`
+in 45 minutes. This file called that a livelock. It is not. `_needs_probation` grants
+`PROBATION_CYCLES * (1 + min(probation_restarts, MAX_PROBATION_RESTARTS))` = 52 for every
+restart from the third onward, so the candidate drains once `cumulative_cycles` reaches it;
+the live one was at 16 of 52 at 10:24 EDT and still improving.
+
+Bounding the *returns* rather than the *budget* was implemented and then reverted: it broke
+`test_returning_to_probation_keeps_counting_retries_without_a_verdict_from_the_count`, which
+pins this branch as deliberately unbounded and gives the same reason. The contract wins.
+`tests/autopoiesis/test_probation_restart_budget.py`, 8 tests, is now a pinning test only -
+it asserts the behaviour as it is, including the counter being inert past the cap and the
+queue draining - and passes with and without any change, which is what a pinning test is for
+and is not evidence of a fix.
+
+### Unit C - still deferred
+
+The gate question is unchanged and is not answered here. `SESSION_QUOTE_NOT_FRESH` fails the
+whole window on any stale cycle, BIL produced four in one hour, and three of them were
+`HOLD 0` abstentions recorded `REJECTED` rather than `SKIPPED` because Guardian checks
+staleness before the HOLD branch. Two decisions remain open: what a correctly-refused stale
+abstention means for the gate, and whether an instrument that cannot quote inside the
+freshness limit belongs in the configured symbol list. Neither may be answered by loosening
+`stale_after_seconds`, and neither should be changed in the same run as Unit A.
+
+## Verification for Unit A
+
+- Focused: 21 new tests, plus 94 passing across `test_score_latch.py`,
+  `test_guardian.py`, `test_guardian_trade_freshness.py`, and 235 passing across the
+  lifecycle/evaluator/admission/selector/probation/reflection/curriculum selection.
+- Full: `make check ENVFILE=/dev/null TEST_ARGS='-W error::pytest.PytestUnhandledThreadExceptionWarning'`
+  **1789 passed / 3 skipped**. The clean committed tree measures **1760 passed / 3 skipped**
+  under the identical command, so the +29 is exactly the 21 + 8 new tests and the skip count
+  is unchanged. The "6 skipped" recorded in earlier evidence was produced under a different
+  environment; it is not what this tree does today.
+- `make type`: 49 source files, no issues. `ruff check src/ tools/ tests/ examples/`: clean.
+- README's stated test-file count moved 94 -> 96, which `test_governance.py` enforces against
+  the tree.
 
 ## Added after the 10:30 run
 
