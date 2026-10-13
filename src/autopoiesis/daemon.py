@@ -755,25 +755,25 @@ class AgentDaemon:
         return None, (self.config.symbols[0] if self.config.symbols else "SPY")
 
     def _open_book(self) -> list[dict[str, object]]:
-        """Positions from the most recent real snapshot, for the curriculum context.
+        """Positions from the latest recorded real snapshot, for curriculum context.
 
-        Only the fields an exit decision needs, and only what the broker reported.
+        This reads the journal, not a fresh broker snapshot. Include every nonzero
+        signed holding; a recorded flat book must supersede older positions.
         """
         if self.journal is None:
             return []
-        for record in reversed(self.journal.read_all()):
-            held = [
-                {
-                    "symbol": position.symbol,
-                    "quantity": position.quantity,
-                    "market_value": round(position.market_value, 2),
-                }
-                for position in record.snapshot.positions
-                if position.quantity > 0
-            ]
-            if held:
-                return held
-        return []
+        records = self.journal.last_n(1)
+        if not records:
+            return []
+        return [
+            {
+                "symbol": position.symbol,
+                "quantity": position.quantity,
+                "market_value": round(position.market_value, 2),
+            }
+            for position in records[-1].snapshot.positions
+            if position.quantity != 0
+        ]
 
     def _recent_rejections(self, limit: int = 6) -> list[dict[str, str]]:
         """Rejected proposals with the reason, newest verdict per strategy id.

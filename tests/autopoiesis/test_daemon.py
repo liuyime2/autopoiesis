@@ -23,6 +23,7 @@ from autopoiesis.models import (
     ExecutionResult,
     GuardianResult,
     PortfolioHistoryPoint,
+    PositionSnapshot,
     StrategySpec,
     TradeDecision,
 )
@@ -711,6 +712,80 @@ def test_daemon_passes_exploration_summary_to_curriculum(tmp_path):
     assert curriculum.kwargs["guardian_max_position_value"] == daemon.config.max_position_value
     event = journal.read_events("CURRICULUM_PROPOSED")[-1]
     assert event.payload["recent_exploration_summary"]["no_exploration"] is True
+
+
+@pytest.mark.parametrize(
+    ("latest_positions", "expected"),
+    [
+        ((), []),
+        ((PositionSnapshot(symbol="ZERO", quantity=0, market_value=0),), []),
+        (
+            (PositionSnapshot(symbol="QQQ", quantity=-0.5, market_value=-100.125),),
+            [{"symbol": "QQQ", "quantity": -0.5, "market_value": -100.12}],
+        ),
+        (
+            (
+                PositionSnapshot(symbol="QQQ", quantity=-0.5, market_value=-100.125),
+                PositionSnapshot(symbol="AAPL", quantity=0.25, market_value=50.126),
+                PositionSnapshot(symbol="ZERO", quantity=0, market_value=0),
+            ),
+            [
+                {"symbol": "QQQ", "quantity": -0.5, "market_value": -100.12},
+                {"symbol": "AAPL", "quantity": 0.25, "market_value": 50.13},
+            ],
+        ),
+    ],
+    ids=["flat", "zero-only", "short-only", "short-before-fractional-long"],
+)
+def test_open_book_uses_latest_snapshot_alone(tmp_path, latest_positions, expected):
+    """Synthetic snapshots in an isolated real journal; no broker evidence claim."""
+    cfg = config(tmp_path)
+    journal = JsonlJournal(cfg.journal_path)
+    record = FakeLoop().run_once("SPY")
+    old_snapshot = record.snapshot.model_copy(update={
+        "positions": (PositionSnapshot(symbol="SPY", quantity=2, market_value=200),),
+    })
+    journal.append(record.model_copy(update={"snapshot": old_snapshot}))
+    journal.append(record.model_copy(update={
+        "cycle_id": "latest-synthetic-cycle",
+        "snapshot": record.snapshot.model_copy(update={"positions": latest_positions}),
+    }))
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(), journal=journal)
+
+    assert daemon._open_book() == expected
+
+
+@pytest.mark.parametrize("with_journal", [False, True], ids=["no-journal", "no-history"])
+def test_open_book_without_recorded_snapshot_is_empty(tmp_path, with_journal):
+    """Synthetic isolated setup must not invent a recorded account book."""
+    cfg = config(tmp_path)
+    journal = JsonlJournal(cfg.journal_path) if with_journal else None
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(), journal=journal)
+
+    assert daemon._open_book() == []
+
+
+def test_open_book_requests_one_record_without_read_all(tmp_path, monkeypatch):
+    """Assert bounded result request, not a journal I/O or timing benchmark."""
+    cfg = config(tmp_path)
+    journal = JsonlJournal(cfg.journal_path)
+    journal.append(FakeLoop().run_once("SPY"))
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(), journal=journal)
+    requested = []
+    last_n = journal.last_n
+
+    def capture_last_n(n):
+        requested.append(n)
+        return last_n(n)
+
+    def forbidden_read_all():
+        pytest.fail("current account context must not request all historical cycles")
+
+    monkeypatch.setattr(journal, "last_n", capture_last_n)
+    monkeypatch.setattr(journal, "read_all", forbidden_read_all)
+
+    assert daemon._open_book() == []
+    assert requested == [1]
 
 
 # --- the counterfactual ledger is a ledger, not a repeated dump --------------
