@@ -70,8 +70,22 @@ Missing strategy selection now abstains before the model and cannot reselect
 through fallback. This proves synthetic attribution boundaries, not an order.
 
 Deployment checkpoint: exact prior ten service/timer bytes and unit states retained
-privately in `/tmp/autopoiesis-open-rollback-20261013/units`; the preexisting main
+privately in `/localscratch/liuyime2/QuantGroup/runtime/autopoiesis/deployment-checkpoints/20261013/units`; the preexisting main
 prereg.py diff is preserved. `make journal-backup` with the real JOURNAL_RUNTIME
 completed exit 0 into that private checkpoint: five files, 2,326 cycles,
 21,695 events, four generations, zero unparsed lines, recovery **CERTIFIED**.
 Strategy/knowledge state and the actual switch remain pending.
+
+Unit 2 accepted in e526c13: the separate raw-LLM --once assembly was deleted in
+favor of the bounded audited daemon path; focused tests **142 passed**, independent
+specification approved and quality review reran **59 passed**. No real trading
+entry was launched while the old daemon remained active.
+
+Unit 3 initial implementation: **73 focused tests passed** but independent spec
+review refused approval for Make failure-exit masking, duplicate broker order IDs,
+and omitted cumulative fill observations. Corrections are written before edits in
+the unit plan and must be re-reviewed. Frozen full `make check ENVFILE=/dev/null`
+also measured **1,563 passed / 6 skipped / 1 failed in 81.03s**: config wiring reads
+host env despite the offline setting and omits actual Make readers. The next bounded
+plan is `2026-10-13-config-wiring-isolation.md`. Do not certify readiness from this
+failing full run or delete actual working research parameters to hide it.
