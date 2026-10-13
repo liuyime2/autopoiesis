@@ -126,3 +126,5 @@ RSI 只改研究方法和下一轮实验优先级，不给系统改 Guardian、�
 最新冻结源码在 05:17 EDT 的 `make check ENVFILE=/dev/null TEST_ARGS='-W error::pytest.PytestUnhandledThreadExceptionWarning'` 通过 **1,757 / 6 skipped in 47.53s**。该树上之后的文档提交只增加了本路线文件和开盘计划记录。独立 Python 3.10.18 credentials-free clone 对 `dbd55c2` 于 05:40 EDT 全部 **9/9 步骤 PASS**；`make check` 和单独 `pytest` 各 **1,757 passed / 6 skipped**；集成门禁 **55/55 classes、2,900 executions / 94 files**；包括 self-test 与 14/14 unit templates。原始成功输出在 `docs/evidence/fresh-clone.log`，已确认凭证和子 XDG 配置清空。日志变更随后独立提交；精确提交及 GitHub CI 状态按下文增量更新。
 
 05:38 EDT 对旧 daemon 只读确认：PID 2800047 仍是 active/running，heartbeat RUNNING、broker 最近读取成功、market-closed maintenance、cycle/error 0/0；其代码指纹仍为旧 `60d5aa8d767ce067`。旧 30 秒停机窗口和旧代码未被动过。本轮可说“本地源码检查 + 新克隆通过”，不可说“生产 daemon 已更新”或“开盘已验证”。
+
+GitHub 对完整提交 `da2da73bf9b3812aa2cd1e1b87cd67faff783c7f` 启动 run **38378167116**：release 与 Python **3.10 / 3.11 / 3.12** 四个 job 均为 success。三个版本各自的 install、lint、type、tests、offline smoke、self-test 和 integration gate 完成。该 commit 的 fresh-clone 日志记录实际 clone SHA 为 `dbd55c2`；`da2da73` 只增加原始日志和路线状态文字，代码/测试树没有变化。PR #10 仍 open、未合并。旧 daemon 尚未更新，因此生产部署与当天市场会话验证仍是待执行关口。
