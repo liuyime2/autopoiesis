@@ -29,6 +29,12 @@ from pathlib import Path
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "runtime" / "autopoiesis"
 
+#: The ledger's own name for the dataset fingerprint, so the reader uses the writer's spelling
+#: rather than one that happens to look right. `research/driver.py` writes this key; it also still
+#: accepts the bare `fingerprint` as a second look, which costs nothing and is honest about a
+#: ledger written by a version that spelled it differently.
+FINGERPRINT_FIELD = "dataset_fingerprint"
+
 
 def _journal_path() -> str:
     """The journal path, resolved through AgentConfig rather than written out again.
@@ -91,6 +97,15 @@ def _research_fingerprints() -> list[str]:
     whatever the broker's tape was on the day. The SHA-256 over ordered (timestamp, price) pairs is
     what makes two runs' data comparable at all, and a provenance record that omits it lets two
     verdicts be quoted side by side from tapes that were not the same one.
+
+    The field name is the writer's, `FINGERPRINT_FIELD`, and this is the fix for a real
+    disagreement. This reader looked up `"fingerprint"` while `research/driver.py` writes
+    `"dataset_fingerprint"`, and the two are the same fact. Measured on the live ledger: 143
+    rows, 44 of them carrying `dataset_fingerprint`, and this function returned **none of them** -
+    so every provenance record printed said the research data had no fingerprint. The unit test
+    passed because it wrote the field the reader wanted rather than the field the ledger uses,
+    which is the shape of a test that mirrors the bug instead of catching it. A reader and a
+    writer that must agree now take the name from one place.
     """
     ledger = RUNTIME / "research_trials.jsonl"
     if not ledger.exists():
@@ -108,7 +123,7 @@ def _research_fingerprints() -> list[str]:
             row = json.loads(line)
         except json.JSONDecodeError:
             continue
-        value = row.get("fingerprint")
+        value = row.get(FINGERPRINT_FIELD) or row.get("fingerprint")
         if isinstance(value, str) and value and value not in fingerprints:
             fingerprints.append(value)
         if len(fingerprints) >= 3:

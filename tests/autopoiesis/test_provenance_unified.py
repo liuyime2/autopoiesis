@@ -38,8 +38,11 @@ def test_the_record_carries_the_research_dataset_fingerprint(tmp_path, monkeypat
     ledger = tmp_path / "runtime" / "autopoiesis" / "research_trials.jsonl"
     ledger.parent.mkdir(parents=True)
     ledger.write_text(
-        json.dumps({"strategy_id": "old", "bars": 100, "fingerprint": "sha256:aaaa"}) + "\n"
-        + json.dumps({"strategy_id": "new", "bars": 200, "fingerprint": "sha256:bbbb"}) + "\n",
+        # The ledger's own field name. This test used to write "fingerprint", which is what the
+        # reader looked up and not what the ledger uses, so it passed against a reader that
+        # returned nothing from the real 143-row ledger - 44 of whose rows carry a fingerprint.
+        json.dumps({"strategy_id": "old", "bars": 100, "dataset_fingerprint": "sha256:aaaa"}) + "\n"
+        + json.dumps({"strategy_id": "new", "bars": 200, "dataset_fingerprint": "sha256:bbbb"}) + "\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(module, "RUNTIME", tmp_path / "runtime" / "autopoiesis")
@@ -173,3 +176,61 @@ def test_the_real_record_on_this_host_still_prints_its_daemon_state():
     assert "status:" in text
     assert "broker answered:" in text
     assert "model answered:" in text
+
+
+def _ledger_lines() -> list[str]:
+    """Rows from the live research ledger, or [] where no system has run."""
+    ledger = _load().RUNTIME / "research_trials.jsonl"
+    if not ledger.exists():
+        return []
+    return [l for l in ledger.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+def test_the_fingerprint_field_the_reader_uses_is_the_one_the_ledger_writes():
+    """The reader and the writer must not each have their own spelling of one fact.
+
+    This is the guard for a bug that was invisible where it was lived. `tools/provenance.py`
+    looked up `row["fingerprint"]` while `research/driver.py` writes `dataset_fingerprint`, so
+    `_research_fingerprints()` returned an empty list from the live 143-row ledger - 44 rows of
+    which declare a fingerprint - and every provenance record printed claimed the research data
+    had none. The unit test passed, because it wrote the field the reader wanted.
+
+    The check is against the writer, read through the same import the runtime uses: the field the
+    ledger actually carries must be one the reader accepts. It is a name equality, and that is the
+    whole point - two names for one fact is how the reader came to describe nothing.
+    """
+    import inspect
+
+    from autopoiesis.research import driver
+
+    module = _load()
+    # The driver writes the row; find the key it writes for the fingerprint in its own source.
+    written = {
+        name for name in ("dataset_fingerprint", "fingerprint")
+        if f'"{name}"' in inspect.getsource(driver)
+    }
+
+    assert module.FINGERPRINT_FIELD in written, (
+        f"the reader looks up {module.FINGERPRINT_FIELD!r} but the driver writes none of "
+        f"{sorted(written)}; a provenance record that cannot find a fingerprint does not report "
+        f"a missing fingerprint, it reports a missing reader"
+    )
+    assert "dataset_fingerprint" in written, (
+        "the ledger writer must keep writing the documented field name"
+    )
+
+    # And, where a system has actually run, the reader must find a fingerprint on the real
+    # ledger. This is the direction the old test could not check: it wrote the row itself, so it
+    # agreed with the reader by construction.
+    keys = set()
+    for line in _ledger_lines():
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        keys.update(row)
+    if keys:
+        assert module.FINGERPRINT_FIELD in keys, (
+            f"the live ledger carries {sorted(keys)} and none is {module.FINGERPRINT_FIELD!r}, so "
+            f"the reader will print 'no fingerprint' forever"
+        )
