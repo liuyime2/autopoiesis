@@ -15,7 +15,9 @@
 - Active daemon PID 2800047, started October 12 18:26:26 EDT, loaded fingerprint 60d5aa8d767ce067. Heartbeat RUNNING, closed-market maintenance, cycle/error counts 0/0, broker=true, model=null. It has not loaded the reviewed repair.
 - Local backup timer enabled/active; actual October 13 01:01:30 trigger completed 01:02:02 EDT with Result=success / exit 0. Research timer next 06:58:13 EDT still uses the old deployment.
 - 21 TB free. Real alpha, decision benefit and controlled RSI have not been demonstrated. Old historical samples cannot be backfilled into new frozen provenance.
-- Official NYSE core session is 09:30–16:00 New York time. Determine the next actual session from the broker clock/calendar; optional user date clarification is pending. Prepare the nearest session first.
+- Official NYSE core session is 09:30–16:00 New York time. The user confirmed
+  **October 13 Tuesday, the nearest open**; actual broker next open is October 13
+  09:30 EDT. Recheck the session using the broker calendar during readiness.
 
 ## Acceptance and verification
 
@@ -33,7 +35,7 @@ Open-session PASS requires new real journal records from the expected session, f
 
 ## Stop and rollback criteria
 
-Any live/nonpaper endpoint, wider risk setting, unapproved submission, provenance mismatch, ambiguous order retry, corrupted archive or conflicting writer is NO-GO. Freeze new trading work and preserve evidence; do not retry ambiguous submissions or erase journal/state. An infrastructure rollback restores the reviewed previous source/unit with the same preserved journal, never a stale replacement journal or a risk bypass. Model timeout uses the existing safe fallback and remains separately measurable.
+Any live/nonpaper endpoint, wider risk setting, unapproved submission, provenance mismatch, ambiguous order retry, corrupted archive or conflicting writer is NO-GO. Freeze new trading work and preserve evidence; do not retry ambiguous submissions or erase journal/state. An infrastructure rollback restores previous unit bytes with the same preserved journal, never a stale replacement journal or a risk bypass. The old source has the attribution defect found in this audit: restoring its unit must leave trading stopped until an audited safe source is restored, rather than automatically resume that known unsafe loop. Model timeout uses the existing safe fallback and remains separately measurable.
 
 ## Evidence log
 
@@ -89,3 +91,19 @@ also measured **1,563 passed / 6 skipped / 1 failed in 81.03s**: config wiring r
 host env despite the offline setting and omits actual Make readers. The next bounded
 plan is `2026-10-13-config-wiring-isolation.md`. Do not certify readiness from this
 failing full run or delete actual working research parameters to hide it.
+
+Unit 3 is subsequently accepted in 1de7679: **104 focused tests passed**;
+specification and subsequent quality review approved after actual-process config,
+Make WAIT-vs-FAIL, identity/fill and transient-heartbeat corrections. Real collector
+execution and timer installation remain pending. Unit 4 initially enabled a full
+check with **1,612 passed / 6 skipped in 38.94s**, but quality then found shell
+literal/comment false consumers. That correction is now independently approved
+(84 focused tests); the final changed tree still needs its own full/fresh-clone
+proof. These are not a deployed-source or market-open certificate.
+
+The user added whole-account visibility and asset scope, explicitly including
+options and crypto. The new bounded plan is `2026-10-13-account-asset-boundary.md`.
+Its measured baseline is 68 focused passes, but the current equity pipeline has
+no options/crypto adapter and truncation safeguards differ between trading and
+readiness. Resolve account visibility and unsupported-instrument/order-list
+boundaries before the source deployment; do not enable unsupported trading.
