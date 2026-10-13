@@ -120,3 +120,9 @@ RSI 只改研究方法和下一轮实验优先级，不给系统改 Guardian、�
 ## 不能打勾的目标
 
 以下项目即使相邻代码已存在，也保持未完成，直到对应真实验收出现：完整持仓自动化覆盖；期权/crypto/任意资产实盘或 paper 适配；独立有效 alpha；LLM 相对等约束基线增益；RSI control/treatment 改进；自动赚钱；同步净超额与风险合格的完整 60 日窗口；完整异地恢复；实际网站对外体验验收。任何一项都不能由单元测试、页面、systemd active、broker 权限、单次 PASS、历史合计余额或一笔成交替代。
+
+## 本次执行增量（2026-10-13 05:40 EDT）
+
+最新冻结源码在 05:17 EDT 的 `make check ENVFILE=/dev/null TEST_ARGS='-W error::pytest.PytestUnhandledThreadExceptionWarning'` 通过 **1,757 / 6 skipped in 47.53s**。该树上之后的文档提交只增加了本路线文件和开盘计划记录。独立 Python 3.10.18 credentials-free clone 对 `dbd55c2` 于 05:40 EDT 全部 **9/9 步骤 PASS**；`make check` 和单独 `pytest` 各 **1,757 passed / 6 skipped**；集成门禁 **55/55 classes、2,900 executions / 94 files**；包括 self-test 与 14/14 unit templates。原始成功输出在 `docs/evidence/fresh-clone.log`，已确认凭证和子 XDG 配置清空。日志变更随后独立提交；精确提交及 GitHub CI 状态按下文增量更新。
+
+05:38 EDT 对旧 daemon 只读确认：PID 2800047 仍是 active/running，heartbeat RUNNING、broker 最近读取成功、market-closed maintenance、cycle/error 0/0；其代码指纹仍为旧 `60d5aa8d767ce067`。旧 30 秒停机窗口和旧代码未被动过。本轮可说“本地源码检查 + 新克隆通过”，不可说“生产 daemon 已更新”或“开盘已验证”。
