@@ -78,7 +78,7 @@ export
 endif
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install check lint lint-files type test smoke smoke-offline fast fast-no-broker daily-report benchmark broker-latency-sample \
+.PHONY: help setup install check lint lint-files type test test-provenance-host smoke smoke-offline fast fast-no-broker daily-report benchmark broker-latency-sample \
         verify verify-self-test doctor audit integrity classes classes-list \
         run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc \
         site refresh-figures benchmark-json dist release-check \
@@ -110,6 +110,7 @@ help:
 	@echo "make fast             lint + test + smoke + verify"
 	@echo "make fast-no-broker   lint + test + smoke-offline, no credentials needed"
 	@echo "make reproduce        write runtime/autopoiesis/reproduce.txt (provenance)"
+	@echo "make test-provenance-host  opt-in real journal/ledger/broker-clock provenance checks"
 	@echo "make clean            remove caches; clean-pyc removes only bytecode"
 	@echo "make integrity        runtime state integrity only"
 	@echo "make doctor           health and evidence checks"
@@ -235,6 +236,12 @@ verify-self-test:
 TEST_ARGS ?=
 test:
 	@$(PY) -m pytest -q $(TEST_ARGS)
+
+# Explicit integration against this host's runtime, including broker clock when configured.
+# Ordinary tests use synthetic files and never access these production-host inputs.
+test-provenance-host:
+	@AUTOPOIESIS_TEST_HOST_PROVENANCE=1 $(PY) -m pytest -q \
+		tests/autopoiesis/test_provenance_unified.py -k 'real_record or real_ledger'
 
 doctor:
 	@./autopoiesis doctor

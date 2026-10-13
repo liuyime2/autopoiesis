@@ -12,7 +12,24 @@ import math
 import random
 from datetime import date, timedelta
 
+import pytest
+
 from autopoiesis import risk_judgment as rj
+
+SYNTHETIC_AS_OF = date(2026, 10, 8)
+
+
+@pytest.fixture(autouse=True)
+def synthetic_clock_and_cache(monkeypatch, tmp_path):
+    """All judgments here use a fixed synthetic date and never the host's VIX cache."""
+    class SyntheticDate(date):
+        @classmethod
+        def today(cls):
+            return SYNTHETIC_AS_OF
+
+    # vix_floor imports datetime.date locally, so patch its source, not rj.date.
+    monkeypatch.setattr(dt, "date", SyntheticDate)
+    monkeypatch.setattr(rj, "VIX_CACHE", tmp_path / "absent-vix.pkl")
 
 
 def _series(vols, per=21, seed=5):
@@ -207,12 +224,6 @@ def test_the_decision_block_carries_the_window_it_was_decided_on():
 # rho +0.18 to +0.43, p 0.0004 to 0.0056). The asymmetry is one-sided, so the right shape is a floor.
 
 
-def _calm_vix_days(level: float = 9.0, count: int = 260) -> dict:
-    """A flat VIX history long enough that its own volatility is measurable. One point is not: the
-    floor rescales VIX by the ratio of the two volatilities, and a ratio needs both."""
-    return {f"2026-{(i // 28) + 1:02d}-{(i % 28) + 1:02d}": level for i in range(count)}
-
-
 def _cache_vix(tmp_path, values):
     import json
 
@@ -221,7 +232,7 @@ def _cache_vix(tmp_path, values):
     return path
 
 
-def test_the_floor_never_raises_the_forecast_and_says_which_one_won():
+def test_the_floor_never_lowers_the_forecast_and_says_which_one_won(monkeypatch, tmp_path):
     """A floor by definition can only lift the number, and lifting it can only shrink the
     position. If this test ever fails the other way, the floor has become leverage."""
     from autopoiesis import risk_judgment as rj
@@ -229,6 +240,9 @@ def test_the_floor_never_raises_the_forecast_and_says_which_one_won():
     closes = _ladder_series(n=900)
     own = rj.ewma_series(closes)[-1]
     for vix_level in (5.0, 20.0, 80.0, 400.0):
+        history = _vix_days(18.0)
+        history[SYNTHETIC_AS_OF.isoformat()] = vix_level
+        monkeypatch.setattr(rj, "VIX_CACHE", _cache_vix(tmp_path, history))
         floored, note = rj.vix_floor(closes, own)
         assert floored is None or floored >= own, f"VIX {vix_level} lowered the forecast"
         if floored and floored > own * (1 + 1e-9):
@@ -240,7 +254,7 @@ def test_a_calm_index_leaves_the_forecast_alone(monkeypatch, tmp_path):
     depends on a gitignored file passes on the machine that fetched it and fails on a fresh clone."""
     from autopoiesis import risk_judgment as rj
 
-    monkeypatch.setattr(rj, "VIX_CACHE", _cache_vix(tmp_path, _calm_vix_days()))
+    monkeypatch.setattr(rj, "VIX_CACHE", _cache_vix(tmp_path, _vix_days(9.0)))
     closes = _ladder_series(n=900)
     own = rj.ewma_series(closes)[-1]
     floored, note = rj.vix_floor(closes, own)
@@ -278,18 +292,17 @@ def test_an_unreadable_cache_is_reported_not_swallowed(monkeypatch, tmp_path):
 def test_the_decision_block_reports_both_numbers_when_the_floor_engages(monkeypatch, tmp_path):
     """`forecast_vol_pct` next to `own_ewma_vol_pct` next to the note, so a reader can see which of
     the two produced the number and disagree with it."""
-    import json
-
     from autopoiesis import risk_judgment as rj
 
     # A VIX series that is far above anything the symbol's own returns produce.
-    values = {f"2026-10-{d:02d}": 90.0 for d in range(1, 30)}
+    values = _vix_days(18.0)
+    values[SYNTHETIC_AS_OF.isoformat()] = 120.0
     monkeypatch.setattr(rj, "VIX_CACHE", _cache_vix(tmp_path, values))
     block = rj.RiskJudgment(lambda symbol: _ladder_series(n=900)).block("SPY")
     assert block is not None
     assert "own_ewma_vol_pct" in block and "vix_note" in block
-    if block.get("floored_by_vix"):
-        assert block["forecast_vol_pct"] >= block["own_ewma_vol_pct"]
+    assert "floor engaged" in block["vix_note"]
+    assert block["forecast_vol_pct"] > block["own_ewma_vol_pct"]
 
 
 # --- a stale reading is not today's judgement ------------------------------------------------
@@ -338,7 +351,7 @@ def test_a_fresh_reading_is_used(monkeypatch, tmp_path):
     to itself. Real VIX history averages near 20 with spikes, so that is the shape used."""
     from autopoiesis import risk_judgment as rj
 
-    history = _calm_vix_days(level=18.0, count=259)
+    history = _vix_days(level=18.0, count=259)
     history[dt.date.today().isoformat()] = 120.0        # the spike the floor exists to catch
     monkeypatch.setattr(rj, "VIX_CACHE", _cache_vix(tmp_path, history))
     closes = _ladder_series(n=900)
@@ -346,6 +359,23 @@ def test_a_fresh_reading_is_used(monkeypatch, tmp_path):
     floored, note = rj.vix_floor(closes, own)
     assert floored > own, f"a fresh high reading should engage the floor: {note}"
     assert "floor engaged" in note
+
+
+@pytest.mark.parametrize("age, engaged", [(0, True), (4, True), (5, False), (-1, False)])
+def test_the_four_day_freshness_boundary_is_preserved(monkeypatch, tmp_path, age, engaged):
+    """Synthetic as-of dates exercise the exact production boundary, including future refusal."""
+    reading = SYNTHETIC_AS_OF - timedelta(days=age)
+    history = _vix_days(18.0, last=reading.isoformat())
+    history[reading.isoformat()] = 120.0
+    monkeypatch.setattr(rj, "VIX_CACHE", _cache_vix(tmp_path, history))
+    closes = _ladder_series(n=900)
+    own = rj.ewma_series(closes)[-1]
+    floored, note = rj.vix_floor(closes, own)
+    if engaged:
+        assert floored > own and "floor engaged" in note
+    else:
+        assert floored == own
+        assert ("days old" if age > 4 else "future") in note
 
 
 def test_an_unparseable_date_is_a_refusal_not_a_crash(monkeypatch, tmp_path):
