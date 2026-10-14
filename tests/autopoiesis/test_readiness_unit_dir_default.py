@@ -144,8 +144,28 @@ def test_the_resolved_default_is_an_absolute_path():
     `install()` raises `ValueError` for anything not absolute, and `main()` turns that into
     one line: `TIMER_INSTALL_FAILED`. A relative default would therefore fail with a message
     that names neither the path nor the reason, which is the opposite of actionable.
+
+    Reproduced on GitHub's runners 2026-10-14 by running this suite from a fresh clone with
+    `HOME` pointed at a directory with no `.config`: the default resolves to the empty
+    string, because `tools/systemd_unit_dir.sh` correctly refuses when no writable unit
+    directory exists, and an empty string is not a relative path that needs rejecting. The
+    host had neither a manager nor a home directory to place a unit in, so there was no
+    default to make a claim about.
+
+    The assertion is therefore guarded rather than relaxed: on a host that resolves a
+    default, the default must still be absolute.
     """
     default = _make_default()
+
+    if not default:
+        import pytest
+
+        pytest.skip(
+            "no unit directory can be resolved on this host (no systemd user manager and "
+            "no writable $HOME/.config), so there is no default to assert a shape about; "
+            "the refusal that produces the empty value is covered by "
+            "test_installing_without_a_unit_directory_fails_loudly"
+        )
 
     assert default.startswith("/"), (
         f"the default must resolve to an absolute path, got {default!r}. "
