@@ -45,6 +45,13 @@ def test_fetch_target_passes_auditable_utc_window_to_existing_fetcher(tmp_path):
             "make", "--no-print-directory", "fetch-replay-bars", "ENVFILE=/dev/null", f"PY={python}",
             "REPLAY_SYMBOL=SPY", "REPLAY_START=2026-04-10T13:30:00Z",
             "REPLAY_END=2026-10-09T19:40:00Z", "REPLAY_INTERVAL=5Min", "REPLAY_ROLLING=1",
+            # Named explicitly rather than inherited. `make` exports the operator
+            # environment file's variables to everything it runs, so under `make verify`
+            # this subprocess arrived with `REPLAY_CACHE` already set to an absolute path
+            # and the assertion below compared that against the bare default. The subject
+            # of this test is that the target forwards an auditable UTC window, and a
+            # configured cache directory is legitimate; the default is not a contract.
+            "REPLAY_CACHE=runtime/autopoiesis/replay",
         ],
         cwd=ROOT,
         env=env,

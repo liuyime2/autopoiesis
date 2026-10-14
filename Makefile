@@ -604,7 +604,18 @@ SCHEDULED ?= 0
 READINESS_ROOT ?= $(CURDIR)
 READINESS_PYTHON ?=
 READINESS_ENVFILE ?= $(ENVFILE)
-READINESS_UNIT_DIR ?= $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/systemd/user
+#: Ask the systemd user manager where it reads units from, the way `install-service` does.
+#:
+#: This was `$(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/systemd/user`,
+#: which trusts the *shell's* XDG_CONFIG_HOME. The manager resolves unit paths from its own
+#: start-time environment and on this host reports none, so it searches
+#: $HOME/.config/systemd/user. Measured 2026-10-13: `make install-readiness-timers` without
+#: an explicit `READINESS_UNIT_DIR` wrote four validated unit files to
+#: /localscratch/liuyime2/ohome/.config/systemd/user and exited 0, and systemd never read
+#: one of them - the installer reported success and the timers were dead files. The unit
+#: bytes had to be restored by hand and the install repeated. `tools/systemd_unit_dir.sh`
+#: already asks the manager rather than assuming; this now asks it too.
+READINESS_UNIT_DIR ?= $(shell tools/systemd_unit_dir.sh 2>/dev/null)
 export EXPECTED_FINGERPRINT DEPLOYMENT_AFTER DATE READINESS_OUTPUT SCHEDULED
 export READINESS_ROOT READINESS_PYTHON READINESS_ENVFILE READINESS_UNIT_DIR
 
@@ -621,6 +632,8 @@ source-fingerprint:
 # Explicitly requested installation only. Validate every substituted value before
 # rendering, verify all four units, then reload and enable the two reporting timers.
 install-readiness-timers:
+	@test -n "$(READINESS_UNIT_DIR)" || (echo "FATAL: could not determine a systemd user unit directory." >&2; \
+	  echo "       Run 'tools/systemd_unit_dir.sh' to see why." >&2; exit 2)
 	@$(PY) tools/install_market_readiness.py
 
 # Narrow type verification for operator tools without running a repository gate.
