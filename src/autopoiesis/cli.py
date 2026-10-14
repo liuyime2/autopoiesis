@@ -528,7 +528,40 @@ def _ollama_curriculum_transport(config: AgentConfig, *, should_stop: Callable[[
         if should_stop is not None and should_stop():
             raise RuntimeError("curriculum model request refused: daemon stop requested")
         response = engine.transport(f"{engine.base_url}/api/generate", payload, engine.timeout)
-        return str(response.get("response", ""))
+        body = str(response.get("response") or "")
+        if body:
+            return body
+
+        # An empty body used to reach the JSON parser as `""`, which raised "constrained
+        # response contained no JSON object" - a message true of every cause and specific to
+        # none. Measured 2026-10-14: six CURRICULUM_FAILED in twelve hours, all with that
+        # message and only `error_type` journalled, and nothing on record could say which of
+        # the three cases below had happened. `done_reason` and `error` are the two fields
+        # that answer it, and both were being discarded here.
+        #
+        # `done_reason=length` with an empty body is context exhaustion, not a refusal: the
+        # prompt and the answer schema together left no room to answer. That case is named in
+        # `llm_decision.py` from the incident that set `CURRICULUM_NUM_CTX` to 8192, so it is
+        # the one this whole curriculum stage has been hitting.
+        if not isinstance(response, dict):
+            raise ValueError(
+                f"curriculum model reply was not an object: {type(response).__name__}"
+            )
+        done = str(response.get("done_reason") or "")
+        error = str(response.get("error") or "")
+        if done == "length":
+            raise ValueError(
+                "curriculum model ran out of context before answering "
+                f"(done_reason=length, num_ctx={CURRICULUM_NUM_CTX}, "
+                f"prompt_chars={len(prompt)}); the prompt and the answer schema did not fit "
+                "together, so the model had no tokens left to produce a body"
+            )
+        if error:
+            raise ValueError(f"curriculum model returned an error: {error}")
+        raise ValueError(
+            "curriculum model returned no body and no cause "
+            f"(done_reason={done or 'unset'!r}, keys={sorted(response)})"
+        )
 
     def transport(context):
         return generate_curriculum_task_json(call=call, prompt_context=context)

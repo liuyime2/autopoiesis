@@ -78,6 +78,7 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_counterfactual_multi_symbol.py": ("decision-outcome-counterfactual",),
     "test_readiness_unit_dir_default.py": ("unit-integration", "crash-recovery"),
     "test_realized_pnl_attribution.py": ("pnl-accounting", "lifecycle-invariants"),
+    "test_curriculum_empty_body_cause.py": ("unit-integration", "crash-recovery"),
     "test_probation_restart_budget.py": ("lifecycle-invariants", "selection-pressure-reaches-the-rules"),
     "test_retired_strategy_readmission.py": ("lifecycle-invariants", "unit-integration"),
     "test_staleness_not_strategy_fault.py": (
