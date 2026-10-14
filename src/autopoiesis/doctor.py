@@ -947,38 +947,50 @@ def _check_pnl_attribution(
     # 29 shares are unmatched - the FAIL could never fire and the severity test in
     # test_attribution.py only passed because its fixture has no unmatched sells. Two
     # conditions that are each independently a failure have to be reported as such.
+    # Collected, then reported once. Two conditions here are independently true - unmatched
+    # sells, and a model that subtracted from a positive total - and an earlier version
+    # emitted them as two lines carrying the same check name, which is the duplicate the
+    # 2026-10-13 daily report showed. The independence that matters is that neither finding
+    # may be suppressed by the other, and that is preserved: both are collected and the
+    # worst severity wins. Two lines is not independence, it is a reader unable to tell
+    # whether the second line is a different problem or the same one repeated.
+    #
+    # The `elif` chain between the model conditions is kept deliberately: they are
+    # mutually exclusive statements about the same quantity, and the first matching one
+    # is the most specific true description of it.
+    findings: list[tuple[str, str]] = []
     if unmatched_shares:
-        report.add(
-            "pnl attribution", WARN,
-            detail + f"; {unmatched_shares:g} share(s) were sold that no BUY accounts "
-            "for, so the PnL of those exits is not in the total above at all - their "
-            "proceeds are real and their cost basis is not on the record, so the omitted "
-            "term can be positive or negative and the figure is incomplete rather than "
-            "exact. This is a property of the account, not a fault in the trading path - "
-            "run `make status`",
-        )
+        # Severity only. `detail` already states this in full - it carries an
+        # `UNMATCHED SELLS n:` clause naming the strategies and saying the PnL is absent
+        # from the total - and the version this replaces restated all of it a second time
+        # in the same line. The finding that matters here is that the line cannot be OK
+        # while shares are unaccounted for; the explanation is already written above it.
+        findings.append((WARN, ""))
     if result.closed_lots and model_lots > 0 and result.model_pnl <= 0.0:
-        report.add(
-            "pnl attribution", FAIL,
-            detail + f"; the model opened {model_lots} lot(s) and contributed "
+        findings.append((
+            FAIL,
+            f"the model opened {model_lots} lot(s) and contributed "
             f"{result.model_pnl:+.2f} to a total of {result.total_realized_pnl:+.2f}",
-        )
+        ))
     elif result.closed_lots and result.model_pnl == 0.0 and model_open > 0:
-        report.add(
-            "pnl attribution", WARN,
-            detail + f"; the model has {model_open:g} share(s) OPEN and none closed, "
-            "so its realized contribution is 0.00 by construction rather than "
-            "because it did nothing - the closed-lot figure above belongs entirely "
-            "to the baseline rule",
-        )
+        findings.append((
+            WARN,
+            f"the model has {model_open:g} share(s) OPEN and none closed, so its realized "
+            "contribution is 0.00 by construction rather than because it did nothing - the "
+            "closed-lot figure above belongs entirely to the baseline rule",
+        ))
     elif result.closed_lots and result.model_pnl == 0.0:
-        report.add(
-            "pnl attribution", WARN,
-            detail + "; the model has opened no lots, so it has neither helped nor "
-            "hurt - the figure above belongs entirely to the baseline rule",
-        )
-    else:
+        findings.append((
+            WARN,
+            "the model has opened no lots, so it has neither helped nor hurt - the figure "
+            "above belongs entirely to the baseline rule",
+        ))
+    if not findings:
         report.add("pnl attribution", OK, detail)
+        return
+    severity = FAIL if FAIL in [status for status, _ in findings] else WARN
+    notes = [note for _, note in findings if note]
+    report.add("pnl attribution", severity, "; ".join([detail, *notes]))
 
 
 def _check_llm_fallback(
