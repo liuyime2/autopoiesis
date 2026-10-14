@@ -81,6 +81,7 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_curriculum_empty_body_cause.py": ("unit-integration", "crash-recovery"),
     "test_strategy_pause.py": ("risk-controls", "lifecycle-invariants"),
     "test_unconditional_sell.py": ("risk-controls", "pnl-accounting"),
+    "test_fallback_exposure_limit.py": ("risk-controls", "decision-outcome-counterfactual"),
     "test_probation_restart_budget.py": ("lifecycle-invariants", "selection-pressure-reaches-the-rules"),
     "test_retired_strategy_readmission.py": ("lifecycle-invariants", "unit-integration"),
     "test_staleness_not_strategy_fault.py": (
