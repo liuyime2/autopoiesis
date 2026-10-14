@@ -203,7 +203,12 @@ def test_the_two_windows_are_not_assumed_equal():
     from autopoiesis.llm_decision import CURRICULUM_NUM_CTX, DECISION_NUM_CTX
 
     assert DECISION_NUM_CTX == 4096
-    assert CURRICULUM_NUM_CTX == 8192
+    # Re-derived 2026-10-14, not raised on principle. The 8192 was sized from a
+    # 3441-token prompt and a 1452-token answer. Measured against the live model
+    # with the live context, both halves have grown - prompt 4,556 and answer
+    # 1,504-2,803 - leaving 1,258 spare at the worst of three runs, 15%. 12288
+    # costs nothing: 141.8s there against 141.9s at 8192 on the same prompt.
+    assert CURRICULUM_NUM_CTX == 12288
     assert CURRICULUM_NUM_CTX > DECISION_NUM_CTX, (
         "the curriculum prompt is far larger than the decision prompt; if this "
         "ever fails, the measurements changed and the constants need re-deriving"

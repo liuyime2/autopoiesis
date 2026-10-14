@@ -807,6 +807,15 @@ class AgentDaemon:
         trading activity, never its own output, so a refused id looked unused.
         Deduplicated because the same id is reviewed again on every retry and six
         copies of one sentence teaches nothing a single copy does not.
+
+        Dedup by id was not enough, because the ids are not what repeats. Measured
+        2026-10-14: the six most recent refusals carried three distinct reason
+        strings, and normalising the one number that differs between them left two.
+        Five of the six were the same probation-capacity sentence - 1,240 of the
+        2,002 characters sent. Grouping them was tried and withdrawn: it only merges
+        byte-identical reasons, so it recovered about 400 of 8,192 tokens (5%), in
+        exchange for changing the prompt shape the model reads. The budget is fixed
+        at CURRICULUM_NUM_CTX instead, which buys four times that.
         """
         if self.journal is None:
             return []

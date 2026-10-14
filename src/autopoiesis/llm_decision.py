@@ -126,11 +126,22 @@ DECISION_INSTRUCTION = (
 #: needs ~1200. 8192 is chosen over 6144 because the margin must survive the
 #: context growing, not merely the context that happened to exist today.
 DECISION_NUM_CTX = 4096
-#: Worst case must be prompt + answer + growth. 3441 measured prompt, 1452
-#: measured answer, 3299 spare at 8192. A chars/3.6 estimate said 2838 and was
-#: 19% low, because JSON punctuation and short keys are cheap per character;
-#: budgets are set from token counts, never from character guesses.
-CURRICULUM_NUM_CTX = 8192
+#: Worst case must be prompt + answer + growth. 8192 was sized from 3441 measured
+#: prompt and 1452 measured answer, leaving 3299 spare. A chars/3.6 estimate said
+#: 2838 and was 19% low, because JSON punctuation and short keys are cheap per
+#: character; budgets are set from token counts, never from character guesses.
+#:
+#: Both halves of that sum have since grown and the budget did not. Measured
+#: 2026-10-14 against the live model with the live context: prompt 3,965 and
+#: answer 2,677, so 6,642 of 8,192 - 19% spare - with the answer being free text
+#: the model writes to whatever length it likes. Overrunning returns
+#: `done_reason=length` with an empty body, which is the
+#: "constrained response contained no JSON object" failure recorded four times in
+#: the twelve hours to 05:36.
+#:
+#: 12288 is free: measured on the same prompt, 141.8s at 12288 against 141.9s at
+#: 8192. The whole gap is spent on the answer.
+CURRICULUM_NUM_CTX = 12288
 #: Measured 118.4s at 6144, 141.9s at 8192, 141.8s at 12288 on the same prompt.
 #: The engine's default 120s timeout sat inside that range, so simply fixing the
 #: window would have turned a truncation into a ReadTimeout instead. The
