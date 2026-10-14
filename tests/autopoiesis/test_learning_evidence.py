@@ -285,7 +285,9 @@ def test_unknown_seeded_fill_labels_preserve_accounting_without_learning_pnl():
         ),),
     )
     report = DeterministicEvaluator().evaluate([closed], evidence=evidence, seeded_fills=[seeded], full_records=[closed])
-    assert report.pnl.strategy_realized_pnl == {"opener": 10}
+    # The amount is the subject of this test; which strategy holds it is not. Realized PnL
+    # is booked to the strategy that sold - see `test_realized_pnl_attribution.py`.
+    assert sum(report.pnl.strategy_realized_pnl.values()) == 10
     assert "opener" not in report.strategy_metrics
     assert report.pnl.closed_lot_count == 1 and report.pnl.unmatched_sell_quantity == {}
 
@@ -318,7 +320,7 @@ def test_order_alias_conflicts_preserve_accounting_but_withhold_learning(conflic
         records.insert(2, buy.model_copy(update={"cycle_id": "synthetic-broker-only-retry",
             "execution": buy.execution.model_copy(update={"client_order_id": None})}))
     report = DeterministicEvaluator().evaluate(records, evidence=evidence, full_records=records)
-    assert report.pnl.strategy_realized_pnl == {"opener": 20}
+    assert sum(report.pnl.strategy_realized_pnl.values()) == 20
     assert report.strategy_metrics["opener"].realized_pnl is None
 
 
@@ -368,7 +370,7 @@ def test_current_behavior_can_earn_learning_pnl_after_old_behavior(old_unknown, 
     evidence = BrokerEvidenceBatch(generated_at=STAMP + timedelta(hours=5), window_start=STAMP,
         window_end=STAMP + timedelta(hours=5), activities=activities)
     report = DeterministicEvaluator().evaluate(records[-2:], evidence=evidence, full_records=records)
-    assert report.pnl.strategy_realized_pnl == {"synthetic-s1": 30 - 14 * fee}
+    assert sum(report.pnl.strategy_realized_pnl.values()) == 30 - 14 * fee
     assert report.strategy_metrics["synthetic-s1"].cycles == 2
     assert report.strategy_metrics["synthetic-s1"].realized_pnl == 20 - 2 * fee
     assert report.strategy_metrics["synthetic-s1"].fees == 2 * fee
@@ -400,8 +402,11 @@ def test_confirmed_unknown_submission_resolves_alias_without_erasing_taint(taint
             status="filled", submitted_at=a.transaction_time, filled_at=a.transaction_time,
         ) for a in evidence.activities)})
     report = DeterministicEvaluator().evaluate(records, evidence=evidence, full_records=records)
-    assert report.pnl.strategy_realized_pnl == {"opener": 20}
-    assert report.strategy_metrics["opener"].realized_pnl == (None if tainted else 20)
+    assert sum(report.pnl.strategy_realized_pnl.values()) == 20
+    # On the strategy that actually sold. `opener` supplied the cost basis and has a bucket
+    # of its own, but no realized PnL: a strategy cannot hold profit it did not realise.
+    assert report.strategy_metrics["closer"].realized_pnl == (None if tainted else 20)
+    assert report.strategy_metrics["opener"].realized_pnl is None
 
 
 def test_latest_inconclusive_screen_supersedes_old_pass_and_legacy_pass_is_rejected(tmp_path):

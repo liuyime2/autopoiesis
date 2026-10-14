@@ -325,7 +325,15 @@ class DeterministicEvaluator:
                 and sold.decision.action in {"SELL", "SHORT"}
             )
         for strategy_id in pnl.strategy_realized_pnl:
-            lots = [lot for lot in pnl.closed_lots if lot.strategy_id == strategy_id and clean_lot(lot)]
+            lots = [
+                lot for lot in pnl.closed_lots
+                # The strategy-level ledger is booked to whoever closed the lot, so the
+                # selection has to ask the same question it asked when it was written.
+                # Filtering on `lot.strategy_id` - the opener - silently produced an empty
+                # list for every real closer and dropped the broker-verified PnL the comment
+                # below is about.
+                if closing_strategy_of(lot) == strategy_id and clean_lot(lot)
+            ]
             if not lots:
                 continue
             # Not `if strategy_id in buckets`. A strategy can close a lot without
@@ -1172,6 +1180,17 @@ def _open_lot_quantity(ledger: _LotLedger) -> dict[str, float]:
     return quantities
 
 
+def closing_strategy_of(lot: ClosedLotAttribution) -> str:
+    """The strategy the lot's realized PnL is booked to: whoever sold.
+
+    `ClosedLotAttribution.strategy_id` is the **opener**, because that is whose cost basis
+    the sell consumed and whose open lots are still valued. Realized PnL is an outcome of
+    the sell, so the strategy-level ledger uses this instead - see `_apply_activity` for the
+    measurement that forced the distinction.
+    """
+    return lot.closing_strategy_id or lot.strategy_id
+
+
 def _apply_activity(
     ledger: _LotLedger, activity: BrokerFillActivity, *, strategy_id: str, opens_short: bool = False
 ) -> None:
@@ -1182,6 +1201,23 @@ def _apply_activity(
     strategy that opened that lot, recording the closing strategy separately. That
     is the standard convention and it is the only one under which a lot opened by
     one strategy can be closed by another.
+
+    The strategy-level ledger is booked to the **closing** strategy, because realized PnL is
+    an outcome of the sell and a strategy that bought and held has realized nothing. It was
+    booked to the opener, and the live record shows what that costs: measured 2026-10-13, no
+    agent strategy in the whole journal had ever both bought and sold, so every strategy
+    with a `closed_quantity` was one that had never sold. The account total of +760.03 is
+    correct as an account figure, but it was attributed to `tiny-fixed-size-001` (+378.18),
+    `trend-follow-buy-001` (+147.51), `fixed-size-buy-001` (+146.94) and
+    `fixed-size-probe-0001` (+87.40) - four strategies with zero sells - while the strategies
+    that actually executed the sells earned nothing. `closed_quantity` was worse than
+    mislabelled: it read as "this strategy closed N shares" when it meant "N of this
+    strategy's shares were closed", which is how a never-selling strategy ends up reported
+    as the library's best performer.
+
+    The lot keeps both identities. `strategy_id` is the opener, because that is whose cost
+    basis was consumed and whose open lots must still be valued; `closing_strategy_id` is
+    the closer, set whenever the two differ.
     """
     if activity.side == "BUY":
         # A buy covers the agent's open shorts first; only the remainder opens a long. Shorts
@@ -1222,7 +1258,7 @@ def _apply_activity(
         buy_fee = lot.fees * (matched / lot.quantity) if lot.quantity else 0.0
         sell_fee = sell_fee_remaining * (matched / remaining) if remaining else 0.0
         realized_pnl = (activity.price - lot.price) * matched - buy_fee - sell_fee
-        tracker = ledger.tracker(owner)
+        tracker = ledger.tracker(strategy_id)
         tracker.realized_pnl += realized_pnl
         tracker.closed_quantity += matched
         tracker.closed_lots.append(

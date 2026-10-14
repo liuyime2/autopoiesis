@@ -455,10 +455,21 @@ def test_a_sell_by_one_strategy_closes_a_lot_opened_by_another():
     report = DeterministicEvaluator().evaluate([opened, closed], evidence=evidence)
 
     assert report.pnl.closed_lot_count == 1
-    # The lot's PnL belongs to the strategy that opened it, not the one that closed it.
-    assert report.pnl.strategy_realized_pnl == {"opener": 20.0}
-    assert "closer" not in report.pnl.strategy_realized_pnl
+    # Booked to `closer`. This reverses a deliberate decision recorded in the comment above -
+    # the account-level lot ledger exists so a sell by one strategy can close a lot another
+    # opened, and the PnL went to the opener on the reasoning that the gain came from the
+    # entry. That reasoning holds for the account and for `by_opening_strategy`, which still
+    # carries it. It does not hold as *the strategy-level result*, for two reasons the live
+    # record supplied. Measured 2026-10-13: no agent strategy in the journal had ever both
+    # bought and sold, so all +760.03 went to four strategies with zero sells and they were
+    # reported as the library's best performers. And `strategy_metrics[...].realized_pnl` feeds
+    # the lifecycle, so this figure can promote or retire a strategy on profit it never
+    # realised.
+    assert report.pnl.strategy_realized_pnl == {"closer": 20.0}
+    assert "opener" not in report.pnl.strategy_realized_pnl
     lot = report.pnl.closed_lots[0]
+    # The lot keeps both identities: the opener supplied the cost basis and is whose open
+    # positions are valued; the closer is the seller.
     assert lot.strategy_id == "opener"
     assert lot.closing_strategy_id == "closer"
     assert lot.realized_pnl == 20.0
@@ -523,7 +534,9 @@ def test_journal_confirmed_fills_establish_lots_opened_before_the_window():
     report = DeterministicEvaluator().evaluate([closed], evidence=evidence, seeded_fills=seeded)
 
     assert report.pnl.closed_lot_count == 1
-    assert report.pnl.strategy_realized_pnl == {"opener": 100.0}
+    # Booked to `closer`: realized PnL is an outcome of the sell. See
+    # `test_realized_pnl_attribution.py` for the live measurement behind that.
+    assert report.pnl.strategy_realized_pnl == {"closer": 100.0}
     assert report.pnl.closed_lots[0].opened_at == datetime(2026, 6, 11, 14, 30, tzinfo=timezone.utc)
     assert any(attribution.seeded for attribution in report.pnl.fill_attributions)
 
@@ -578,10 +591,16 @@ def test_verified_pnl_reaches_the_metrics_layer_without_cycles_in_the_window():
     opened = make_record(cycle_id="old-buy", action="BUY", quantity=1, strategy_id="opener", last_price=700)
     report = DeterministicEvaluator().evaluate([closed], evidence=evidence, full_records=[opened, closed])
 
+    # The lot was opened before the window, from a journal-confirmed fill, and its realized
+    # PnL still reaches the metrics layer - the case this test exists for, recorded at
+    # evaluator.py as "a strategy can close a lot without appearing in the current cycle
+    # window, and the old guard dropped broker-verified PnL on the floor in exactly that
+    # case". The PnL is now booked to `closer`, which executed the sell; `opener` supplied
+    # the cost basis and gets no bucket, because it realised nothing.
     metrics = report.strategy_metrics
-    assert metrics["opener"].realized_pnl == 100.0
-    assert metrics["opener"].cycles == 0
-    assert metrics["opener"].pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+    assert metrics["closer"].realized_pnl == 100.0
+    assert metrics["closer"].pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+    assert "opener" not in metrics
 
 
 def test_a_split_fill_reported_as_several_activities_is_one_order():
@@ -645,7 +664,10 @@ def test_a_split_fill_reported_as_several_activities_is_one_order():
     # 23 agent lots close; 52 - 23 = 29 shares were never the agent's.
     assert report.pnl.closed_lot_count == 23
     assert report.pnl.unmatched_sell_quantity == {"closer": 29.0}
-    assert report.pnl.strategy_realized_pnl["opener"] == pytest.approx(
+    # Booked to `closer`, not `opener`. Realized PnL is an outcome of the sell, and `opener`
+    # bought and held, so it realized nothing. See `test_realized_pnl_attribution.py` for the
+    # live measurement that forced the distinction.
+    assert report.pnl.strategy_realized_pnl["closer"] == pytest.approx(
         (766.57 - 742.03) * 23, abs=0.01
     )
     sells = [a for a in report.pnl.fill_attributions if a.side == "SELL"]
@@ -684,5 +706,6 @@ def test_a_split_fill_at_two_prices_is_volume_weighted():
         [opened, sold], evidence=evidence, seeded_fills=seeded
     )
 
-    # Volume-weighted: (1*100 + 1*200) / 2 = 150, so (150 - 50) * 2 = 200.
-    assert report.pnl.strategy_realized_pnl["opener"] == pytest.approx(200.0, abs=0.01)
+    # Volume-weighted: (1*100 + 1*200) / 2 = 150, so (150 - 50) * 2 = 200. Booked to
+    # `closer`, which executed the sell; `opener` only supplied the cost basis.
+    assert report.pnl.strategy_realized_pnl["closer"] == pytest.approx(200.0, abs=0.01)
