@@ -199,7 +199,7 @@ def main() -> int:
         print("no overlapping SPY/VIX observations")
         return 1
     print(f"sample: {rows[0]['day']} .. {rows[-1]['day']}  ({len(rows)} observations)")
-    print(f"baseline from the plan: rho=+0.60 p=0.0003 over 52 days\n")
+    print("baseline from the plan: rho=+0.60 p=0.0003 over 52 days\n")
 
     whole = report("whole sample", rows)
     if not whole:
