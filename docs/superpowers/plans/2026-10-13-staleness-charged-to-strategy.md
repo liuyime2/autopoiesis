@@ -184,3 +184,14 @@ would independently trip `SESSION_PROVENANCE_INVALID`. Unit C therefore has to d
 not one: what a correctly-refused stale abstention means for the gate, and whether a configured
 symbol whose instrument cannot quote inside the freshness limit belongs in the configured symbol
 list at all. Neither may be answered by loosening `stale_after_seconds`.
+## Closing state, 2026-10-13 22:50 EDT
+
+Unit A shipped and deployed as part of `3619ff2ddac17037`. Unit B withdrawn with the evidence
+that withdrew it. B2 investigated, first reading corrected, no change. Two further defects
+found and fixed the same evening, both recorded in the evidence file: the readiness installer's
+unit directory, and realized-PnL attribution to strategies that never sold.
+
+The `self-evolution-closes` gate class is still red. It is not an independent defect: its cause
+is the provenance gap before 2026-10-13 plus the 24-hour horizon, both of which resolve with
+elapsed time rather than with a code change. The prediction recorded earlier in the evidence
+file stands and is checkable by the 2026-10-14 timers.

@@ -329,6 +329,83 @@ No return is claimed. Sell prices and cost basis is known and the book carries a
 pre-existing unrealized loss on TLT; nothing here attributes any of it to decision quality, and
 the day's `PROFIT_TARGET_CHECKED` reads `profit target unproven`.
 
+## Correction: +760.03 was attributed to strategies that never sold
+
+The closing section above, and several earlier statements in this file, repeat the figure
+`+760.03` across 49 closed lots and describe it as broker-verified agent PnL. The account-level
+figure was and is correct. **The strategy-level attribution of it was not**, and the earlier
+wording repeated a claim the system could not support.
+
+Measured on the live journal after the session closed:
+
+| strategy | credited realized PnL | bought | sold |
+|---|---|---|---|
+| `tiny-fixed-size-001` | +378.18 | 17 | **0** |
+| `trend-follow-buy-001` | +147.51 | 9 | **0** |
+| `fixed-size-buy-001` | +146.94 | 16 | **0** |
+| `fixed-size-probe-0001` | +87.40 | 33 | **0** |
+
+No agent strategy in the entire journal had ever both bought and sold. Every strategy carrying
+a `closed_quantity` was therefore one that had never sold, and all 760.03 of it was credited to
+four never-selling strategies and reported as the library's best performers - while
+`trend-follow-sell-002` and `trend-follow-20261011-001`, which executed every one of those
+sells, earned nothing. `closed_quantity` was the worse half of the wording: it read as "this
+strategy closed N shares" when it meant "N of this strategy's shares were closed".
+
+`strategy_metrics[...].realized_pnl` feeds the lifecycle, so the figure could promote or retire
+a strategy on profit it never realised. That is what makes it a decision defect and not only a
+reporting one.
+
+Fixed in `5f325c4`: realized PnL is booked to the closing strategy, the lot keeps both
+identities, and `by_opening_strategy` retains the entry attribution as a diagnostic. The
+**account total is unchanged** - 49 closed lots, +760.03, +801.87 after cost - and the credited
+strategies now read:
+
+    trend-follow-sell-002        +564.39
+    trend-follow-20261011-001     +151.47
+    fixed-size-sell-006            +19.92
+    fixed-size-sell-20260724-001   +12.15
+    fixed-size-sell-005            +10.02
+    fixed-size-xle-sell-001         +1.84   <- traded today
+    fixed-size-xlf-sell-001         +0.24   <- traded today
+
+The benchmark's per-strategy ranking moved accordingly, and moved **worse**, which is the
+direction that makes it believable:
+
+| strategy | before | after | SPY, same window |
+|---|---|---|---|
+| `tiny-fixed-size-001` | +3.96% | **+0.03%** | +6.78% |
+| `fixed-size-probe-0001` | +0.74% | +0.29% | +1.12% |
+| `trend-follow-20260627-001` | +0.87% | +0.87% | +0.89% |
+| `trend-follow-20260727-001` | +0.30% | +0.30% | +0.38% |
+
+`tiny-fixed-size-001` was previously reported as 2.81 points behind buy-and-hold and is in fact
+**6.75 points** behind. Four strategies were dropped from the table because they now hold no
+closed lot at all. `make benchmark`'s own verdict was and remains `NOT MEASURABLE`, on 21 of 60
+trading days, with `portfolio comparison UNKNOWN`.
+
+This corrects the benchmark's ranking and the strategy-level ledger. It does **not** change
+`+760.03` as an account figure, and it does not turn any of it into evidence of alpha.
+
+## Deployment of the attribution fix — 22:15 to 22:41 EDT
+
+Source `4a303537b4a335f1` deployed with the market closed.
+
+- Unit bytes preserved (14 files) at `/tmp/opencode/unit-bak-2215/`.
+- Cooperative stop **4 s** against the 630 s budget, `Result=success`, `ExecMainStatus=0`.
+- Journal snapshot `CERTIFIED`: 2,781 cycles, 22,411 events, 0 unparsed lines.
+- State checkpoint `predeploy-state-2237`: 220 files / 311.4 MB, **220 of 220** hashes verified.
+- Ten units byte-identical. Started 22:37:46, PID **3624205**, `NRestarts=0`, fingerprint
+  `4a303537b4a335f1`. `ORDER_RECONCILIATION_REVIEWED` `matched: true`. All six timers armed.
+- The readiness timers were installed **without** an explicit `READINESS_UNIT_DIR`, to exercise
+  the default corrected earlier this evening. Both units resolved to
+  `/home/liuyime2/.config/systemd/user`, both carry the new fingerprint on disk *and* as loaded
+  by systemd, and the `$XDG_CONFIG_HOME` directory the old default wrote to is empty. That is
+  the fix verified on the real path, not only in a test.
+
+`make verify` after deployment: **53 of 55 classes pass**, 3,028 executions across 100 test
+files.
+
 ## Deployment of the re-admission path — 17:24 to 17:40 EDT
 
 Source `712dad74d423eeef` deployed with the market closed, replacing `3619ff2ddac17037`.
