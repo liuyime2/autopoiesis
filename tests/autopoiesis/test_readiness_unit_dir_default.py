@@ -28,6 +28,7 @@ Usage: pytest tests/autopoiesis/test_readiness_unit_dir_default.py -q
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -47,6 +48,30 @@ def _make_default() -> str:
     ).stdout
     match = re.search(r'test -n "([^"]+)"', out)
     return match.group(1) if match else ""
+
+
+def _has_systemd_user_manager() -> bool:
+    """Whether this host can answer the question the environment-dependent tests ask.
+
+    Measured on GitHub's runners 2026-10-14. The tests below asserted against
+    `tools/systemd_unit_dir.sh` and skipped only when that script exited non-zero. The
+    script does not fail on a host with no systemd user manager: with no manager to ask
+    it falls back to `$HOME/.config`, finds the parent directory writable, and prints
+    `$HOME/.config/systemd/user` with exit 0. So the skip never fired, the comparison
+    ran, and it failed on a runner where the Makefile's own `$(shell ...)` had resolved
+    nothing to compare against.
+
+    The dependency was never "the script failed" - it was "this host has a manager whose
+    answer means anything". That is what is asked here, so the skip fires for the right
+    reason rather than a proxy that happens to hold on one machine.
+    """
+    if shutil.which("systemctl") is None:
+        return False
+    probe = subprocess.run(
+        ["systemctl", "--user", "show-environment"],
+        text=True, capture_output=True, check=False,
+    )
+    return probe.returncode == 0
 
 
 def test_the_default_is_derived_from_the_manager_not_from_the_shell():
@@ -77,13 +102,19 @@ def test_the_default_is_derived_from_the_manager_not_from_the_shell():
 
 def test_the_default_matches_where_the_manager_actually_reads_units():
     """The two must agree, and if they cannot this must not pass quietly."""
+    if not _has_systemd_user_manager():
+        import pytest
+
+        pytest.skip(
+            "no systemd user manager on this host: tools/systemd_unit_dir.sh falls back "
+            "to $HOME/.config and succeeds anyway, so there is no manager answer to "
+            "compare the Makefile default against"
+        )
     manager_dir = subprocess.run(
         [str(ROOT / "tools" / "systemd_unit_dir.sh")], cwd=ROOT, text=True,
         capture_output=True, check=False,
     )
     if manager_dir.returncode != 0:
-        # The script refuses on a host with no durable unit directory, which is the correct
-        # behaviour; there is nothing to compare against there.
         import pytest
 
         pytest.skip("no durable systemd user unit directory on this host")
