@@ -252,6 +252,25 @@ test-provenance-host:
 doctor:
 	@./autopoiesis doctor
 
+# Take one strategy out of service, audited. STRATEGY_IDS is required; REASON is
+# required, because a pause nobody can explain is indistinguishable from a mistake.
+# The lifecycle is written to the strategy file and `StrategyLibrary.list()` re-reads
+# that directory every cycle, so the running daemon sees this on its next cycle - no
+# restart, no deploy, and nothing unreviewed enters the trading path.
+STRATEGY_IDS ?=
+PAUSE_REASON ?=
+PAUSE_ACTOR ?= operator
+# Default to the live runtime tree the daemon serves from, overridable so the same
+# entry point can be pointed at a copy for rehearsal.
+PAUSE_STRATEGY_DIR ?= runtime/autopoiesis/strategies
+PAUSE_JOURNAL ?= runtime/autopoiesis/journal.jsonl
+pause-strategy:
+	@test -n "$(STRATEGY_IDS)" || { echo "PAUSE: set STRATEGY_IDS=<id> [id ...]"; exit 2; }
+	@test -n "$(PAUSE_REASON)" || { echo "PAUSE: set PAUSE_REASON='<why>'"; exit 2; }
+	@$(PY) -m autopoiesis.strategy_pause $(STRATEGY_IDS) \
+		--reason "$(PAUSE_REASON)" --actor "$(PAUSE_ACTOR)" \
+		--strategy-dir "$(PAUSE_STRATEGY_DIR)" --journal "$(PAUSE_JOURNAL)"
+
 # Does the system beat SPY buy-and-hold, after costs, inside the stated risk budget?
 # The falsifiable target the whole project is measured against. No credentials needed.
 benchmark:
