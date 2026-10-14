@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from autopoiesis import (
     attribution,
@@ -566,9 +567,15 @@ def _check_decision_quality(
     """
     symbol = config.symbols[0] if config.symbols else "SPY"
     try:
-        result = counterfactual.evaluate(
+        # Every configured symbol, not the first one. `evaluate` takes one symbol and builds
+        # one price series from it, which has to stay that way - a TLT decision is a question
+        # about TLT's next 24 hours. But this check graded the first symbol only, so the
+        # 2026-10-14 review found the decision-quality figure and the llm-vs-rule figure
+        # below it were both SPY-only while the account traded TLT, XLE, XLF, BIL and XLB.
+        # A metric about the model, computed from one symbol of six, is a metric about SPY.
+        result = counterfactual.evaluate_symbols(
             records,
-            symbol=symbol,
+            symbols=tuple(config.symbols) if config.symbols else (symbol,),
             horizon_hours=config.counterfactual_horizon_hours,
             assumed_cost_pct=config.assumed_round_trip_cost_pct,
         )
@@ -580,12 +587,14 @@ def _check_decision_quality(
         return
     quality = result.hold_quality()
     counts = result.counts()
+    by_symbol = _scored_by_symbol(result)
     detail = (
         f"hold_quality={quality} over {len(result.scored)} scored "
         f"({result.pending_count} pending, {result.gap_count} refused as gaps); "
         f"holds: {counts.get('GOOD_HOLD', 0)} good, "
         f"{counts.get('MISSED_ALPHA', 0)} missed alpha, "
         f"{counts.get('FALSE_TRADE', 0)} false trade"
+        + (f"; by symbol: {by_symbol}" if by_symbol else "")
     )
     if quality is None:
         report.add(
@@ -597,6 +606,19 @@ def _check_decision_quality(
     _report_llm_against_the_rule(report, result.rows)
 
 
+def _scored_by_symbol(result) -> str:
+    """Scored counts per symbol, so a figure computed over all of them can be read per one.
+
+    Added with the move from `evaluate` to `evaluate_symbols`: a single total over six
+    symbols hides that one symbol contributed most of it, which is how the SPY-only figure
+    survived unnoticed.
+    """
+    counts: dict[str, int] = {}
+    for row in result.scored:
+        counts[row.symbol] = counts.get(row.symbol, 0) + 1
+    return ", ".join(f"{symbol}={count}" for symbol, count in sorted(counts.items()))
+
+
 def _report_llm_against_the_rule(report: DoctorReport, rows: list) -> None:
     """What the model's departures from the strategy's rule were worth, paired per cycle.
 
@@ -605,6 +627,27 @@ def _report_llm_against_the_rule(report: DoctorReport, rows: list) -> None:
     rule's. Their sum is the model's increment over the rule on identical inputs - the
     number the PnL-lot attribution could only approximate. Cycles before that have no pair
     and are not counted, rather than estimated.
+
+    Three corrections made 2026-10-14, each because the figure was being read as a
+    conclusion it could not support:
+
+    - **Per trading day, and withheld under 20 of them.** The reported "+16.9%" was a sum
+      over 68 overrides concentrated in three days, 39 of them on 2026-10-07 alone. A total
+      that is one day wearing a percentage sign is not evidence about a model. The plan's
+      acceptance is explicit: below 20 trading days, report that the evidence is
+      insufficient rather than report a net figure.
+
+    - **A reasonless disagreement is already excluded upstream.** `HybridDecisionEngine`
+      returns the rule's own decision with `decision_source="policy_engine"` when the model
+      departed without an `override_reason`, so it never enters this count. Asserted rather
+      than assumed, because the exclusion lives in another module and could be removed
+      without this one noticing.
+
+    - **A system skip cannot be excluded here, and that is recorded rather than faked.**
+      `CounterfactualRow` carries no execution status, so a cycle where the executor or
+      Guardian skipped an order is indistinguishable from a model that chose differently.
+      Excluding them needs the status on the row; until it is there, the count includes
+      them and this says so.
     """
     paired = [
         row for row in rows
@@ -618,14 +661,62 @@ def _report_llm_against_the_rule(report: DoctorReport, rows: list) -> None:
         )
         return
     overrides = [row for row in paired if row.action != row.rule_action]
+    if not overrides:
+        report.add(
+            "llm vs rule", OK,
+            f"{len(paired)} paired LLM decision(s) across "
+            f"{len(_trading_days(paired))} trading day(s), none of them a departure from "
+            f"the rule",
+        )
+        return
+
+    days = _trading_days(overrides)
     total = sum(row.override_value_pct for row in overrides)
     helped = sum(1 for row in overrides if row.override_value_pct > 0)
+    per_day = _per_day_override_totals(overrides)
+    distribution = ", ".join(f"{day}={value:+.3f}%" for day, value in sorted(per_day.items()))
+    caveats = (
+        "; the row carries no execution status, so a cycle the executor or Guardian "
+        "skipped is counted here as a departure - excluding those needs the status on the "
+        "row and is not done"
+    )
+
+    if len(days) < MIN_TRADING_DAYS_FOR_A_CONCLUSION:
+        report.add(
+            "llm vs rule", WARN,
+            f"INSUFFICIENT EVIDENCE: {len(overrides)} override(s) over {len(days)} trading "
+            f"day(s), below the {MIN_TRADING_DAYS_FOR_A_CONCLUSION} needed before a net "
+            f"figure means anything about the model. By day: {distribution}. The "
+            f"unwithheld total would be {total:+.3f}% of probe value and must not be read "
+            f"as a result" + caveats,
+        )
+        return
     report.add(
         "llm vs rule", OK,
-        f"{len(paired)} paired LLM decision(s), {len(overrides)} override(s) of the rule, "
-        f"{helped} of them worth more than the rule; overrides net {total:+.3f}% of probe "
-        f"value (one share, 24h, after the assumed cost)",
+        f"{len(paired)} paired LLM decision(s), {len(overrides)} override(s) of the rule "
+        f"over {len(days)} trading day(s), {helped} of them worth more than the rule; "
+        f"overrides net {total:+.3f}% of probe value (one share, 24h, after the assumed "
+        f"cost). By day: {distribution}" + caveats,
     )
+
+
+#: Overrides are summed, and a sum is a conclusion. Below this many trading days the
+#: 2026-10-14 review found 68 overrides concentrated in three, 39 of them in one - a total
+#: that is a single day wearing a percentage sign. The plan's acceptance names this number.
+MIN_TRADING_DAYS_FOR_A_CONCLUSION = 20
+
+
+def _trading_days(rows: list) -> set[str]:
+    """Distinct calendar dates the rows were decided on, in exchange-local time."""
+    return {row.decided_at.astimezone(ZoneInfo("America/New_York")).date().isoformat() for row in rows}
+
+
+def _per_day_override_totals(rows: list) -> dict[str, float]:
+    totals: dict[str, float] = {}
+    for row in rows:
+        day = row.decided_at.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+        totals[day] = totals.get(day, 0.0) + row.override_value_pct
+    return totals
 
 
 def _check_experiment_chain(
