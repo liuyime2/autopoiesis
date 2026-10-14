@@ -46,6 +46,70 @@ NON_EXPIRING_RETIREMENT_REASONS = ("broker-verified negative realized PnL",)
 #: in which the lifecycle events themselves become the learning evidence.
 MAX_READMISSIONS = 1
 
+#: Parameter fields whose value is derived from market state, so the strategy's action
+#: can be false at a price it is watching. Derived from `STRATEGY_PARAMETER_SCHEMAS`
+#: below rather than typed here, so a kind that gains a trigger is recognised without
+#: editing a second list that could drift away from the schema it claims to mirror.
+#:
+#: Four fields are subtracted, and each for a reason. `action` is the action rather than
+#: a fact about the market, and including it would make every `FIXED_SIZE` look
+#: conditional - the exact bug, reintroduced through the derivation. `quantity` and
+#: `confidence` are sizing and conviction. `reference_price` anchors a band but triggers
+#: nothing by itself, and is what the permanently-degenerate band is about.
+_NOT_MARKET_DERIVED = frozenset({"action", "quantity", "confidence", "reference_price"})
+
+
+def _market_trigger_fields() -> frozenset[str]:
+    from autopoiesis import coerce
+    from autopoiesis.models import STRATEGY_PARAMETER_SCHEMAS
+
+    fields: set[str] = set()
+    for kind, schema in STRATEGY_PARAMETER_SCHEMAS.items():
+        fields.update(
+            coerce.field_str_tuple(
+                coerce.field_dict(schema, f"schema[{kind}]").get("allowed"),
+                f"schema[{kind}].allowed",
+            )
+        )
+    return frozenset(fields - _NOT_MARKET_DERIVED)
+
+
+MARKET_TRIGGER_FIELDS = _market_trigger_fields()
+
+
+def _unconditional_sell_reason(strategy: StrategySpec) -> str | None:
+    """Refuse a sell that has no way to decline to fire, or None if it may.
+
+    Measured 2026-10-14 on the live account. The curriculum treats "this position has no
+    strategy that can sell it" as a gap to fill, and `FIXED_SIZE` - whose entire
+    parameter set is `action`, `quantity`, `confidence` - is the kind it reached for.
+    `fixed-size-tlt-sell-001` was therefore not a sell that rarely fires but a sell that
+    cannot not fire: selected in a cycle, it sells, and the only thing that stops it is
+    the position running out. Broker-verified, TLT 188 shares sold and XLE and XLF
+    emptied entirely, with one order every ~32 minutes on 2026-10-14 alone.
+
+    `trend-follow-sell-001` in the same library carries `reference_price` and
+    `threshold_pct`, so the gap was real and the library can express a conditional sell.
+    The gap did not justify an unconditional one.
+
+    Deliberately kind-agnostic. The question is whether the spec carries anything that
+    can be false, not whether its kind is `FIXED_SIZE`: a future kind with no condition
+    is caught, and a `FIXED_SIZE` that somehow gained one is allowed.
+    """
+    if str(strategy.parameters.get("action", "")).upper() != "SELL":
+        return None
+    parameters = strategy.parameters or {}
+    if MARKET_TRIGGER_FIELDS & set(parameters):
+        return None
+    return (
+        f"SELL {parameters.get('quantity')} carries no market condition and so cannot "
+        f"decline to fire; kind {strategy.kind} has no trigger field "
+        f"({sorted(MARKET_TRIGGER_FIELDS)}) so this strategy would sell on every cycle it "
+        f"is selected until the position is empty. Measured 2026-10-14: TLT 188 shares "
+        f"sold, XLE and XLF emptied. Propose a conditional exit instead - TREND_FOLLOW "
+        f"with reference_price and threshold_pct, or a RULE with when_above/when_below."
+    )
+
 
 class StrategyAdmission:
     def __init__(
@@ -225,6 +289,14 @@ class StrategyAdmission:
             return StrategyAdmissionResult(
                 accepted=False,
                 reason=reference_reason,
+                strategy_id=strategy.strategy_id,
+            )
+
+        unconditional_reason = _unconditional_sell_reason(strategy)
+        if unconditional_reason is not None:
+            return StrategyAdmissionResult(
+                accepted=False,
+                reason=unconditional_reason,
                 strategy_id=strategy.strategy_id,
             )
 
@@ -422,6 +494,15 @@ class StrategyAdmission:
     def _duplicates_trend_follow(self, strategy: StrategySpec, strategies: list[StrategySpec]) -> bool:
         for existing in strategies:
             if existing.kind != "TREND_FOLLOW":
+                continue
+            if existing.strategy_id == strategy.strategy_id:
+                # The strategy under review is compared against the library, and for a
+                # re-admission the library still holds the retired copy of *this* spec.
+                # Comparing a spec with itself always matches on parameters, so without
+                # this a TREND_FOLLOW could never be re-admitted: it would be refused as
+                # a duplicate of the thing the re-admission path exists to bring back.
+                # The retired copy's own readmission limits are the right place to judge
+                # whether it may return, and that is what `_readmission_refusal` does.
                 continue
             if existing.symbols != strategy.symbols:
                 continue

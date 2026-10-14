@@ -50,15 +50,28 @@ def _spec(
     lifecycle: str = "RETIRED",
     lifecycle_reason: str = "severe operational failure rate 1.00",
     readmissions: int = 0,
-    action: str = "SELL",
     symbols: tuple[str, ...] = ("BIL",),
 ) -> StrategySpec:
     return StrategySpec(
         strategy_id=strategy_id,
         name="BIL sell",
-        kind="FIXED_SIZE",
+        # TREND_FOLLOW, not FIXED_SIZE. Admission refuses a SELL carrying no market
+        # condition, because one that cannot decline to fire sold 188 TLT shares and
+        # emptied XLE and XLF on 2026-10-14. This fixture is about the *lifecycle*
+        # re-admission path - that a retired id can come back and keeps its old reason -
+        # so it uses a spec the gate would accept, and the refusal of the unconditional
+        # shape is asserted separately below.
+        kind="TREND_FOLLOW",
         symbols=symbols,
-        parameters={"action": action, "quantity": 1, "confidence": 0.5},
+        # Anchored at 95.0 with a 1% band, i.e. [94.05, 95.95]. That is outside the band
+        # of a BIL near 91.5 and of the AAPL at 100.0 one test supplies, so neither is
+        # refused as permanently degenerate, and it stays inside the +/-50% deviation
+        # tolerance of both.
+        parameters={
+            "reference_price": 95.0,
+            "threshold_pct": 0.01,
+            "quantity": 1, "confidence": 0.5,
+        },
         max_position_value=25000.0,
         enabled=True,
         lifecycle=lifecycle,
@@ -258,3 +271,31 @@ def test_a_re_admission_still_goes_through_guardian_review(tmp_path):
     assert result.accepted is False
     assert "allowlist" in result.reason
     assert library.load("fixed-size-bil-sell-001").lifecycle == "RETIRED"
+
+
+def test_a_retired_unconditional_sell_is_not_readmitted(tmp_path):
+    """Re-admission is a way back from retirement, not a way around the gate.
+
+    Measured 2026-10-14: `fixed-size-bil-sell-001` is the live shape this describes -
+    FIXED_SIZE, action SELL, no market condition. Re-admitting it would put back the
+    exact strategy that sold 188 TLT shares and emptied XLE and XLF, under a new name
+    and with a clean lifecycle story. The readmission path exists because retirement can
+    be wrong; it does not exist to route around a refusal that still applies.
+    """
+    unconditional = StrategySpec(
+        strategy_id="fixed-size-bil-sell-002", name="BIL sell", kind="FIXED_SIZE",
+        symbols=("BIL",), parameters={"action": "SELL", "quantity": 1, "confidence": 0.5},
+        max_position_value=25000.0, enabled=True, lifecycle="RETIRED",
+        lifecycle_reason="severe operational failure rate 1.00", probation_restarts=1,
+        created_at=datetime(2026, 10, 4, tzinfo=timezone.utc), rationale="t",
+    )
+    library = StrategyLibrary(tmp_path)
+    library.save(unconditional)
+
+    result = _gate(library).admit(unconditional)
+
+    assert result.accepted is False, "an unconditional sell must not come back"
+    assert "no market condition" in result.reason, result.reason
+    assert library.try_load("fixed-size-bil-sell-002").lifecycle == "RETIRED", (
+        "a refusal must leave the retirement standing"
+    )

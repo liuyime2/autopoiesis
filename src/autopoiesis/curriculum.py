@@ -170,6 +170,16 @@ class StructuredCurriculumAgent:
                 "No trade is not failure; no exploration is failure.",
                 "If recent_exploration_summary.no_exploration is true, propose the next distinct small admissible strategy instead of repeating generic EVALUATE or near-duplicate TREND_FOLLOW.",
                 "Every entry in recently_rejected is a strategy you already proposed and admission refused. Read the reason and change what it names: kind, symbols, action, quantity, or max_position_value. Renaming the same trade does not make it a new strategy and will be refused identically.",
+                # Measured 2026-10-14. Demanding a SELL was met with FIXED_SIZE SELL 1,
+                # which has no condition and therefore cannot decline to fire: TLT 188
+                # shares sold, XLE and XLF emptied. If required_action is SELL you must
+                # choose TREND_FOLLOW (reference_price, threshold_pct) or RULE (signal,
+                # lookback, threshold_pct, when_above, when_below). FIXED_SIZE SELL will
+                # be refused, because a sell with nothing that can be false would sell
+                # every cycle it is selected until the position is empty. If no
+                # conditional exit is possible for a symbol, that is a fact to report -
+                # propose something else and say so in the rationale.
+                "An exit must be able to decline to fire: a SELL with no market condition is refused. Use TREND_FOLLOW or RULE, never FIXED_SIZE, for an exit.",
                 "Do not force orders; Guardian, market-open checks, and paper executor remain authoritative.",
                 "Do not claim profitability or target achievement without broker evidence in the supplied context.",
             ],
