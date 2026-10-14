@@ -19,6 +19,13 @@ from autopoiesis.models import (
     TradeDecision,
 )
 
+#: What `HybridDecisionEngine._fallback` writes when the model was asked and did not produce
+#: a usable answer. A module constant for the same reason `FAIL_CLOSED_RATIONALE` is one:
+#: the daemon reads it to decide whether the model was consulted and failed, and a marker
+#: that exists in two places is a marker the two can drift apart until the monitor quietly
+#: stops counting the failures it exists to count.
+LLM_UNAVAILABLE_MARKER = "llm_unavailable: "
+
 
 def parse_decision_json(text: str, *, model_name: str | None = None) -> TradeDecision:
     start = text.find("{")
@@ -380,7 +387,7 @@ class HybridDecisionEngine:
             "strategy_provenance": self._selected_provenance,
             # The fallback is the rule, so the rule's action is the action taken.
             "rule_action": decision.action,
-            "rationale": f"{decision.rationale} | llm_unavailable: {reason}",
+            "rationale": f"{decision.rationale} | {LLM_UNAVAILABLE_MARKER}{reason}",
         }
         note = self._fallback_exposure_note(decision)
         if note is not None:

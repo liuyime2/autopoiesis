@@ -28,6 +28,7 @@ from autopoiesis.journal import JsonlJournal
 from autopoiesis.knowledge_admission import KnowledgeAdmission
 from autopoiesis.knowledge_library import lesson_effects
 from autopoiesis.learning_evidence import ELIGIBILITY_VERSION, capture, valid_provenance
+from autopoiesis.llm_decision import LLM_UNAVAILABLE_MARKER
 from autopoiesis.loop import FAIL_CLOSED_RATIONALE
 from autopoiesis.models import (
     BrokerEvidenceBatch,
@@ -1879,9 +1880,21 @@ class AgentDaemon:
         if decision is None:
             return
         source = getattr(decision, "decision_source", None)
+        rationale = getattr(decision, "rationale", "")
         if source == "llm":
             self._record_model(True)
-        elif getattr(decision, "rationale", "") == FAIL_CLOSED_RATIONALE:
+        elif rationale == FAIL_CLOSED_RATIONALE:
+            self._record_model(False)
+        elif LLM_UNAVAILABLE_MARKER in rationale:
+            # The model was asked and did not produce a usable answer. `_fallback` marks
+            # every such decision with this marker and carries the cause after it - a
+            # timeout, a refused connection, a response with no JSON object in it.
+            #
+            # Without this branch the flag kept its last known value, so a parse failure
+            # was invisible to the monitor: reported 2026-10-14 as 23% of decisions on
+            # 10-12 and 9% on 10-13, and unverifiable from the journal, because no event
+            # recorded a decision-path failure at all. A failure the system does not
+            # count is a failure nobody fixes.
             self._record_model(False)
 
     def _journal_recency(self) -> tuple[datetime | None, float | None]:
