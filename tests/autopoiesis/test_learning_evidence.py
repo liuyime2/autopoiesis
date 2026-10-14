@@ -206,7 +206,16 @@ def test_synthetic_covered_model_and_fallback_preserve_frozen_provenance(tmp_pat
 
     monkeypatch.setattr(model, "decide", mutate_library)
     decision = engine.decide_snapshot(_snapshot())
-    assert (decision.symbol, decision.action, decision.strategy_id) == ("SPY", "BUY", "s1")
+    # The action differs by design when the model fails: the fallback may not open
+    # exposure, so the rule's BUY is recorded and refused. The provenance assertion below
+    # is identical in both cases and is what this test is about - the frozen capture must
+    # survive the library changing underneath it either way.
+    expected_action = "HOLD" if model_fails else "BUY"
+    assert (decision.symbol, decision.action, decision.strategy_id) == (
+        "SPY", expected_action, "s1",
+    )
+    if model_fails:
+        assert decision.rule_action == "BUY", "the refused intent must be recorded"
     assert decision.strategy_provenance == frozen
     assert decision.decision_source == ("fallback_policy_engine" if model_fails else "llm")
     assert len(model.calls) == 1

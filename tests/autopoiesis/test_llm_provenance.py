@@ -226,11 +226,33 @@ def test_llm_naming_a_different_symbol_falls_back(tmp_path):
     assert "AAPL" in decision.rationale
 
 
-def test_fallback_still_produces_a_real_trade(tmp_path):
+def test_fallback_still_produces_a_real_decision_and_refuses_to_open_a_position(tmp_path):
+    """The fallback is still useful, and it may no longer buy on a model that did not answer.
+
+    This asserted `action == "BUY"` until 2026-10-14, which was the defect: a connection
+    error became a new position with no judgement behind it, and on 10-13 sixteen of that
+    day's sells were placed by the fallback rather than by any decision. The fallback still
+    produces a real, journalled decision - it just cannot open exposure, so the rule's BUY
+    is recorded and refused rather than executed.
+    """
     llm = ScriptedLLM(error=ConnectionError("refused"))
     engine, _ = _engine(tmp_path, llm)
 
-    assert engine.decide_snapshot(_snapshot()).action == "BUY"
+    decision = engine.decide_snapshot(_snapshot())
+
+    assert decision.action == "HOLD", (
+        "a refused connection must not become a position"
+    )
+    assert decision.quantity == 0
+    assert decision.decision_source == "fallback_policy_engine", (
+        "it is still the fallback, and the record must say so"
+    )
+    assert decision.rule_action == "BUY", (
+        "the rule's intent is kept, or the refusal is invisible to a later reader"
+    )
+    assert "refused" in decision.rationale, (
+        "the cause must survive the refusal: " + decision.rationale
+    )
 
 
 def test_a_broken_policy_engine_abstains_before_the_llm(tmp_path):
@@ -1266,10 +1288,22 @@ def test_an_override_without_a_reason_is_discarded_for_the_rule(tmp_path):
 
 
 def test_the_fallback_records_its_own_rule_as_the_rule_action(tmp_path):
+    """What the rule wanted is recorded even when it is refused.
+
+    This asserted `rule_action == action == "BUY"` until 2026-10-14. The fallback may no
+    longer open exposure, so the two diverge - and that divergence is the point: the
+    record has to say what the rule asked for, or a later reader cannot tell a decision
+    that was never made from one that was made and refused.
+    """
     engine, _ = _engine(tmp_path, ScriptedLLM(error=TimeoutError("slow")))
     decision = engine.decide_snapshot(_snapshot())
+
     assert decision.decision_source == "fallback_policy_engine"
-    assert decision.rule_action == decision.action == "BUY"
+    assert decision.rule_action == "BUY", "the rule's intent must be recorded"
+    assert decision.action == "HOLD", "and it must not have been executed"
+    assert "slow" in decision.rationale, (
+        "the timeout is the cause and must survive: " + decision.rationale
+    )
 
 
 # --- the model sees how the price got here, and nothing after now -------------

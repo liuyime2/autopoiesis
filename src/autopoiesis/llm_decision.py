@@ -374,15 +374,54 @@ class HybridDecisionEngine:
                 strategy_id=self._selected_spec.strategy_id,
                 strategy_provenance=self._selected_provenance,
             )
-        return decision.model_copy(
-            update={
-                "decision_source": "fallback_policy_engine",
-                "strategy_id": self._selected_spec.strategy_id,
-                "strategy_provenance": self._selected_provenance,
-                # The fallback is the rule, so the rule's action is the action taken.
-                "rule_action": decision.action,
-                "rationale": f"{decision.rationale} | llm_unavailable: {reason}",
-            }
+        updates: dict[str, object] = {
+            "decision_source": "fallback_policy_engine",
+            "strategy_id": self._selected_spec.strategy_id,
+            "strategy_provenance": self._selected_provenance,
+            # The fallback is the rule, so the rule's action is the action taken.
+            "rule_action": decision.action,
+            "rationale": f"{decision.rationale} | llm_unavailable: {reason}",
+        }
+        note = self._fallback_exposure_note(decision)
+        if note is not None:
+            updates["action"] = "HOLD"
+            updates["quantity"] = 0
+            updates["hold_reason"] = "llm_unavailable_exposure_blocked"
+            # Appended, not substituted. The first version replaced the rationale and
+            # took the actual cause with it - "Read timed out" and the symbol the model
+            # named both vanished, which is the diagnosis this whole branch exists to
+            # preserve. A refusal that hides why the model was unavailable is worse than
+            # no note at all.
+            updates["rationale"] = f"{updates['rationale']} | {note}"
+        return decision.model_copy(update=updates)
+
+    #: Actions a rule may take when the model did not answer. SELL reduces a long and
+    #: COVER reduces a short, so both are exits or reductions. BUY and SHORT add exposure.
+    REDUCING_ACTIONS = frozenset({"HOLD", "SELL", "COVER"})
+
+    def _fallback_exposure_note(self, decision: TradeDecision) -> str | None:
+        """Why an unavailable model must not be able to open a position through a rule.
+
+        The fallback took the rule's action verbatim, including a BUY, so a parse failure
+        became a new position with no judgement behind it. Reported 2026-10-14: on 10-13,
+        16 of that day's sells were placed by the fallback rather than by any decision.
+
+        The asymmetry is the point. A rule that reduces exposure when the model is
+        silent is still acting on the model's own strategy; a rule that opens one is
+        taking a position nobody asked for, at a moment the system has already said it
+        could not think. Guardian still gates whatever survives this, so this narrows the
+        fallback rather than replacing a risk check.
+
+        Not a safety limit and not weakened anywhere: no Guardian bound, no daily loss
+        limit and no market-open check is touched. It removes an ability, not a bound.
+
+        Returns the sentence to append, or None when the action reduces exposure.
+        """
+        if decision.action in self.REDUCING_ACTIONS:
+            return None
+        return (
+            f"the rule wanted {decision.action}, which adds exposure; the fallback may "
+            f"only hold or reduce, so no order was placed"
         )
 
     def _context(self, snapshot: DataSnapshot) -> dict[str, Any]:
