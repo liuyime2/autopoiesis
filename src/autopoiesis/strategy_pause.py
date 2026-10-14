@@ -26,6 +26,12 @@ That is what makes this the right instrument for a live position drain: it stops
 loss without putting unreviewed code into the trading path.
 
 Usage: python -m autopoiesis.strategy_pause <strategy_id> --reason "<why>"
+
+This reads no credentials and needs none: pausing a strategy writes one strategy file and
+one journal line, and touches neither the broker nor the model. The paths come from the
+caller, and `make pause-strategy` supplies the live ones. Resolving a config file here
+would have meant constructing a `$HOME` path, which the `home-independence` gate forbids
+in production code and which the Makefile already resolves in one place.
 """
 
 from __future__ import annotations
@@ -111,6 +117,15 @@ def pause_strategy(
                     "actor": actor,
                     "previous_lifecycle": previous,
                     "lifecycle": "PAUSED",
+                    # The key the existing reader uses. `_check_lifecycle_provenance` in
+                    # doctor.py builds its "which state did the journal decide" map from
+                    # `payload["new_lifecycle"]`, and a state it cannot trace there is
+                    # reported as a blocking finding. Writing only `lifecycle` left three
+                    # paused strategies failing the doctor with "reached a state with no
+                    # matching recorded decision", which was true of the reader and false
+                    # of the fact. The pause is a recorded decision; it has to be recorded
+                    # in the shape the reader already reads.
+                    "new_lifecycle": "PAUSED",
                     "lifecycle_reason": cleaned,
                 },
             )
@@ -129,16 +144,6 @@ def main(argv: list[str] | None = None) -> int:
         "--library", default=None, help="alias for --strategy-dir", dest="_library"
     )
     args = parser.parse_args(argv)
-
-    env = Path.home() / ".config" / "autopoiesis" / "env"
-    if env.exists():
-        import os
-
-        for line in env.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, value = line.split("=", 1)
-                os.environ.setdefault(key.strip(), value.strip().strip("'\""))
 
     directory = Path(args._library or args.strategy_dir or "runtime/autopoiesis/strategies")
     journal = JsonlJournal(Path(args.journal)) if args.journal else None

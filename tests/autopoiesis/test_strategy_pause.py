@@ -126,6 +126,11 @@ def test_the_journal_records_who_paused_what_and_from_which_state(tmp_path):
         "an audit that cannot say what it changed from is not an audit"
     )
     assert payload["lifecycle"] == "PAUSED"
+    assert payload["new_lifecycle"] == "PAUSED", (
+        "doctor.py's lifecycle-provenance check reads `new_lifecycle`; an event that "
+        "omits it makes three correctly-paused strategies fail the doctor as "
+        "'reached a state with no matching recorded decision'"
+    )
     assert pauses[0]["strategy_id"] == "fixed-size-tlt-sell-001"
     assert "unconditional exit probe" in pauses[0]["message"]
 
@@ -273,22 +278,103 @@ def test_an_accepted_strategy_can_still_be_paused(tmp_path):
         assert library.try_load(f"probe-{lifecycle.lower()}").lifecycle == "PAUSED"
 
 
-def test_the_event_is_shaped_like_the_lifecycle_events_already_in_the_journal(tmp_path):
-    """Provenance must be comparable with what the lifecycle manager already writes."""
+def test_the_doctor_can_trace_the_pause_to_the_journal(tmp_path):
+    """The entry point's own acceptance criterion, asserted against the real reader.
+
+    This is not a shape comparison: it runs `_check_lifecycle_provenance` over a journal
+    the pause wrote and requires the result to be OK. Written because the first version
+    wrote `lifecycle` while doctor.py reads `new_lifecycle`, and three correctly-paused
+    strategies failed the doctor as "reached a state with no matching recorded decision".
+    """
+    from test_daemon import config as _config
+
+    from autopoiesis.doctor import DoctorReport, Status, _check_lifecycle_provenance
+
     journal = JsonlJournal(tmp_path / "journal.jsonl")
     library = _library(tmp_path, _spec("fixed-size-tlt-sell-001"))
-    journal.append_event(
-        JournalEvent(
-            event_id="reference", event_type="STRATEGY_LIFECYCLE_UPDATED", timestamp=TS,
-            status="SUCCESS", message="a lifecycle-manager transition",
-            strategy_id="other", payload={"phase": "applied"},
-        )
-    )
     pause_strategy(
         library=library, journal=journal, strategy_id="fixed-size-tlt-sell-001",
         reason="unconditional exit probe", actor="operator", now=TS,
     )
 
-    events = [json.loads(line) for line in journal.path.read_text().splitlines() if line]
-    keys = {frozenset(e) for e in events}
-    assert len(keys) == 1, f"two lifecycle events must share a shape, not: {keys}"
+    config = _config(tmp_path)
+    object.__setattr__(config, "strategy_dir", tmp_path / "strategies")
+    report = DoctorReport()
+    _check_lifecycle_provenance(report, config, journal)
+
+    checks = [c for c in report.checks if c.name == "lifecycle provenance"]
+    assert checks, report.checks
+    assert checks[0].status is Status.OK, (
+        f"an operator pause is a recorded decision and the doctor must trace it: "
+        f"{checks[0].detail}"
+    )
+
+
+def test_the_doctor_reads_a_pause_written_before_the_key_existed(tmp_path):
+    """The journal is append-only, so the reader must read what was recorded.
+
+    Three pauses were written on 2026-10-14 carrying `lifecycle` and not
+    `new_lifecycle`, which left the doctor reporting them as states with no recorded
+    decision. Those events cannot be rewritten to suit a reader. The acceptance is
+    narrow: only an event that names itself an operator pause gets the second key.
+    """
+    from test_daemon import config as _config
+
+    from autopoiesis.doctor import DoctorReport, Status, _check_lifecycle_provenance
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    library = _library(tmp_path, _spec("fixed-size-tlt-sell-001"))
+    journal.append_event(JournalEvent(
+        event_id="legacy-pause", event_type="STRATEGY_LIFECYCLE_UPDATED", timestamp=TS,
+        status="SUCCESS", message="paused by operator: unconditional exit probe",
+        strategy_id="fixed-size-tlt-sell-001",
+        payload={
+            "phase": "applied", "source": "operator_pause", "actor": "operator",
+            "previous_lifecycle": "PROBATION", "lifecycle": "PAUSED",
+            "lifecycle_reason": "unconditional exit probe",
+        },
+    ))
+    library.save(_spec("fixed-size-tlt-sell-001").model_copy(update={"lifecycle": "PAUSED"}))
+
+    config = _config(tmp_path)
+    object.__setattr__(config, "strategy_dir", tmp_path / "strategies")
+    report = DoctorReport()
+    _check_lifecycle_provenance(report, config, journal)
+
+    checks = [c for c in report.checks if c.name == "lifecycle provenance"]
+    assert checks and checks[0].status is Status.OK, (
+        f"an append-only journal cannot be rewritten to suit a reader: {checks}"
+    )
+
+
+def test_the_doctor_still_reports_a_lifecycle_manager_event_with_no_new_lifecycle(tmp_path):
+    """The narrow acceptance must not become a blanket one.
+
+    A lifecycle-manager transition that omits `new_lifecycle` is a real gap - the
+    strategy reached a gated state and the journal does not say what it moved to - and
+    must still be reported.
+    """
+    from test_daemon import config as _config
+
+    from autopoiesis.doctor import DoctorReport, Status, _check_lifecycle_provenance
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    library = _library(tmp_path, _spec("fixed-size-tlt-sell-001"))
+    journal.append_event(JournalEvent(
+        event_id="malformed", event_type="STRATEGY_LIFECYCLE_UPDATED", timestamp=TS,
+        status="SUCCESS", message="a manager transition with no target state",
+        strategy_id="fixed-size-tlt-sell-001",
+        payload={"phase": "applied", "lifecycle": "PAUSED"},
+    ))
+    library.save(_spec("fixed-size-tlt-sell-001").model_copy(update={"lifecycle": "PAUSED"}))
+
+    config = _config(tmp_path)
+    object.__setattr__(config, "strategy_dir", tmp_path / "strategies")
+    report = DoctorReport()
+    _check_lifecycle_provenance(report, config, journal)
+
+    checks = [c for c in report.checks if c.name == "lifecycle provenance"]
+    assert checks and checks[0].status is Status.FAIL, (
+        "an event that is not an operator pause must not get the second key: "
+        f"{[(c.status, c.detail) for c in checks]}"
+    )

@@ -364,6 +364,16 @@ def _check_lifecycle_provenance(
     for event in journal.read_events("STRATEGY_LIFECYCLE_UPDATED"):
         strategy_id = event.strategy_id or event.payload.get("strategy_id")
         new_lifecycle = event.payload.get("new_lifecycle")
+        if not isinstance(new_lifecycle, str) and event.payload.get("source") == "operator_pause":
+            # An operator pause writes `new_lifecycle` so this reader finds it, but three
+            # pauses were written on 2026-10-14 before that was noticed, carrying only
+            # `lifecycle`. The journal is append-only evidence, so those events cannot be
+            # rewritten to suit a reader; the reader has to read what was recorded. This
+            # is deliberately narrow - only an event that names itself an operator pause
+            # gets the second key, so a lifecycle-manager event missing `new_lifecycle`
+            # is still reported rather than silently accepted.
+            candidate = event.payload.get("lifecycle")
+            new_lifecycle = candidate if isinstance(candidate, str) else None
         if isinstance(strategy_id, str) and isinstance(new_lifecycle, str):
             decided[strategy_id] = new_lifecycle
 
