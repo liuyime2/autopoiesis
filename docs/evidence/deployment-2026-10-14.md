@@ -81,3 +81,26 @@ One deployer at a time; only committed code whose CI is green on all three versi
 no deploys during an open session; the deploying worktree clean. Each held: the deploy
 ran at 16:02 with the market closed, from a clean tree, at a commit whose four CI jobs
 had passed.
+## Second deployment, same day
+
+| | |
+|---|---|
+| commit | `0d05fc4` — the P2 work: fallback exposure limit, decision-failure counting, coverage-map entry |
+| source fingerprint | `6d38e72bc6753626` |
+| deployed at | 2026-10-14 17:09 EDT, market closed |
+| daemon PID after restart | 4052852, `NRestarts=0`, `ActiveState=active` |
+| CI | runs 183 and 184, `success` on all four jobs |
+
+Verified after the restart: daemon fingerprint, on-disk fingerprint and both readiness
+units all read `6d38e72bc6753626`. The timers were reinstalled in the same operation for
+the same reason as before - they carry the value they expect.
+
+Two CI failures were diagnosed and fixed by reproducing the runner environment locally
+rather than by guessing, because the CI logs need a token this session does not have:
+
+- `dc53a90` failed lint. Two ruff findings were committed with it and only fixed
+  afterwards, and CI runs `ruff check` without `--fix`.
+- `0d05fc4`'s predecessor failed the gate's `test-coverage-map` class, which requires
+  every test file to declare the check classes it covers. `make check` does not run the
+  gate, so neither was visible locally. The gate passes 55/55 in a reproduction of the
+  runner environment.
