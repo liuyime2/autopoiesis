@@ -242,3 +242,45 @@ def test_the_choice_object_is_immutable():
     assert isinstance(choice, AttentionChoice)
     with pytest.raises(Exception):
         choice.symbols = ["AAPL"]  # type: ignore[misc]
+
+
+def test_the_ollama_body_dict_is_unwrapped():
+    """The real transport returns the parsed body, whose answer is under `response`.
+
+    Measured 2026-10-15: nine `ATTENTION_SELECTED` events in one session, every one
+    `source=mechanical` with "model reply had no usable choices". The reader handled a
+    JSON string and an object with a `response` attribute, but not a dict with a
+    `response` *key* - which is exactly what `engine.transport` returns. So it looked for
+    `choices` at the top level, found none, and fell back every single round.
+    """
+    body = {"response": json.dumps(_choices(("TLT", "duration exposure"))),
+            "done_reason": "stop", "eval_count": 12}
+    choice = select_attention(CANDIDATES, k=3, transport=_transport(body))
+
+    assert choice.source == "model", (
+        f"the Ollama body must be unwrapped, not treated as the choice: {choice.note}"
+    )
+    assert choice.symbols == ["TLT"], choice.symbols
+    assert choice.reasons == {"TLT": "duration exposure"}
+
+
+def test_a_body_with_no_answer_still_falls_back():
+    """And an empty body must not become a choice."""
+    choice = select_attention(
+        CANDIDATES, k=3,
+        transport=_transport({"response": "", "done_reason": "length"}),
+    )
+
+    assert choice.source == "mechanical", choice.source
+    assert choice.symbols == ["SPY", "TLT", "XLE"]
+
+
+def test_a_body_carrying_choices_directly_is_not_unwrapped():
+    """`choices` at the top level wins, so a transport that answers in the schema's own
+    shape is not second-guessed."""
+    choice = select_attention(
+        CANDIDATES, k=3,
+        transport=_transport({**_choices(("XLE", "energy")), "response": "ignored"}),
+    )
+
+    assert choice.symbols == ["XLE"], choice.symbols

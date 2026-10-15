@@ -155,6 +155,13 @@ def _parse(raw: object) -> list[tuple[str, str]] | None:
         return _parse(payload.response)
     if not isinstance(payload, dict):
         return None
+    # The transport hands back the parsed Ollama body: a dict whose answer is under
+    # `response`, as JSON text. `hasattr` above does not see a dict key, so without this
+    # the reader looked for `choices` at the top level, found none, and every round fell
+    # back to the mechanical list. Measured 2026-10-15: nine ATTENTION_SELECTED events in
+    # one session, all `source=mechanical`, all "model reply had no usable choices".
+    if "choices" not in payload and isinstance(payload.get("response"), str):
+        return _parse(payload["response"])
     entries = payload.get("choices")
     if not isinstance(entries, list):
         return None
