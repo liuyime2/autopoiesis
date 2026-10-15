@@ -9,6 +9,7 @@ from synthetic_evidence import synthetic_clean_record, synthetic_row_metadata, s
 from autopoiesis import calibration, offline_validation
 from autopoiesis.evaluator import DeterministicEvaluator
 from autopoiesis.learning_evidence import capture, eligibility
+from autopoiesis.llm_decision import NO_STRATEGY_MARKER
 from autopoiesis.models import (
     AccountSnapshot,
     CycleRecord,
@@ -117,7 +118,12 @@ def test_model_cannot_forge_strategy_id_or_metadata_and_selection_reads_once(tmp
 
 
 @pytest.mark.parametrize("boundary", [
-    "empty_library", "uncovered_symbol", "selector_failure", "missing_provenance",
+    # `uncovered_symbol` was in this list until 2026-10-14, when the plan authorised the
+    # model to decide a symbol no strategy covers. It has its own test below. It is
+    # deliberately NOT removed from the file: the six boundaries left here are failures -
+    # an empty library, a selector that threw, and four ways for provenance to be absent or
+    # wrong - and the model must not be asked about any of them.
+    "empty_library", "selector_failure", "missing_provenance",
     "wrong_selected_symbol", "wrong_provenance_id", "invalid_provenance_digest",
 ])
 def test_synthetic_unattributed_selection_abstains_before_model(tmp_path, monkeypatch, boundary):
@@ -163,6 +169,36 @@ def test_synthetic_unattributed_selection_abstains_before_model(tmp_path, monkey
     assert decision.strategy_id is None and decision.strategy_provenance is None
     assert model.calls == []
     assert fallback_calls == []
+
+
+def test_an_uncovered_symbol_is_asked_but_cannot_trade_unattributed(tmp_path, monkeypatch):
+    """The one boundary the plan changes, asserted on the property that mattered.
+
+    This case used to assert `model.calls == []`. The property the old test protected is
+    the docstring of the test above: "synthetic failures must never let an actionable model
+    trade without attribution". That property still holds, by a different mechanism - the
+    decision carries no `strategy_id`, so it is attributed to no strategy, and HOLD is the
+    baseline, so the model's unexplained BUY is refused. What changed is only that the
+    model is now asked at all, which is the defect the plan names: about 316 cycles a day
+    went by without the model ever being consulted.
+    """
+    from test_llm_provenance import ScriptedLLM, _engine, _snapshot
+
+    model = ScriptedLLM(TradeDecision(
+        symbol="XLB", action="BUY", quantity=1, confidence=.9,
+        rationale="synthetic actionable model response",
+    ))
+    engine, _policy = _engine(tmp_path, model, strategies=("s1",))
+    decision = engine.decide_snapshot(_snapshot(symbol="XLB"))
+
+    assert len(model.calls) == 1, "the model must be asked about an uncovered symbol"
+    assert (decision.symbol, decision.action, decision.quantity) == ("XLB", "HOLD", 0), (
+        "an unexplained BUY for an uncovered symbol must not be taken"
+    )
+    assert decision.strategy_id is None, "no strategy may be credited with it"
+    assert decision.strategy_provenance is None
+    assert decision.decision_source == "llm", "the model answered"
+    assert NO_STRATEGY_MARKER in decision.rationale, decision.rationale
 
 
 def test_synthetic_no_selection_fallback_does_not_reselect_trade(tmp_path, monkeypatch):

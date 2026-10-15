@@ -26,6 +26,12 @@ from autopoiesis.models import (
 #: stops counting the failures it exists to count.
 LLM_UNAVAILABLE_MARKER = "llm_unavailable: "
 
+#: Marks a decision about a symbol no strategy covers. The model is asked with HOLD as the
+#: baseline and may depart from it only with a reason. `strategy_id` is left None, which is
+#: what keeps these out of every per-strategy metric and out of the lifecycle: they are not
+#: a strategy's decisions and must never be scored as one.
+NO_STRATEGY_MARKER = "no_strategy"
+
 
 def parse_decision_json(text: str, *, model_name: str | None = None) -> TradeDecision:
     start = text.find("{")
@@ -299,13 +305,94 @@ class HybridDecisionEngine:
         #: (shown, withheld) lesson ids for the snapshot `_context` last built.
         self._lesson_split: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
 
+    def _decide_uncovered(self, snapshot: DataSnapshot, context: dict) -> TradeDecision:
+        """A symbol no strategy covers still gets a decision, and it is not a strategy's.
+
+        Measured 2026-10-14: roughly 316 cycles a day across the watchlist and XLB were
+        `selection_unavailable: no matching frozen strategy covering snapshot symbol`, so
+        the model was never asked about them at all. The plan authorises asking it, with
+        HOLD as the baseline and a reason required to depart from it.
+
+        Three properties, each load-bearing:
+
+        - **HOLD is the baseline.** A departure without an `override_reason` is not taken,
+          the same rule the covered path applies and for the same measured reason: over 323
+          comparable cycles, 112 of 113 disagreements were the model declining a trade with
+          nothing recorded about why.
+        - **`strategy_id` stays None.** That is what keeps these decisions out of every
+          per-strategy metric and out of the lifecycle. The plan's acceptance is that the
+          count of `no_strategy` decisions inside strategy scoring is zero.
+        - **Guardian is untouched.** The decision goes through the same gate as any other;
+          nothing here widens a limit or bypasses a check.
+
+        `decision_source` stays `"llm"` when the model answers, so the monitor that counts
+        whether the model answered keeps working. The marker goes in the rationale.
+        """
+        def abstain(reason: str) -> TradeDecision:
+            return TradeDecision(
+                symbol=snapshot.symbol, action="HOLD", quantity=0, confidence=0,
+                rationale=f"selection_unavailable: {reason}",
+                hold_reason="no_signal", decision_source="policy_engine",
+            )
+
+        if self._selection_broke:
+            # A selector that threw is an outage, not an uncovered symbol. Asking the model
+            # here would spend a call on a cycle whose strategy library could not be read.
+            return abstain("selection could not run; the model was not asked")
+        if self._library_empty:
+            # Nothing is covered because nothing exists. That is a configuration failure and
+            # not the gap this branch was authorised to fill.
+            return abstain("the strategy library is empty; the model was not asked")
+
+        try:
+            decision = self.llm.decide(context)
+        except Exception as exc:
+            return abstain(f"no matching frozen strategy and the model did not answer: {type(exc).__name__}")
+        if decision.symbol != snapshot.symbol:
+            return abstain("no matching frozen strategy and the model named another symbol")
+
+        departure = decision.action != "HOLD"
+        if departure and not (decision.override_reason or "").strip():
+            return TradeDecision(
+                symbol=snapshot.symbol, action="HOLD", quantity=0,
+                confidence=decision.confidence,
+                rationale=(
+                    f"{NO_STRATEGY_MARKER}: the model wanted {decision.action} for a symbol "
+                    f"no strategy covers and gave no override_reason, so the HOLD baseline "
+                    f"stands"
+                ),
+                hold_reason="other", decision_source="llm",
+                model=decision.model,
+            )
+        return decision.model_copy(update={
+            "decision_source": "llm",
+            "strategy_id": None,
+            "strategy_provenance": None,
+            "hold_reason": decision.hold_reason or ("other" if not departure else None),
+            "rationale": f"{NO_STRATEGY_MARKER}: {decision.rationale}",
+        })
+
     def decide_snapshot(self, snapshot: DataSnapshot) -> TradeDecision:
         context = self._context(snapshot)
         selected_spec = self._selected_spec
         provenance = valid_provenance(self._selected_provenance)
+        # Two different facts, and only one of them authorises asking the model.
+        #
+        #   - **The selector returned nothing.** No strategy covers this symbol. That is the
+        #     gap the plan names, and the model may be asked about it.
+        #   - **The selector returned something that does not fit** - a spec for another
+        #     symbol, or provenance that is absent, misidentified or digest-invalid. That is
+        #     a failure of selection or of capture, and asking the model about it would spend
+        #     a call on a cycle whose attribution is already broken.
+        #
+        # Merging the two was the first version of this change, and
+        # `test_synthetic_unattributed_selection_abstains_before_model` caught it: four of
+        # its six remaining boundaries are provenance failures with a spec selected, and all
+        # four started asking the model.
+        if selected_spec is None:
+            return self._decide_uncovered(snapshot, context)
         if (
-            selected_spec is None
-            or context.get("selected_strategy_id") != selected_spec.strategy_id
+            context.get("selected_strategy_id") != selected_spec.strategy_id
             or provenance is None
             or provenance.strategy_id != selected_spec.strategy_id
             or snapshot.symbol not in selected_spec.symbols
@@ -440,6 +527,19 @@ class HybridDecisionEngine:
         self._rule_decision = None
         self._selected_spec = None
         self._selected_provenance = None
+        #: Whether selection could not run at all, as opposed to running and finding no
+        #: strategy that covers this symbol. The two were indistinguishable - the handler
+        #: below sets `strategy_id = None` in both cases - and they call for opposite
+        #: behaviour: an uncovered symbol may be asked of the model, a broken selector may
+        #: not. `test_a_broken_policy_engine_abstains_before_the_llm` pins that, and caught
+        #: this branch asking the model about a selector that had just thrown.
+        self._selection_broke = False
+        #: Whether the library held any strategy at all. An empty library is a configuration
+        #: failure, not an uncovered symbol: there is nothing to be uncovered *by*, and the
+        #: plan's authority is for a symbol no strategy covers, not for a system with no
+        #: strategies. Kept separate from `_selection_broke` because a library that reads
+        #: cleanly and is empty is not the same failure as one that could not be read.
+        self._library_empty = False
         try:
             strategies = self.policy_engine.strategy_library.list()
             selected = self.policy_engine.selector.select(
@@ -468,8 +568,10 @@ class HybridDecisionEngine:
                 selected_spec = selected
                 self._selected_spec = selected
                 self._selected_provenance = capture(selected)
+            self._library_empty = not strategies
         except Exception:
             strategy_id = None
+            self._selection_broke = True
         executor = getattr(self.policy_engine, "executor", None)  # no executor, no rule to run
         if selected_spec is not None and executor is not None:
             try:
