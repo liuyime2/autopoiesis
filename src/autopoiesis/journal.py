@@ -22,6 +22,61 @@ _CYCLE_MARKER = '"execution":'
 _EVENT_MARKER = '"event_id":'
 
 
+#: Fields whose recorded value a later version may not recognise, and the value to read
+#: instead. The journal is append-only evidence: a record written by a version that got a
+#: closed set wrong cannot be rewritten to suit the set, so the reader has to read what was
+#: recorded rather than drop it.
+#:
+#: Measured 2026-10-15, market open: `TradeDecision.hold_reason` was written as
+#: `llm_unavailable_exposure_blocked`, which is not in `HoldReason`. The record appended
+#: cleanly, so the write looked successful, and it then failed validation on the way back
+#: in - five XLE cycles unreadable, and `market-open-verify` failed with CORRUPT_HISTORY.
+#: `other` is the honest reading: it is the literal that means "none of the named states".
+#:
+#: Writing one is still refused by the model, which is where that belongs. This is only
+#: the reader declining to lose a cycle over a field whose meaning is already lost.
+_TOLERATED_VALUES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("decision", "hold_reason"), "other"),
+)
+
+
+def _read_tolerantly(model, stripped: str):
+    """`model` from `stripped` with the tolerated fields coerced, or None if it still fails."""
+    try:
+        payload = json.loads(stripped)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    changed = False
+    for path, replacement in _TOLERATED_VALUES:
+        node: Any = payload
+        for key in path[:-1]:
+            node = node.get(key) if isinstance(node, dict) else None
+            if not isinstance(node, dict):
+                break
+        else:
+            leaf = path[-1]
+            if isinstance(node, dict) and leaf in node and node[leaf] not in _KNOWN[path]:
+                node[leaf] = replacement
+                changed = True
+    if not changed:
+        return None
+    try:
+        return model.model_validate(payload)
+    except Exception:
+        return None
+
+
+def _known_values() -> dict:
+    from autopoiesis.models import _HOLD_REASONS
+
+    return {("decision", "hold_reason"): _HOLD_REASONS}
+
+
+_KNOWN = _known_values()
+
+
 class RetainedWindow(TypedDict):
     """What `retained_window` returns, spelled out rather than left as `object`.
 
@@ -404,9 +459,11 @@ class JsonlJournal:
                 try:
                     parsed = model.model_validate_json(stripped)
                 except Exception:
-                    dropped += 1
-                    self._note_drop(stripped)
-                    continue
+                    parsed = _read_tolerantly(model, stripped)
+                    if parsed is None:
+                        dropped += 1
+                        self._note_drop(stripped)
+                        continue
                 if keep is not None and not keep(parsed):
                     continue
                 if collected is not None:

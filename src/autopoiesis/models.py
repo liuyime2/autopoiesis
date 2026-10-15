@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -21,6 +21,9 @@ Side = Literal["BUY", "SELL"]
 BrokerEvidenceStatus = Literal["SUCCESS", "PARTIAL", "FAILED"]
 DecisionSource = Literal["llm", "fallback_policy_engine", "policy_engine", "baseline"]
 HoldReason = Literal["no_signal", "risk_limit_near", "market_uncertain", "await_confirmation", "other"]
+#: The same set as a value, for a reader deciding whether a recorded value is one it knows.
+#: Kept beside the Literal so the two cannot drift.
+_HOLD_REASONS = frozenset(get_args(HoldReason))
 AttributionStatus = Literal["LINKED", "UNLINKED"]
 StrategyKind = Literal["HOLD_BASELINE", "TREND_FOLLOW", "FIXED_SIZE", "RULE"]
 #: The signals a RULE strategy may read. Each is a percent figure over `lookback` bars.
@@ -1080,6 +1083,14 @@ class TradeDecision(BaseModel):
     model: str | None = None
     hold_reason: HoldReason | None = None
     """Why a HOLD was chosen, stated by the model.
+
+    Validated on construction, and read tolerantly by the journal. The asymmetry is
+    deliberate. On 2026-10-15 the fallback wrote a value outside this set -
+    `llm_unavailable_exposure_blocked` - the record appended cleanly, and it then failed
+    validation on the way back in: five XLE cycles were unreadable and `market-open-verify`
+    failed with `CORRUPT_HISTORY`. The journal is append-only, so that record cannot be
+    rewritten to suit the set, and `_scan` coerces the value to `other` on read rather than
+    losing the cycle. Writing one is still refused, which is what the writer should do.
 
     Without this a risk-driven abstention is indistinguishable from an ordinary
     one in the audit trail. Guardian logs "approved" for a HOLD, so when the model

@@ -484,7 +484,18 @@ class HybridDecisionEngine:
         if note is not None:
             updates["action"] = "HOLD"
             updates["quantity"] = 0
-            updates["hold_reason"] = "llm_unavailable_exposure_blocked"
+            # `hold_reason` is a closed literal set - no_signal, risk_limit_near,
+            # market_uncertain, await_confirmation, other - and this wrote a sixth value
+            # that is not in it. The record was still appended, so the write looked
+            # successful; it then failed `TradeDecision` validation on the way back in and
+            # the journal reader counted it as a dropped line. Measured 2026-10-15: five
+            # XLE cycles were unreadable and `market-open-verify` failed with
+            # CORRUPT_HISTORY, which is exactly what that diagnostic exists to catch.
+            #
+            # `other` is the honest literal - the reason is not one of the four named
+            # states - and the specific cause stays in the rationale, which is free text
+            # and is where a reader looks for it anyway.
+            updates["hold_reason"] = "other"
             # Appended, not substituted. The first version replaced the rationale and
             # took the actual cause with it - "Read timed out" and the symbol the model
             # named both vanished, which is the diagnosis this whole branch exists to
