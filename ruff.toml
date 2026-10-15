@@ -8,7 +8,10 @@
 # house style it does not follow. `BLE001` (blind `except`) is deliberately excluded:
 # the daemon is designed to catch broadly and record the failure in the journal rather
 # than die mid-cycle, which is a correctness property here, not an oversight. Enabling
-# it would have produced 83 findings, all of them intentional. Four arrived with the
+# it would have produced 85 findings, all of them intentional. Two arrived on 2026-10-14
+# with the watchlist choice: a model that times out, refuses or answers unusably must
+# leave the mechanical list standing, and each of those two sites says which happened in
+# its note rather than raising. Four arrived with the
 # instrument profile and the headlines that go beside it: a broker endpoint that is
 # down, a symbol the broker cannot name and a news call that fails must each leave the
 # decision exactly as it was, and each says so on `last_*_error` rather than raising.
@@ -44,7 +47,7 @@ select = [
 ignore = [
     # The daemon catches broadly on purpose: a maintenance failure must be journaled
     # and survive, not crash the process and take the paper run down with it. Each of
-    # these 83 sites records what failed (see `_agent_holding_errors`,
+    # these 85 sites records what failed (see `_agent_holding_errors`,
     # `_should_trade_now`, which refuses to let an unreadable broker clock kill the
     # process the way a network stall did twice on 2026-10-08, and
     # `_maintenance`'s try/except, the doctor's per-check isolation, and
