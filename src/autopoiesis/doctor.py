@@ -1148,24 +1148,30 @@ def _check_model_registry(
     if registry.total_decisions == 0:
         report.add("model registry", WARN, "no decisions on record")
         return
-    unattributed = registry.models[model_registry.UNATTRIBUTED].decisions \
-        if model_registry.UNATTRIBUTED in registry.models else 0
-    # Severity has to be proportional. This check warned only when *every* decision
-    # was unattributed, so a record that is 93% unattributed - 920 of 987, the
-    # state it is actually in - reported OK on the strength of the 67 that do
-    # carry a name. The docstring is right that back-filling would be worse, and
-    # right that the total-absence case is worth a warning; it drew the line at the
-    # only value that cannot be a majority. The question this check exists to answer
-    # is how much of the decision record can be attributed at all, and "almost none
-    # of it" is not an OK. The boundary is inclusive: exactly half unattributed is a
-    # coin flip on provenance, which is not a state to report as healthy. The first
-    # version used a strict `>` and a test caught 50/50 reporting OK.
-    if unattributed and unattributed >= registry.total_decisions / 2:
+    # Severity is measured against the decisions the model actually answered, not against
+    # every decision on the journal. Measured 2026-10-14: this reported "1824 of 3221
+    # (57%) cannot be attributed to a model" while only 67 of those 1824 were decisions the
+    # model made - the rest were the rule path, where `model` is None by definition and
+    # nothing is wrong. That is the same conflation `_post_cycle_model_flag` had to fix for
+    # `last_model_ok`, and it matters more here: a 57% failure that is really a 4% one is a
+    # monitor that gets ignored, which is the failure mode the check exists to prevent.
+    #
+    # The boundary stays inclusive at half, and now applies to the asked set. A journal
+    # where most of what the model answered cannot be attributed is still not an OK.
+    if registry.asked == 0:
         report.add(
             "model registry", WARN,
-            f"{unattributed} of {registry.total_decisions} decision(s) "
-            f"({unattributed / registry.total_decisions:.0%}) cannot be attributed "
-            f"to a model; {registry.summary()}",
+            registry.summary(),
+            "the model has not answered a decision on this journal yet, so there is "
+            "nothing whose provenance could be checked",
+        )
+        return
+    if registry.unattributed_asked >= registry.asked / 2:
+        report.add(
+            "model registry", WARN,
+            f"{registry.unattributed_asked} of the {registry.asked} decision(s) the model "
+            f"answered ({registry.unattributed_asked / registry.asked:.0%}) cannot be "
+            f"attributed to a model; {registry.summary()}",
             "provenance was not captured for these; they are left unattributed "
             "deliberately rather than back-filled",
         )

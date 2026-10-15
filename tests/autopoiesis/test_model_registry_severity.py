@@ -17,17 +17,24 @@ class _Cfg:
 
 
 class _Dec:
-    def __init__(self, model):
+    """A decision the model answered. `decision_source` is what makes it one.
+
+    Without it these fixtures modelled the rule path, where `model` is None by
+    definition - and the ratio under test is over decisions the model answered.
+    """
+
+    def __init__(self, model, source="llm"):
         if model is not None:
             self.model = model
+        self.decision_source = source
 
     def __bool__(self):
         return True
 
 
 class _Rec:
-    def __init__(self, model):
-        self.decision = _Dec(model)
+    def __init__(self, model, source="llm"):
+        self.decision = _Dec(model, source)
 
 
 def _report(n_named, n_unattributed):
@@ -65,3 +72,47 @@ def test_exactly_half_is_not_reported_as_ok():
     """The boundary is documented, so pin it rather than leave it to drift."""
     assert _report(50, 50).status.value == "warn"
     assert _report(51, 49).status.value == "ok"
+
+
+def test_a_rule_decision_is_not_an_attribution_failure():
+    """The model was never asked, so there is no model to attribute and nothing is wrong.
+
+    Measured 2026-10-14: the check reported "1824 of 3221 decision(s) (57%) cannot be
+    attributed to a model" while only 67 of those 1824 were decisions the model made.
+    The other 1757 were the rule path. That is the same conflation
+    `_post_cycle_model_flag` had to fix for `last_model_ok`, and a 57% failure that is
+    really a 4% one is a monitor that gets ignored.
+    """
+    records = [_Rec("qwen3.8:27b") for _ in range(900)]
+    records += [_Rec(None, source="policy_engine") for _ in range(2000)]
+    rep = DoctorReport()
+    _check_model_registry(rep, _Cfg(), records)
+
+    check = next(c for c in rep.checks if c.name == "model registry")
+    assert check.status.value == "ok", check.detail
+    assert "57%" not in check.detail, check.detail
+    assert "never asked" in check.detail, (
+        "the rule path must be stated rather than folded into the attribution gap: "
+        + check.detail
+    )
+    assert "qwen3.8:27b 900" in check.detail, check.detail
+    assert "%" not in check.detail, (
+        "no attribution ratio belongs here: nothing the model answered is missing a "
+        "model, so there is no gap to express as a percentage: " + check.detail
+    )
+
+
+def test_the_ratio_is_over_the_decisions_the_model_answered():
+    """Not over every decision on the journal. Same gap, correct denominator."""
+    records = [_Rec("qwen3.8:27b") for _ in range(300)]
+    records += [_Rec(None) for _ in range(700)]          # asked, unattributed
+    records += [_Rec(None, source="policy_engine") for _ in range(2000)]
+    rep = DoctorReport()
+    _check_model_registry(rep, _Cfg(), records)
+
+    check = next(c for c in rep.checks if c.name == "model registry")
+    assert check.status.value == "warn", check.detail
+    assert "700 of the 1000" in check.detail, (
+        f"the denominator must be the 1000 asked, not all 3000: {check.detail}"
+    )
+    assert "70%" in check.detail, check.detail
