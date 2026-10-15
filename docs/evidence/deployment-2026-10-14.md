@@ -104,3 +104,32 @@ rather than by guessing, because the CI logs need a token this session does not 
   every test file to declare the check classes it covers. `make check` does not run the
   gate, so neither was visible locally. The gate passes 55/55 in a reproduction of the
   runner environment.
+
+## Third deployment, same day
+
+| | |
+|---|---|
+| commit | `c078bf3` - the watchlist choice wired into the daemon, and the ruff.toml figure |
+| source fingerprint | `21809d717f596ec1` |
+| deployed at | 2026-10-14 23:31 EDT, market closed |
+| daemon PID after restart | 42757, `NRestarts=0`, `ActiveState=active` |
+| CI | run 211, `success` on all four jobs |
+
+Verified after the restart: daemon fingerprint, on-disk fingerprint and both readiness
+units all read `21809d717f596ec1`.
+
+### Two invalid reproductions, recorded because they misled
+
+The conda environment resolves `autopoiesis` to this worktree's `src/`. A "fresh clone"
+run without an explicit `PYTHONPATH` therefore imports this tree's code and runs the
+clone's tests against it - which produced a failure that did not exist. A second
+reproduction was invalid on top of that: the main worktree's local `master` ref was never
+moved after the push, so `git clone --branch master` from the repository path yielded the
+pre-change commit, and the old tests were run against the new code.
+
+Both reported a `test_risk_judgment` failure that was an artefact. The real CI failure was
+`config-comment-figures-true`: ruff.toml documented 83 blind-except sites against 85.
+
+Reproducing a runner correctly means: clone the branch that was pushed, and set
+`PYTHONPATH` to the clone's own `src`. Done that way on this commit, a fresh clone gives
+1910 passed / 8 skipped with the gate's only failure being the one fixed here.
