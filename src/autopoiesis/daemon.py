@@ -29,6 +29,11 @@ from autopoiesis.knowledge_admission import KnowledgeAdmission
 from autopoiesis.knowledge_library import lesson_effects
 from autopoiesis.learning_evidence import ELIGIBILITY_VERSION, capture, valid_provenance
 from autopoiesis.llm_decision import LLM_UNAVAILABLE_MARKER
+
+#: How many candidates the model is offered when choosing the watchlist. Wider than the
+#: slots so the choice is a choice; bounded so the prompt stays small.
+ATTENTION_CANDIDATES = 40
+from autopoiesis import attention
 from autopoiesis.loop import FAIL_CLOSED_RATIONALE
 from autopoiesis.models import (
     BrokerEvidenceBatch,
@@ -110,6 +115,10 @@ class AgentDaemon:
         strategy_library: StrategyLibrary | None = None,
         reflection_memory: ReflectionMemory | None = None,
         curriculum_agent: StructuredCurriculumAgent | None = None,
+        #: Asked to choose which of the broker's candidates the system should watch. None
+        #: leaves the mechanical top-k in place, which is what the system did before this
+        #: existed - a missing model must not be able to empty the watchlist.
+        attention_transport: Callable[[str, dict], object] | None = None,
         #: Called with the running cycle count after each cycle, so a caller that needs a
         #: per-cycle number can hold it. The incumbent cadence is defined over cycles but
         #: reads `reflection.json`, which is a 30-minute-old snapshot, so without this the
@@ -133,6 +142,7 @@ class AgentDaemon:
         self.startup_reconciler = startup_reconciler
         self.fill_reconciler = fill_reconciler
         self.strategy_library = strategy_library
+        self.attention_transport = attention_transport
         self.reflection_memory = reflection_memory
         self.curriculum_agent = curriculum_agent
         self.strategy_admission = strategy_admission
@@ -1751,11 +1761,38 @@ class AgentDaemon:
             self._append_event("CYCLE_FAILED", status="FAILED", message=f"could not list held symbols: {exc}")
         if self.config.universe == "tradable" and self.config.attention_slots > 0:
             try:
-                symbols += gateway.attention_symbols(
-                    self.config.attention_slots, min_price=self.config.min_price, exclude=frozenset(seen)
+                # The candidate list is wider than the slots, because the model is choosing
+                # from it rather than receiving the answer. Asking for exactly
+                # `attention_slots` and then choosing among them would be a choice with one
+                # option.
+                candidates = gateway.attention_symbols(
+                    max(self.config.attention_slots, ATTENTION_CANDIDATES),
+                    min_price=self.config.min_price, exclude=frozenset(seen),
                 )
             except Exception as exc:
                 self._append_event("CYCLE_FAILED", status="FAILED", message=f"could not pick attention symbols: {exc}")
+                return symbols
+            choice = attention.select_attention(
+                candidates,
+                k=self.config.attention_slots,
+                transport=self.attention_transport,
+                context={"held": len(seen), "slots": self.config.attention_slots},
+            )
+            # Recorded every round, including when the model did not choose. The plan's
+            # 24-hour evaluation compares chosen symbols against unchosen ones, and it
+            # cannot do that from a record that only keeps the rounds the model won.
+            self._append_event(
+                "ATTENTION_SELECTED", status="SUCCESS",
+                message=f"watchlist from {choice.source}: {', '.join(choice.symbols) or 'none'}",
+                payload={
+                    "source": choice.source,
+                    "symbols": list(choice.symbols),
+                    "reasons": dict(choice.reasons),
+                    "candidates": list(candidates),
+                    "note": choice.note,
+                },
+            )
+            symbols += [s for s in choice.symbols if s not in seen]
         return symbols
 
     def _round_sleep_seconds(self, elapsed: float) -> int:

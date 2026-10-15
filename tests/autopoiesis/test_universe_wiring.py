@@ -79,6 +79,10 @@ def _daemon(universe, slots=0, held=("TLT",), attention=("AAA",), fail_held=Fals
     )
     d = AgentDaemon.__new__(AgentDaemon)
     d.config = SimpleNamespace(symbols=("SPY", "QQQ"), universe=universe, attention_slots=slots, min_price=5.0)
+    # None is the mechanical list, which is what these tests are about: the round's coverage.
+    # The model's own choice is covered in test_attention_selection.py.
+    d.attention_transport = None
+    d._append_event = lambda *a, **k: None
     d.loop = SimpleNamespace(data_gateway=gw)
     d.events = []
     d._append_event = lambda *a, **k: d.events.append(k.get("message"))  # type: ignore[method-assign]
@@ -95,3 +99,55 @@ def test_a_round_covers_configured_then_held_then_attention_symbols_without_dupl
 def test_a_broker_failure_narrows_the_round_instead_of_stopping_it():
     d = _daemon("tradable", 4, fail_held=True)
     assert d._round_symbols()[:2] == ["SPY", "QQQ"] and any("could not list held symbols" in str(m) for m in d.events)
+
+
+def test_the_round_uses_the_models_choice_and_records_it():
+    """The integration the module needs: the daemon asks, obeys, and journals.
+
+    Three things at once, because they are the whole point of wiring it in: the model's
+    symbol reaches the round, the mechanical list does not, and an event is written even
+    though the round continued. The plan's 24-hour evaluation compares chosen symbols
+    against unchosen ones and cannot do that from a record that keeps only some rounds.
+    """
+    import json
+
+    d = _daemon("tradable", slots=2, held=("TLT",), attention=("AAA", "BBB", "CCC"))
+    d.attention_transport = lambda prompt, schema: json.dumps(
+        {"choices": [{"symbol": "CCC", "reason": "the model picked this one"}]}
+    )
+    events = []
+    d._append_event = lambda event_type, **kwargs: events.append((event_type, kwargs))
+
+    symbols = d._round_symbols()
+
+    assert "CCC" in symbols, f"the model's choice must reach the round: {symbols}"
+    assert "AAA" not in symbols, (
+        "the mechanical first-k must not also be included, or the model chose nothing"
+    )
+    kinds = [e[0] for e in events]
+    assert kinds == ["ATTENTION_SELECTED"], kinds
+    payload = events[0][1]["payload"]
+    assert payload["source"] == "model"
+    assert payload["symbols"] == ["CCC"]
+    assert payload["reasons"] == {"CCC": "the model picked this one"}
+    assert "AAA" in payload["candidates"], (
+        "the candidates are recorded so the choice can be judged against what was offered"
+    )
+
+
+def test_a_model_that_does_not_answer_still_leaves_a_usable_watchlist():
+    """The round must not depend on the model being reachable."""
+    d = _daemon("tradable", slots=2, held=("TLT",), attention=("AAA", "BBB", "CCC"))
+
+    def broken(prompt, schema):
+        raise TimeoutError("slow")
+
+    d.attention_transport = broken
+    events = []
+    d._append_event = lambda event_type, **kwargs: events.append((event_type, kwargs))
+
+    symbols = d._round_symbols()
+
+    assert "AAA" in symbols and "BBB" in symbols, f"the mechanical list must stand: {symbols}"
+    assert events[0][1]["payload"]["source"] == "mechanical"
+    assert "TimeoutError" in events[0][1]["payload"]["note"]

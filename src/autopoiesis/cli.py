@@ -32,6 +32,7 @@ from autopoiesis.journal import JsonlJournal
 from autopoiesis.knowledge_admission import KnowledgeAdmission
 from autopoiesis.knowledge_library import KnowledgeLibrary
 from autopoiesis.llm_decision import (
+    ATTENTION_NUM_CTX,
     CURRICULUM_NUM_CTX,
     CURRICULUM_TIMEOUT_S,
     HybridDecisionEngine,
@@ -488,6 +489,11 @@ def _build_agent_daemon(
             if config.curriculum_enabled
             else None
         ),
+        attention_transport=(
+            _ollama_attention_transport(config, should_stop=lambda: daemon._stop_requested)
+            if config.universe == "tradable" and config.attention_slots > 0
+            else None
+        ),
         strategy_admission=StrategyAdmission(guardian=guardian, strategy_library=strategy_library),
         broker_evidence_provider=BrokerEvidenceProvider(client=client),
         lifecycle_manager=StrategyLifecycleManager(),
@@ -567,6 +573,36 @@ def _ollama_curriculum_transport(config: AgentConfig, *, should_stop: Callable[[
         return generate_curriculum_task_json(call=call, prompt_context=context)
 
     return transport
+
+
+def _ollama_attention_transport(config: AgentConfig, *, should_stop: Callable[[], bool] | None = None):
+    """Ask the model which candidates to watch. Returns the raw body; `attention` parses it.
+
+    A separate, much smaller request than the curriculum's: the prompt is a symbol list and
+    the schema is two fields, so it does not need the curriculum's context window or its
+    two-minute timeout. It uses the decision timeout because it sits in the trading loop -
+    a watchlist choice that takes two minutes is a cycle the loop did not spend deciding.
+    """
+    engine = OllamaDecisionEngine(
+        base_url=config.ollama_base_url,
+        model=config.model,
+        gpu_devices=config.gpu_devices,
+        timeout=CURRICULUM_TIMEOUT_S,
+    )
+
+    def call(prompt: str, schema: dict) -> object:
+        payload = {
+            "model": config.model,
+            "prompt": prompt,
+            "stream": False,
+            "format": schema,
+            "options": {"temperature": 0.2, "num_ctx": ATTENTION_NUM_CTX},
+        }
+        if should_stop is not None and should_stop():
+            raise RuntimeError("attention model request refused: daemon stop requested")
+        return engine.transport(f"{engine.base_url}/api/generate", payload, engine.timeout)
+
+    return call
 
 
 def _stop_daemon(config: AgentConfig) -> int:

@@ -30,6 +30,7 @@ CurriculumTaskType = Literal["STRATEGY_SPEC", "OPTIMIZE", "EVALUATE"]
 CurriculumTaskSource = Literal["llm", "fallback"]
 DaemonStatus = Literal["STARTING", "RUNNING", "BACKING_OFF", "STOPPING", "STOPPED", "ERROR"]
 JournalEventType = Literal[
+    "ATTENTION_SELECTED",
     "REFLECTION_GENERATED",
     "REFLECTION_FAILED",
     "STRATEGY_EVALUATION_RECORDED",

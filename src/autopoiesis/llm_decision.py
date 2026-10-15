@@ -162,6 +162,10 @@ CURRICULUM_NUM_CTX = 12288
 #: minutes for a correct answer is the right trade. The decision path keeps 120s
 #: because it answers in ~12s.
 CURRICULUM_TIMEOUT_S = 600
+#: The watchlist choice: a symbol list in, two fields out. It sits in the trading loop
+#: rather than off-hours, so it gets the decision window and not the curriculum's - a
+#: watchlist that takes two minutes is a cycle the loop did not spend deciding.
+ATTENTION_NUM_CTX = 4096
 
 
 class OllamaDecisionEngine:
