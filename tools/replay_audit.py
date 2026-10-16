@@ -272,6 +272,22 @@ def main() -> int:
     # `confirmed_fill_activities`, which reads this same `ORDER_FILL_CONFIRMED` source.
     # So the two sides already share a source and the difference is in the matching, and
     # assembling the ledger's actual universe needs more than this file can see.
+    #
+    # A second attempt, 2026-10-16: merge the owner's fills into the FIFO stream in time
+    # order, so both sides see one universe. Also wrong, and by more - 1,510 owner fills
+    # merged gave **1,539 closed lots against the ledger's 74**. The ledger does not open
+    # lots from the owner's history at all; the doctor says what it does with them -
+    # "shares an agent order sold beyond the agent's own lots, *priced* FIFO against the
+    # account owner's recorded fills". They price an exit that had no agent lot behind it.
+    # They are not a supply of lots, and adding them as one is the same mistake as the
+    # first attempt with the sign flipped.
+    #
+    # What is left, and it is the whole remaining question: the ledger reports 74 closed
+    # lots against this pass's 47, and the ledger's fills come from the broker evidence
+    # batch *plus* `confirmed_fill_activities` - which reads this same
+    # `ORDER_FILL_CONFIRMED` source but deduplicates by client order id. So the difference
+    # is most likely in deduplication, and that is the next thing to measure, not to
+    # assume.
     lots = []
     unmatched = 0.0
     realized = 0.0
