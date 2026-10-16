@@ -120,7 +120,11 @@ def _production_lot_figures():
     """
     try:
         from autopoiesis.broker_evidence import latest_evidence_batch
-        from autopoiesis.evaluator import DeterministicEvaluator, confirmed_fill_activities
+        from autopoiesis.evaluator import (
+            DeterministicEvaluator,
+            confirmed_fill_activities,
+            owner_fill_activities,
+        )
         from autopoiesis.fill_reconciler import FILL_EVENT
         from autopoiesis.journal import JsonlJournal
     except Exception as exc:  # surfaced below rather than silently skipped
@@ -140,6 +144,15 @@ def _production_lot_figures():
         evidence=latest_evidence_batch(journal),
         fills=fills,
         seeded_fills=confirmed_fill_activities(journal, records),
+        # The account owner's recorded fills, which the doctor passes and this did not.
+        # Without it the ledger here was computed with different inputs than production
+        # uses, so the comparison was between the naive pass and a configuration nothing
+        # runs - measured 2026-10-16: the audit read 68 lots and $693.13 while the doctor
+        # reported the same journal differently. `owner_fills` is a separate argument from
+        # `seeded_fills`, and that is what made it easy to miss: `seeded_fills` is fed
+        # `confirmed_fill_activities`, which reads the same `ORDER_FILL_CONFIRMED` source
+        # the naive pass does, so the two looked like they shared a universe already.
+        owner_fills=owner_fill_activities(journal),
     )
     pnl = result.pnl
     # Three wrong guesses in a row on this line, each caught by the surface-it
