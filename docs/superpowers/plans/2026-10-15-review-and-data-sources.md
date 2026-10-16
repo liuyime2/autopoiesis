@@ -160,6 +160,46 @@ Next: profile the probe (`cProfile` over `harness.run()`), then either fix the h
 reduce the replay's cycle count *with the probe's own assertion re-derived*, not lowered.
 The probe's `cycles >= 100` bar and every other assertion stay as they are.
 
+## 3c. Incremental journal parsing: attempted 2026-10-16, reverted
+
+The profile in §3b names `journal._scan` as 76% of the replay. A signature-keyed cache
+was landed first and is in the tree: it took the probe from 953s to 622s and still returns
+`[]`. It stops there because the daemon writes an event every cycle, so the signature
+changes every cycle and the cache misses on nearly every read.
+
+Incremental parsing was then attempted - parse only the bytes a file has gained, keyed by
+inode so a rotated file keeps its identity when renamed from `.1` to `.2`. **It was
+reverted, and the two bugs it hit are recorded here so the next attempt starts from them
+rather than from scratch.**
+
+**Bug 1, found by the test and fixed before reverting.** `size >= offset` cannot tell an
+append from a rewrite: a rewritten file can be *larger*, and reading from a stale offset
+then parses whatever now sits at that byte position. The test that caught it rewrote a file
+longer and got only its first record back. The fix was a boundary check - keep the last 64
+bytes of the consumed text and require them to still be there before extending. Cheap, and
+it makes the rewrite case fall back to a whole read.
+
+**Bug 2, not found, and the reason for the revert.** After a partial line is completed by
+appending the rest, the next scan still returned only the earlier records. The offsets were
+traced by hand through `_parsed` -> `_boundary_holds` -> `_extend` and every step read
+correctly, which means the fault is somewhere those three do not show - most likely in how
+`entry` is rebuilt and stored back, or in `records` being extended from `entry["records"]`
+and then again inside `_extend`.
+
+**Why it was reverted rather than debugged further.** The journal is the system of record.
+A faster reader that silently loses a record is far worse than the slow one it replaces,
+and the failing case is not exotic - it is "the writer appended the rest of a line", which
+is what a real append does whenever a read lands mid-write. Shipping it would have traded a
+known slowness for an unknown loss.
+
+**The test to restore first.** `tests/autopoiesis/test_journal_incremental_parse.py` was
+written with it and deleted with it. Its central assertion is the one that matters and
+should be written before the code: **over a file growing one record at a time, the
+incremental read must equal a whole re-parse at every step**, compared against a reader
+that has never seen the file. Two of its cases are worth keeping in mind because they are
+what a naive implementation gets wrong: a line without its terminator is not a record yet,
+and a file that shrank must be re-read whole rather than extended from a stale offset.
+
 ## 4. Acceptance
 
 - `make verify` reports 55/55 locally, and CI reports green, on the same commit.
