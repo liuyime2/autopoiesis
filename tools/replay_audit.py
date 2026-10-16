@@ -319,6 +319,26 @@ def main() -> int:
     # This pass's figures are the naive baseline a test asserts (47 / 757.95 / 29), so a
     # change that moves them has to converge before it can land. Reading the snapshots
     # without the ordering fix moves the baseline and proves nothing.
+    #
+    # The ordering was measured too, and it is not the difference either. Every one of the
+    # 97 confirmations has `filled_at = None`, so this pass was already sorting on the
+    # event's own timestamp while the ledger dates each activity from the cycle's
+    # `DataSnapshot.timestamp` - a real difference in principle, and 313 cycles carry that
+    # anchor. Sorting on the anchor instead left the figures **exactly unchanged**, so the
+    # two orderings agree on this record and the discrepancy is elsewhere.
+    #
+    # Five hypotheses, all measured away: the owner's lots as seeds; the owner's fills
+    # merged as activities; deduplication; the missing `ORDER_FILL_SNAPSHOT` source on its
+    # own; and the fill dating. The one that moved anything was the snapshot source - 47 to
+    # 93 - and it overshot. What has not been done is the thing the plan asked for and this
+    # file cannot do alone: reconcile against the ledger's own activity list rather than
+    # against a reconstruction of it. `_apply_activity` is fed
+    # `(*confirmed_candidates, *seeded_fills)` after dedup by order, and comparing this
+    # pass's stream against **that** list, order id by order id, is the measurement that
+    # would end the guessing. It is not attempted here because it needs the production
+    # activity list, which is what this pass exists to be independent of - so the honest
+    # conclusion is that this check cannot be reconciled by construction from the journal
+    # alone, and the plan's premise that it can is the thing to revisit.
     lots = []
     unmatched = 0.0
     realized = 0.0
