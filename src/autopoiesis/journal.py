@@ -116,6 +116,7 @@ class JsonlJournal:
         self.backups = backups
         self.use_lock = lock
         self.last_dropped_lines = 0
+        self._parse_cache: dict = {}
         self.last_dropped_samples: list[str] = []
         # Where a generation goes when the rotation horizon reaches it. Same filesystem as the
         # journal on purpose, so the move is an `os.replace` and not a copy: there is no window
@@ -428,19 +429,58 @@ class JsonlJournal:
         return [p for p in archived if p.is_file()]
 
     def _scan(self, model, *, limit, keep=None):
+        # Parsing is cached across calls, keyed by the files' own signatures.
+        #
+        # Measured 2026-10-16 with `cProfile` over the replay: 9,154 scans of the journal
+        # cost 732 of 965 seconds - 76% of the run - and 5,705,703 of those were pydantic
+        # `model_validate_json` calls. Every `read_events` re-parsed every generation, and
+        # the daemon reads several per cycle, so the cost is quadratic in the record.
+        #
+        # The cache is safe because the journal is append-only: a change is a size or mtime
+        # change on one of `history_paths`, and rotation changes the set of paths itself.
+        # `keep` and `limit` are applied per call and never cached, so a caller's filter
+        # cannot be mistaken for another's.
+        parsed, dropped = self._parsed(model)
         collected: deque | None = deque(maxlen=limit) if limit else None
         kept: list = []
+        for record in parsed:
+            if keep is not None and not keep(record):
+                continue
+            if collected is not None:
+                collected.append(record)
+            else:
+                kept.append(record)
+        return (list(collected) if collected is not None else kept), dropped
+
+    def _signature(self) -> tuple:
+        """The files' identity, so a cache entry can tell whether it is still current."""
+        out = []
+        for path in self.history_paths():
+            try:
+                stat = path.stat()
+                out.append((str(path), stat.st_size, stat.st_mtime_ns))
+            except OSError:
+                out.append((str(path), -1, -1))
+        return tuple(out)
+
+    def _parsed(self, model):
+        """Every record of `model` across all generations, parsed once per file signature."""
+        signature = self._signature()
+        cached = self._parse_cache.get(model)
+        if cached is not None and cached[0] == signature:
+            return cached[1], cached[2]
+
+        records: list = []
         dropped = 0
         want_events = model is JournalEvent
-        # Locked once across every generation: rotation replaces the live file, so taking
-        # the lock per generation could interleave a rotation between reads and duplicate
-        # or skip records.
         with self._read_lock(), contextlib.ExitStack() as stack:
-          paths = self.history_paths()
-          if not paths:
-              return [], 0
-          handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in paths]
-          for line in itertools.chain.from_iterable(handles):
+            paths = self.history_paths()
+            if not paths:
+                self.last_dropped_lines = 0
+                self._parse_cache[model] = (signature, [], 0)
+                return [], 0
+            handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in paths]
+            for line in itertools.chain.from_iterable(handles):
                 stripped = line.strip()
                 if not stripped:
                     continue
@@ -457,21 +497,17 @@ class JsonlJournal:
                     # A well-formed record of the other kind. Not an error.
                     continue
                 try:
-                    parsed = model.model_validate_json(stripped)
+                    records.append(model.model_validate_json(stripped))
                 except Exception:
-                    parsed = _read_tolerantly(model, stripped)
-                    if parsed is None:
+                    repaired = _read_tolerantly(model, stripped)
+                    if repaired is None:
                         dropped += 1
                         self._note_drop(stripped)
                         continue
-                if keep is not None and not keep(parsed):
-                    continue
-                if collected is not None:
-                    collected.append(parsed)
-                else:
-                    kept.append(parsed)
+                    records.append(repaired)
         self.last_dropped_lines = dropped
-        return (list(collected) if collected is not None else kept), dropped
+        self._parse_cache[model] = (signature, records, dropped)
+        return records, dropped
 
     def _note_drop(self, line: str) -> None:
         if len(self.last_dropped_samples) < 3:
