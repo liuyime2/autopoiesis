@@ -54,6 +54,21 @@ ruling carrying its ratio in the reason, the strategy no longer on `PROBATION`, 
 replayed ruling claiming broker-verified PnL. Run standalone it prints a JSON list of what
 failed. `make verify` calls it through `check_self_evolution_closes`.
 
+## Keeping the VIX floor engaged
+
+**`refresh_vix.py`** merges `^VIX` and `^VIX3M` daily closes from Yahoo's public chart
+endpoint into the cache the volatility floor reads. It **merges** rather than replaces: the
+cache carries 9,263 points back to 1990 and the endpoint returns a bounded window, so
+writing what the endpoint returned would discard the long history the six-year quality
+window reads. `make vix-refresh` refreshes; `make vix-check` exits non-zero when the reading
+is past `VIX_STALE_AFTER_DAYS`, which is the same ceiling `vix_floor` applies.
+
+**`vix-refresh.service.in`** and **`vix-refresh.timer.in`** are the pre-open units that run
+it, installed by `install_market_readiness.py` alongside the readiness pair. They are their
+own units rather than a step in `market-preflight`, which is read-only by contract; this one
+writes. Measured 2026-10-15: without them the cache had been stale since 2026-10-09 and the
+floor had been silently disengaged since 2026-10-13.
+
 ## The independent audit
 
 **`replay_audit.py`** re-derives the load-bearing PnL figures straight from the raw
