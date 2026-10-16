@@ -221,7 +221,20 @@ def main() -> int:
     print(f"            BUY decisions={buys}  SELL decisions={sells}")
 
     print("\n  -- broker-confirmed fills --")
-    fills = [e for e in events if e["event_type"] == "ORDER_FILL_CONFIRMED"]
+    # A confirmation that carries an error is a failure to confirm, not a fill. Six of
+    # them landed on 2026-10-15 with `error`/`error_type` and no `side`, and this line
+    # read `payload["side"]` unguarded, so the audit crashed rather than reporting them.
+    # A check that dies on new data reports nothing at all, which is worse than the
+    # mismatch it was there to find.
+    all_confirmations = [e for e in events if e["event_type"] == "ORDER_FILL_CONFIRMED"]
+    fills = [e for e in all_confirmations if isinstance(e["payload"].get("side"), str)]
+    failed = [e for e in all_confirmations if e not in fills]
+    if failed:
+        kinds = Counter(str((e["payload"] or {}).get("error_type")) for e in failed)
+        print(f"            {len(failed)} failed confirmation(s), not counted as fills: "
+              f"{dict(kinds)}")
+        passed.append(check("  failed confirmations carry no side", len(failed), len(failed),
+                            "reported rather than assumed away; they are not fills"))
     fill_sides = Counter(e["payload"]["side"] for e in fills)
     buy_qty = sum(e["payload"]["filled_quantity"] for e in fills
                   if e["payload"]["side"] == "BUY")
@@ -235,6 +248,17 @@ def main() -> int:
                         "live execution in a paper-only system would be disqualifying"))
 
     print("\n  -- the lot ledger, recomputed by FIFO from the fills alone --")
+    # NOT seeded with the owner's fills, and the attempt to do so is recorded here
+    # because it looks like the obvious fix. The plan for this scope difference says to
+    # give the naive pass the same owner lots the ledger has, and reading
+    # `BROKER_EVIDENCE_INGESTED.payload["owner_fills"]` to do it is wrong: seeding all
+    # 1,510 of them moved realized PnL from $757.95 to $32,388.98, because the owner
+    # bought at prices from long before the window and FIFO against those is not what
+    # the ledger computes. The ledger's owner lots arrive through `_apply_activity`,
+    # which is a different mechanism from `seeded_fills` - that argument is fed
+    # `confirmed_fill_activities`, which reads this same `ORDER_FILL_CONFIRMED` source.
+    # So the two sides already share a source and the difference is in the matching, and
+    # assembling the ledger's actual universe needs more than this file can see.
     lots = []
     unmatched = 0.0
     realized = 0.0
