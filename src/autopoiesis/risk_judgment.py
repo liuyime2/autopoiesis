@@ -40,6 +40,11 @@ QUALITY_HORIZON = 21
 MIN_QUALITY = 0.10
 #: Fewer independent outcomes than this and the quality cannot be judged either way.
 MIN_EFFECTIVE_N = 30
+#: A 3-day holiday weekend is the longest normal gap; four is the ceiling. Read by
+#: `vix_floor` to refuse a stale reading and by the doctor to report that it is refusing,
+#: so the two cannot disagree about whether the floor is engaged - which is how it was
+#: silently off from 2026-10-13 for two days while the doctor said OK.
+VIX_STALE_AFTER_DAYS = 4
 #: One-sided 95% bound used on both sides of the floor.
 Z = 1.645
 #: Quality windows tried in order, longest first. Not arbitrary day counts: each is the smallest
@@ -287,7 +292,7 @@ def vix_floor(
         # the cache's date against the wall clock would be wrong there - and the first version of
         # that change made it fail with "last date None is not a date", which silently disabled the
         # floor for every replay.
-        stale_after = 4  # a 3-day holiday weekend is the longest normal gap; four is the ceiling
+        stale_after = VIX_STALE_AFTER_DAYS
         if as_of_vix is None:
             try:
                 from datetime import date as _date

@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -227,6 +227,7 @@ def _check_governance(report: DoctorReport, config: AgentConfig) -> None:
     #    identically. The first run records the baseline; later runs flag any
     #    increase, which is the one direction that matters.
     _check_risk_baseline(report, config)
+    _check_vix_freshness(report, config)
 
     # 3. Every lifecycle on disk must be traceable to a decision the manager made.
     #    PAUSED and RETIRED are terminal by ordering inside one function, not by any
@@ -280,6 +281,68 @@ def _check_governance(report: DoctorReport, config: AgentConfig) -> None:
         #    exists to find, created in the same commit that hunts for it - so
         #    every doctor check is asserted to be present in the report.
         _check_champion_and_search(report, config, journal)
+
+
+def _check_vix_freshness(report: DoctorReport, config: AgentConfig) -> None:
+    """Whether the index-implied floor is actually engaged, or silently off.
+
+    Measured 2026-10-15: the cache's last point was 2026-10-09, six days old, and
+    `vix_floor` refuses a reading more than four days old - correctly, and **silently**.
+    Nothing reported it. The floor had been off since 2026-10-13 and the doctor said
+    `RESULT: OK`, so a risk input that P6 measured as a 12.4% forecast-error improvement
+    was absent from every decision for two days without one line saying so.
+
+    The staleness guard is right and is not touched here. What was missing is the alarm:
+    a protection that disables itself is worth nothing if the only way to learn it is to
+    read the cache's last date by hand.
+    """
+    from autopoiesis.risk_judgment import VIX_CACHE
+
+    # The module's own constant, not a path rebuilt from the config. `vix_floor` reads
+    # `VIX_CACHE`, so a second path here could point somewhere the floor never looks and
+    # report on a file that does not matter.
+    path = VIX_CACHE
+    if not path.exists():
+        report.add(
+            "vix freshness", WARN,
+            f"no VIX cache at {path}; the index-implied floor cannot engage",
+            "the floor is a floor on the volatility forecast, not a requirement, so "
+            "decisions continue - but nothing is being floored",
+        )
+        return
+    try:
+        series = json.loads(path.read_text(encoding="utf-8"))
+        history = series.get("^VIX") or {}
+        last = max(history) if history else None
+    except Exception as exc:
+        report.add("vix freshness", WARN, f"cache unreadable: {type(exc).__name__}")
+        return
+    if last is None:
+        report.add("vix freshness", WARN, "cache holds no ^VIX points")
+        return
+
+    # The same ceiling `vix_floor` applies. Read rather than restated: two numbers for one
+    # rule is how the two answers to "is this stale" start disagreeing.
+    from autopoiesis.risk_judgment import VIX_STALE_AFTER_DAYS
+
+    # Local, because that is what `vix_floor` uses. Measuring the age in UTC here made the
+    # two disagree by a day either side of midnight - which is the drift this shared
+    # constant exists to prevent, reintroduced through the clock instead of the number.
+    age = (date.today() - date.fromisoformat(last)).days
+    if age > VIX_STALE_AFTER_DAYS:
+        report.add(
+            "vix freshness", WARN,
+            f"the VIX cache's last point is {last}, {age} days old; the floor has been "
+            f"disengaged since the reading passed {VIX_STALE_AFTER_DAYS} days, and nothing "
+            f"refreshes it on a schedule",
+            "refresh the cache before the open; the floor is measured to cut the "
+            "volatility forecast error by 12.4% and is currently contributing nothing",
+        )
+        return
+    report.add(
+        "vix freshness", OK,
+        f"last point {last}, {age} day(s) old, within the {VIX_STALE_AFTER_DAYS}-day ceiling",
+    )
 
 
 def _check_risk_baseline(report: DoctorReport, config: AgentConfig) -> None:
