@@ -130,6 +130,36 @@ signal test; a source that could change a decision does.
 7. **Data sources 1-3.**
 8. **Merge to `main` once the gate is 55/55**, then P7-P11.
 
+## 3b. The gate now takes longer than a working session (measured 2026-10-16)
+
+`make verify` did not finish in 25 minutes. The bottleneck is one class:
+`self-evolution-closes` runs `tools/self_evolution_probe.py`, which drives a full daemon
+replay over real bars, and that probe now takes **953 seconds** - 15.9 minutes on its own.
+
+It got slower because it got *correct*: until 2026-10-16 the probe scored nothing (the
+replay never stamped provenance, so every counterfactual row was refused), and a stage that
+does nothing is fast. Fixing the root cause made the offline validation actually run over
+the scored decisions, and that is where the time goes.
+
+**This is a defect in its own right, and it blocks the rule above.** "Do not deploy while
+the local gate is red" cannot be executed by an operator who cannot get the gate to finish.
+It is not a reason to weaken the probe or to skip the class.
+
+What is known, and what is not:
+
+- Known: 847 cycles, and the probe asserts at least 100. The cost scales with the bar count.
+- Known: the daemon's `_maintenance` - which now runs the counterfactual over scored
+  decisions - is on `maintenance_interval_seconds`, and the replay drives time through
+  `sleep=lambda _seconds: gateway.advance()`.
+- **Not known: where the 953 seconds actually go.** No profile has been taken. The two
+  obvious candidates - a counterfactual pass that rebuilds price series from every record
+  each time it runs, and per-cycle snapshot construction - are guesses until measured, and
+  this plan does not act on guesses.
+
+Next: profile the probe (`cProfile` over `harness.run()`), then either fix the hot path or
+reduce the replay's cycle count *with the probe's own assertion re-derived*, not lowered.
+The probe's `cycles >= 100` bar and every other assertion stay as they are.
+
 ## 4. Acceptance
 
 - `make verify` reports 55/55 locally, and CI reports green, on the same commit.
