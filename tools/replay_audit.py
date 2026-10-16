@@ -282,12 +282,23 @@ def main() -> int:
     # They are not a supply of lots, and adding them as one is the same mistake as the
     # first attempt with the sign flipped.
     #
-    # What is left, and it is the whole remaining question: the ledger reports 74 closed
-    # lots against this pass's 47, and the ledger's fills come from the broker evidence
-    # batch *plus* `confirmed_fill_activities` - which reads this same
-    # `ORDER_FILL_CONFIRMED` source but deduplicates by client order id. So the difference
-    # is most likely in deduplication, and that is the next thing to measure, not to
-    # assume.
+    # Measured 2026-10-16, and it rules out the third hypothesis as well. Across every
+    # generation: **97 `ORDER_FILL_CONFIRMED` events, 97 distinct `client_order_id`, zero
+    # seen twice** (81 BUY, 16 SELL). So the difference is not deduplication either -
+    # `confirmed_fill_activities` has nothing to collapse.
+    #
+    # What that leaves is the meaning of the number itself. This pass counts FIFO *match
+    # operations*; the ledger's `closed_lots` is a list of `ClosedLotAttribution`, so it
+    # counts lots. Those are different quantities and comparing them for equality is the
+    # error - but the direction does not fit yet (this pass 47, ledger 74, and a
+    # match-count should not be the smaller one), so the semantics are not fully
+    # understood and the next step is to read `_apply_activity` against this loop rather
+    # than to construct a fourth universe.
+    #
+    # Three attempts have now been made and all three were wrong: the owner's lots as
+    # seeds, the owner's fills merged as activities, and deduplication. Each was a
+    # plausible mechanism, and each was disproved by measurement rather than by argument.
+    # The pattern is that this is not a scope problem, which is what the plan assumed.
     lots = []
     unmatched = 0.0
     realized = 0.0
