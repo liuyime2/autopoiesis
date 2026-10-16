@@ -12,6 +12,7 @@ from pathlib import Path
 from autopoiesis.atomicio import write_text_atomic
 
 UNIT_NAMES = (
+    "vix-refresh.service", "vix-refresh.timer",
     "market-preflight.service", "market-preflight.timer",
     "market-open-verify.service", "market-open-verify.timer",
 )

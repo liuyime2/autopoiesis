@@ -88,6 +88,7 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_judged_candidate_leaves_probation.py": ("lifecycle-invariants", "unit-integration"),
     "test_replay_audit_survives_failed_confirmations.py": ("replay-determinism", "broker-reconciliation"),
     "test_vix_freshness_alarm.py": ("risk-controls", "unit-integration"),
+    "test_vix_refresh.py": ("risk-controls", "unit-integration"),
     "test_probation_restart_budget.py": ("lifecycle-invariants", "selection-pressure-reaches-the-rules"),
     "test_retired_strategy_readmission.py": ("lifecycle-invariants", "unit-integration"),
     "test_staleness_not_strategy_fault.py": (

@@ -252,6 +252,16 @@ test-provenance-host:
 doctor:
 	@./autopoiesis doctor
 
+# The VIX floor refuses a reading more than four days old, and nothing refreshed the cache
+# on a schedule until 2026-10-15 - so the floor was silently disengaged from 2026-10-13
+# while the doctor said OK. P6 measured it as a 12.4% forecast-error improvement.
+# `--check` is the pre-open gate: it exits non-zero when the reading is stale.
+vix-refresh:
+	@$(PY) tools/refresh_vix.py
+
+vix-check:
+	@$(PY) tools/refresh_vix.py --check
+
 # Take one strategy out of service, audited. STRATEGY_IDS is required; REASON is
 # required, because a pause nobody can explain is indistinguishable from a mistake.
 # The lifecycle is written to the strategy file and `StrategyLibrary.list()` re-reads

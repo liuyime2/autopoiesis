@@ -1109,10 +1109,31 @@ def test_readiness_synthetic_timer_install_verifies_before_replacement(tmp_path,
         if command[0] == "systemd-analyze":
             assert all((unit_dir / name).read_text() == "synthetic old installed unit" for name in names)
             staged = [Path(path) for path in command[3:]]
-            assert len(staged) == 4
+            # Derived from the installer's own list, not pinned. It was 4 and went red the
+            # moment the VIX refresh added two units; what this asserts is that every
+            # declared unit was staged.
+            from tools.install_market_readiness import UNIT_NAMES
+
+            assert len(staged) == len(UNIT_NAMES), (
+                f"{len(staged)} staged against {len(UNIT_NAMES)} declared"
+            )
             assert all(path.is_file() for path in staged)
-            assert "/usr/bin/make" in staged[0].read_text()
-            assert "aaaaaaaaaaaaaaaa" in staged[0].read_text()
+            # Found by content, not by index. `staged[0]` was the preflight until the VIX
+            # refresh added two units ahead of it, and the refresh unit correctly carries
+            # no fingerprint - it does not check one - so indexing by position asserted a
+            # fingerprint against a unit that has none.
+            fingerprinted = [
+                path for path in staged if "aaaaaaaaaaaaaaaa" in path.read_text()
+            ]
+            assert fingerprinted, (
+                "the units that check the deployed fingerprint must carry it: "
+                f"{[path.name for path in staged]}"
+            )
+            services = [path for path in staged if path.name.endswith(".service")]
+            assert services, [path.name for path in staged]
+            assert all("/usr/bin/make" in path.read_text() for path in services), (
+                "every service runs through the task runner; a timer has no ExecStart"
+            )
             if not verification_ok:
                 raise subprocess.CalledProcessError(1, command)
 

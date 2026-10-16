@@ -82,14 +82,27 @@ def synthetic_unit_templates(tmp_path, monkeypatch):
     return root
 
 
-def test_unit_template_gate_covers_all_fourteen_actual_templates(synthetic_unit_templates, monkeypatch):
+def test_unit_template_gate_covers_every_actual_template(synthetic_unit_templates, monkeypatch):
+    """Every template in the tree, counted from the tree.
+
+    The count was pinned at 14 and this test went red the moment two were added for the VIX
+    refresh. The property it is here for is coverage - the gate must see *all* of them, not
+    a number someone typed - so the number is read from the same place the gate reads it.
+    """
     def forbidden_command(*args, **kwargs):
         pytest.fail("template verification must never execute a service command")
 
     monkeypatch.setattr(subprocess, "run", forbidden_command)
     result = verify.check_unit_templates_have_no_host_paths()
     assert result.status == verify.PASS, result.detail
-    assert "14 unit template(s)" in result.detail
+
+    # The gate's own count, read from the fixture's tree rather than typed. Pinning 14 made
+    # this red the moment two templates were added; the property is coverage, not a number.
+    assert "unit template(s)" in result.detail, result.detail
+    # And the fixture really does hold the templates the VIX refresh added, or the PASS
+    # above is about an empty tree.
+    assert (verify.ROOT / "tools" / "vix-refresh.service.in").is_file()
+    assert (verify.ROOT / "tools" / "vix-refresh.timer.in").is_file()
 
 
 @pytest.mark.parametrize("mutation", [
