@@ -299,6 +299,26 @@ def main() -> int:
     # seeds, the owner's fills merged as activities, and deduplication. Each was a
     # plausible mechanism, and each was disproved by measurement rather than by argument.
     # The pattern is that this is not a scope problem, which is what the plan assumed.
+    #
+    # The fourth measurement found the real scope gap and it is not the owner's: this pass
+    # read **97** agent fills from `ORDER_FILL_CONFIRMED` while
+    # `confirmed_fill_activities` returns **160**, because the ledger also projects
+    # `ORDER_FILL_SNAPSHOT` - 64 events in this journal - into one latest cumulative row per
+    # `client_order_id`, and adds the confirmed fills for orders no snapshot covers. That is
+    # `confirmed_fill_events`, and a pass that reads one of two sources is not an independent
+    # check of the ledger, it is an independent check of half of it.
+    #
+    # Reading both was implemented and **reverted, because it did not converge**: the pass
+    # went from 47 closed lots to **93** against the ledger's 75, and realized PnL from
+    # +757.95 to **-4,253.93**. Reading the right sources is necessary and not sufficient -
+    # the remaining difference is in *when* each fill is dated, since this pass sorts on
+    # `filled_at` and the ledger applies `transaction_time`, and a FIFO match depends on
+    # that order. That is the next thing to measure, and it is measurable: print both
+    # orderings for the same order id and compare.
+    #
+    # This pass's figures are the naive baseline a test asserts (47 / 757.95 / 29), so a
+    # change that moves them has to converge before it can land. Reading the snapshots
+    # without the ordering fix moves the baseline and proves nothing.
     lots = []
     unmatched = 0.0
     realized = 0.0
