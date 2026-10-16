@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from collections.abc import Callable, Mapping
+from datetime import timezone
 from typing import Any
 
 import requests
@@ -273,8 +274,12 @@ class HybridDecisionEngine:
         risk_provider: Callable[[str], dict[str, Any] | None] | None = None,
         instrument_provider: Callable[[str], dict[str, Any] | None] | None = None,
         news_provider: Callable[[str], tuple[NewsItem, ...]] | None = None,
+        #: Guardian's own ceiling, so the uncovered path can refuse to *pay* for a decision
+        #: that will be refused anyway. None leaves the path exactly as it was.
+        stale_after_seconds: int | None = None,
     ):
         self.llm = llm
+        self.stale_after_seconds = stale_after_seconds
         self.policy_engine = policy_engine
         self.lessons = lessons
         self.max_lessons = max_lessons
@@ -343,6 +348,16 @@ class HybridDecisionEngine:
             # A selector that threw is an outage, not an uncovered symbol. Asking the model
             # here would spend a call on a cycle whose strategy library could not be read.
             return abstain("selection could not run; the model was not asked")
+        if self._quote_already_stale(snapshot):
+            # Measured 2026-10-15: 48 cycles in one session asked the model about a symbol
+            # whose price was already too old for Guardian, which refused every one of them.
+            # The call bought nothing and cost about forty seconds of the round.
+            #
+            # Checked against the *snapshot's own clock*, not the wall clock: the question is
+            # "was this price already old when the snapshot was taken", which is the defect
+            # Guardian documents - a fresh clock with an hour-old price - and it is the same
+            # answer under replay, where the wall clock would be wrong.
+            return abstain("the price quote is already stale; the model was not asked")
         if self._library_empty:
             # Nothing is covered because nothing exists. That is a configuration failure and
             # not the gap this branch was authorised to fill.
@@ -375,6 +390,25 @@ class HybridDecisionEngine:
             "hold_reason": decision.hold_reason or ("other" if not departure else None),
             "rationale": f"{NO_STRATEGY_MARKER}: {decision.rationale}",
         })
+
+    def _quote_already_stale(self, snapshot: DataSnapshot) -> bool:
+        """Whether Guardian would refuse this snapshot's price before the model is asked.
+
+        Only the quote, not the clock: `snapshot.timestamp` is the broker's clock and is by
+        construction the moment the snapshot was taken, so it cannot be stale relative to
+        itself. `quote_time` is when the price was observed, and it is the one Guardian
+        checks separately.
+        """
+        ceiling = self.stale_after_seconds
+        quote_time = snapshot.quote_time
+        if ceiling is None or quote_time is None:
+            return False
+        stamp, quote = snapshot.timestamp, quote_time
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        if quote.tzinfo is None:
+            quote = quote.replace(tzinfo=timezone.utc)
+        return (stamp - quote).total_seconds() > ceiling
 
     def decide_snapshot(self, snapshot: DataSnapshot) -> TradeDecision:
         context = self._context(snapshot)

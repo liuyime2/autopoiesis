@@ -448,6 +448,9 @@ def _build_agent_daemon(
             "universe": config.universe,
         },
         cost_basis=cost_basis,
+        # Guardian's ceiling, so the uncovered path does not pay for a decision that will
+        # be refused. Same number, one source.
+        stale_after_seconds=config.stale_after_seconds,
         risk_provider=risk_judgment.block,
         # What the symbol is, and what is published about it. Both are context: neither is a
         # signal, and the instruction says so.

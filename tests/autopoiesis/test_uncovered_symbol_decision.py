@@ -25,6 +25,7 @@ from autopoiesis.models import TradeDecision
 
 class _Snapshot:
     symbol = "XLB"
+    quote_time = None
 
 
 class _LLM:
@@ -50,6 +51,9 @@ def _engine(llm, *, selection_broke=False, library_empty=False):
     engine._rule_decision = None
     engine._selection_broke = selection_broke
     engine._library_empty = library_empty
+    # None leaves the path exactly as it was before the stale-quote guard existed; the
+    # guard has its own tests.
+    engine.stale_after_seconds = None
     return engine
 
 
@@ -192,3 +196,95 @@ def test_every_departure_needs_a_reason_not_only_the_dangerous_ones(action):
     decision = _engine(llm)._decide_uncovered(_Snapshot(), {})
 
     assert decision.action == "HOLD", f"{action} without a reason must not be taken"
+
+
+# --- the quote guard: do not pay for a decision that will be refused -------
+
+
+def _aged_snapshot(*, quote_age_seconds: int):
+    from datetime import datetime, timedelta, timezone
+
+    class _Aged:
+        symbol = "XLB"
+
+        def __init__(self):
+            self.timestamp = datetime(2026, 10, 15, 15, 0, tzinfo=timezone.utc)
+            self.quote_time = self.timestamp - timedelta(seconds=quote_age_seconds)
+
+    return _Aged()
+
+
+def test_a_stale_quote_is_not_asked_of_the_model():
+    """Measured 2026-10-15: 48 cycles in one session asked about a price Guardian refused.
+
+    The call bought nothing and cost about forty seconds of the round.
+    """
+    llm = _LLM(_decision("HOLD"))
+    engine = _engine(llm)
+    engine.stale_after_seconds = 900
+
+    decision = engine._decide_uncovered(_aged_snapshot(quote_age_seconds=3600), {})
+
+    assert llm.calls == [], "a price already too old for Guardian must not cost a model call"
+    assert decision.decision_source == "policy_engine", (
+        "nothing was decided by the model, so nothing may be attributed to it"
+    )
+    assert "already stale" in decision.rationale, decision.rationale
+
+
+def test_a_fresh_quote_is_still_asked():
+    """And the guard must not silence the path it was added to protect."""
+    llm = _LLM(_decision("HOLD"))
+    engine = _engine(llm)
+    engine.stale_after_seconds = 900
+
+    engine._decide_uncovered(_aged_snapshot(quote_age_seconds=30), {})
+
+    assert len(llm.calls) == 1
+
+
+def test_the_boundary_is_guardians_own_ceiling():
+    """Not a second number: this refuses exactly what Guardian would refuse."""
+    llm = _LLM(_decision("HOLD"))
+    engine = _engine(llm)
+    engine.stale_after_seconds = 900
+
+    engine._decide_uncovered(_aged_snapshot(quote_age_seconds=900), {})
+    assert len(llm.calls) == 1, "exactly at the ceiling is not stale"
+
+    engine._decide_uncovered(_aged_snapshot(quote_age_seconds=901), {})
+    assert len(llm.calls) == 1, "one second past it is"
+
+
+def test_without_a_ceiling_the_path_is_unchanged():
+    """None leaves the uncovered path exactly as it was before the guard existed."""
+    llm = _LLM(_decision("HOLD"))
+    engine = _engine(llm)
+    assert engine.stale_after_seconds is None
+
+    engine._decide_uncovered(_aged_snapshot(quote_age_seconds=86400), {})
+
+    assert len(llm.calls) == 1, "with no ceiling there is nothing to compare against"
+
+
+def test_a_snapshot_without_a_quote_time_is_not_stale():
+    """Absent is not stale, which is the same rule Guardian applies."""
+    llm = _LLM(_decision("HOLD"))
+    engine = _engine(llm)
+    engine.stale_after_seconds = 900
+
+    engine._decide_uncovered(_Snapshot(), {})
+
+    assert len(llm.calls) == 1
+
+
+def test_the_engine_takes_guardians_ceiling_from_the_caller():
+    """One source for the number. A second would drift from what Guardian enforces."""
+    import inspect
+
+    from autopoiesis import cli
+
+    assert "stale_after_seconds" in inspect.getsource(HybridDecisionEngine.__init__)
+    assert "stale_after_seconds=config.stale_after_seconds" in inspect.getsource(cli), (
+        "the CLI must pass Guardian's own ceiling, not a second number"
+    )
