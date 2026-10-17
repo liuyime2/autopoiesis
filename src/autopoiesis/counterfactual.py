@@ -44,9 +44,11 @@ acquired the verb for trading well.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from autopoiesis.learning_evidence import ELIGIBILITY_VERSION, eligibility
@@ -282,16 +284,72 @@ def _horizon_quote(
     decided_at: datetime,
     horizon_hours: float,
     max_gap_hours: float,
-) -> tuple[float | None, float | None, str]:
-    """The first quote at or after the horizon, and how far away it was."""
+) -> tuple[float | None, float | None, str, datetime | None]:
+    """The first quote at or after the horizon, how far away it was, and when it was.
+
+    The timestamp is returned because the cash distributions that went ex between the
+    decision and the horizon belong in the return, and that window ends at the quote that
+    was actually used - not at the target, which the quote may follow by up to
+    `max_gap_hours`.
+    """
     target = decided_at.timestamp() + horizon_hours * 3600.0
     for timestamp, price, _ in series[index + 1:]:
         if timestamp.timestamp() >= target:
             gap = (timestamp - decided_at).total_seconds() / 3600.0
             if gap > max_gap_hours:
-                return None, gap, "GAP"
-            return price, gap, "SCORED"
-    return None, None, "PENDING"
+                return None, gap, "GAP", None
+            return price, gap, "SCORED", timestamp
+    return None, None, "PENDING", None
+
+
+#: Cash distributions per symbol, `{symbol: {ex_date: rate}}`, refreshed by
+#: `tools/refresh_dividends.py`. Absent is not an error - the arithmetic is then exactly
+#: what every measurement before 2026-10-17 was made against.
+DIVIDENDS_CACHE = Path("runtime") / "autopoiesis" / "replay" / "DIVIDENDS.pkl"
+
+
+def load_dividends(symbol: str) -> dict[str, float]:
+    """The cached ex-dates and rates for `symbol`, or `{}` when there are none.
+
+    Never raises: a missing or unreadable cache must leave the arithmetic as it was, not
+    degrade it into a guess. Same discipline as `risk_judgment.vix_floor`.
+    """
+    try:
+        if not DIVIDENDS_CACHE.exists():
+            return {}
+        data = json.loads(DIVIDENDS_CACHE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    rows = data.get(symbol)
+    if not isinstance(rows, dict):
+        return {}
+    out: dict[str, float] = {}
+    for ex_date, rate in rows.items():
+        try:
+            out[str(ex_date)] = float(rate)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _distributions_between(symbol: str, start: datetime, end: datetime | None) -> float:
+    """Cash distributions that went ex strictly after `start` and at or before `end`."""
+    if end is None:
+        return 0.0
+    rows = load_dividends(symbol)
+    if not rows:
+        return 0.0
+    first = start.astimezone(timezone.utc).date()
+    last = end.astimezone(timezone.utc).date()
+    total = 0.0
+    for ex_date, rate in rows.items():
+        try:
+            ex = date.fromisoformat(ex_date)
+        except (ValueError, TypeError):
+            continue
+        if first < ex <= last:
+            total += rate
+    return total
 
 
 #: A one-share probe's position for each action: what it holds over the horizon.
@@ -350,7 +408,7 @@ def evaluate(
         action = record.decision.action
         if action not in _DIRECTION:
             continue
-        future_price, gap, status = _horizon_quote(
+        future_price, gap, status, horizon_at = _horizon_quote(
             series, index, decided_at, horizon_hours, max_gap_hours
         )
 
@@ -379,7 +437,22 @@ def evaluate(
             )
             continue
 
-        gross = (future_price - price) / price * 100.0
+        # Cash distributions that went ex between the decision and the horizon are part of
+        # the return. Measured 2026-10-17: without this, a decision scored across an ex-date
+        # is scored against a price that fell by the distribution, so a HOLD reads as a loss
+        # and a SELL as a gain - neither of which is true of the total return. The broker's
+        # own accounting already credits the cash; this is the derived measure catching up.
+        #
+        # Added here rather than to the price series, which was tried and reverted: the
+        # series prices become `price_at_horizon`, and `test_point_in_time` asserts that
+        # value is a real observed quote. Both reported prices stay exactly as observed.
+        #
+        # Applied 2026-10-17 at the account holder's direction, as option 2: the verdicts
+        # already in the journal that span an ex-date were computed without this and are
+        # wrong, and they stay in the journal unchanged - it is append-only - while the next
+        # counterfactual pass writes corrected events beside them.
+        gross = (future_price + _distributions_between(symbol, decided_at, horizon_at)
+                 - price) / price * 100.0
         net = gross - assumed_cost_pct
         verdict, taken_value = _grade(action, gross, assumed_cost_pct, dead_band_pct)
         if action != "HOLD" and record.execution.status == "SUBMISSION_UNKNOWN":
