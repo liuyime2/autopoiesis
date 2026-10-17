@@ -90,7 +90,7 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_vix_freshness_alarm.py": ("risk-controls", "unit-integration"),
     "test_vix_refresh.py": ("risk-controls", "unit-integration"),
     "test_drifted_reference_retirement.py": ("lifecycle-invariants", "risk-controls"),
-    "test_gpu_devices_reserved.py": ("gpu-devices-reserved", "home-independence"),
+    "test_gpu_devices_reserved.py": ("crash-recovery", "unit-integration"),
     "test_decision_empty_body_cause.py": ("crash-recovery", "decision-outcome-counterfactual"),
     "test_probation_restart_budget.py": ("lifecycle-invariants", "selection-pressure-reaches-the-rules"),
     "test_retired_strategy_readmission.py": ("lifecycle-invariants", "unit-integration"),
@@ -287,7 +287,6 @@ CHECK_CLASSES: tuple[str, ...] = (
     "units-where-systemd-looks",
     "daemon-source-matches-worktree",
     "unit-environment-files",
-    "gpu-devices-reserved",
     "replay-audit",
     "shadow-not-executed",
     "shadow-stage-exercised",
@@ -3918,8 +3917,6 @@ def main() -> int:
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
 
 
 #: Devices this project may pin work to. AGENTS.md section 18: GPUs 5 to 9 belong to work
@@ -3993,3 +3990,7 @@ def check_gpu_devices_reserved() -> Result:
         "gpu-devices-reserved", PASS,
         f"{len(pins)} GPU pin(s) within {sorted(ALLOWED_GPU_DEVICES)}: {detail}",
     )
+
+
+if __name__ == "__main__":
+    sys.exit(main())
