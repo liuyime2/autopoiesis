@@ -370,7 +370,7 @@ src/autopoiesis/          the package (import name autopoiesis). 49 modules, 4 e
   models.py             shared schema, imported by 26 modules
   research/             walk-forward backtests; production may not import it
 tools/                  the gate (verify.py), benchmark, daily report, probes, systemd templates
-tests/autopoiesis/       111 test files
+tests/autopoiesis/       112 test files
 examples/               the smallest runnable example, no broker needed
 configs/                paper.env.example: every environment variable with its default
 docs/                   ARCHITECTURE.md, evidence/, history/

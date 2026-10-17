@@ -1555,8 +1555,44 @@ class AgentDaemon:
         evidence = self._offline_evidence_by_strategy(_validation=_validation)
         decisions = self.lifecycle_manager.review(self.strategy_library.list(), results, evidence)
         decisions.extend(self._reconsider_paused(results, evidence))
+        decisions.extend(self._drifted_reference_retirements())
         for decision in decisions:
             self._apply_lifecycle_decision(decision)
+
+    def _drifted_reference_retirements(self) -> list:
+        """Retire a servable strategy that admission would refuse today for a drifted reference.
+
+        The plan's P1 item, second half: "make the lifecycle able to retire a strategy whose
+        reference has drifted from the market rather than waiting for a human". Measured three
+        times now - TLT, XLF and SPY were each drained one share per cycle by a strategy whose
+        trigger band emitted a single action forever, and each time a human paused it. The
+        pause stops that instance and does not stop the next one.
+
+        The predicate is admission's own, not a second number: a spec whose `reference_price`
+        has drifted far enough that the gate would refuse it today is a spec that should not
+        keep serving. Two answers to "is this reference usable" is how they start disagreeing,
+        which is the mistake `VIX_STALE_AFTER_DAYS` was extracted to avoid in this same work.
+
+        Only PROBATION and ACTIVE. PAUSED and RETIRED are already out of service, and a
+        BASELINE holds no reference.
+        """
+        admission = getattr(self, "strategy_admission", None)
+        if admission is None or self.strategy_library is None:
+            return []
+        out = []
+        for spec in self.strategy_library.list():
+            if spec.lifecycle not in {"PROBATION", "ACTIVE"} or not spec.enabled:
+                continue
+            reason = admission._reference_price_rejection_reason(spec)
+            if reason is None:
+                continue
+            out.append(
+                StrategyLifecycleDecision(
+                    spec, "RETIRED",
+                    f"reference drifted from the market: {reason}",
+                )
+            )
+        return out
 
     def _retire_lessons_without_effect(self) -> None:
         """Take a lesson out of the prompt once the ablation shows it changes nothing.
