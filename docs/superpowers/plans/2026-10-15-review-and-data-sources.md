@@ -245,10 +245,25 @@ The fix is to adjust the series for the distribution on the ex-date - total retu
 than price return - and the dividend cache belongs beside `VIX.pkl`, refreshed the same way
 and for the same reason: a correctness input that goes stale silently disengages.
 
-**The measurement that should come first**, because it decides whether this is urgent: find
-a TLT ex-date in the journal, take the decisions scored across it, and count how many were
-scored in the wrong direction by the price drop. If it is none, this is correctness work
-rather than a scoring defect and the priority is lower than the plan assumes.
+**The measurement that should come first was taken, and it changes the urgency.**
+
+    TLT ex-dates from the provider:  2026-08-03, 2026-09-01, 2026-10-01
+    TLT cycles in the journal:       only 2026-10-08 .. 2026-10-16
+    TLT cycles within a day of any ex-date:  0
+
+The journal holds no TLT cycle before 2026-10-08, because TLT was not in the cycled symbol
+set until then - the doctor's retention window starts 2026-06-09, so this is the symbol set
+changing rather than rotation losing them.
+
+**So the defect is latent and nothing has been mis-scored yet.** That is a statement about
+the past and not about the future: TLT distributes monthly, the next ex-date is around
+2026-11-02, and from 2026-10-08 TLT is cycled every session. The first ex-date after that
+change is the first one that will bite.
+
+Which makes this **correctness work with a deadline rather than an urgent scoring defect**,
+and the plan's "priority 3, free, direct" is right - but the reason it is not higher is that
+the calendar has not reached it yet, not that it does not matter. A fix landed after
+2026-11-02 would be a fix landed after the first mis-scored decisions.
 
 ## 4. Acceptance
 
