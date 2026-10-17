@@ -1,6 +1,11 @@
 import os
+import signal
+import time
 from dataclasses import replace
 from datetime import datetime, timezone
+
+import pytest
+from synthetic_evidence import synthetic_spec
 
 from autopoiesis.config import AgentConfig
 from autopoiesis.curriculum import StructuredCurriculumAgent
@@ -10,14 +15,17 @@ from autopoiesis.health import HealthMonitor
 from autopoiesis.journal import JsonlJournal
 from autopoiesis.knowledge_admission import KnowledgeAdmission
 from autopoiesis.knowledge_library import KnowledgeLibrary
+from autopoiesis.learning_evidence import capture
 from autopoiesis.models import (
     AccountSnapshot,
     BrokerEvidenceBatch,
+    CurriculumTask,
     CycleRecord,
     DataSnapshot,
     ExecutionResult,
     GuardianResult,
     PortfolioHistoryPoint,
+    PositionSnapshot,
     StrategySpec,
     TradeDecision,
 )
@@ -60,7 +68,7 @@ def config(tmp_path, *, symbols=("SPY",), interval=1):
 
 
 class FakeLoop:
-    def __init__(self, journal=None, strategy_id=None, action="HOLD", quantity=0, status="SKIPPED", confidence=0.1):
+    def __init__(self, journal=None, strategy_id=None, action="HOLD", quantity=0, status="SKIPPED", confidence=0.1, strategy_spec=None):
         self.symbols = []
         self.journal = journal
         self.strategy_id = strategy_id
@@ -68,6 +76,8 @@ class FakeLoop:
         self.quantity = quantity
         self.status = status
         self.confidence = confidence
+        # Synthetic selected behavior is explicitly part of this fixture.
+        self.strategy_spec = strategy_spec or (synthetic_spec(strategy_id) if strategy_id else None)
 
     def run_once(self, symbol):
         self.symbols.append(symbol)
@@ -84,7 +94,7 @@ class FakeLoop:
         record = CycleRecord(
             cycle_id=f"cycle-{len(self.symbols)}",
             snapshot=snapshot,
-            decision=TradeDecision(symbol=symbol, action=self.action, quantity=self.quantity, confidence=self.confidence, rationale="test", strategy_id=self.strategy_id),
+            decision=TradeDecision(symbol=symbol, action=self.action, quantity=self.quantity, confidence=self.confidence, rationale="test", strategy_id=self.strategy_id, strategy_provenance=capture(self.strategy_spec) if self.strategy_spec else None),
             guardian=GuardianResult(approved=True, reason="approved"),
             execution=ExecutionResult(status=self.status, order_id=None, filled_quantity=0, message="test"),
             strategy_id=self.strategy_id,
@@ -101,7 +111,7 @@ class FailingLoop:
 
 class FailingReflectionMemory(ReflectionMemory):
     def reflect(self, records, evidence=None, fills=None, seeded_fills=None,
-                cumulative_cycles=None, cumulative_trade_attempts=None):
+                cumulative_cycles=None, cumulative_trade_attempts=None, full_records=None):
         raise RuntimeError("reflection boom")
 
 
@@ -162,6 +172,238 @@ class FakeReconciler:
             extra_broker_orders=("broker-extra",) if not self.matched else (),
             message="matched" if self.matched else "broker has open orders not found in journal",
         )
+
+
+def test_signal_stop_boundary_performs_no_io(tmp_path, monkeypatch):
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop())
+    calls = []
+    monkeypatch.setattr(daemon, "_heartbeat", lambda *args: calls.append(args))
+    daemon._request_stop(signal.SIGTERM, None)
+    assert daemon._stop_requested
+    assert calls == []
+
+
+@pytest.mark.parametrize("oversleep", [0.0, 0.25])
+def test_default_wait_preserves_duration_with_bounded_sleeps(tmp_path, monkeypatch, oversleep):
+    """Synthetic clock advances prove polling respects the original monotonic deadline."""
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop())
+    elapsed = 0.0
+    sleeps = []
+
+    def sleep(seconds):
+        nonlocal elapsed
+        sleeps.append(seconds)
+        elapsed += seconds + oversleep
+
+    monkeypatch.setattr("autopoiesis.daemon.time.monotonic", lambda: elapsed)
+    monkeypatch.setattr("autopoiesis.daemon.time.sleep", sleep)
+    daemon.sleep(2.5)
+    assert elapsed == pytest.approx(2.5)
+    assert all(0 < seconds <= 1.0 for seconds in sleeps)
+    assert sleeps == ([1.0, 1.0, 0.5] if not oversleep else [1.0, 1.0])
+
+
+def test_default_wait_does_not_return_before_requested_duration(tmp_path):
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop())
+    started = time.monotonic()
+    daemon.sleep(0.03)
+    assert time.monotonic() - started >= 0.03
+
+
+def test_explicit_sleep_callback_keeps_its_contract_even_after_stop(tmp_path):
+    class Sleep:
+        def __init__(self):
+            self.calls = []
+
+        def __bool__(self):
+            return False
+
+        def __call__(self, seconds):
+            self.calls.append(seconds)
+
+    callback = Sleep()
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop(), sleep=callback)
+    daemon.stop()
+    assert daemon.sleep is callback
+    daemon.sleep(30)
+    assert callback.calls == [30]
+
+
+def test_stop_boundary_after_maintenance_skips_clock_and_sleep(tmp_path, monkeypatch):
+    calls = []
+
+    class Scheduler:
+        def should_trade_now(self):
+            calls.append("clock")
+            return False
+
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop(), scheduler=Scheduler(),
+                         sleep=lambda seconds: calls.append("sleep"))
+    monkeypatch.setattr(daemon, "_maintenance", daemon.stop)
+    assert daemon.run() == 0
+    assert calls == []
+
+
+def test_stop_boundary_between_maintenance_stages_skips_later_work(tmp_path, monkeypatch):
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop())
+    calls = []
+
+    def stop_first_stage():
+        calls.append("unresolved")
+        daemon.stop()
+
+    monkeypatch.setattr(daemon, "_resolve_unresolved_submissions", stop_first_stage)
+    monkeypatch.setattr(daemon, "_resolve_pending_fills", lambda: calls.append("fills"))
+    monkeypatch.setattr(daemon, "_latest_evidence_batch", lambda: calls.append("evidence"))
+    monkeypatch.setattr(daemon, "_ingest_broker_evidence", lambda: calls.append("ingest"))
+    monkeypatch.setattr(daemon, "_manage_strategy_lifecycle", lambda **kwargs: calls.append("lifecycle"))
+    daemon._maintenance()
+    assert calls == ["unresolved"]
+
+
+def test_stop_boundary_after_run_once_skips_post_cycle_work(tmp_path, monkeypatch):
+    loop = FakeLoop()
+    daemon = AgentDaemon(config=config(tmp_path), loop=loop)
+    run_once = loop.run_once
+    calls = []
+
+    def stop_and_return_record(symbol):
+        daemon.stop()
+        return run_once(symbol)
+
+    monkeypatch.setattr(loop, "run_once", stop_and_return_record)
+    monkeypatch.setattr(daemon, "_post_cycle", lambda: calls.append("post-cycle"))
+    daemon._run_symbol("SPY")
+    assert daemon.cycle_count == daemon.daily_cycle_count == 1
+    assert calls == []
+
+
+def test_clock_failure_stop_boundary_skips_backoff_sleep(tmp_path):
+    calls = []
+
+    class Scheduler:
+        def should_trade_now(self):
+            daemon.stop()
+            raise RuntimeError("synthetic clock failure")
+
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop(), scheduler=Scheduler(),
+                         sleep=lambda seconds: calls.append(seconds))
+    assert not daemon._should_trade_now()
+    assert calls == []
+
+
+def test_completed_cycle_is_counted_exactly_once_when_callback_raises(tmp_path):
+    def failed_callback(count):
+        raise RuntimeError("synthetic callback failure")
+
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop(), on_cycle_count=failed_callback)
+    daemon.last_cycle_id = "previous-cycle"
+    daemon._run_symbol("SPY")
+    assert daemon.cycle_count == daemon.daily_cycle_count == 1
+    assert daemon.error_count == 1
+    assert daemon.last_cycle_id == "cycle-1"
+
+
+def test_completed_cycle_is_counted_exactly_once_when_post_cycle_raises(tmp_path, monkeypatch):
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop())
+
+    def failed_post_cycle():
+        raise RuntimeError("synthetic post-cycle failure")
+
+    monkeypatch.setattr(daemon, "_post_cycle", failed_post_cycle)
+    daemon._run_symbol("SPY")
+    assert daemon.cycle_count == daemon.daily_cycle_count == 1
+    assert daemon.error_count == 1
+
+
+def test_stop_boundary_between_strategy_screens_skips_later_candidates(tmp_path, monkeypatch):
+    cfg = config(tmp_path)
+    library = StrategyLibrary(cfg.strategy_dir)
+    library.save(synthetic_spec("first"))
+    library.save(synthetic_spec("second"))
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(), strategy_library=library,
+                         journal=JsonlJournal(cfg.journal_path))
+    calls = []
+
+    def stop_first_screen(strategy_id, **kwargs):
+        calls.append(strategy_id)
+        daemon.stop()
+
+    monkeypatch.setattr(daemon, "_screen_candidate", stop_first_screen)
+    daemon._screen_all_strategies()
+    assert calls == ["first"]
+
+
+def test_stop_boundary_during_post_cycle_reflection_skips_lifecycle_and_curriculum(tmp_path, monkeypatch):
+    cfg = config(tmp_path)
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(), journal=JsonlJournal(cfg.journal_path),
+                         reflection_memory=ReflectionMemory(tmp_path / "reflection.json"),
+                         curriculum_agent=CapturingCurriculum(), reflect_every=1, curriculum_every=1)
+    daemon.cycle_count = 1
+    calls = []
+
+    def stop_during_reflection(**kwargs):
+        calls.append("reflection")
+        daemon.stop()
+
+    monkeypatch.setattr(daemon, "_reflect", stop_during_reflection)
+    monkeypatch.setattr(daemon, "_manage_strategy_lifecycle", lambda **kwargs: calls.append("lifecycle"))
+    monkeypatch.setattr(daemon, "_curriculum_proposal", lambda: calls.append("curriculum"))
+    daemon._post_cycle()
+    assert calls == ["reflection"]
+
+
+def test_stop_boundary_before_symbol_entry_starts_no_new_cycle(tmp_path):
+    loop = FakeLoop()
+    daemon = AgentDaemon(config=config(tmp_path), loop=loop)
+    daemon.stop()
+    daemon._run_symbol("SPY")
+    assert loop.symbols == []
+    assert daemon.cycle_count == daemon.daily_cycle_count == 0
+
+
+def test_stop_boundary_before_clock_entry_starts_no_new_broker_call(tmp_path, monkeypatch):
+    calls = []
+    scheduler = FakeScheduler(True)
+    monkeypatch.setattr(scheduler, "should_trade_now", lambda: calls.append("clock") or True)
+    daemon = AgentDaemon(config=config(tmp_path), loop=FakeLoop(), scheduler=scheduler)
+    daemon.stop()
+    assert not daemon._should_trade_now()
+    assert calls == []
+
+
+def test_startup_stop_boundary_skips_reconciliation_but_keeps_cleanup(tmp_path, monkeypatch):
+    """Synthetic stop at the first heartbeat must not launch a broker stage."""
+    calls = []
+
+    class Reconciler(FakeReconciler):
+        def reconcile(self):
+            calls.append("broker-reconcile")
+            return super().reconcile()
+
+    cfg = config(tmp_path)
+    loop = FakeLoop()
+    daemon = AgentDaemon(config=cfg, loop=loop, startup_reconciler=Reconciler(True))
+    release_lock = daemon._release_lock
+    previous_signals = (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT))
+
+    def stop_at_startup(status, message):
+        calls.append(status)
+        if status == "RUNNING":
+            daemon.stop()
+
+    def release_and_record():
+        release_lock()
+        calls.append("lock-released")
+
+    monkeypatch.setattr(daemon, "_heartbeat", stop_at_startup)
+    monkeypatch.setattr(daemon, "_append_event", lambda *args, **kwargs: calls.append("reconcile-event"))
+    monkeypatch.setattr(daemon, "_release_lock", release_and_record)
+    assert daemon.run() == 0
+    assert calls == ["RUNNING", "STOPPED", "lock-released"]
+    assert loop.symbols == []
+    assert not cfg.pidfile_path.exists()
+    assert (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT)) == previous_signals
 
 
 def test_daemon_runs_cycles_and_writes_heartbeat(tmp_path):
@@ -263,6 +505,38 @@ def test_daemon_market_closed_runs_maintenance_without_trading(tmp_path):
     assert "PNL_EVIDENCE_RECORDED" in event_types
     assert "PROFIT_TARGET_CHECKED" in event_types
     assert reflection_memory.load().evaluation["pnl_evidence"] == "broker_portfolio_history_verified"
+
+
+@pytest.mark.parametrize("return_pct", [None, 0.11, 0.02, -0.11, 2.0])
+def test_synthetic_account_target_is_unproven_and_deduplicated(tmp_path, return_pct):
+    """Synthetic broker-shaped account history cannot attribute returns to the agent."""
+    cfg = replace(config(tmp_path), profit_target_return_pct=1.25)
+    journal = JsonlJournal(cfg.journal_path)
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(), journal=journal)
+    evidence = None
+    if return_pct is not None:
+        now = datetime.now(tz=timezone.utc)
+        evidence = BrokerEvidenceBatch(
+            generated_at=now, window_start=now, window_end=now,
+            portfolio_history=(PortfolioHistoryPoint(
+                timestamp=now, equity=100_000, profit_loss=0, profit_loss_pct=return_pct,
+            ),),
+        )
+    daemon._verify_profit_target(evidence)
+    daemon._verify_profit_target(evidence)
+    events = journal.read_events("PROFIT_TARGET_CHECKED")
+    assert len(events) == 1
+    assert events[0].status == "SKIPPED"
+    payload = events[0].payload
+    assert payload["status"] == "unproven"
+    assert payload["comparison_status"] == "UNKNOWN"
+    assert "agent allocation" in payload["comparison_reason"]
+    assert "aligned rolling equity" in payload["comparison_reason"]
+    assert payload["satisfied"] is False
+    assert payload["target_daily_return_pct"] == 1.25
+    assert payload["account_return_pct"] == return_pct
+    assert payload["account_return_scope"] == "account_only_diagnostic"
+    assert payload["paper_only"] is True
 
 
 def test_daemon_market_open_runs_cycle(tmp_path):
@@ -426,6 +700,202 @@ def test_daemon_records_curriculum_failure(tmp_path):
     assert events[-1].payload["error_type"] == "RuntimeError"
 
 
+@pytest.mark.parametrize(
+    ("stop_at", "proposal_count", "admission_count"),
+    [
+        ("entry", 0, 0),
+        ("reflection", 0, 0),
+        ("strategies", 0, 0),
+        ("summary", 0, 0),
+        ("lesson", 0, 0),
+        ("rejections", 0, 0),
+        ("book", 0, 0),
+        ("market", 0, 0),
+        ("proposal", 1, 0),
+        ("proposal_audit", 1, 0),
+        ("prices", 1, 0),
+        ("set_prices", 1, 0),
+        ("results", 1, 0),
+        ("admission", 1, 1),
+        ("admission_audit", 1, 1),
+    ],
+)
+def test_curriculum_stop_boundary_preserves_completed_audits(
+    tmp_path, monkeypatch, stop_at, proposal_count, admission_count
+):
+    """Synthetic stage stops retain real local results without starting later stages."""
+    task = CurriculumTask(
+        task_id="synthetic-stop-task", task_type="STRATEGY_SPEC",
+        summary="synthetic boundary proposal", rationale="synthetic fixture",
+        strategy_spec=synthetic_spec("synthetic-stop-strategy"),
+    )
+    calls = []
+
+    class SyntheticCurriculum:
+        def propose(self, **kwargs):
+            calls.append(("proposal", daemon._stop_requested))
+            if stop_at == "proposal":
+                daemon.stop()
+            return task
+
+    daemon, journal, memory, library = make_daemon_with_learning(
+        tmp_path, curriculum_agent=SyntheticCurriculum()
+    )
+    daemon.loop.run_once("SPY")
+    daemon._reflect()
+    admission = daemon.strategy_admission
+    original_admit = admission.admit
+    original_append = daemon._append_event
+    original_lesson = daemon._record_no_exploration_lesson
+    lesson_calls = []
+
+    def lesson(summary):
+        lesson_calls.append(daemon._stop_requested)
+        original_lesson(summary)
+
+    def admit(*args, **kwargs):
+        calls.append(("admission", daemon._stop_requested))
+        result = original_admit(*args, **kwargs)
+        if stop_at == "admission":
+            daemon.stop()
+        return result
+
+    def append(event_type, **kwargs):
+        original_append(event_type, **kwargs)
+        if (stop_at, event_type) in {
+            ("proposal_audit", "CURRICULUM_PROPOSED"),
+            ("admission_audit", "STRATEGY_ADMISSION_REVIEWED"),
+        }:
+            daemon.stop()
+
+    monkeypatch.setattr(admission, "admit", admit)
+    monkeypatch.setattr(daemon, "_append_event", append)
+    monkeypatch.setattr(daemon, "_record_no_exploration_lesson", lesson)
+    monkeypatch.setattr(
+        daemon, "_screen_candidate",
+        lambda strategy_id: calls.append(("screen", daemon._stop_requested)),
+    )
+    preparations = {
+        "reflection": (memory, "load"),
+        "strategies": (library, "list"),
+        "summary": (daemon, "_recent_exploration_summary"),
+        "lesson": (daemon, "_record_no_exploration_lesson"),
+        "rejections": (daemon, "_recent_rejections"),
+        "book": (daemon, "_open_book"),
+        "market": (daemon, "_last_market"),
+        "prices": (daemon, "_last_known_prices"),
+        "set_prices": (admission, "set_market_prices"),
+        "results": (daemon, "_strategy_results"),
+    }
+    if stop_at in preparations:
+        owner, method = preparations[stop_at]
+        original = getattr(owner, method)
+
+        def stop_after_preparation(*args, **kwargs):
+            result = original(*args, **kwargs)
+            daemon.stop()
+            return result
+
+        monkeypatch.setattr(owner, method, stop_after_preparation)
+    elif stop_at == "entry":
+        daemon.stop()
+
+    daemon._curriculum_proposal()
+
+    expected_calls = [("proposal", False)] if proposal_count else []
+    if admission_count:
+        expected_calls.append(("admission", False))
+    assert calls == expected_calls
+    assert lesson_calls == (
+        [] if stop_at in {"entry", "reflection", "strategies", "summary"} else [False]
+    )
+    proposals = journal.read_events("CURRICULUM_PROPOSED")
+    admissions = journal.read_events("STRATEGY_ADMISSION_REVIEWED")
+    assert len(proposals) == proposal_count
+    assert len(admissions) == admission_count
+    assert not journal.read_events("CURRICULUM_FAILED")
+    if proposals:
+        assert proposals[0].status == "SUCCESS"
+        assert proposals[0].task_id == task.task_id
+        assert proposals[0].strategy_id == task.strategy_spec.strategy_id
+    if admissions:
+        assert admissions[0].status == "ACCEPTED"
+        assert admissions[0].payload["accepted"] is True
+    assert [spec.strategy_id for spec in library.list()] == (
+        [task.strategy_spec.strategy_id] if admission_count else []
+    )
+
+
+@pytest.mark.parametrize("stop_at", ["transport", "backoff", "retry_context", "none", "exhausted"])
+def test_curriculum_transport_retry_respects_stop_boundary(tmp_path, monkeypatch, stop_at):
+    """Synthetic transport failures exercise the actual structured agent's retry path."""
+    spec = synthetic_spec("synthetic-retry-strategy").model_copy(update={
+        "kind": "FIXED_SIZE", "parameters": {"action": "BUY", "quantity": 1, "confidence": 0.6},
+    })
+    task = CurriculumTask(
+        task_id="synthetic-retry-task", task_type="STRATEGY_SPEC",
+        summary="synthetic retry proposal", rationale="synthetic fixture", strategy_spec=spec,
+    )
+    calls = []
+    waits = []
+    screens = []
+
+    def transport(context):
+        calls.append(daemon._stop_requested)
+        if len(calls) == 1 or stop_at == "exhausted":
+            if stop_at == "transport":
+                daemon.stop()
+            raise TimeoutError("synthetic transport timeout")
+        return task.model_dump_json()
+
+    daemon, journal, _, library = make_daemon_with_learning(
+        tmp_path, curriculum_agent=StructuredCurriculumAgent(transport=transport)
+    )
+    daemon.loop.run_once("SPY")
+    daemon._reflect()
+
+    def backoff(seconds):
+        waits.append((seconds, daemon._stop_requested))
+        if stop_at == "backoff":
+            daemon.stop()
+
+    daemon.sleep = backoff
+    monkeypatch.setattr(daemon, "_screen_candidate", lambda strategy_id: screens.append(strategy_id))
+    original_rejections = daemon._recent_rejections
+
+    def rejections():
+        result = original_rejections()
+        if stop_at == "retry_context" and calls:
+            daemon.stop()
+        return result
+
+    monkeypatch.setattr(daemon, "_recent_rejections", rejections)
+
+    daemon._curriculum_proposal()
+
+    assert calls == ([False] if stop_at in {"transport", "backoff", "retry_context"} else [False, False])
+    assert waits == ([] if stop_at == "transport" else [(5, False)])
+    if stop_at == "none":
+        assert not journal.read_events("CURRICULUM_FAILED")
+        assert len(journal.read_events("CURRICULUM_PROPOSED")) == 1
+        reviewed = journal.read_events("STRATEGY_ADMISSION_REVIEWED")
+        assert len(reviewed) == 1
+        assert reviewed[0].status == "REJECTED"
+        assert reviewed[0].message == "curriculum progression requires HOLD_BASELINE before trading skills"
+        assert library.list() == []
+        assert screens == [spec.strategy_id]
+    else:
+        failures = journal.read_events("CURRICULUM_FAILED")
+        assert len(failures) == 1
+        assert failures[0].status == "FAILED"
+        assert failures[0].message == "synthetic transport timeout"
+        assert failures[0].payload["error_type"] == "TimeoutError"
+        assert not journal.read_events("CURRICULUM_PROPOSED")
+        assert not journal.read_events("STRATEGY_ADMISSION_REVIEWED")
+        assert library.list() == []
+        assert screens == []
+
+
 def test_daemon_computes_recent_no_exploration_summary(tmp_path):
     cfg = config(tmp_path, interval=0)
     journal = JsonlJournal(cfg.journal_path)
@@ -488,6 +958,80 @@ def test_daemon_passes_exploration_summary_to_curriculum(tmp_path):
     assert event.payload["recent_exploration_summary"]["no_exploration"] is True
 
 
+@pytest.mark.parametrize(
+    ("latest_positions", "expected"),
+    [
+        ((), []),
+        ((PositionSnapshot(symbol="ZERO", quantity=0, market_value=0),), []),
+        (
+            (PositionSnapshot(symbol="QQQ", quantity=-0.5, market_value=-100.125),),
+            [{"symbol": "QQQ", "quantity": -0.5, "market_value": -100.12}],
+        ),
+        (
+            (
+                PositionSnapshot(symbol="QQQ", quantity=-0.5, market_value=-100.125),
+                PositionSnapshot(symbol="AAPL", quantity=0.25, market_value=50.126),
+                PositionSnapshot(symbol="ZERO", quantity=0, market_value=0),
+            ),
+            [
+                {"symbol": "QQQ", "quantity": -0.5, "market_value": -100.12},
+                {"symbol": "AAPL", "quantity": 0.25, "market_value": 50.13},
+            ],
+        ),
+    ],
+    ids=["flat", "zero-only", "short-only", "short-before-fractional-long"],
+)
+def test_open_book_uses_latest_snapshot_alone(tmp_path, latest_positions, expected):
+    """Synthetic snapshots in an isolated real journal; no broker evidence claim."""
+    cfg = config(tmp_path)
+    journal = JsonlJournal(cfg.journal_path)
+    record = FakeLoop().run_once("SPY")
+    old_snapshot = record.snapshot.model_copy(update={
+        "positions": (PositionSnapshot(symbol="SPY", quantity=2, market_value=200),),
+    })
+    journal.append(record.model_copy(update={"snapshot": old_snapshot}))
+    journal.append(record.model_copy(update={
+        "cycle_id": "latest-synthetic-cycle",
+        "snapshot": record.snapshot.model_copy(update={"positions": latest_positions}),
+    }))
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(), journal=journal)
+
+    assert daemon._open_book() == expected
+
+
+@pytest.mark.parametrize("with_journal", [False, True], ids=["no-journal", "no-history"])
+def test_open_book_without_recorded_snapshot_is_empty(tmp_path, with_journal):
+    """Synthetic isolated setup must not invent a recorded account book."""
+    cfg = config(tmp_path)
+    journal = JsonlJournal(cfg.journal_path) if with_journal else None
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(), journal=journal)
+
+    assert daemon._open_book() == []
+
+
+def test_open_book_requests_one_record_without_read_all(tmp_path, monkeypatch):
+    """Assert bounded result request, not a journal I/O or timing benchmark."""
+    cfg = config(tmp_path)
+    journal = JsonlJournal(cfg.journal_path)
+    journal.append(FakeLoop().run_once("SPY"))
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(), journal=journal)
+    requested = []
+    last_n = journal.last_n
+
+    def capture_last_n(n):
+        requested.append(n)
+        return last_n(n)
+
+    def forbidden_read_all():
+        pytest.fail("current account context must not request all historical cycles")
+
+    monkeypatch.setattr(journal, "last_n", capture_last_n)
+    monkeypatch.setattr(journal, "read_all", forbidden_read_all)
+
+    assert daemon._open_book() == []
+    assert requested == [1]
+
+
 # --- the counterfactual ledger is a ledger, not a repeated dump --------------
 
 
@@ -513,11 +1057,12 @@ def _scored_cycle(cycle_id, *, price, horizon_price, hours_ago=48):
     )
 
     def _record(cid, snap):
+        spec = _spec("s1").model_copy(update={"parameters": {"action": "BUY", "quantity": 1, "confidence": .7}})
         return CycleRecord(
             cycle_id=cid,
             snapshot=snap,
             decision=TradeDecision(
-                symbol="SPY", action="BUY", quantity=1, confidence=0.7, rationale="t", strategy_id="s1"
+                symbol="SPY", action="BUY", quantity=1, confidence=0.7, rationale="t", strategy_id="s1", strategy_provenance=capture(spec)
             ),
             guardian=GuardianResult(approved=True, reason="approved"),
             execution=ExecutionResult(
@@ -787,7 +1332,7 @@ def test_daemon_persists_lifecycle_updates(tmp_path):
             rationale="test",
         )
     )
-    loop = FakeLoop(journal=journal, strategy_id="trial", action="BUY", quantity=1, status="SUBMITTED", confidence=0.8)
+    loop = FakeLoop(journal=journal, strategy_id="trial", action="BUY", quantity=1, status="SUBMITTED", confidence=0.8, strategy_spec=strategy_library.load("trial"))
     daemon = AgentDaemon(
         config=cfg,
         loop=loop,
@@ -818,6 +1363,9 @@ def test_daemon_persists_lifecycle_updates(tmp_path):
         timestamp=_dt.now(tz=_tz.utc), status="SUCCESS",
         message="screened", strategy_id="trial",
         payload={"strategy_id": "trial", "verdict": "PASS_SCREENED",
+                 "eligibility_version": 1,
+                 "strategy_provenance": capture(strategy_library.load("trial")).model_dump(mode="json"),
+                 "source_cycle_ids": ["cycle-1"],
                  "reason": "screened", "scored": 12, "good_holds": 9,
                  "good_hold_ratio": 0.75},
     ))
@@ -1184,6 +1732,7 @@ def test_the_lesson_that_is_published_quotes_the_day_adjusted_margin(tmp_path, m
         "decision": TradeDecision(
             symbol="SPY", action="HOLD", quantity=0, confidence=0.6, rationale="r",
             strategy_id="hold-strategy", decision_source="llm",
+            strategy_provenance=capture(synthetic_spec("hold-strategy")),
         ),
     })
     journal.append(llm_record)

@@ -19,6 +19,9 @@ def test_an_identical_lesson_is_rejected_across_a_restart():
 
     with tempfile.TemporaryDirectory() as tmp:
         library = KnowledgeLibrary(pathlib.Path(tmp) / "knowledge")
+        from test_calibration import _record
+
+        library.verify_journal_sources([_record("cycle-1", .6)])  # Explicit synthetic cited cycle.
 
         def lesson(created: str) -> KnowledgeArtifact:
             return KnowledgeArtifact(

@@ -5,16 +5,20 @@ returns, and (2) survive a stop window that is big enough for the stage to retur
 one is not a preference: the historical evidence records two stop jobs that reached the 30-second
 deadline and ended in SIGKILL, and a curriculum generation measured 141.9 seconds.
 
-Both are tested with a fake rather than by signalling a real process. A signal delivered to a test
-process asserts something about the test runner; a blocking stage the test controls asserts
-something about the daemon.
+Synthetic controlled stages test transaction completion, and a separate subprocess tests actual
+SIGTERM delivery during the daemon's default wait without signalling the test runner.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import select
+import signal
+import subprocess
 import sys
+import textwrap
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -66,6 +70,28 @@ def test_every_bounded_stage_fits_inside_the_budget(tool):
         assert stage.seconds <= inventory.largest.seconds + 1e-9, (
             f"{stage.name} at {stage.seconds}s is larger than the inventory's maximum"
         )
+
+
+def test_cooperative_default_wait_is_in_the_stage_inventory(tool, monkeypatch):
+    inventory = tool.collect()
+    stage = next((stage for stage in inventory.stages if stage.name == "daemon cooperative wait"), None)
+    assert stage is not None, "default scheduler/backoff waits are missing from the stop inventory"
+    assert stage.seconds == pytest.approx(1.0)
+    assert inventory.budget == pytest.approx(630.0)
+
+    # A synthetic source declaration change must change the reported bound without importing it.
+    read_text = Path.read_text
+
+    def changed_source(path, *args, **kwargs):
+        source = read_text(path, *args, **kwargs)
+        if path == tool.SRC / "daemon.py":
+            source = source.replace("COOPERATIVE_WAIT_POLL_SECONDS = 1.0",
+                                    "COOPERATIVE_WAIT_POLL_SECONDS = 2.0")
+        return source
+
+    monkeypatch.setattr(Path, "read_text", changed_source)
+    changed = next(item for item in tool.collect().stages if item.name == stage.name)
+    assert changed.seconds == pytest.approx(2.0)
 
 
 def test_the_unit_template_defers_the_budget_to_the_derivation(tool):
@@ -135,6 +161,39 @@ def test_budget_only_prints_one_number(tool, capsys):
 
 
 # --- SIGTERM behaviour -----------------------------------------------------------------------
+
+
+def test_sigterm_interrupts_actual_default_long_wait():
+    """Synthetic isolated child uses the real default wait, with no broker/model/runtime IO."""
+    source = textwrap.dedent("""
+        import signal
+        from autopoiesis.config import AgentConfig
+        from autopoiesis.daemon import AgentDaemon
+
+        daemon = AgentDaemon(config=AgentConfig.from_env({}), loop=None)
+        signal.signal(signal.SIGTERM, daemon._request_stop)
+        print("WAITING", flush=True)
+        daemon.sleep(30)
+        print(f"STOPPED={daemon._stop_requested}", flush=True)
+    """)
+    child = subprocess.Popen([sys.executable, "-u", "-c", source], cwd=ROOT,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        ready, _, _ = select.select([child.stdout], [], [], 10)
+        assert ready, "synthetic child never entered the default wait"
+        assert child.stdout.readline().strip() == "WAITING"
+        time.sleep(0.05)
+        started = time.monotonic()
+        child.send_signal(signal.SIGTERM)
+        stdout, stderr = child.communicate(timeout=3)
+        elapsed = time.monotonic() - started
+        assert child.returncode == 0, stderr
+        assert "STOPPED=True" in stdout
+        assert elapsed < 2, f"default wait took {elapsed:.3f}s after SIGTERM"
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.communicate(timeout=5)
 
 
 class _BlockingLoop:

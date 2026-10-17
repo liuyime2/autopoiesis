@@ -1,0 +1,16 @@
+[Unit]
+Description=Refresh the VIX cache before the open
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+EnvironmentFile=@ENVFILE@
+Environment=PYTHONPATH=@ROOT@/src
+Environment=PATH=@PYTHONDIR@:/usr/local/bin:/usr/bin:/bin
+# Not `market-preflight`, which is read-only by contract and says so in its description.
+# This one writes the cache, so it is its own unit and runs before the preflight reads it.
+ExecStart=/usr/bin/make --no-print-directory -C @ROOT@ vix-refresh PY=@PYTHON@
+TimeoutStartSec=300
+UMask=0077
+Nice=10

@@ -1,0 +1,14 @@
+[Unit]
+Description=Read-only paper market preopen readiness
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+EnvironmentFile=@ENVFILE@
+Environment=PYTHONPATH=@ROOT@/src
+Environment=PATH=@PYTHONDIR@:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/make --no-print-directory -C @ROOT@ market-preflight PY=@PYTHON@ ENVFILE=@ENVFILE@ EXPECTED_FINGERPRINT=@FINGERPRINT@ SCHEDULED=1
+TimeoutStartSec=1200
+UMask=0077
+Nice=10

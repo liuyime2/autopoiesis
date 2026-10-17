@@ -1,80 +1,87 @@
 #!/usr/bin/env python
-"""Test real Alpaca connection and market status."""
+"""Read-only whole-account inventory, independent of stock quotes and models.
+
+Financial output belongs in private runtime evidence. Account permissions and
+broker tradability are observations, not proof of an implemented trading adapter.
+"""
 import sys
 
 sys.path.insert(0, 'src')
 
-from autopoiesis.broker_client import create_alpaca_client
+from autopoiesis.broker_client import create_alpaca_client, list_open_orders
 from autopoiesis.config import AgentConfig
-from autopoiesis.data_gateway import AlpacaDataGateway
+
+
+def _observed(record, field):
+    value = getattr(record, field, None)
+    return "UNKNOWN" if value is None or value == "" else value
 
 
 def main():
-    print("=" * 60)
-    print("Testing Real Alpaca Connection & Market Status")
-    print("=" * 60)
-
     config = AgentConfig.from_env()
     client = create_alpaca_client(
         key_id=config.alpaca_api_key,
         secret_key=config.alpaca_secret_key,
         base_url=config.alpaca_base_url,
     )
-
-    # Test 1: Get Clock (market open/closed status)
-    print("\n[1/5] Getting Market Clock...")
+    print("Read-only Alpaca paper whole-account inventory")
     clock = client.get_clock()
-    print(f"  Timestamp: {clock.timestamp}")
-    print(f"  Market OPEN: {clock.is_open}")
-    print(f"  Next Open: {clock.next_open}")
-    print(f"  Next Close: {clock.next_close}")
+    print("\nMarket clock:")
+    for field in ("timestamp", "is_open", "next_open", "next_close"):
+        print(f"  {field}: {_observed(clock, field)}")
 
-    # Test 2: Get Account
-    print("\n[2/5] Getting Account...")
     account = client.get_account()
-    print(f"  Status: {account.status}")
-    print(f"  Equity: ${account.equity}")
-    print(f"  Cash: ${account.cash}")
-    print(f"  Buying Power: ${account.buying_power}")
-    print(f"  Portfolio Value: ${account.portfolio_value}")
-    print(f"  Last Equity: ${account.last_equity}")
+    print("\nAccount:")
+    for field in (
+        "status", "equity", "cash", "buying_power", "non_marginable_buying_power",
+        "options_buying_power", "crypto_status", "portfolio_value", "last_equity",
+        "trading_blocked", "account_blocked", "trade_suspended_by_user",
+        "pattern_day_trader", "shorting_enabled", "options_approved_level", "options_trading_level",
+    ):
+        print(f"  {field}: {_observed(account, field)}")
 
-    # Test 3: Get Positions
-    print("\n[3/5] Getting Positions...")
     positions = client.list_positions()
-    print(f"  Position count: {len(positions)}")
-    for pos in positions:
-        print(f"    {pos.side} {pos.qty} {pos.symbol}")
-        print(f"      Avg Entry: ${pos.avg_entry_price}")
-        print(f"      Market Value: ${pos.market_value}")
-        print(f"      Unrealized PnL: ${pos.unrealized_pl}")
+    if not isinstance(positions, list):
+        print("Positions unavailable or invalid")
+        return 1
+    print(f"\nWhole-account positions: {len(positions)}")
+    held = set()
+    for position in positions:
+        symbol = _observed(position, "symbol")
+        held.add(str(symbol))
+        print(f"  {symbol}:")
+        for field in ("asset_class", "side", "qty", "avg_entry_price", "market_value", "unrealized_pl"):
+            print(f"    {field}: {_observed(position, field)}")
 
-    # Test 4: Get Recent Orders
-    print("\n[4/5] Getting Recent Orders...")
-    orders = client.list_orders(status='all', limit=10)
-    print(f"  Order count: {len(orders)}")
+    configured = set(config.symbols) | set(getattr(config, "allowlist", ()))
+    print("\nAsset metadata for every held and configured symbol:")
+    print("  us_equity: EQUITY_ADAPTER_AVAILABLE; Guardian, market and coverage checks still required")
+    print("  options/crypto/unknown classes: UNSUPPORTED; no execution adapter")
+    for symbol in sorted(held | configured):
+        print(f"  {symbol} (held={symbol in held}, configured={symbol in configured}):")
+        try:
+            asset = client.get_asset(symbol)
+        except Exception as exc:
+            print(f"    metadata: UNKNOWN ({type(exc).__name__})")
+            print("    implementation_support: UNSUPPORTED")
+            continue
+        for field in ("class", "name", "exchange", "status", "tradable", "marginable",
+                      "shortable", "easy_to_borrow", "fractionable"):
+            print(f"    {field}: {_observed(asset, field)}")
+        support = "EQUITY_ADAPTER_AVAILABLE" if getattr(asset, "class", None) == "us_equity" else "UNSUPPORTED"
+        print(f"    implementation_support: {support}")
+
+    try:
+        orders = list_open_orders(client)
+    except RuntimeError as exc:
+        print(f"\nOpen orders complete: False ({exc})")
+        return 1
+    print(f"\nOpen orders complete: True; count: {len(orders)}")
     for order in orders:
-        print(f"    {order.side} {order.qty} {order.symbol} @ {order.filled_avg_price} ({order.status})")
-        print(f"      Submitted: {order.submitted_at}")
-        if order.filled_at:
-            print(f"      Filled: {order.filled_at}")
-
-    # Test 5: Full Data Snapshot
-    print("\n[5/5] Full Data Snapshot...")
-    gateway = AlpacaDataGateway(client=client)
-    snapshot = gateway.snapshot("SPY")
-    print(f"  Symbol: {snapshot.symbol}")
-    print(f"  Timestamp: {snapshot.timestamp}")
-    print(f"  Market Open: {snapshot.market_open}")
-    print(f"  Last Price: ${snapshot.last_price}")
-    print(f"  Account Equity: ${snapshot.account.equity}")
-    print(f"  Positions: {len(snapshot.positions)}")
-    print(f"  Open Orders: {len(snapshot.open_orders)}")
-
-    print("\n" + "=" * 60)
-    print("✅ All Alpaca tests passed!")
-    print("=" * 60)
+        print(f"  {order.side} {order.qty} {order.symbol} ({order.status})")
+    print("\nRead-only inventory finished; trading readiness remains separately audited.")
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())

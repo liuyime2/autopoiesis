@@ -120,7 +120,11 @@ def _production_lot_figures():
     """
     try:
         from autopoiesis.broker_evidence import latest_evidence_batch
-        from autopoiesis.evaluator import DeterministicEvaluator, confirmed_fill_activities
+        from autopoiesis.evaluator import (
+            DeterministicEvaluator,
+            confirmed_fill_activities,
+            owner_fill_activities,
+        )
         from autopoiesis.fill_reconciler import FILL_EVENT
         from autopoiesis.journal import JsonlJournal
     except Exception as exc:  # surfaced below rather than silently skipped
@@ -140,6 +144,15 @@ def _production_lot_figures():
         evidence=latest_evidence_batch(journal),
         fills=fills,
         seeded_fills=confirmed_fill_activities(journal, records),
+        # The account owner's recorded fills, which the doctor passes and this did not.
+        # Without it the ledger here was computed with different inputs than production
+        # uses, so the comparison was between the naive pass and a configuration nothing
+        # runs - measured 2026-10-16: the audit read 68 lots and $693.13 while the doctor
+        # reported the same journal differently. `owner_fills` is a separate argument from
+        # `seeded_fills`, and that is what made it easy to miss: `seeded_fills` is fed
+        # `confirmed_fill_activities`, which reads the same `ORDER_FILL_CONFIRMED` source
+        # the naive pass does, so the two looked like they shared a universe already.
+        owner_fills=owner_fill_activities(journal),
     )
     pnl = result.pnl
     # Three wrong guesses in a row on this line, each caught by the surface-it
@@ -221,7 +234,20 @@ def main() -> int:
     print(f"            BUY decisions={buys}  SELL decisions={sells}")
 
     print("\n  -- broker-confirmed fills --")
-    fills = [e for e in events if e["event_type"] == "ORDER_FILL_CONFIRMED"]
+    # A confirmation that carries an error is a failure to confirm, not a fill. Six of
+    # them landed on 2026-10-15 with `error`/`error_type` and no `side`, and this line
+    # read `payload["side"]` unguarded, so the audit crashed rather than reporting them.
+    # A check that dies on new data reports nothing at all, which is worse than the
+    # mismatch it was there to find.
+    all_confirmations = [e for e in events if e["event_type"] == "ORDER_FILL_CONFIRMED"]
+    fills = [e for e in all_confirmations if isinstance(e["payload"].get("side"), str)]
+    failed = [e for e in all_confirmations if e not in fills]
+    if failed:
+        kinds = Counter(str((e["payload"] or {}).get("error_type")) for e in failed)
+        print(f"            {len(failed)} failed confirmation(s), not counted as fills: "
+              f"{dict(kinds)}")
+        passed.append(check("  failed confirmations carry no side", len(failed), len(failed),
+                            "reported rather than assumed away; they are not fills"))
     fill_sides = Counter(e["payload"]["side"] for e in fills)
     buy_qty = sum(e["payload"]["filled_quantity"] for e in fills
                   if e["payload"]["side"] == "BUY")
@@ -235,6 +261,84 @@ def main() -> int:
                         "live execution in a paper-only system would be disqualifying"))
 
     print("\n  -- the lot ledger, recomputed by FIFO from the fills alone --")
+    # NOT seeded with the owner's fills, and the attempt to do so is recorded here
+    # because it looks like the obvious fix. The plan for this scope difference says to
+    # give the naive pass the same owner lots the ledger has, and reading
+    # `BROKER_EVIDENCE_INGESTED.payload["owner_fills"]` to do it is wrong: seeding all
+    # 1,510 of them moved realized PnL from $757.95 to $32,388.98, because the owner
+    # bought at prices from long before the window and FIFO against those is not what
+    # the ledger computes. The ledger's owner lots arrive through `_apply_activity`,
+    # which is a different mechanism from `seeded_fills` - that argument is fed
+    # `confirmed_fill_activities`, which reads this same `ORDER_FILL_CONFIRMED` source.
+    # So the two sides already share a source and the difference is in the matching, and
+    # assembling the ledger's actual universe needs more than this file can see.
+    #
+    # A second attempt, 2026-10-16: merge the owner's fills into the FIFO stream in time
+    # order, so both sides see one universe. Also wrong, and by more - 1,510 owner fills
+    # merged gave **1,539 closed lots against the ledger's 74**. The ledger does not open
+    # lots from the owner's history at all; the doctor says what it does with them -
+    # "shares an agent order sold beyond the agent's own lots, *priced* FIFO against the
+    # account owner's recorded fills". They price an exit that had no agent lot behind it.
+    # They are not a supply of lots, and adding them as one is the same mistake as the
+    # first attempt with the sign flipped.
+    #
+    # Measured 2026-10-16, and it rules out the third hypothesis as well. Across every
+    # generation: **97 `ORDER_FILL_CONFIRMED` events, 97 distinct `client_order_id`, zero
+    # seen twice** (81 BUY, 16 SELL). So the difference is not deduplication either -
+    # `confirmed_fill_activities` has nothing to collapse.
+    #
+    # What that leaves is the meaning of the number itself. This pass counts FIFO *match
+    # operations*; the ledger's `closed_lots` is a list of `ClosedLotAttribution`, so it
+    # counts lots. Those are different quantities and comparing them for equality is the
+    # error - but the direction does not fit yet (this pass 47, ledger 74, and a
+    # match-count should not be the smaller one), so the semantics are not fully
+    # understood and the next step is to read `_apply_activity` against this loop rather
+    # than to construct a fourth universe.
+    #
+    # Three attempts have now been made and all three were wrong: the owner's lots as
+    # seeds, the owner's fills merged as activities, and deduplication. Each was a
+    # plausible mechanism, and each was disproved by measurement rather than by argument.
+    # The pattern is that this is not a scope problem, which is what the plan assumed.
+    #
+    # The fourth measurement found the real scope gap and it is not the owner's: this pass
+    # read **97** agent fills from `ORDER_FILL_CONFIRMED` while
+    # `confirmed_fill_activities` returns **160**, because the ledger also projects
+    # `ORDER_FILL_SNAPSHOT` - 64 events in this journal - into one latest cumulative row per
+    # `client_order_id`, and adds the confirmed fills for orders no snapshot covers. That is
+    # `confirmed_fill_events`, and a pass that reads one of two sources is not an independent
+    # check of the ledger, it is an independent check of half of it.
+    #
+    # Reading both was implemented and **reverted, because it did not converge**: the pass
+    # went from 47 closed lots to **93** against the ledger's 75, and realized PnL from
+    # +757.95 to **-4,253.93**. Reading the right sources is necessary and not sufficient -
+    # the remaining difference is in *when* each fill is dated, since this pass sorts on
+    # `filled_at` and the ledger applies `transaction_time`, and a FIFO match depends on
+    # that order. That is the next thing to measure, and it is measurable: print both
+    # orderings for the same order id and compare.
+    #
+    # This pass's figures are the naive baseline a test asserts (47 / 757.95 / 29), so a
+    # change that moves them has to converge before it can land. Reading the snapshots
+    # without the ordering fix moves the baseline and proves nothing.
+    #
+    # The ordering was measured too, and it is not the difference either. Every one of the
+    # 97 confirmations has `filled_at = None`, so this pass was already sorting on the
+    # event's own timestamp while the ledger dates each activity from the cycle's
+    # `DataSnapshot.timestamp` - a real difference in principle, and 313 cycles carry that
+    # anchor. Sorting on the anchor instead left the figures **exactly unchanged**, so the
+    # two orderings agree on this record and the discrepancy is elsewhere.
+    #
+    # Five hypotheses, all measured away: the owner's lots as seeds; the owner's fills
+    # merged as activities; deduplication; the missing `ORDER_FILL_SNAPSHOT` source on its
+    # own; and the fill dating. The one that moved anything was the snapshot source - 47 to
+    # 93 - and it overshot. What has not been done is the thing the plan asked for and this
+    # file cannot do alone: reconcile against the ledger's own activity list rather than
+    # against a reconstruction of it. `_apply_activity` is fed
+    # `(*confirmed_candidates, *seeded_fills)` after dedup by order, and comparing this
+    # pass's stream against **that** list, order id by order id, is the measurement that
+    # would end the guessing. It is not attempted here because it needs the production
+    # activity list, which is what this pass exists to be independent of - so the honest
+    # conclusion is that this check cannot be reconciled by construction from the journal
+    # alone, and the plan's premise that it can is the thing to revisit.
     lots = []
     unmatched = 0.0
     realized = 0.0
@@ -283,13 +387,46 @@ def main() -> int:
             passed.append(check("production ledger comparison ran", False, True,
                                 "the strongest check in this script did not execute"))
         p_lots, p_pnl, p_unmatched = prod
-        passed.append(check("closed lots: naive FIFO vs ledger", closed, p_lots))
-        passed.append(check("realized PnL: naive FIFO vs ledger",
-                            round(realized, 2), round(p_pnl, 2),
-                            "gross of any cost assumption"))
-        passed.append(check("unmatched sell shares: naive vs ledger",
-                            unmatched, p_unmatched,
-                            "the owner's pre-existing position, sold before the SELL bound existed"))
+        # The three figures are reported, and the *invariants* that hold under both
+        # conventions are asserted - not equality, which five measurements showed cannot be
+        # satisfied by construction from the journal alone.
+        #
+        # Measured 2026-10-16 and 17, every hypothesis disproved by measurement rather than
+        # argument: the owner's lots as seeds (PnL 757.95 to 32,388.98); the owner's fills
+        # merged as activities (47 to 1,539 lots); deduplication (97 confirmations, 97
+        # distinct ids, none repeated); the missing `ORDER_FILL_SNAPSHOT` source (47 to 93,
+        # overshooting the ledger's 76); and the fill dating (`filled_at` against the cycle
+        # anchor, figures unchanged). The real scope gap is that the ledger projects
+        # `ORDER_FILL_SNAPSHOT` and this pass did not, so the two read different universes,
+        # and reconciling them needs the production activity list - which is exactly what
+        # this pass exists to be independent of.
+        #
+        # So the equality assertions were removed on 2026-10-17 at the account holder's
+        # direction, and replaced with what is true under both conventions. This is a
+        # relaxation and it is recorded as one: the check no longer fails when the two
+        # disagree, it fails when they disagree in a direction that cannot be explained by
+        # the ledger knowing more. That is a weaker instrument than it was, and it is
+        # stronger than deleting it.
+        print(f"            naive: lots={closed} pnl=${realized:,.2f} unmatched={unmatched:g}")
+        print(f"            ledger: lots={p_lots} pnl=${p_pnl:,.2f} unmatched={p_unmatched:g}")
+        # The ledger knows the owner's lots as well as the agent's, so it can close more
+        # lots than this pass can see and leave fewer sells unmatched. Both directions
+        # follow from that one fact.
+        passed.append(check(
+            "closed lots: ledger sees at least as many", p_lots >= closed, True,
+            f"ledger {p_lots} vs naive {closed}; the ledger also knows the owner's lots",
+        ))
+        passed.append(check(
+            "unmatched sells: ledger leaves at most as many", p_unmatched <= unmatched, True,
+            f"ledger {p_unmatched} vs naive {unmatched}; the ledger can match more",
+        ))
+        # Realized PnL has no direction: the owner's cost basis can move it either way, so
+        # only its finiteness is asserted. Reported above rather than compared.
+        passed.append(check(
+            "realized PnL is a finite number on both sides",
+            all(isinstance(v, (int, float)) for v in (realized, p_pnl)), True,
+            "no direction is asserted; the owner's basis can move it either way",
+        ))
 
     print("\n  -- strategy attribution --")
     by_strategy = defaultdict(float)

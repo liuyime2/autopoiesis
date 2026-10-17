@@ -22,6 +22,61 @@ _CYCLE_MARKER = '"execution":'
 _EVENT_MARKER = '"event_id":'
 
 
+#: Fields whose recorded value a later version may not recognise, and the value to read
+#: instead. The journal is append-only evidence: a record written by a version that got a
+#: closed set wrong cannot be rewritten to suit the set, so the reader has to read what was
+#: recorded rather than drop it.
+#:
+#: Measured 2026-10-15, market open: `TradeDecision.hold_reason` was written as
+#: `llm_unavailable_exposure_blocked`, which is not in `HoldReason`. The record appended
+#: cleanly, so the write looked successful, and it then failed validation on the way back
+#: in - five XLE cycles unreadable, and `market-open-verify` failed with CORRUPT_HISTORY.
+#: `other` is the honest reading: it is the literal that means "none of the named states".
+#:
+#: Writing one is still refused by the model, which is where that belongs. This is only
+#: the reader declining to lose a cycle over a field whose meaning is already lost.
+_TOLERATED_VALUES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("decision", "hold_reason"), "other"),
+)
+
+
+def _read_tolerantly(model, stripped: str):
+    """`model` from `stripped` with the tolerated fields coerced, or None if it still fails."""
+    try:
+        payload = json.loads(stripped)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    changed = False
+    for path, replacement in _TOLERATED_VALUES:
+        node: Any = payload
+        for key in path[:-1]:
+            node = node.get(key) if isinstance(node, dict) else None
+            if not isinstance(node, dict):
+                break
+        else:
+            leaf = path[-1]
+            if isinstance(node, dict) and leaf in node and node[leaf] not in _KNOWN[path]:
+                node[leaf] = replacement
+                changed = True
+    if not changed:
+        return None
+    try:
+        return model.model_validate(payload)
+    except Exception:
+        return None
+
+
+def _known_values() -> dict:
+    from autopoiesis.models import _HOLD_REASONS
+
+    return {("decision", "hold_reason"): _HOLD_REASONS}
+
+
+_KNOWN = _known_values()
+
+
 class RetainedWindow(TypedDict):
     """What `retained_window` returns, spelled out rather than left as `object`.
 
@@ -61,6 +116,7 @@ class JsonlJournal:
         self.backups = backups
         self.use_lock = lock
         self.last_dropped_lines = 0
+        self._parse_cache: dict = {}
         self.last_dropped_samples: list[str] = []
         # Where a generation goes when the rotation horizon reaches it. Same filesystem as the
         # journal on purpose, so the move is an `os.replace` and not a copy: there is no window
@@ -203,9 +259,6 @@ class JsonlJournal:
         Durable intents and legacy ambiguous ERROR rows count conservatively, while a
         CycleRecord for the same client order ID does not count a second time.
         """
-        paths = self.history_paths()
-        if not paths:
-            return 0
         attempts: set[str] = set()
         intent_ids: set[str] = set()
         date_text = day.isoformat()
@@ -221,6 +274,9 @@ class JsonlJournal:
         # reader that concluded the agent had never run. A limit that can silently stop
         # limiting is worse than no limit, because the report says it is in force.
         with self._read_lock(), contextlib.ExitStack() as stack:
+            paths = self.history_paths()
+            if not paths:
+                return 0
             handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in paths]
             for line in itertools.chain.from_iterable(handles):
                 if date_text not in line:
@@ -343,10 +399,13 @@ class JsonlJournal:
         paths = self._archive_paths()
         # `.N` holds the oldest generation, so the backups read in descending index order
         # (oldest first) and the live file comes last because it is the newest.
-        for index in range(self.backups, 0, -1):
-            candidate = self.path.with_suffix(self.path.suffix + f".{index}")
-            if candidate.exists():
-                paths.append(candidate)
+        prefix = self.path.name + "."
+        rotated = [
+            candidate for candidate in self.path.parent.glob(prefix + "*")
+            if candidate.is_file() and candidate.name[len(prefix):].isdigit()
+            and int(candidate.name[len(prefix):]) > 0
+        ]
+        paths.extend(sorted(rotated, key=lambda p: int(p.name[len(prefix):]), reverse=True))
         if self.path.exists():
             paths.append(self.path)
         return paths
@@ -370,19 +429,58 @@ class JsonlJournal:
         return [p for p in archived if p.is_file()]
 
     def _scan(self, model, *, limit, keep=None):
-        paths = self.history_paths()
-        if not paths:
-            return [], 0
+        # Parsing is cached across calls, keyed by the files' own signatures.
+        #
+        # Measured 2026-10-16 with `cProfile` over the replay: 9,154 scans of the journal
+        # cost 732 of 965 seconds - 76% of the run - and 5,705,703 of those were pydantic
+        # `model_validate_json` calls. Every `read_events` re-parsed every generation, and
+        # the daemon reads several per cycle, so the cost is quadratic in the record.
+        #
+        # The cache is safe because the journal is append-only: a change is a size or mtime
+        # change on one of `history_paths`, and rotation changes the set of paths itself.
+        # `keep` and `limit` are applied per call and never cached, so a caller's filter
+        # cannot be mistaken for another's.
+        parsed, dropped = self._parsed(model)
         collected: deque | None = deque(maxlen=limit) if limit else None
         kept: list = []
+        for record in parsed:
+            if keep is not None and not keep(record):
+                continue
+            if collected is not None:
+                collected.append(record)
+            else:
+                kept.append(record)
+        return (list(collected) if collected is not None else kept), dropped
+
+    def _signature(self) -> tuple:
+        """The files' identity, so a cache entry can tell whether it is still current."""
+        out = []
+        for path in self.history_paths():
+            try:
+                stat = path.stat()
+                out.append((str(path), stat.st_size, stat.st_mtime_ns))
+            except OSError:
+                out.append((str(path), -1, -1))
+        return tuple(out)
+
+    def _parsed(self, model):
+        """Every record of `model` across all generations, parsed once per file signature."""
+        signature = self._signature()
+        cached = self._parse_cache.get(model)
+        if cached is not None and cached[0] == signature:
+            return cached[1], cached[2]
+
+        records: list = []
         dropped = 0
         want_events = model is JournalEvent
-        # Locked once across every generation: rotation replaces the live file, so taking
-        # the lock per generation could interleave a rotation between reads and duplicate
-        # or skip records.
         with self._read_lock(), contextlib.ExitStack() as stack:
-          handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in paths]
-          for line in itertools.chain.from_iterable(handles):
+            paths = self.history_paths()
+            if not paths:
+                self.last_dropped_lines = 0
+                self._parse_cache[model] = (signature, [], 0)
+                return [], 0
+            handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in paths]
+            for line in itertools.chain.from_iterable(handles):
                 stripped = line.strip()
                 if not stripped:
                     continue
@@ -399,19 +497,17 @@ class JsonlJournal:
                     # A well-formed record of the other kind. Not an error.
                     continue
                 try:
-                    parsed = model.model_validate_json(stripped)
+                    records.append(model.model_validate_json(stripped))
                 except Exception:
-                    dropped += 1
-                    self._note_drop(stripped)
-                    continue
-                if keep is not None and not keep(parsed):
-                    continue
-                if collected is not None:
-                    collected.append(parsed)
-                else:
-                    kept.append(parsed)
+                    repaired = _read_tolerantly(model, stripped)
+                    if repaired is None:
+                        dropped += 1
+                        self._note_drop(stripped)
+                        continue
+                    records.append(repaired)
         self.last_dropped_lines = dropped
-        return (list(collected) if collected is not None else kept), dropped
+        self._parse_cache[model] = (signature, records, dropped)
+        return records, dropped
 
     def _note_drop(self, line: str) -> None:
         if len(self.last_dropped_samples) < 3:
@@ -431,6 +527,20 @@ class JsonlJournal:
             return
         if self.path.stat().st_size + incoming <= self.max_bytes:
             return
+        # Imported history or a lowered retention budget can leave generations
+        # older than the normal horizon. Archive those oldest first, before the
+        # normal oldest retained file, or the reader's archive-first order flips.
+        prefix = self.path.name + "."
+        deep_generations = [
+            generation for generation in self.history_paths()
+            if generation.name.startswith(prefix)
+            and generation.name[len(prefix):].isdigit()
+            and int(generation.name[len(prefix):]) > max(self.backups, 0)
+        ]
+        if deep_generations:
+            self._validate_archive_manifest(self._manifest_for_rotation())
+            for generation in deep_generations:
+                self._archive_generation(generation)
         oldest = self.path.with_suffix(self.path.suffix + f".{self.backups}")
         if self.backups <= 0:
             # `backups = 0` asks the journal to keep nothing but the live file. That is a
@@ -590,12 +700,7 @@ class JsonlJournal:
     def _has_existing_history(self) -> bool:
         if self.path.exists() and self.path.stat().st_size:
             return True
-        if any(
-            self.path.with_suffix(self.path.suffix + f".{index}").exists()
-            for index in range(1, self.backups + 1)
-        ):
-            return True
-        return bool(self._archive_paths())
+        return any(path != self.path for path in self.history_paths())
 
     def _locked(self):
         """Exclusive, for appends."""

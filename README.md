@@ -7,7 +7,7 @@ broker's own records — and retires the ones that cannot.**
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![Paper trading only](https://img.shields.io/badge/trading-paper%20only-orange.svg)](#safety)
-[![Gate: 55 check classes](https://img.shields.io/badge/gate-55%20check%20classes-brightgreen.svg)](tools/verify.py)
+[![Gate: 56 check classes](https://img.shields.io/badge/gate-56%20check%20classes-brightgreen.svg)](tools/verify.py)
 [![Lint: ruff](https://img.shields.io/badge/lint-ruff-261230.svg)](ruff.toml)
 [![Types: mypy](https://img.shields.io/badge/types-mypy-2a6db2.svg)](pyproject.toml)
 [![Broker: Alpaca](https://img.shields.io/badge/broker-Alpaca%20paper-yellow.svg)](https://alpaca.markets/)
@@ -20,8 +20,8 @@ append-only journal, so whatever the agent claims about itself can be checked.
 
 > **Paper trading only. Not investment advice. No performance claim.**
 > Live trading is refused in code: any broker URL that is not Alpaca's paper endpoint is
-> rejected before a client is built. On the record so far the system **does not** beat
-> holding SPY — `make benchmark` prints the current verdict with its denominators.
+> rejected before a client is built. Outperformance of holding SPY is **unproven** —
+> `make benchmark` reports UNKNOWN until allocated capital and aligned equity exist.
 
 ## Contents
 
@@ -57,8 +57,8 @@ yourself. Autopoiesis is built around that second part:
 | **Lessons with an ablation** | Each lesson in the prompt is shown on half the cycles. One with no measured effect after 10 trading days is retired. |
 | **Constrained strategy DSL** | New strategies are parameter-only rules (`RULE`, `TREND_FOLLOW`, …) checked by a schema. The model never writes code. |
 | **Bounded short selling** | SHORT/COVER sit behind `AUTOPOIESIS_SHORTS` (`off` / `shadow` / `paper`), with their own Guardian rule. Off by default. |
-| **Broker-verified accounting** | FIFO lot ledger, realised and unrealised PnL, attribution to model vs baseline, and a SPY buy-and-hold benchmark on the same capital and window. |
-| **Self-checking** | `make verify` runs 55 check classes over code *and* the running system; `make verify-self-test` breaks the gate on purpose to prove it can fail. A watchdog restarts the daemon, and a report is written after every close. |
+| **Broker-verified accounting** | FIFO lot ledger, realised and unrealised PnL, owner/agent segregation and diagnostic strategy comparisons. Agent allocation and aligned portfolio benchmark remain unavailable. |
+| **Self-checking** | `make verify` runs 56 check classes over code *and* the running system; `make verify-self-test` breaks the gate on purpose to prove it can fail. A watchdog restarts the daemon, and a report is written after every close. |
 | **Reproducible** | One script clones the committed tree into a new venv with no credentials and runs everything; its log is committed. |
 
 ## How it works
@@ -128,12 +128,11 @@ twice bullish in 33 years, and RSI and LWR disagree on 87% of them because `%R` 
 "six independent signals" is closer to four. It is recorded as UNDERPOWERED, not as a null it did
 not earn.
 
-**Not shown: that the agent beats holding.** `make benchmark` reports the agent's own return on
-deployed capital after cost against SPY over the same window. Over the record on disk (19 trading
-days against a 60-day target) the agent is **behind**, and the figure is printed with its
-denominator. A per-strategy comparison is printed beside it as a *diagnostic* — given each strategy
-its own peak capital, on its own window — and is labelled as such, because one weak strategy
-failing is not the agent failing.
+**Not shown: that the agent beats holding.** `make benchmark` preserves paper realized and
+unrealized PnL and charges the configured assumed cost. It reports UNKNOWN for agent return,
+aligned SPY excess and the 60-day target: independent strategy peak exposures are not agent
+allocated capital, and distinct cycle dates are not a continuous equity history.
+Per-strategy peak-exposure comparisons remain labelled diagnostics.
 
 **Not shown: that the LLM helps.** A large share of decisions predate provenance capture and
 cannot be attributed to a model at all; `make benchmark` prints that coverage with every share it
@@ -155,12 +154,10 @@ the `status` word the file carries, which is a record of what it was rather than
 `PAUSED` is described as a holding pattern the loop reopens, because the daemon returns a paused
 strategy to probation on journalled evidence, and the page used to call it terminal.
 
-**Portfolio & Risk** prints the limits in force beside the exposure they bound — peak exposure
-45,233.90 against a configured 90,000, per strategy, with realized PnL and the assumed cost the
-evaluator charges — and the per-strategy capital is the denominator the agent-level return uses,
-so the page and `make benchmark` cannot disagree about the capital. It does **not** print a
-drawdown: the record is discrete paper cycles with no equity curve behind it, and a drawdown
-manufactured from realized PnL alone would move with the timing of closes rather than with risk.
+**Portfolio & Risk** prints configured limits and per-strategy historical exposure diagnostics,
+realized PnL and assumed costs. A sum of independent historical peaks does not measure simultaneous
+exposure or compliance with the portfolio cap. Agent allocated capital, continuous equity and
+portfolio drawdown remain UNKNOWN.
 
 **System** prints whether the daemon is running judged by age and pid, the source fingerprint of
 the code that wrote the heartbeat, and how much of the record these pages can see — the live
@@ -205,7 +202,7 @@ make install                    # pip install -e ".[dev]"
 make check                      # ruff + mypy + the test suite
 make smoke-offline              # config and CLI end to end, no broker contacted
 python examples/minimal_cycle.py  # the Guardian approving one order and refusing another
-make verify                     # the full gate: 55 check classes
+make verify                     # the full gate: 56 check classes
 ```
 
 On Debian or Ubuntu, run `sudo apt install python3-venv` first. conda also works: the `make`
@@ -242,8 +239,8 @@ for that reason, and CI runs the release check on the packaged path separately.
 4. Check the connection, then run it:
 
    ```bash
-   make smoke                      # one real cycle against the paper account
-   ./autopoiesis install-service      # systemd user units: daemon, Ollama, watchdog, research, report
+   make smoke                      # read-only broker connection and snapshot checks
+   make install-service            # systemd user units: daemon, Ollama, watchdog, research, report
    make run                        # start the daemon
    make status                     # alive? which strategy? last decision?
    make doctor                     # health of the running system, non-zero on any fault
@@ -262,13 +259,14 @@ Every task is a `make` target.
 |---|---|---|
 | `make check` | lint + mypy + tests | no |
 | `make smoke-offline` | config and CLI end to end with `--skip-broker` | no |
-| `make verify` | the gate: 55 check classes; `CLASS=<name>` re-runs one | no¹ |
+| `make verify` | the gate: 56 check classes; `CLASS=<name>` re-runs one | no¹ |
 | `make verify-self-test` | breaks the gate on purpose and checks it fails | no |
-| `make smoke` | one real cycle against the paper account | yes |
+| `make smoke` | read-only broker connection and snapshot checks | yes |
 | `make fast` | check + smoke + the gate | yes |
+| `make install-service` | install the systemd user units | no |
 | `make run` / `stop` / `restart` / `status` | control the daemon via systemd | yes |
 | `make doctor` | health of the running system | yes |
-| `make benchmark` | each strategy against SPY buy-and-hold, same capital and window; exit 0 ahead / 1 behind / 2 nothing to measure | journal |
+| `make benchmark` | raw paper accounting and strategy diagnostics; current agent comparison UNKNOWN, exit 2 | journal |
 | `make daily-report` | one trading day's validation report (`DATE=YYYY-MM-DD`) | journal |
 | `make status-page` | a read-only static snapshot: overview, portfolio & risk, decisions, strategies, system, evidence | journal |
 | `make pipeline` | validate-data → test → evaluate → reproduce | journal |
@@ -281,17 +279,35 @@ When the gate is red, read which class failed before concluding the code is wron
 classes judge the running system (for example, "is the model adding value?"). Those can fail
 on a trading result, while `make check` speaks only about the repository.
 
+Manual `--once` operation runs the same paper daemon with `max_cycles=1`: the shared
+strategy selection, frozen strategy provenance, hybrid decision engine, full Guardian
+configuration, startup reconciliation, and market scheduler all apply. It acquires the
+daemon's exclusive PID lock, so an active daemon refuses a competing single-cycle writer.
+During an open session it can submit a paper order and records its results through the
+daemon's journal and heartbeat; it also runs normal daemon maintenance. It is an operational
+command, with the daemon's exit status, rather than a read-only preview or a printed cycle
+report.
+
+When the broker scheduler reports closed, bounded mode exits without a trading cycle.
+A successful closed invocation proves that scheduling prevented trading; it does not
+prove a successful model decision, Guardian review of an order, broker submission, fill,
+or profitability. `make smoke` is read-only connection/data verification. The shared daemon
+builder only constructs the pipeline; construction does not run decisions, reconciliation,
+maintenance, or execution, although existing journal reads may acquire file locks.
+
 ## Reproducing the results
 
 ```bash
-docs/evidence/run-fresh-clone.sh
+make fresh-clone ENVFILE=/dev/null
 ```
 
 This clones the committed tree into a scratch directory, creates a new venv, removes every
-credential, and runs seven steps: lint, the full test suite, the example, the entry point,
-provenance, the gate's self-test and the gate. The output is committed as
+credential and inherited project configuration, prevents reloading operator env files,
+and runs nine steps through Make: lint, check, smoke-offline, tests, example, CLI help,
+provenance, the gate's self-test and the gate. HOME stays unchanged. The output is committed as
 [`docs/evidence/fresh-clone.log`](docs/evidence/fresh-clone.log), and the gate checks that log
-against the script and the commit it names. CI runs the same steps on every push.
+against the script and the commit it names. CI also runs lint, types, tests,
+offline smoke, the self-test and the gate; it does not run the nested clone harness.
 
 Figures about trading, by contrast, come from a running paper account and change as it
 trades, so they are not written into these documents. Reproduce them on your own record with
@@ -340,7 +356,7 @@ Report a vulnerability as described in [`SECURITY.md`](SECURITY.md).
 ## Project layout
 
 ```
-src/autopoiesis/          the package (import name autopoiesis). 46 modules, 4 external dependencies.
+src/autopoiesis/          the package (import name autopoiesis). 49 modules, 4 external dependencies.
   cli.py                the single entry point
   daemon.py             the trading loop and the maintenance loop
   loop.py               one cycle: snapshot -> decision -> guardian -> execute
@@ -351,10 +367,10 @@ src/autopoiesis/          the package (import name autopoiesis). 46 modules, 4 e
   counterfactual.py     scoring each decision against what the market did next
   curriculum.py         the agent proposing new strategies
   journal.py            append-only record; the source of truth
-  models.py             shared schema, imported by 24 modules
+  models.py             shared schema, imported by 26 modules
   research/             walk-forward backtests; production may not import it
 tools/                  the gate (verify.py), benchmark, daily report, probes, systemd templates
-tests/autopoiesis/        90 test files
+tests/autopoiesis/       115 test files
 examples/               the smallest runnable example, no broker needed
 configs/                paper.env.example: every environment variable with its default
 docs/                   ARCHITECTURE.md, evidence/, history/

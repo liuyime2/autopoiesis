@@ -78,12 +78,12 @@ export
 endif
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install check lint lint-files type test smoke smoke-offline fast fast-no-broker daily-report benchmark broker-latency-sample \
+.PHONY: help setup install check lint lint-files type test test-provenance-host smoke smoke-offline fast fast-no-broker daily-report benchmark broker-latency-sample \
         verify verify-self-test doctor audit integrity classes classes-list \
-        run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc \
-        site refresh-figures benchmark-json dist release-check \
+        install-service run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc \
+        site refresh-figures benchmark-json dist release-check fresh-clone example-cycle cli-help \
         attest-archive-baseline fetch-replay-bars research-search research-run \
-        journal-backup journal-restore journal-drill \
+        journal-backup journal-local-backup journal-restore journal-drill \
         research-register research-verify research-check-tape
 
 help:
@@ -101,15 +101,16 @@ help:
 	@echo "make classes          list the check classes and their test files"
 	@echo "make lint             ruff over src/ tools/ tests/ examples/"
 	@echo "make lint-files FILES=...  run ruff on selected files for fast failure isolation"
-	@echo "make type             mypy over src/autopoiesis; reports without gating"
-	@echo "make check            lint + test (no broker, no credentials)"
+	@echo "make type             mypy over src/autopoiesis; non-zero on any finding"
+	@echo "make check            lint + type + test (no broker, no credentials)"
 	@echo "make test             unit and integration tests only"
-	@echo "make smoke            one real cycle against the paper broker"
+	@echo "make smoke            read-only broker whole-account and asset inventory"
 	@echo "make broker-latency-sample COUNT=20 read-only clock/account operation latency against paper"
 	@echo "make smoke-offline    the widest check needing no broker and no credentials"
 	@echo "make fast             lint + test + smoke + verify"
 	@echo "make fast-no-broker   lint + test + smoke-offline, no credentials needed"
 	@echo "make reproduce        write runtime/autopoiesis/reproduce.txt (provenance)"
+	@echo "make test-provenance-host  opt-in real journal/ledger/broker-clock provenance checks"
 	@echo "make clean            remove caches; clean-pyc removes only bytecode"
 	@echo "make integrity        runtime state integrity only"
 	@echo "make doctor           health and evidence checks"
@@ -121,6 +122,7 @@ help:
 	@echo "make evaluate         score the current paper record: strategies, PnL, counterfactuals"
 	@echo "make pipeline         validate-data -> test -> evaluate -> reproduce (run make install first)"
 	@echo "make status-page      a read-only static snapshot of current state"
+	@echo "make install-service install the systemd user units"
 	@echo "make run|stop|restart the trading daemon"
 	@echo "make status           daemon and account status"
 	@echo ""
@@ -146,21 +148,26 @@ REPLAY_END ?=
 REPLAY_INTERVAL ?= 5Min
 REPLAY_ROLLING ?= 0
 REPLAY_CACHE ?= runtime/autopoiesis/replay
+SPEC ?= $(AUTOPOIESIS_RESEARCH_SPEC)
+PREREGISTRY ?= $(if $(AUTOPOIESIS_PREREGISTRY),$(AUTOPOIESIS_PREREGISTRY),runtime/autopoiesis/preregistered)
+RESEARCH_TRIALS ?= $(if $(AUTOPOIESIS_RESEARCH_TRIALS),$(AUTOPOIESIS_RESEARCH_TRIALS),runtime/autopoiesis/research_trials.jsonl)
 
 fetch-replay-bars:
 	@test -n "$(REPLAY_START)" || (echo "REPLAY_START is required (UTC ISO-8601)" >&2; exit 2)
 	@test -n "$(REPLAY_END)" || (echo "REPLAY_END is required (UTC ISO-8601)" >&2; exit 2)
-	@$(PY) tools/fetch_replay_bars.py "$(REPLAY_SYMBOL)" "$(REPLAY_START)" "$(REPLAY_END)" "$(REPLAY_INTERVAL)" $(if $(filter 1 true yes,$(REPLAY_ROLLING)),ROLLING,)
+	@$(PY) tools/fetch_replay_bars.py "$(REPLAY_SYMBOL)" "$(REPLAY_START)" "$(REPLAY_END)" "$(REPLAY_INTERVAL)" $(if $(filter 1 true yes,$(REPLAY_ROLLING)),ROLLING,) --cache "$(REPLAY_CACHE)"
 
 research-search:
-	@$(PY) -m autopoiesis.research.driver "$(REPLAY_CACHE)" "$(REPLAY_SYMBOL)"
+	@test -n "$(SPEC)" || (echo "SPEC=<registered supported .spec> is required" >&2; exit 2)
+	@$(PY) -m autopoiesis.research.driver "$(REPLAY_CACHE)" "$(REPLAY_SYMBOL)" "$(SPEC)" --registry "$(PREREGISTRY)" --trials "$(RESEARCH_TRIALS)"
 
 research-run:
-	@test -n "$(REPLAY_START)" || (echo "REPLAY_START is required (UTC ISO-8601)" >&2; exit 2)
-	@test -n "$(REPLAY_END)" || (echo "REPLAY_END is required (UTC ISO-8601)" >&2; exit 2)
-	@$(MAKE) research-install
-	@$(MAKE) fetch-replay-bars
-	@$(MAKE) research-search
+	@test -n "$(SPEC)" || (echo "SPEC=<registered supported .spec> is required" >&2; exit 2)
+	@contract_args="$$( $(PY) tools/check_research_tape.py "$(SPEC)" --registry "$(PREREGISTRY)" --fetch-arguments )" || exit $$?; \
+	  readarray -t fields <<< "$$contract_args"; \
+	  $(MAKE) research-install && \
+	  $(MAKE) fetch-replay-bars REPLAY_SYMBOL="$${fields[0]}" REPLAY_START="$${fields[1]}" REPLAY_END="$${fields[2]}" REPLAY_INTERVAL="$${fields[3]}" REPLAY_ROLLING=0 && \
+	  $(MAKE) research-search REPLAY_SYMBOL="$${fields[0]}"
 
 # Must stay green. If this ever fails, the gate cannot be trusted and every other
 # result from it is meaningless.
@@ -236,8 +243,43 @@ TEST_ARGS ?=
 test:
 	@$(PY) -m pytest -q $(TEST_ARGS)
 
+# Explicit integration against this host's runtime, including broker clock when configured.
+# Ordinary tests use synthetic files and never access these production-host inputs.
+test-provenance-host:
+	@AUTOPOIESIS_TEST_HOST_PROVENANCE=1 $(PY) -m pytest -q \
+		tests/autopoiesis/test_provenance_unified.py -k 'real_record or real_ledger'
+
 doctor:
 	@./autopoiesis doctor
+
+# The VIX floor refuses a reading more than four days old, and nothing refreshed the cache
+# on a schedule until 2026-10-15 - so the floor was silently disengaged from 2026-10-13
+# while the doctor said OK. P6 measured it as a 12.4% forecast-error improvement.
+# `--check` is the pre-open gate: it exits non-zero when the reading is stale.
+vix-refresh:
+	@$(PY) tools/refresh_vix.py
+
+vix-check:
+	@$(PY) tools/refresh_vix.py --check
+
+# Take one strategy out of service, audited. STRATEGY_IDS is required; REASON is
+# required, because a pause nobody can explain is indistinguishable from a mistake.
+# The lifecycle is written to the strategy file and `StrategyLibrary.list()` re-reads
+# that directory every cycle, so the running daemon sees this on its next cycle - no
+# restart, no deploy, and nothing unreviewed enters the trading path.
+STRATEGY_IDS ?=
+PAUSE_REASON ?=
+PAUSE_ACTOR ?= operator
+# Default to the live runtime tree the daemon serves from, overridable so the same
+# entry point can be pointed at a copy for rehearsal.
+PAUSE_STRATEGY_DIR ?= runtime/autopoiesis/strategies
+PAUSE_JOURNAL ?= runtime/autopoiesis/journal.jsonl
+pause-strategy:
+	@test -n "$(STRATEGY_IDS)" || { echo "PAUSE: set STRATEGY_IDS=<id> [id ...]"; exit 2; }
+	@test -n "$(PAUSE_REASON)" || { echo "PAUSE: set PAUSE_REASON='<why>'"; exit 2; }
+	@$(PY) -m autopoiesis.strategy_pause $(STRATEGY_IDS) \
+		--reason "$(PAUSE_REASON)" --actor "$(PAUSE_ACTOR)" \
+		--strategy-dir "$(PAUSE_STRATEGY_DIR)" --journal "$(PAUSE_JOURNAL)"
 
 # Does the system beat SPY buy-and-hold, after costs, inside the stated risk budget?
 # The falsifiable target the whole project is measured against. No credentials needed.
@@ -274,6 +316,9 @@ classes:
 	@$(PY) tools/verify.py --list
 
 classes-list: classes
+
+install-service:
+	@./autopoiesis install-service
 
 run:
 	@systemctl --user start autopoiesis.service
@@ -321,9 +366,19 @@ type:
 
 check: lint type test
 
-# Smoke: one real cycle end to end against the broker. This is the cheapest test
-# that touches the network and the model, and the first one that can catch a
-# broken API contract, a bad credential path or a decision that will not parse.
+# The fresh-clone harness uses the same declared entry points as a contributor.
+FRESH_CLONE_DEST ?=
+fresh-clone:
+	@bash docs/evidence/run-fresh-clone.sh $(if $(FRESH_CLONE_DEST),"$(FRESH_CLONE_DEST)",)
+
+example-cycle:
+	@$(PY) examples/minimal_cycle.py
+
+cli-help:
+	@$(PY) -m autopoiesis.cli --help
+
+# Smoke: read-only whole-account paper broker and asset inventory, independent of
+# stock quotes. Quote/decision readiness is audited by the market-readiness targets.
 smoke:
 	@$(CONDA_RUN) python tools/alpaca_smoke.py
 
@@ -397,37 +452,28 @@ validate-data:
 		echo "validate-data: runtime state parses and is internally consistent"; \
 	fi
 
-# Score what actually happened, using broker evidence only.
-#
-# The exit code is deliberately swallowed. `--verify-profit-target` exits non-zero when the
-# 10% daily target is not met, which right now it is not - and that is a measurement, not a
-# broken build. Wiring it into `make pipeline` unchanged would have made the pipeline fail
-# every day until the agent is profitable, which teaches an operator to ignore the target
-# entirely: the one number the project exists to move would become noise. So the report is
-# printed with its verdict intact and the stage succeeds, and a genuine failure - an
-# unreadable journal, missing credentials - still surfaces because the report cannot be
-# produced at all.
-# `--verify-profit-target` exits 1 when the 10% daily target is not met, which is a
-# measurement, and 2 when it cannot produce the report at all, which is a failure. An earlier
-# version used `|| true`, which swallowed both, so a missing interpreter, a crash and an unmet
-# target were indistinguishable - and the comment claiming a genuine failure still surfaced
-# was simply wrong. Only the absence of a report fails this stage.
+# Collect the configured target measurement. Account-only history leaves agent
+# performance UNKNOWN (exit 2), not a proven pass or failure. A complete JSON
+# report must match its process exit, status, comparison_status and satisfied
+# fields; a Python exception also exits 1 and must fail this stage. Successful
+# collection preserves the verdict and never means the profitability target passed.
 EVAL_REPORT := runtime/autopoiesis/evaluate.txt
 
 evaluate:
 	@mkdir -p runtime/autopoiesis
 	@if [ ! -f runtime/autopoiesis/journal.jsonl ]; then \
 		echo "evaluate: no journal yet; run 'make run' for at least one cycle first"; \
-	elif $(CONDA_RUN) python -m autopoiesis.cli --verify-profit-target > $(EVAL_REPORT); then \
-		cat $(EVAL_REPORT); \
-		echo "evaluate: target met"; \
 	else \
-		rc=$$?; cat $(EVAL_REPORT); \
-		if [ $$rc -gt 1 ]; then \
-			echo "evaluate: FAILED (exit $$rc): the report could not be produced"; \
-			exit $$rc; \
+		rc=0; $(PY) -m autopoiesis.cli --verify-profit-target > $(EVAL_REPORT) || rc=$$?; \
+		if $(PY) -c 'import json, sys; p = json.load(open(sys.argv[1])); rc = int(sys.argv[2]); expected = {0: ("satisfied", "PASS", True), 1: ("not satisfied", "FAIL", False), 2: ("unproven", "UNKNOWN", False)}; valid = isinstance(p, dict) and rc in expected and p.get("exit_code") == rc and (p.get("status"), p.get("comparison_status")) == expected[rc][:2] and p.get("satisfied") is expected[rc][2]; sys.exit(0 if valid else 1)' $(EVAL_REPORT) $$rc; then \
+			cat $(EVAL_REPORT); \
+			echo "evaluate: measurement collected; the report contains the target verdict"; \
+		else \
+			cat $(EVAL_REPORT); \
+			echo "evaluate: FAILED (exit $$rc): invalid or inconsistent measurement"; \
+			if [ $$rc -ne 0 ]; then exit $$rc; fi; \
+			exit 1; \
 		fi; \
-		echo "evaluate: target NOT met (exit 1). That is a measurement, not a gate failure."; \
 	fi
 reproduce:
 	@mkdir -p runtime/autopoiesis
@@ -478,6 +524,24 @@ release-check: dist
 		&& echo "configs/paper.env.example from the sdist: ok"
 	@test -f runtime/release-src/autopoiesis-*/examples/minimal_cycle.py \
 		&& echo "examples/ from the sdist: ok"
+	@# A disposable example registration proves installed storage, not a research result.
+	@installed_python="$(CURDIR)/runtime/release-check/bin/python"; \
+	  workspace="$(CURDIR)/runtime/release-check/workspace"; \
+	  spec=( "$(CURDIR)"/runtime/release-src/autopoiesis-*/configs/research.spec.example ); \
+	  mkdir -p "$$workspace" && cd "$$workspace" && \
+	  env -i AUTOPOIESIS_ENV_FILE="$$workspace/absent.env" XDG_CONFIG_HOME="$$workspace/config" \
+	  "$$installed_python" -c 'import os, subprocess, sys, sysconfig; from pathlib import Path; import autopoiesis; from autopoiesis.research import prereg; \
+	assert "PYTHONPATH" not in os.environ and "AUTOPOIESIS_PREREGISTRY" not in os.environ; \
+	assert not Path(os.environ["AUTOPOIESIS_ENV_FILE"]).exists(); \
+	site = Path(sysconfig.get_path("purelib")).resolve(); \
+	assert site.is_relative_to(Path(sys.prefix).resolve()); \
+	assert all(Path(module.__file__).resolve().is_relative_to(site) for module in (autopoiesis, prereg)); \
+	spec = Path(sys.argv[1]); \
+	subprocess.run([sys.executable, "-m", "autopoiesis.research.prereg", "register", str(spec)], check=True); \
+	subprocess.run([sys.executable, "-m", "autopoiesis.research.prereg", "verify", str(spec)], check=True); \
+	registry = Path.cwd() / "runtime/autopoiesis/preregistered"; digest = prereg.spec_hash(spec); \
+	assert (registry / (digest + ".spec")).is_file() and (registry / (digest + ".json")).is_file(); \
+	print("installed example register/verify in the working-directory registry: ok")' "$${spec[0]}"
 	@echo "release-check: the sdist installs and runs what the README claims it runs"
 
 
@@ -515,16 +579,25 @@ benchmark-json:
 # This proves a snapshot can be taken and restored on this host. It does not ship anything
 # anywhere: an off-site copy is a deployment decision these targets make possible and do not make.
 
+JOURNAL_RUNTIME ?= runtime/autopoiesis
+BACKUP_ROOT ?= runtime/backups
+
 journal-backup:
-	@$(PY) tools/journal_snapshot.py snapshot $(DEST)
+	@test -n "$(DEST)" || (echo "DEST=<snapshot dir> is required" >&2; exit 2)
+	@$(PY) tools/journal_snapshot.py --runtime "$(JOURNAL_RUNTIME)" snapshot "$(DEST)"
+
+journal-local-backup:
+	@env -u ALPACA_API_KEY -u ALPACA_SECRET_KEY -u APCA_API_KEY_ID -u APCA_API_SECRET_KEY \
+	  -u OPENAI_API_KEY -u ANTHROPIC_API_KEY AUTOPOIESIS_ENV_FILE=/dev/null \
+	  $(PY) tools/journal_snapshot.py --runtime "$(JOURNAL_RUNTIME)" backup "$(BACKUP_ROOT)"
 
 journal-restore:
 	@test -n "$(SRC)" || (echo "SRC=<snapshot dir> is required" >&2; exit 2)
 	@test -n "$(DEST)" || (echo "DEST=<scratch dir> is required" >&2; exit 2)
-	@$(PY) tools/journal_snapshot.py restore $(SRC) $(DEST)
+	@$(PY) tools/journal_snapshot.py --runtime "$(JOURNAL_RUNTIME)" restore "$(SRC)" "$(DEST)"
 
 journal-drill:
-	@$(PY) tools/journal_snapshot.py drill
+	@$(PY) tools/journal_snapshot.py --runtime "$(JOURNAL_RUNTIME)" drill
 
 
 # --- pre-registered research -----------------------------------------------------------------
@@ -540,13 +613,59 @@ journal-drill:
 
 research-register:
 	@test -n "$(SPEC)" || (echo "SPEC=<path to a .spec file> is required" >&2; exit 2)
-	@$(PY) -m autopoiesis.research.prereg register $(SPEC)
+	@$(PY) -m autopoiesis.research.prereg register "$(SPEC)" --registry "$(PREREGISTRY)"
 
 research-verify:
 	@test -n "$(SPEC)" || (echo "SPEC=<path to a .spec file> is required" >&2; exit 2)
-	@$(PY) -m autopoiesis.research.prereg verify $(SPEC)
+	@$(PY) -m autopoiesis.research.prereg verify "$(SPEC)" --registry "$(PREREGISTRY)"
 
 research-check-tape:
 	@test -n "$(SPEC)" || (echo "SPEC=<path to a .spec file> is required" >&2; exit 2)
 	@test -n "$(REPLAY_CACHE)" || (echo "REPLAY_CACHE=<bar cache dir> is required" >&2; exit 2)
-	@$(PY) tools/check_research_tape.py $(SPEC) $(REPLAY_CACHE)
+	@$(PY) tools/check_research_tape.py "$(SPEC)" "$(REPLAY_CACHE)" --symbol "$(REPLAY_SYMBOL)" --registry "$(PREREGISTRY)"
+
+# Read-only observations of the actual paper process. Required source identity is
+# deliberately supplied by the operator; it is never inferred into a passing verdict.
+EXPECTED_FINGERPRINT ?=
+DEPLOYMENT_AFTER ?=
+READINESS_OUTPUT ?=
+SCHEDULED ?= 0
+READINESS_ROOT ?= $(CURDIR)
+READINESS_PYTHON ?=
+READINESS_ENVFILE ?= $(ENVFILE)
+#: Ask the systemd user manager where it reads units from, the way `install-service` does.
+#:
+#: This was `$(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/systemd/user`,
+#: which trusts the *shell's* XDG_CONFIG_HOME. The manager resolves unit paths from its own
+#: start-time environment and on this host reports none, so it searches
+#: $HOME/.config/systemd/user. Measured 2026-10-13: `make install-readiness-timers` without
+#: an explicit `READINESS_UNIT_DIR` wrote four validated unit files to
+#: /localscratch/liuyime2/ohome/.config/systemd/user and exited 0, and systemd never read
+#: one of them - the installer reported success and the timers were dead files. The unit
+#: bytes had to be restored by hand and the install repeated. `tools/systemd_unit_dir.sh`
+#: already asks the manager rather than assuming; this now asks it too.
+READINESS_UNIT_DIR ?= $(shell tools/systemd_unit_dir.sh 2>/dev/null)
+export EXPECTED_FINGERPRINT DEPLOYMENT_AFTER DATE READINESS_OUTPUT SCHEDULED
+export READINESS_ROOT READINESS_PYTHON READINESS_ENVFILE READINESS_UNIT_DIR
+
+.PHONY: market-preflight market-open-verify source-fingerprint install-readiness-timers
+market-preflight:
+	@$(PY) -c 'import os, runpy, sys; assert os.environ["SCHEDULED"] in {"0", "1"}, "SCHEDULED must be 0 or 1"; args = ["--phase", "preopen", "--expected-fingerprint", os.environ["EXPECTED_FINGERPRINT"]]; args += ["--session-date", os.environ["DATE"]] if os.environ.get("DATE") else []; args += ["--output", os.environ["READINESS_OUTPUT"]] if os.environ.get("READINESS_OUTPUT") else []; args += ["--scheduled"] if os.environ["SCHEDULED"] == "1" else []; sys.exit(runpy.run_path("tools/market_readiness.py")["main"](args))'
+
+market-open-verify:
+	@$(PY) -c 'import os, runpy, sys; assert os.environ["SCHEDULED"] in {"0", "1"}, "SCHEDULED must be 0 or 1"; args = ["--phase", "open", "--expected-fingerprint", os.environ["EXPECTED_FINGERPRINT"]]; args += ["--after", os.environ["DEPLOYMENT_AFTER"]] if os.environ.get("DEPLOYMENT_AFTER") else []; args += ["--session-date", os.environ["DATE"]] if os.environ.get("DATE") else []; args += ["--output", os.environ["READINESS_OUTPUT"]] if os.environ.get("READINESS_OUTPUT") else []; args += ["--scheduled"] if os.environ["SCHEDULED"] == "1" else []; sys.exit(runpy.run_path("tools/market_readiness.py")["main"](args))'
+
+source-fingerprint:
+	@$(PY) -c 'from autopoiesis.daemon import source_fingerprint; print(source_fingerprint())'
+
+# Explicitly requested installation only. Validate every substituted value before
+# rendering, verify all four units, then reload and enable the two reporting timers.
+install-readiness-timers:
+	@test -n "$(READINESS_UNIT_DIR)" || (echo "FATAL: could not determine a systemd user unit directory." >&2; \
+	  echo "       Run 'tools/systemd_unit_dir.sh' to see why." >&2; exit 2)
+	@$(PY) tools/install_market_readiness.py
+
+# Narrow type verification for operator tools without running a repository gate.
+type-files:
+	@test -n "$(FILES)" || (echo "FILES is required" >&2; exit 2)
+	@$(CONDA_RUN) mypy $(FILES)

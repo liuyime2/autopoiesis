@@ -52,6 +52,12 @@ class Attribution:
     by_source: dict[str, float] = field(default_factory=dict)
     lots_by_source: dict[str, int] = field(default_factory=dict)
     by_strategy: dict[str, float] = field(default_factory=dict)
+    #: The same PnL grouped by the strategy that **opened** each lot instead of the one that
+    #: closed it. Kept because the two answer different questions - `by_strategy` asks who
+    #: realised the gain, this asks whose entry the gain came from - and a ledger that
+    #: reported only one of them could be read as either claim. `by_strategy` is the
+    #: strategy-level result; this is diagnostic.
+    by_opening_strategy: dict[str, float] = field(default_factory=dict)
     account_pnl: float | None = None
     account_pnl_scope: str = ""
     fees: float = 0.0
@@ -193,10 +199,21 @@ def attribute(
         result.fees += float(lot.get("buy_fees") or 0.0) + float(
             lot.get("sell_fees") or 0.0
         )
-        strategy_id = lot.get("strategy_id") or "UNATTRIBUTED"
-        result.by_strategy[strategy_id] = (
-            result.by_strategy.get(strategy_id, 0.0) + realized
+        # Realized PnL is booked to whoever closed the lot, not whoever opened it. The lot
+        # carries both: `strategy_id` is the opener, whose cost basis was consumed and whose
+        # open lots are still valued, and `closing_strategy_id` is the seller. Measured
+        # 2026-10-13 on the live journal, no agent strategy had ever both bought and sold, so
+        # crediting the opener handed +760.03 of account-level realized PnL to four
+        # never-selling strategies and reported them as the library's best performers while
+        # the strategies that actually sold earned nothing. The account total is unchanged by
+        # this; only the split between strategies is.
+        opener = lot.get("strategy_id") or "UNATTRIBUTED"
+        credited = lot.get("closing_strategy_id") or opener
+        result.by_strategy[credited] = (
+            result.by_strategy.get(credited, 0.0) + realized
         )
+        result.by_opening_strategy.setdefault(opener, 0.0)
+        result.by_opening_strategy[opener] += realized
         opener = by_order.get(lot.get("buy_order_id"))
         source = (
             opener.decision.decision_source if opener is not None else "UNLINKED"

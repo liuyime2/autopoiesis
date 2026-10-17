@@ -17,6 +17,7 @@ The only guard against it was disabled twice: it returned False for any
 from datetime import datetime, timezone
 
 import pytest
+from synthetic_evidence import synthetic_clean_record
 
 from autopoiesis.evaluator import (
     INACTION_FLOOR,
@@ -161,7 +162,7 @@ def _snapshot(market_open=True, price=500.0):
 
 
 def _record(strategy_id, action, status, reason="approved", approved=True, market_open=True, quantity=1):
-    return CycleRecord(
+    return synthetic_clean_record(CycleRecord(
         cycle_id=f"c-{strategy_id}-{action}-{status}-{market_open}",
         snapshot=_snapshot(market_open=market_open),
         decision=TradeDecision(
@@ -170,7 +171,7 @@ def _record(strategy_id, action, status, reason="approved", approved=True, marke
         guardian=GuardianResult(approved=approved, reason=reason),
         execution=ExecutionResult(status=status, order_id=None, filled_quantity=0, message="m"),
         strategy_id=strategy_id,
-    )
+    ))
 
 
 @pytest.mark.parametrize("reason", sorted(SYSTEM_REJECTION_REASONS))

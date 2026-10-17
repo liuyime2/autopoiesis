@@ -115,10 +115,8 @@ def test_a_horizon_beyond_a_long_outage_is_refused_rather_than_scored():
     assert report.scored == []
 
 
-def test_repeated_quotes_are_not_new_observations():
-    """49% of consecutive journaled quotes are byte-identical, because the gateway
-    reports the same last trade when nothing traded. Counting them made half the
-    horizons a move of exactly zero - an artefact of the polling interval."""
+def test_equal_prices_at_distinct_times_remain_observations():
+    """Synthetic equal quotes must not condition evaluation on a later price move."""
     records = [
         _record("a", T0, 100.0),
         _record("b", T0 + timedelta(hours=1), 100.0),
@@ -127,7 +125,7 @@ def test_repeated_quotes_are_not_new_observations():
     ]
     report = cf.evaluate(records, horizon_hours=24.0)
 
-    assert len(report.rows) == 2, "the two repeats collapse into the original quote"
+    assert len(report.rows) == 4, "timestamped equal prices are retained"
     assert report.rows[0].verdict == cf.MISSED_ALPHA
 
 

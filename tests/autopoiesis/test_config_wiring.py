@@ -10,6 +10,7 @@ an operator knob that silently does nothing when set.
 import dataclasses
 import os
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,8 +19,10 @@ from autopoiesis.config import AgentConfig
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "autopoiesis"
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "tools"))
+import verify
+
 CONFIG_PY = SRC / "config.py"
-OPERATOR_ENTRY_POINT = REPO / "autopoiesis"
 PRODUCTION = "\n".join(
     p.read_text() for p in sorted(SRC.glob("*.py")) if p.name != "config.py"
 )
@@ -28,44 +31,15 @@ CONFIG_SRC = CONFIG_PY.read_text()
 FIELDS = [f.name for f in dataclasses.fields(AgentConfig)]
 
 
-def _entry_point_reads() -> str:
-    """`autopoiesis`'s executable code, whole-line comments dropped.
-
-    The env file is dual-purpose: `autopoiesis` sources the same file the loader reads and then
-    does its own shell work before it ever invokes `python -m autopoiesis.cli`. AUTOPOIESIS_ENVBIN
-    is the live case - it names the environment's bin directory and nothing in Python reads it.
-
-    Scanning the file whole would be worthless, because its header documents every shell knob
-    it honours and a docstring is not a read; the header is entirely `#` lines, so dropping
-    those makes the scan mean "this code reads it".
-    """
-    code = [
-        line
-        for line in OPERATOR_ENTRY_POINT.read_text().splitlines()
-        if not line.lstrip().startswith("#")
-    ]
-    return "\n".join(code)
-
-
 def _env_vars_read() -> set[str]:
-    """Every AUTOPOIESIS_* variable an operator's env file can actually be consumed by.
-
-    Two readers, not one. Scanning only `config.py` reported AUTOPOIESIS_ENVBIN as a dead knob
-    on a host where it is the reason `autopoiesis install-service` finds the environment at all -
-    the same "looks configurable, does nothing" failure this file exists to catch, pointed the
-    other way, and the obvious response to a red gate of that kind is to delete the line from
-    the env file and break the install. The sibling gate `tools/verify.py::
-    check_config_example_names_are_real` had the same blind spot in the other direction.
-    """
-    return set(re.findall(r"AUTOPOIESIS_[A-Z0-9_]+", CONFIG_SRC + _entry_point_reads()))
+    """Loader keys plus actual shell and Make references; never operator secrets."""
+    return set(re.findall(r"AUTOPOIESIS_[A-Z0-9_]+", CONFIG_SRC + verify._entry_point_reads()))
 
 
 def _env_vars_in_the_shipped_config() -> set[str]:
-    """Every AUTOPOIESIS_* variable an operator could actually set."""
-    path = Path(os.environ.get("XDG_CONFIG_HOME", "")) / "autopoiesis" / "env"
-    if not path.exists():
-        pytest.skip("no runtime env file on this host")
-    return set(re.findall(r"AUTOPOIESIS_[A-Z0-9_]+", path.read_text()))
+    """Active key assignments in the shipped example, independent of the host."""
+    path = REPO / "configs" / "paper.env.example"
+    return set(re.findall(r"^[ \t]*(AUTOPOIESIS_[A-Z0-9_]+)=", path.read_text(), re.M))
 
 
 @pytest.mark.parametrize("name", FIELDS)
@@ -108,10 +82,157 @@ def test_every_operator_knob_is_actually_read_by_the_loader():
     configured = _env_vars_in_the_shipped_config()
     unknown = sorted(configured - read)
     assert not unknown, (
-        f"set in the runtime env but read by neither config.py nor autopoiesis: {unknown}. "
+        f"set in the shipped example but read by no loader, shell or Make consumer: {unknown}. "
         "Either wire them up or remove them - an ignored setting is worse than "
         "an absent one, because it looks like it is working"
     )
+
+
+@pytest.mark.parametrize("host_env_present", [False, True])
+def test_declared_knobs_use_shipped_assignments_without_opening_host_env(
+    tmp_path, monkeypatch, host_env_present,
+):
+    """Synthetic files: operator secrets and documentation are not declarations."""
+    example = tmp_path / "configs" / "paper.env.example"
+    example.parent.mkdir()
+    example.write_text(
+        "AUTOPOIESIS_MODE=paper\n"
+        "  AUTOPOIESIS_SYMBOLS=SPY\n"
+        "# AUTOPOIESIS_COMMENT_ONLY=ignored\n"
+        "# Explain AUTOPOIESIS_PROSE without setting it.\n"
+        "unrelated=AUTOPOIESIS_VALUE\n"
+    )
+    host_env = tmp_path / "host" / "autopoiesis" / "env"
+    host_env.parent.mkdir(parents=True)
+    if host_env_present:
+        host_env.write_text("AUTOPOIESIS_HOST_ONLY=synthetic\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(host_env.parent.parent))
+    monkeypatch.setattr(sys.modules[__name__], "REPO", tmp_path)
+    original = Path.read_text
+
+    def guarded_read(path, *args, **kwargs):
+        assert path != host_env, "ordinary wiring checks must not open the host env"
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", guarded_read)
+    assert _env_vars_in_the_shipped_config() == {"AUTOPOIESIS_MODE", "AUTOPOIESIS_SYMBOLS"}
+
+
+def test_actual_make_research_references_are_configuration_readers():
+    """These are the repository's real Make references, without executing research."""
+    assert {
+        "AUTOPOIESIS_RESEARCH_SPEC", "AUTOPOIESIS_PREREGISTRY", "AUTOPOIESIS_RESEARCH_TRIALS",
+    } <= _env_vars_read()
+
+
+@pytest.fixture
+def synthetic_config_workspace(tmp_path, monkeypatch):
+    """Minimal synthetic source tree for the existing config-example gate."""
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "src" / "autopoiesis").mkdir(parents=True)
+    (tmp_path / "src" / "autopoiesis" / "config.py").write_text("")
+    (tmp_path / "autopoiesis").write_text("#!/bin/sh\n")
+    (tmp_path / "Makefile").write_text("")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty-host-config"))
+    monkeypatch.setattr(verify, "ROOT", tmp_path)
+    monkeypatch.setattr(sys.modules[__name__], "REPO", tmp_path)
+    monkeypatch.setattr(sys.modules[__name__], "CONFIG_SRC", "")
+    return tmp_path
+
+
+@pytest.mark.parametrize("check", ["inverse", "gate"])
+def test_make_references_are_consumers_in_both_wiring_checks(synthetic_config_workspace, check):
+    """Synthetic declarations use the three actual research reference forms."""
+    root = synthetic_config_workspace
+    names = {"AUTOPOIESIS_RESEARCH_SPEC", "AUTOPOIESIS_PREREGISTRY", "AUTOPOIESIS_RESEARCH_TRIALS"}
+    (root / "configs" / "paper.env.example").write_text("\n".join(f"{name}=synthetic" for name in names))
+    (root / "Makefile").write_text(
+        "SPEC ?= $(AUTOPOIESIS_RESEARCH_SPEC)\n"
+        "PREREGISTRY ?= $(if $(AUTOPOIESIS_PREREGISTRY),$(AUTOPOIESIS_PREREGISTRY),runtime/registry)\n"
+        "TRIALS ?= $(if $(AUTOPOIESIS_RESEARCH_TRIALS),$(AUTOPOIESIS_RESEARCH_TRIALS),runtime/trials)\n"
+    )
+    if check == "inverse":
+        assert names <= _env_vars_read()
+    else:
+        assert verify.check_config_example_names_are_real().status == verify.PASS
+
+
+@pytest.mark.parametrize("make_source", [
+    "",
+    "# $(AUTOPOIESIS_DEAD)\n",
+    "OTHER=synthetic # $(AUTOPOIESIS_DEAD)\n",
+    "AUTOPOIESIS_DEAD ?= synthetic\n",
+])
+def test_dead_make_names_are_rejected_by_both_checks(synthetic_config_workspace, make_source):
+    """Synthetic dead, comment-only and assignment-only names are not reads."""
+    root = synthetic_config_workspace
+    (root / "configs" / "paper.env.example").write_text("AUTOPOIESIS_DEAD=synthetic\n")
+    (root / "Makefile").write_text(make_source)
+    assert "AUTOPOIESIS_DEAD" not in _env_vars_read()
+    assert verify.check_config_example_names_are_real().status == verify.FAIL
+
+
+@pytest.mark.parametrize("host_env_present", [False, True])
+def test_host_env_cannot_validate_an_unknown_example_knob(
+    synthetic_config_workspace, monkeypatch, host_env_present,
+):
+    """A synthetic external env must not provide evidence of a code reader."""
+    root = synthetic_config_workspace
+    (root / "configs" / "paper.env.example").write_text("AUTOPOIESIS_DEAD=synthetic\n")
+    host_env = root / "host" / "autopoiesis" / "env"
+    host_env.parent.mkdir(parents=True)
+    if host_env_present:
+        host_env.write_text("AUTOPOIESIS_DEAD=synthetic\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(host_env.parent.parent))
+    assert verify.check_config_example_names_are_real().status == verify.FAIL
+
+
+@pytest.mark.parametrize(("shell_source", "consumed"), [
+    ("echo ${AUTOPOIESIS_SYNTHETIC:-default}\n", True),
+    ("echo $AUTOPOIESIS_SYNTHETIC\n", True),
+    ("# echo ${AUTOPOIESIS_SYNTHETIC}\n", False),
+    ("AUTOPOIESIS_SYNTHETIC=synthetic\n", False),
+    ('echo "set AUTOPOIESIS_SYNTHETIC in your env"\n', False),
+    ('echo "${AUTOPOIESIS_SYNTHETIC:-default}"\n', True),
+    ('echo "# $AUTOPOIESIS_SYNTHETIC"\n', True),
+    ("echo value#$AUTOPOIESIS_SYNTHETIC\n", True),
+    ("echo ok # ${AUTOPOIESIS_SYNTHETIC}\n", False),
+    ("echo '$AUTOPOIESIS_SYNTHETIC'\n", False),
+    ("echo '${AUTOPOIESIS_SYNTHETIC}'\n", False),
+    ("echo \\${AUTOPOIESIS_SYNTHETIC}\n", False),
+    ('echo "\\$AUTOPOIESIS_SYNTHETIC"\n', False),
+])
+@pytest.mark.parametrize("check", ["inverse", "gate"])
+def test_shell_consumers_require_variable_expansion(
+    synthetic_config_workspace, shell_source, consumed, check,
+):
+    """Synthetic shell source separates runtime expansion from declared names."""
+    root = synthetic_config_workspace
+    (root / "configs" / "paper.env.example").write_text("AUTOPOIESIS_SYNTHETIC=synthetic\n")
+    (root / "autopoiesis").write_text(shell_source)
+    if check == "inverse":
+        assert ("AUTOPOIESIS_SYNTHETIC" in _env_vars_read()) is consumed
+    else:
+        expected = verify.PASS if consumed else verify.FAIL
+        assert verify.check_config_example_names_are_real().status == expected
+
+
+def test_config_example_gate_never_opens_host_env(synthetic_config_workspace, monkeypatch):
+    """Synthetic host guard catches an attempted read even if the gate still fails."""
+    root = synthetic_config_workspace
+    (root / "configs" / "paper.env.example").write_text("AUTOPOIESIS_DEAD=synthetic\n")
+    host_env = root / "host" / "autopoiesis" / "env"
+    host_env.parent.mkdir(parents=True)
+    host_env.write_text("AUTOPOIESIS_OTHER=synthetic\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(host_env.parent.parent))
+    original = Path.read_text
+
+    def guarded_read(path, *args, **kwargs):
+        assert path != host_env, "config-example gate must not open the host env"
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", guarded_read)
+    assert verify.check_config_example_names_are_real().status == verify.FAIL
 
 
 def test_the_config_loader_refuses_live_mode():

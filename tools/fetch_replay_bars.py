@@ -17,6 +17,7 @@ network and credentials; nothing else in the gate does.
 
 from __future__ import annotations
 
+import argparse
 import os
 import pathlib
 import sys
@@ -47,16 +48,18 @@ OUT_DIR = pathlib.Path("runtime/autopoiesis/replay")
 ROLLING_CACHE = OUT_DIR / "rolling.json"
 
 
-def cache_path(symbol: str, start: str, end: str) -> pathlib.Path:
+def cache_path(symbol: str, start: str, end: str, interval: str = DEFAULT_INTERVAL,
+               cache_dir: pathlib.Path | None = None) -> pathlib.Path:
     """A dated cache path, for a window fetched on purpose rather than on a schedule."""
     def day(stamp: str) -> str:
         return stamp[:10]
-    return OUT_DIR / f"{symbol.upper()}_{DEFAULT_INTERVAL}_{day(start)}_{day(end)}.json"
+    return (cache_dir or OUT_DIR) / f"{symbol.upper()}_{interval}_{day(start)}_{day(end)}.json"
 
 
-def rolling_path(symbol: str, interval: str = DEFAULT_INTERVAL) -> pathlib.Path:
+def rolling_path(symbol: str, interval: str = DEFAULT_INTERVAL,
+                 cache_dir: pathlib.Path | None = None) -> pathlib.Path:
     """The single file the scheduled fetch overwrites. See `ROLLING_CACHE` for why."""
-    return OUT_DIR / f"{symbol.upper()}_{interval}_rolling.json"
+    return (cache_dir or OUT_DIR) / f"{symbol.upper()}_{interval}_rolling.json"
 
 
 def client_from_env():
@@ -87,7 +90,8 @@ def client_from_env():
     )
 
 
-def cached_last_bar(symbol: str, interval: str = DEFAULT_INTERVAL) -> datetime | None:
+def cached_last_bar(symbol: str, interval: str = DEFAULT_INTERVAL,
+                    cache_dir: pathlib.Path | None = None) -> datetime | None:
     """The newest timestamp anywhere in the cache, across every file.
 
     Read through each file's own `bars` rather than trusting filenames, because the filenames
@@ -97,7 +101,7 @@ def cached_last_bar(symbol: str, interval: str = DEFAULT_INTERVAL) -> datetime |
     from autopoiesis.replay import bar_files, load_bars
 
     newest: datetime | None = None
-    usable, ignored = bar_files(OUT_DIR)
+    usable, ignored = bar_files(cache_dir or OUT_DIR)
     # Named, not skipped quietly: the fetch decides whether the cache is current by reading it,
     # and a cache that silently stopped being read is how the tape went stale for a day while
     # every report said the search had run.
@@ -188,12 +192,16 @@ def fetch_would_add_nothing(client, cached: datetime | None, interval: str) -> b
 
 
 def main(argv: list[str]) -> int:
-    symbol = argv[1] if len(argv) > 1 else DEFAULT_SYMBOL
-    start = argv[2] if len(argv) > 2 else DEFAULT_START
-    end = argv[3] if len(argv) > 3 else DEFAULT_END
-    interval = argv[4] if len(argv) > 4 else DEFAULT_INTERVAL
-    # The scheduled fetch passes ROLLING; a hand-run window keeps its dated path.
-    rolling = len(argv) > 5 and argv[5] == "ROLLING"
+    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser.add_argument("symbol", nargs="?", default=DEFAULT_SYMBOL)
+    parser.add_argument("start", nargs="?", default=DEFAULT_START)
+    parser.add_argument("end", nargs="?", default=DEFAULT_END)
+    parser.add_argument("interval", nargs="?", default=DEFAULT_INTERVAL)
+    parser.add_argument("rolling", nargs="?", choices=["ROLLING"])
+    parser.add_argument("--cache", type=pathlib.Path, default=None)
+    args = parser.parse_args(argv[1:])
+    symbol, start, end, interval = args.symbol, args.start, args.end, args.interval
+    rolling = args.rolling == "ROLLING"
     _validate_utc_window(start, end)
 
     from autopoiesis.replay import fetch_bars, save_bars
@@ -201,7 +209,7 @@ def main(argv: list[str]) -> int:
     client = client_from_env()
 
     if rolling:
-        cached = cached_last_bar(symbol, interval)
+        cached = cached_last_bar(symbol, interval, args.cache)
         pointless = fetch_would_add_nothing(client, cached, interval)
         if pointless:
             # Nothing a fetch could return is newer than what is on disk. Skipping is what
@@ -217,7 +225,8 @@ def main(argv: list[str]) -> int:
         print(f"no bars returned for {symbol} between {start} and {end}")
         return 1
 
-    path = rolling_path(symbol, interval) if rolling else cache_path(symbol, start, end)
+    path = (rolling_path(symbol, interval, args.cache) if rolling
+            else cache_path(symbol, start, end, interval, args.cache))
     save_bars(path, symbol, bars)
     closes = [bar.close for bar in bars]
     print(f"cached {len(bars)} real {interval} {symbol} bars -> {path}")

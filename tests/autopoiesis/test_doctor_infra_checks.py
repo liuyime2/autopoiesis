@@ -96,7 +96,8 @@ class _BrokerStub:
             raise ConnectionError("connection reset by peer")
         return []
 
-    def list_orders(self, status=None):
+    def list_orders(self, status=None, limit=50):
+        assert status == "open" and limit == 500
         if self._boom:
             raise ConnectionError("connection reset by peer")
         return []
@@ -126,6 +127,18 @@ def test_a_closed_market_is_not_a_failure():
     check = _by_name(report, "broker clock")[0]
     assert check.status.value == "ok"
     assert "CLOSED" in check.detail
+
+
+@pytest.mark.parametrize("orders", [None, [object()], [object()] * 500])
+def test_synthetic_doctor_refuses_incomplete_open_order_inventory(orders):
+    class Broker(_BrokerStub):
+        def list_orders(self, status=None, limit=50):
+            assert status == "open" and limit == 500
+            return orders
+
+    report = _report()
+    doctor_module._check_broker(report, _Cfg(), Broker(), skip=False)
+    assert _by_name(report, "broker positions")[0].status.value == "fail"
 
 
 def test_missing_credentials_skip_rather_than_pass():

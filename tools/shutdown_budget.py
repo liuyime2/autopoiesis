@@ -123,6 +123,14 @@ def collect() -> Inventory:
     inventory = Inventory()
     broker_src = (SRC / "broker_client.py").read_text(encoding="utf-8")
     llm_src = (SRC / "llm_decision.py").read_text(encoding="utf-8")
+    daemon_src = (SRC / "daemon.py").read_text(encoding="utf-8")
+
+    inventory.stages.append(Stage(
+        "daemon cooperative wait",
+        _literal(daemon_src, "COOPERATIVE_WAIT_POLL_SECONDS"),
+        "src/autopoiesis/daemon.py COOPERATIVE_WAIT_POLL_SECONDS",
+        "default scheduler, round, broker backoff and evidence waits check the stop flag",
+    ))
 
     # The broker layer: a urllib3 Timeout(total, connect, read). The `total` is the ceiling on the
     # whole request, which is what a stop budget needs.

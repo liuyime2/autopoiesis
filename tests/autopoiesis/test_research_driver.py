@@ -305,13 +305,13 @@ def test_the_driver_cannot_reach_production_state():
 
 
 def test_a_missing_cache_is_an_error_rather_than_generated_prices(tmp_path):
-    with pytest.raises(SystemExit) as excinfo:
+    with pytest.raises(ValueError) as excinfo:
         driver._load_real_bars(tmp_path / "absent")
     assert "never generates prices" in str(excinfo.value)
 
     empty = tmp_path / "empty"
     empty.mkdir()
-    with pytest.raises(SystemExit):
+    with pytest.raises(ValueError):
         driver._load_real_bars(empty)
 
 
@@ -351,7 +351,7 @@ def test_a_cache_of_only_non_bar_files_is_still_an_error(tmp_path):
     cache = tmp_path / "replay"
     cache.mkdir()
     (cache / "CIK_MAP.json").write_text('{"SPY": 9999}', encoding="utf-8")
-    with pytest.raises(SystemExit) as excinfo:
+    with pytest.raises(ValueError) as excinfo:
         driver._load_real_bars(cache)
     assert "no bar files" in str(excinfo.value)
 
@@ -424,7 +424,7 @@ def test_a_cache_holding_only_another_symbol_is_an_error_that_names_it(tmp_path)
               [ReplayBar(timestamp=t0 + timedelta(minutes=5 * i), open=100.0, high=100.0,
                          low=100.0, close=100.0, volume=1.0) for i in range(5)])
 
-    with pytest.raises(SystemExit) as excinfo:
+    with pytest.raises(ValueError) as excinfo:
         driver._load_real_bars(cache, "SPY")
     message = str(excinfo.value)
     assert "no bars for SPY" in message, message
@@ -467,8 +467,8 @@ def test_main_records_the_fingerprint_of_the_tape_it_consumed(tmp_path, monkeypa
     cache = tmp_path / "replay"
     cache.mkdir()
     t0 = datetime(2026, 4, 10, 13, 30, tzinfo=timezone.utc)
-    rows = [ReplayBar(timestamp=t0 + timedelta(minutes=5 * i), open=100.0, high=100.0,
-                      low=100.0, close=100.0 + i, volume=1000.0) for i in range(40)]
+    rows = [ReplayBar(timestamp=t0 + timedelta(minutes=5 * i), open=100.0+i, high=100.0+i,
+                      low=100.0+i, close=100.0 + i, volume=1000.0) for i in range(40)]
     from autopoiesis.replay import save_bars
 
     save_bars(cache / "SPY_5Min_test.json", "SPY", rows)
@@ -477,7 +477,9 @@ def test_main_records_the_fingerprint_of_the_tape_it_consumed(tmp_path, monkeypa
     spec.write_text(
         "hypothesis: h\nfamily: f\ninstrument: SPY\n"
         "window_start_utc: 2026-04-10T13:30:00Z\nwindow_end_utc: 2026-04-10T16:00:00Z\n"
-        "rule: r\nprimary_metric: m\nexpected_trades: 1\n",
+        "rule: threshold_grid_v1\nprimary_metric: oos_return_pct_after_cost_v1\nexpected_trades: 1\n"
+        "interval: 5Min\nthresholds: 0.002\ncandidate_budget: 2\nevaluator: walk_forward_v1\n"
+        "n_folds: 2\nmin_train_bars: 20\ncommission_pct: 0.005\nslippage_pct: 0.005\n",
         encoding="utf-8",
     )
 
@@ -488,6 +490,11 @@ def test_main_records_the_fingerprint_of_the_tape_it_consumed(tmp_path, monkeypa
     from autopoiesis.research import trials as _trials
 
     monkeypatch.setattr(_trials, "DEFAULT_TRIALS_PATH", ledger)
+    monkeypatch.setenv("AUTOPOIESIS_RESEARCH_TRIALS", str(ledger))
+    monkeypatch.setenv("AUTOPOIESIS_PREREGISTRY", str(tmp_path / "registry"))
+    from autopoiesis.research import prereg
+
+    prereg.register(spec)
     monkeypatch.setattr(driver, "DEFAULT_CACHE_DIR", cache)
     monkeypatch.setattr(driver, "_default_symbol", lambda: "SPY")
 

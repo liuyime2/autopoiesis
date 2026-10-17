@@ -75,16 +75,18 @@ def test_no_function_loads_a_name_that_does_not_exist():
     )
 
 
-def test_the_daemon_startup_path_resolves_every_name():
+@pytest.mark.parametrize("entry", ["_run_daemon", "_build_agent_daemon"])
+def test_the_daemon_startup_path_resolves_every_name(entry):
     import autopoiesis.cli as cli
 
-    source = inspect.getsource(cli._run_daemon)
+    assert callable(getattr(cli, entry, None)), f"{entry} is missing"
+    source = inspect.getsource(getattr(cli, entry))
     tree = ast.parse(source.lstrip())
     bound = _bound_names(tree) | set(vars(cli)) | set(dir(builtins))
     unresolved = sorted(_used_names(tree) - bound)
 
     assert not unresolved, (
-        "_run_daemon references names that do not exist: " + ", ".join(unresolved)
+        f"{entry} references names that do not exist: " + ", ".join(unresolved)
     )
 
 

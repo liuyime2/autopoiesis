@@ -25,6 +25,92 @@ class StrategyAdmissionResult:
     strategy_id: str
 
 
+#: Retirement reasons the current evidence still supports, whatever is proposed afterwards.
+#:
+#: `broker-verified negative realized PnL` is a statement about money that has already
+#: happened, broker-confirmed, so nothing about the present makes it untrue. A strategy
+#: retired for it stays retired, and allowing otherwise would turn this path into a way to
+#: re-run a strategy the account has already been charged for losing on.
+#:
+#: Deliberately not here: "severe operational failure rate N", which is what retired
+#: `fixed-size-bil-sell-001` on 2026-10-13. That reason is a rate over refusals, and the
+#: staleness fix removed an entire class of refusal that was being charged into it. A
+#: recorded reason is only as durable as the attribution behind it.
+NON_EXPIRING_RETIREMENT_REASONS = ("broker-verified negative realized PnL",)
+
+#: How many times a retired strategy may be put back on PROBATION through this gate.
+#:
+#: One. Re-admission is meant to undo a retirement that turned out to be wrong; a second one
+#: means the first was not an error but a disagreement with the gate, which is what the
+#: screen and the promotion path are for. Unbounded, this becomes a retire-and-reinstate loop
+#: in which the lifecycle events themselves become the learning evidence.
+MAX_READMISSIONS = 1
+
+#: Parameter fields whose value is derived from market state, so the strategy's action
+#: can be false at a price it is watching. Derived from `STRATEGY_PARAMETER_SCHEMAS`
+#: below rather than typed here, so a kind that gains a trigger is recognised without
+#: editing a second list that could drift away from the schema it claims to mirror.
+#:
+#: Four fields are subtracted, and each for a reason. `action` is the action rather than
+#: a fact about the market, and including it would make every `FIXED_SIZE` look
+#: conditional - the exact bug, reintroduced through the derivation. `quantity` and
+#: `confidence` are sizing and conviction. `reference_price` anchors a band but triggers
+#: nothing by itself, and is what the permanently-degenerate band is about.
+_NOT_MARKET_DERIVED = frozenset({"action", "quantity", "confidence", "reference_price"})
+
+
+def _market_trigger_fields() -> frozenset[str]:
+    from autopoiesis import coerce
+    from autopoiesis.models import STRATEGY_PARAMETER_SCHEMAS
+
+    fields: set[str] = set()
+    for kind, schema in STRATEGY_PARAMETER_SCHEMAS.items():
+        fields.update(
+            coerce.field_str_tuple(
+                coerce.field_dict(schema, f"schema[{kind}]").get("allowed"),
+                f"schema[{kind}].allowed",
+            )
+        )
+    return frozenset(fields - _NOT_MARKET_DERIVED)
+
+
+MARKET_TRIGGER_FIELDS = _market_trigger_fields()
+
+
+def _unconditional_sell_reason(strategy: StrategySpec) -> str | None:
+    """Refuse a sell that has no way to decline to fire, or None if it may.
+
+    Measured 2026-10-14 on the live account. The curriculum treats "this position has no
+    strategy that can sell it" as a gap to fill, and `FIXED_SIZE` - whose entire
+    parameter set is `action`, `quantity`, `confidence` - is the kind it reached for.
+    `fixed-size-tlt-sell-001` was therefore not a sell that rarely fires but a sell that
+    cannot not fire: selected in a cycle, it sells, and the only thing that stops it is
+    the position running out. Broker-verified, TLT 188 shares sold and XLE and XLF
+    emptied entirely, with one order every ~32 minutes on 2026-10-14 alone.
+
+    `trend-follow-sell-001` in the same library carries `reference_price` and
+    `threshold_pct`, so the gap was real and the library can express a conditional sell.
+    The gap did not justify an unconditional one.
+
+    Deliberately kind-agnostic. The question is whether the spec carries anything that
+    can be false, not whether its kind is `FIXED_SIZE`: a future kind with no condition
+    is caught, and a `FIXED_SIZE` that somehow gained one is allowed.
+    """
+    if str(strategy.parameters.get("action", "")).upper() != "SELL":
+        return None
+    parameters = strategy.parameters or {}
+    if MARKET_TRIGGER_FIELDS & set(parameters):
+        return None
+    return (
+        f"SELL {parameters.get('quantity')} carries no market condition and so cannot "
+        f"decline to fire; kind {strategy.kind} has no trigger field "
+        f"({sorted(MARKET_TRIGGER_FIELDS)}) so this strategy would sell on every cycle it "
+        f"is selected until the position is empty. Measured 2026-10-14: TLT 188 shares "
+        f"sold, XLE and XLF emptied. Propose a conditional exit instead - TREND_FOLLOW "
+        f"with reference_price and threshold_pct, or a RULE with when_above/when_below."
+    )
+
+
 class StrategyAdmission:
     def __init__(
         self,
@@ -155,12 +241,36 @@ class StrategyAdmission:
     def admit(
         self, strategy: StrategySpec, results: Sequence[StrategyResult] | None = None
     ) -> StrategyAdmissionResult:
+        # An id the library already holds is only a duplicate if the strategy behind it is
+        # still in play. A RETIRED one is not: it was removed on evidence, and if that evidence
+        # turns out to have been wrong there is no other way back through this gate, because
+        # a different id cannot take a behavioural slot a retired strategy still occupies.
+        #
+        # Measured 2026-10-13. `fixed-size-bil-sell-001` was retired with
+        # "severe operational failure rate 1.00", charged for one cycle in which Guardian
+        # correctly refused a 1546-second-old quote - a refusal the market caused and the
+        # strategy could not have influenced. The staleness attribution behind that is fixed.
+        # At 14:55:54 EDT the curriculum proposed this exact strategy id, rediscovering the
+        # need for a BIL exit on its own, and this branch refused it as
+        # "strategy_id already exists; duplicate admission rejected". The gate was blocking
+        # the system's own repair of a mistake the gate had caused.
+        retired: StrategySpec | None = None
         if self.strategy_library.exists(strategy.strategy_id):
-            return StrategyAdmissionResult(
-                accepted=False,
-                reason="strategy_id already exists; duplicate admission rejected",
-                strategy_id=strategy.strategy_id,
-            )
+            # A file that exists but will not parse counts as held: overwriting it would
+            # destroy the record of whatever is wrong with it.
+            existing = self.strategy_library.try_load(strategy.strategy_id)
+            if existing is None or existing.lifecycle != "RETIRED":
+                return StrategyAdmissionResult(
+                    accepted=False,
+                    reason="strategy_id already exists; duplicate admission rejected",
+                    strategy_id=strategy.strategy_id,
+                )
+            blocked = self._readmission_refusal(existing)
+            if blocked is not None:
+                return StrategyAdmissionResult(
+                    accepted=False, reason=blocked, strategy_id=strategy.strategy_id,
+                )
+            retired = existing
 
         backlog = self.probation_backlog(results)
         dormant = self.dormant_probation(results)
@@ -182,6 +292,14 @@ class StrategyAdmission:
                 strategy_id=strategy.strategy_id,
             )
 
+        unconditional_reason = _unconditional_sell_reason(strategy)
+        if unconditional_reason is not None:
+            return StrategyAdmissionResult(
+                accepted=False,
+                reason=unconditional_reason,
+                strategy_id=strategy.strategy_id,
+            )
+
         progression_reason = self._progression_rejection_reason(strategy)
         if progression_reason is not None:
             return StrategyAdmissionResult(
@@ -199,16 +317,47 @@ class StrategyAdmission:
             )
 
         lifecycle = "BASELINE" if strategy.kind == "HOLD_BASELINE" else "PROBATION"
-        self.strategy_library.save(
-            strategy.model_copy(
-                update={"lifecycle": lifecycle, "lifecycle_reason": review.reason}
+        updates: dict[str, object] = {"lifecycle": lifecycle}
+        if retired is not None:
+            # Both reasons, because the file is the only place a later reader learns why a
+            # retired id is serving again. Overwriting `lifecycle_reason` with the new
+            # verdict would erase the mistake the re-admission is correcting.
+            updates["lifecycle_reason"] = (
+                f"re-admitted after retirement: {retired.lifecycle_reason}; {review.reason}"
             )
-        )
+            updates["readmissions"] = retired.readmissions + 1
+        else:
+            updates["lifecycle_reason"] = review.reason
+        self.strategy_library.save(strategy.model_copy(update=updates))
         return StrategyAdmissionResult(
             accepted=True,
-            reason="approved",
+            reason=(
+                f"re-admitted after retirement: {retired.lifecycle_reason}"
+                if retired is not None else "approved"
+            ),
             strategy_id=strategy.strategy_id,
         )
+
+    def _readmission_refusal(self, existing: StrategySpec) -> str | None:
+        """Why this retired strategy may not be put back, or None if it may.
+
+        A retirement the evidence still supports must not be reversible by proposing the
+        strategy again, and a re-admission that can happen twice is a loop rather than a
+        repair.
+        """
+        if existing.readmissions >= MAX_READMISSIONS:
+            return (
+                f"re-admission refused: already re-admitted {existing.readmissions} time(s) "
+                f"and the limit is {MAX_READMISSIONS}; this is a disagreement with the gate, "
+                f"not an error in it"
+            )
+        for reason in NON_EXPIRING_RETIREMENT_REASONS:
+            if existing.lifecycle_reason.startswith(reason):
+                return (
+                    f"re-admission refused: retired for '{reason}', which the evidence still "
+                    f"supports; nothing about the present makes it untrue"
+                )
+        return None
 
     def _reference_price_rejection_reason(self, strategy: StrategySpec) -> str | None:
         """Reject a TREND_FOLLOW that cannot trade, in either direction.
@@ -345,6 +494,15 @@ class StrategyAdmission:
     def _duplicates_trend_follow(self, strategy: StrategySpec, strategies: list[StrategySpec]) -> bool:
         for existing in strategies:
             if existing.kind != "TREND_FOLLOW":
+                continue
+            if existing.strategy_id == strategy.strategy_id:
+                # The strategy under review is compared against the library, and for a
+                # re-admission the library still holds the retired copy of *this* spec.
+                # Comparing a spec with itself always matches on parameters, so without
+                # this a TREND_FOLLOW could never be re-admitted: it would be refused as
+                # a duplicate of the thing the re-admission path exists to bring back.
+                # The retired copy's own readmission limits are the right place to judge
+                # whether it may return, and that is what `_readmission_refusal` does.
                 continue
             if existing.symbols != strategy.symbols:
                 continue

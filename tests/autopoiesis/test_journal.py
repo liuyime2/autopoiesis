@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from datetime import date, datetime, timezone
 
 import pytest
@@ -60,6 +61,91 @@ def test_jsonl_journal_appends_and_reads_records(tmp_path):
     assert len(records) == 1
     assert records[0].cycle_id == "cycle-1"
     assert records[0].decision.action == "HOLD"
+
+
+def test_reader_discovers_generations_after_locking(tmp_path, monkeypatch):
+    """Synthetic rotation at lock acquisition must not hide the previously live cycle."""
+    path = tmp_path / "journal.jsonl"
+    journal = JsonlJournal(path)
+    journal.append(make_record("before"))
+
+    @contextmanager
+    def rotate_then_lock(**kwargs):
+        path.rename(tmp_path / "journal.jsonl.1")
+        path.write_text(make_record("after").model_dump_json() + "\n")
+        yield
+
+    monkeypatch.setattr(journal, "_read_lock", rotate_then_lock)
+    assert [record.cycle_id for record in journal.read_all()] == ["before", "after"]
+
+
+def test_daily_attempt_counter_discovers_generations_after_locking(tmp_path, monkeypatch):
+    """Synthetic submitted orders before and after rotation count toward the same hard cap."""
+    path = tmp_path / "journal.jsonl"
+    journal = JsonlJournal(path)
+    record = make_record("before").model_copy(update={
+        "decision": TradeDecision(symbol="SPY", action="BUY", quantity=1,
+                                  confidence=0.6, rationale="synthetic"),
+        "execution": ExecutionResult(status="SUBMITTED", order_id="order-before",
+                                     filled_quantity=0, message="synthetic"),
+    })
+    journal.append(record)
+
+    @contextmanager
+    def rotate_then_lock(**kwargs):
+        path.rename(tmp_path / "journal.jsonl.1")
+        after = record.model_copy(update={
+            "cycle_id": "after",
+            "execution": record.execution.model_copy(update={"order_id": "order-after"}),
+        })
+        path.write_text(after.model_dump_json() + "\n")
+        yield
+
+    monkeypatch.setattr(journal, "_read_lock", rotate_then_lock)
+    assert journal.count_submitted_on(date(2026, 6, 3)) == 2
+
+
+def test_reader_retention_setting_does_not_hide_actual_generations(tmp_path):
+    """Synthetic imported generations remain readable beyond the writer's retention budget."""
+    path = tmp_path / "journal.jsonl"
+    path.write_text(make_record("newest").model_dump_json() + "\n")
+    (tmp_path / "journal.jsonl.21").write_text(make_record("oldest").model_dump_json() + "\n")
+    assert [record.cycle_id for record in JsonlJournal(path, backups=1).read_all()] == ["oldest", "newest"]
+
+
+def test_deep_generation_is_not_attested_as_an_empty_fresh_install(tmp_path):
+    """Synthetic imported history cannot gain a fabricated empty-journal baseline."""
+    (tmp_path / "journal.jsonl.21").write_text(make_record("oldest").model_dump_json() + "\n")
+    status = JsonlJournal(tmp_path / "journal.jsonl", backups=1).archive_manifest_status()
+    assert not status["trusted"]
+
+
+@pytest.mark.parametrize("backups", [0, 1, 3])
+def test_deep_imported_generations_keep_their_order_after_rotation(tmp_path, backups):
+    """Synthetic .21 is older than .3 and must enter the archive first."""
+    path = tmp_path / "journal.jsonl"
+    generations = [(21, "oldest"), (3, "third"), (2, "second"), (1, "first")]
+    for index, cycle_id in generations:
+        (tmp_path / f"journal.jsonl.{index}").write_text(make_record(cycle_id).model_dump_json() + "\n")
+    path.write_text(make_record("live").model_dump_json() + "\n")
+    journal = JsonlJournal(path, max_bytes=1, backups=backups)
+    before = [r.cycle_id for r in journal.read_all()]
+    journal.append(make_record("after"))
+    assert [r.cycle_id for r in journal.read_all()] == [*before, "after"]
+    assert not (tmp_path / "journal.jsonl.21").exists()
+    assert journal.archive_manifest_status()["valid"]
+
+
+def test_gapped_deep_import_refuses_rotation_before_moving_history(tmp_path):
+    """Synthetic incomplete retained layout needs operator repair, not chronology guesses."""
+    paths = [tmp_path / name for name in ("journal.jsonl.21", "journal.jsonl.3", "journal.jsonl")]
+    for number, path in enumerate(paths):
+        path.write_text(make_record(f"existing-{number}").model_dump_json() + "\n")
+    before = {path: path.read_bytes() for path in paths}
+    with pytest.raises(ValueError, match="not contiguous"):
+        JsonlJournal(paths[-1], max_bytes=1).append(make_record("refused"))
+    assert {path: path.read_bytes() for path in paths} == before
+    assert not list((tmp_path / "journal-archive").glob("*.jsonl"))
 
 
 def test_jsonl_journal_reads_mixed_records_and_events(tmp_path):

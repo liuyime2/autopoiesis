@@ -1,0 +1,11 @@
+[Unit]
+Description=Observe paper readiness before the New York session
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 08:45:00 America/New_York
+AccuracySec=30s
+Persistent=true
+Unit=market-preflight.service
+
+[Install]
+WantedBy=timers.target

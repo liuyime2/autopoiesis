@@ -4,18 +4,34 @@ import hashlib
 import json
 import os
 from collections.abc import Callable, Mapping
+from datetime import timezone
 from typing import Any
 
 import requests
 
 from autopoiesis import coerce, regime
 from autopoiesis.coerce import is_number
+from autopoiesis.learning_evidence import capture, valid_provenance
 from autopoiesis.models import (
     DataSnapshot,
     KnowledgeArtifact,
     NewsItem,
+    StrategyProvenance,
     TradeDecision,
 )
+
+#: What `HybridDecisionEngine._fallback` writes when the model was asked and did not produce
+#: a usable answer. A module constant for the same reason `FAIL_CLOSED_RATIONALE` is one:
+#: the daemon reads it to decide whether the model was consulted and failed, and a marker
+#: that exists in two places is a marker the two can drift apart until the monitor quietly
+#: stops counting the failures it exists to count.
+LLM_UNAVAILABLE_MARKER = "llm_unavailable: "
+
+#: Marks a decision about a symbol no strategy covers. The model is asked with HOLD as the
+#: baseline and may depart from it only with a reason. `strategy_id` is left None, which is
+#: what keeps these out of every per-strategy metric and out of the lifecycle: they are not
+#: a strategy's decisions and must never be scored as one.
+NO_STRATEGY_MARKER = "no_strategy"
 
 
 def parse_decision_json(text: str, *, model_name: str | None = None) -> TradeDecision:
@@ -124,11 +140,22 @@ DECISION_INSTRUCTION = (
 #: needs ~1200. 8192 is chosen over 6144 because the margin must survive the
 #: context growing, not merely the context that happened to exist today.
 DECISION_NUM_CTX = 4096
-#: Worst case must be prompt + answer + growth. 3441 measured prompt, 1452
-#: measured answer, 3299 spare at 8192. A chars/3.6 estimate said 2838 and was
-#: 19% low, because JSON punctuation and short keys are cheap per character;
-#: budgets are set from token counts, never from character guesses.
-CURRICULUM_NUM_CTX = 8192
+#: Worst case must be prompt + answer + growth. 8192 was sized from 3441 measured
+#: prompt and 1452 measured answer, leaving 3299 spare. A chars/3.6 estimate said
+#: 2838 and was 19% low, because JSON punctuation and short keys are cheap per
+#: character; budgets are set from token counts, never from character guesses.
+#:
+#: Both halves of that sum have since grown and the budget did not. Measured
+#: 2026-10-14 against the live model with the live context: prompt 3,965 and
+#: answer 2,677, so 6,642 of 8,192 - 19% spare - with the answer being free text
+#: the model writes to whatever length it likes. Overrunning returns
+#: `done_reason=length` with an empty body, which is the
+#: "constrained response contained no JSON object" failure recorded four times in
+#: the twelve hours to 05:36.
+#:
+#: 12288 is free: measured on the same prompt, 141.8s at 12288 against 141.9s at
+#: 8192. The whole gap is spent on the answer.
+CURRICULUM_NUM_CTX = 12288
 #: Measured 118.4s at 6144, 141.9s at 8192, 141.8s at 12288 on the same prompt.
 #: The engine's default 120s timeout sat inside that range, so simply fixing the
 #: window would have turned a truncation into a ReadTimeout instead. The
@@ -136,6 +163,10 @@ CURRICULUM_NUM_CTX = 8192
 #: minutes for a correct answer is the right trade. The decision path keeps 120s
 #: because it answers in ~12s.
 CURRICULUM_TIMEOUT_S = 600
+#: The watchlist choice: a symbol list in, two fields out. It sits in the trading loop
+#: rather than off-hours, so it gets the decision window and not the curriculum's - a
+#: watchlist that takes two minutes is a cycle the loop did not spend deciding.
+ATTENTION_NUM_CTX = 4096
 
 
 class OllamaDecisionEngine:
@@ -204,9 +235,51 @@ class OllamaDecisionEngine:
             },
         }
         response = self.transport(f"{self.base_url}/api/generate", payload, self.timeout)
-        decision = parse_decision_json(
-            str(response.get("response", "")), model_name=self.model,
-        )
+        # The shape check comes first. `str(response.get("response") or "")` on a non-dict
+        # raises AttributeError before any of the diagnosis below can run, so a transport
+        # that hands back something unexpected would report a Python error instead of what
+        # it actually returned - which is the failure mode this whole block exists to end.
+        if not isinstance(response, dict):
+            raise ValueError(
+                f"decision model reply was not an object: {type(response).__name__}"
+            )
+        body = str(response.get("response") or "")
+        if not body:
+            # The same defect the curriculum had, one level down, and it is why the
+            # decision path's failure rate could not be measured. Measured 2026-10-16:
+            # 43 of the fallbacks on 10-15 and 10-16 carried exactly one cause -
+            # "ValueError: LLM response did not contain a JSON object" - and nothing on
+            # record said *why* the model returned no object. `done_reason` and `error`
+            # are the two fields that answer it, and both were discarded here.
+            #
+            # `done_reason=length` with an empty body is context exhaustion: the prompt
+            # and the answer schema together left no room to answer. That is the case the
+            # 4096 above is sized against, and the one that has to be visible in the
+            # journal before the window can be re-derived from a measurement rather than
+            # from a guess.
+            done = str(response.get("done_reason") or "")
+            error = str(response.get("error") or "")
+            prompt_tokens = response.get("prompt_eval_count")
+            answer_tokens = response.get("eval_count")
+            thinking = len(str(response.get("thinking") or ""))
+            if error:
+                raise ValueError(f"decision model returned an error: {error}")
+            if done == "length":
+                raise ValueError(
+                    "decision model ran out of context before answering "
+                    f"(done_reason=length, num_ctx={DECISION_NUM_CTX}, "
+                    f"prompt_tokens={prompt_tokens}, answer_tokens={answer_tokens}, "
+                    f"prompt_chars={len(str(payload.get('prompt', '')))}, "
+                    f"thinking_chars={thinking}); the prompt and the answer schema did not "
+                    "fit together, so the model had no tokens left to produce a body"
+                )
+            raise ValueError(
+                "decision model returned no body and no cause "
+                f"(done_reason={done or 'unset'!r}, prompt_tokens={prompt_tokens}, "
+                f"answer_tokens={answer_tokens}, thinking_chars={thinking}, "
+                f"keys={sorted(response)})"
+            )
+        decision = parse_decision_json(body, model_name=self.model)
         return decision.model_copy(update={"decision_source": "llm"})
 
     @staticmethod
@@ -243,8 +316,12 @@ class HybridDecisionEngine:
         risk_provider: Callable[[str], dict[str, Any] | None] | None = None,
         instrument_provider: Callable[[str], dict[str, Any] | None] | None = None,
         news_provider: Callable[[str], tuple[NewsItem, ...]] | None = None,
+        #: Guardian's own ceiling, so the uncovered path can refuse to *pay* for a decision
+        #: that will be refused anyway. None leaves the path exactly as it was.
+        stale_after_seconds: int | None = None,
     ):
         self.llm = llm
+        self.stale_after_seconds = stale_after_seconds
         self.policy_engine = policy_engine
         self.lessons = lessons
         self.max_lessons = max_lessons
@@ -274,11 +351,138 @@ class HybridDecisionEngine:
         self.last_news_error: str | None = None
         #: The selected strategy's own decision for the snapshot `_context` last built.
         self._rule_decision: TradeDecision | None = None
+        self._selected_spec = None
+        self._selected_provenance: StrategyProvenance | None = None
         #: (shown, withheld) lesson ids for the snapshot `_context` last built.
         self._lesson_split: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
 
+    def _decide_uncovered(self, snapshot: DataSnapshot, context: dict) -> TradeDecision:
+        """A symbol no strategy covers still gets a decision, and it is not a strategy's.
+
+        Measured 2026-10-14: roughly 316 cycles a day across the watchlist and XLB were
+        `selection_unavailable: no matching frozen strategy covering snapshot symbol`, so
+        the model was never asked about them at all. The plan authorises asking it, with
+        HOLD as the baseline and a reason required to depart from it.
+
+        Three properties, each load-bearing:
+
+        - **HOLD is the baseline.** A departure without an `override_reason` is not taken,
+          the same rule the covered path applies and for the same measured reason: over 323
+          comparable cycles, 112 of 113 disagreements were the model declining a trade with
+          nothing recorded about why.
+        - **`strategy_id` stays None.** That is what keeps these decisions out of every
+          per-strategy metric and out of the lifecycle. The plan's acceptance is that the
+          count of `no_strategy` decisions inside strategy scoring is zero.
+        - **Guardian is untouched.** The decision goes through the same gate as any other;
+          nothing here widens a limit or bypasses a check.
+
+        `decision_source` stays `"llm"` when the model answers, so the monitor that counts
+        whether the model answered keeps working. The marker goes in the rationale.
+        """
+        def abstain(reason: str) -> TradeDecision:
+            return TradeDecision(
+                symbol=snapshot.symbol, action="HOLD", quantity=0, confidence=0,
+                rationale=f"selection_unavailable: {reason}",
+                hold_reason="no_signal", decision_source="policy_engine",
+            )
+
+        if self._selection_broke:
+            # A selector that threw is an outage, not an uncovered symbol. Asking the model
+            # here would spend a call on a cycle whose strategy library could not be read.
+            return abstain("selection could not run; the model was not asked")
+        if self._quote_already_stale(snapshot):
+            # Measured 2026-10-15: 48 cycles in one session asked the model about a symbol
+            # whose price was already too old for Guardian, which refused every one of them.
+            # The call bought nothing and cost about forty seconds of the round.
+            #
+            # Checked against the *snapshot's own clock*, not the wall clock: the question is
+            # "was this price already old when the snapshot was taken", which is the defect
+            # Guardian documents - a fresh clock with an hour-old price - and it is the same
+            # answer under replay, where the wall clock would be wrong.
+            return abstain("the price quote is already stale; the model was not asked")
+        if self._library_empty:
+            # Nothing is covered because nothing exists. That is a configuration failure and
+            # not the gap this branch was authorised to fill.
+            return abstain("the strategy library is empty; the model was not asked")
+
+        try:
+            decision = self.llm.decide(context)
+        except Exception as exc:
+            return abstain(f"no matching frozen strategy and the model did not answer: {type(exc).__name__}")
+        if decision.symbol != snapshot.symbol:
+            return abstain("no matching frozen strategy and the model named another symbol")
+
+        departure = decision.action != "HOLD"
+        if departure and not (decision.override_reason or "").strip():
+            return TradeDecision(
+                symbol=snapshot.symbol, action="HOLD", quantity=0,
+                confidence=decision.confidence,
+                rationale=(
+                    f"{NO_STRATEGY_MARKER}: the model wanted {decision.action} for a symbol "
+                    f"no strategy covers and gave no override_reason, so the HOLD baseline "
+                    f"stands"
+                ),
+                hold_reason="other", decision_source="llm",
+                model=decision.model,
+            )
+        return decision.model_copy(update={
+            "decision_source": "llm",
+            "strategy_id": None,
+            "strategy_provenance": None,
+            "hold_reason": decision.hold_reason or ("other" if not departure else None),
+            "rationale": f"{NO_STRATEGY_MARKER}: {decision.rationale}",
+        })
+
+    def _quote_already_stale(self, snapshot: DataSnapshot) -> bool:
+        """Whether Guardian would refuse this snapshot's price before the model is asked.
+
+        Only the quote, not the clock: `snapshot.timestamp` is the broker's clock and is by
+        construction the moment the snapshot was taken, so it cannot be stale relative to
+        itself. `quote_time` is when the price was observed, and it is the one Guardian
+        checks separately.
+        """
+        ceiling = self.stale_after_seconds
+        quote_time = snapshot.quote_time
+        if ceiling is None or quote_time is None:
+            return False
+        stamp, quote = snapshot.timestamp, quote_time
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        if quote.tzinfo is None:
+            quote = quote.replace(tzinfo=timezone.utc)
+        return (stamp - quote).total_seconds() > ceiling
+
     def decide_snapshot(self, snapshot: DataSnapshot) -> TradeDecision:
         context = self._context(snapshot)
+        selected_spec = self._selected_spec
+        provenance = valid_provenance(self._selected_provenance)
+        # Two different facts, and only one of them authorises asking the model.
+        #
+        #   - **The selector returned nothing.** No strategy covers this symbol. That is the
+        #     gap the plan names, and the model may be asked about it.
+        #   - **The selector returned something that does not fit** - a spec for another
+        #     symbol, or provenance that is absent, misidentified or digest-invalid. That is
+        #     a failure of selection or of capture, and asking the model about it would spend
+        #     a call on a cycle whose attribution is already broken.
+        #
+        # Merging the two was the first version of this change, and
+        # `test_synthetic_unattributed_selection_abstains_before_model` caught it: four of
+        # its six remaining boundaries are provenance failures with a spec selected, and all
+        # four started asking the model.
+        if selected_spec is None:
+            return self._decide_uncovered(snapshot, context)
+        if (
+            context.get("selected_strategy_id") != selected_spec.strategy_id
+            or provenance is None
+            or provenance.strategy_id != selected_spec.strategy_id
+            or snapshot.symbol not in selected_spec.symbols
+            or snapshot.symbol not in provenance.universe
+        ):
+            return TradeDecision(
+                symbol=snapshot.symbol, action="HOLD", quantity=0, confidence=0,
+                rationale="selection_unavailable: no matching frozen strategy covering snapshot symbol",
+                hold_reason="no_signal", decision_source="policy_engine",
+            )
         rule = self._rule_decision
         try:
             decision = self.llm.decide(context)
@@ -304,6 +508,8 @@ class HybridDecisionEngine:
             # declining a trade the rule would have taken, with nothing recorded about why.
             return rule.model_copy(update={
                 "decision_source": "policy_engine",
+                "strategy_id": selected_spec.strategy_id,
+                "strategy_provenance": self._selected_provenance,
                 "rule_action": rule.action,
                 "lesson_ids": self._lesson_split[0],
                 "lessons_withheld": self._lesson_split[1],
@@ -322,33 +528,114 @@ class HybridDecisionEngine:
             update["rule_action"] = rule.action
         if decision.action == (rule.action if rule is not None else decision.action):
             update["override_reason"] = None
-        if isinstance(selected, str) and selected and not decision.strategy_id:
-            update["strategy_id"] = selected
+        update["strategy_id"] = selected
+        update["strategy_provenance"] = self._selected_provenance
         return decision.model_copy(update=update)
 
     def _fallback(self, snapshot: DataSnapshot, reason: str) -> TradeDecision:
-        decision = self.policy_engine.decide_snapshot(snapshot)
-        return decision.model_copy(
-            update={
-                "decision_source": "fallback_policy_engine",
-                # The fallback is the rule, so the rule's action is the action taken.
-                "rule_action": decision.action,
-                "rationale": f"{decision.rationale} | llm_unavailable: {reason}",
-            }
+        if self._selected_spec is None:
+            return TradeDecision(
+                symbol=snapshot.symbol, action="HOLD", quantity=0, confidence=0,
+                rationale="selection_unavailable: no frozen strategy for fallback",
+                hold_reason="no_signal", decision_source="policy_engine",
+            )
+        if self._rule_decision is not None:
+            decision = self._rule_decision
+        else:
+            decision = TradeDecision(
+                symbol=snapshot.symbol, action="HOLD", quantity=0, confidence=0,
+                rationale="selected strategy could not produce a fallback decision",
+                strategy_id=self._selected_spec.strategy_id,
+                strategy_provenance=self._selected_provenance,
+            )
+        updates: dict[str, object] = {
+            "decision_source": "fallback_policy_engine",
+            "strategy_id": self._selected_spec.strategy_id,
+            "strategy_provenance": self._selected_provenance,
+            # The fallback is the rule, so the rule's action is the action taken.
+            "rule_action": decision.action,
+            "rationale": f"{decision.rationale} | {LLM_UNAVAILABLE_MARKER}{reason}",
+        }
+        note = self._fallback_exposure_note(decision)
+        if note is not None:
+            updates["action"] = "HOLD"
+            updates["quantity"] = 0
+            # `hold_reason` is a closed literal set - no_signal, risk_limit_near,
+            # market_uncertain, await_confirmation, other - and this wrote a sixth value
+            # that is not in it. The record was still appended, so the write looked
+            # successful; it then failed `TradeDecision` validation on the way back in and
+            # the journal reader counted it as a dropped line. Measured 2026-10-15: five
+            # XLE cycles were unreadable and `market-open-verify` failed with
+            # CORRUPT_HISTORY, which is exactly what that diagnostic exists to catch.
+            #
+            # `other` is the honest literal - the reason is not one of the four named
+            # states - and the specific cause stays in the rationale, which is free text
+            # and is where a reader looks for it anyway.
+            updates["hold_reason"] = "other"
+            # Appended, not substituted. The first version replaced the rationale and
+            # took the actual cause with it - "Read timed out" and the symbol the model
+            # named both vanished, which is the diagnosis this whole branch exists to
+            # preserve. A refusal that hides why the model was unavailable is worse than
+            # no note at all.
+            updates["rationale"] = f"{updates['rationale']} | {note}"
+        return decision.model_copy(update=updates)
+
+    #: Actions a rule may take when the model did not answer. SELL reduces a long and
+    #: COVER reduces a short, so both are exits or reductions. BUY and SHORT add exposure.
+    REDUCING_ACTIONS = frozenset({"HOLD", "SELL", "COVER"})
+
+    def _fallback_exposure_note(self, decision: TradeDecision) -> str | None:
+        """Why an unavailable model must not be able to open a position through a rule.
+
+        The fallback took the rule's action verbatim, including a BUY, so a parse failure
+        became a new position with no judgement behind it. Reported 2026-10-14: on 10-13,
+        16 of that day's sells were placed by the fallback rather than by any decision.
+
+        The asymmetry is the point. A rule that reduces exposure when the model is
+        silent is still acting on the model's own strategy; a rule that opens one is
+        taking a position nobody asked for, at a moment the system has already said it
+        could not think. Guardian still gates whatever survives this, so this narrows the
+        fallback rather than replacing a risk check.
+
+        Not a safety limit and not weakened anywhere: no Guardian bound, no daily loss
+        limit and no market-open check is touched. It removes an ability, not a bound.
+
+        Returns the sentence to append, or None when the action reduces exposure.
+        """
+        if decision.action in self.REDUCING_ACTIONS:
+            return None
+        return (
+            f"the rule wanted {decision.action}, which adds exposure; the fallback may "
+            f"only hold or reduce, so no order was placed"
         )
 
     def _context(self, snapshot: DataSnapshot) -> dict[str, Any]:
-        # The selected strategy and the lesson set both come from the policy
-        # engine. If that lookup fails the LLM still gets a decision: a degraded
-        # context is better than no decision, and Guardian reviews the result
-        # either way.
+        # Selection and lessons come from the policy engine. A missing or invalid
+        # frozen selection makes decide_snapshot abstain before calling the LLM;
+        # Guardian remains the final authority on covered decisions.
         strategy_id = None
         selected_spec = None
         self._rule_decision = None
+        self._selected_spec = None
+        self._selected_provenance = None
+        #: Whether selection could not run at all, as opposed to running and finding no
+        #: strategy that covers this symbol. The two were indistinguishable - the handler
+        #: below sets `strategy_id = None` in both cases - and they call for opposite
+        #: behaviour: an uncovered symbol may be asked of the model, a broken selector may
+        #: not. `test_a_broken_policy_engine_abstains_before_the_llm` pins that, and caught
+        #: this branch asking the model about a selector that had just thrown.
+        self._selection_broke = False
+        #: Whether the library held any strategy at all. An empty library is a configuration
+        #: failure, not an uncovered symbol: there is nothing to be uncovered *by*, and the
+        #: plan's authority is for a symbol no strategy covers, not for a system with no
+        #: strategies. Kept separate from `_selection_broke` because a library that reads
+        #: cleanly and is empty is not the same failure as one that could not be read.
+        self._library_empty = False
         try:
+            strategies = self.policy_engine.strategy_library.list()
             selected = self.policy_engine.selector.select(
-                self.policy_engine.strategy_library.list(),
-                self._results(),
+                strategies,
+                self._results(strategies),
                 # Coverage is evaluated at the real price, not on paper. A
                 # TREND_FOLLOW nominally covers both sides but only emits the one
                 # its reference price points at, and the live one is anchored to a
@@ -369,16 +656,13 @@ class HybridDecisionEngine:
             )
             if selected is not None:
                 strategy_id = selected.strategy_id
-                selected_spec = next(
-                    (
-                        strategy
-                        for strategy in self.policy_engine.strategy_library.list()
-                        if strategy.strategy_id == selected.strategy_id
-                    ),
-                    None,
-                )
+                selected_spec = selected
+                self._selected_spec = selected
+                self._selected_provenance = capture(selected)
+            self._library_empty = not strategies
         except Exception:
             strategy_id = None
+            self._selection_broke = True
         executor = getattr(self.policy_engine, "executor", None)  # no executor, no rule to run
         if selected_spec is not None and executor is not None:
             try:
@@ -721,7 +1005,9 @@ class HybridDecisionEngine:
         if self.lessons is None or strategy_id is None:
             return []
         try:
-            return list(self.lessons(strategy_id))[: self.max_lessons]
+            library = getattr(self.policy_engine, "knowledge_library", None)
+            return [a for a in self.lessons(strategy_id)
+                    if a.source_kind != "journal" or (library is not None and library.lesson_verified(a))][: self.max_lessons]
         except Exception:
             return []
 
@@ -743,11 +1029,11 @@ class HybridDecisionEngine:
         except (TypeError, ValueError):
             return None
 
-    def _results(self):
+    def _results(self, strategies=None):
         engine = self.policy_engine
         if engine.reflection_memory is None:
             return []
         record = engine.reflection_memory.load()
         if record is None:
             return []
-        return engine.reflection_memory.strategy_results(record)
+        return engine.reflection_memory.strategy_results(record, strategies if strategies is not None else engine.strategy_library.list())

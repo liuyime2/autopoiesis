@@ -56,6 +56,20 @@ def _run(*cmd: str) -> str:
         return "unknown"
 
 
+def _git_dirty() -> str:
+    """Include index, worktree and untracked changes; failed inspection is unknown."""
+    try:
+        result = subprocess.run(
+            ("git", "status", "--porcelain", "--untracked-files=normal"),
+            capture_output=True, text=True, timeout=120, cwd=ROOT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    if result.returncode != 0:
+        return "unknown"
+    return "yes" if result.stdout.strip() else "no"
+
+
 def _broker_clock() -> str:
     key = os.environ.get("ALPACA_API_KEY", "")
     secret = os.environ.get("ALPACA_SECRET_KEY", "")
@@ -165,8 +179,7 @@ def main() -> int:
 
     add("\n## code")
     add(f"commit: {_run('git', 'rev-parse', 'HEAD')}")
-    dirty = _run("git", "diff", "--quiet")
-    add(f"dirty:  {'no' if dirty == '0' or not dirty else 'yes'}")
+    add(f"dirty:  {_git_dirty()}")
 
     add("\n## environment")
     add(f"python: {sys.version.split()[0]}")

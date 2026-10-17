@@ -17,9 +17,7 @@ from autopoiesis.broker_evidence import latest_evidence_batch
 from autopoiesis.config import AgentConfig
 from autopoiesis.curriculum import StructuredCurriculumAgent
 from autopoiesis.evaluator import (
-    PNL_EVIDENCE_ACCOUNT_VERIFIED,
     PNL_EVIDENCE_MISSING,
-    PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
     DeterministicEvaluator,
     confirmed_fill_activities,
     owner_fill_activities,
@@ -29,6 +27,13 @@ from autopoiesis.health import HealthMonitor
 from autopoiesis.journal import JsonlJournal
 from autopoiesis.knowledge_admission import KnowledgeAdmission
 from autopoiesis.knowledge_library import lesson_effects
+from autopoiesis.learning_evidence import ELIGIBILITY_VERSION, capture, valid_provenance
+from autopoiesis.llm_decision import LLM_UNAVAILABLE_MARKER
+
+#: How many candidates the model is offered when choosing the watchlist. Wider than the
+#: slots so the choice is a choice; bounded so the prompt stays small.
+ATTENTION_CANDIDATES = 40
+from autopoiesis import attention
 from autopoiesis.loop import FAIL_CLOSED_RATIONALE
 from autopoiesis.models import (
     BrokerEvidenceBatch,
@@ -51,6 +56,9 @@ from autopoiesis.strategy_engine import (
 
 #: Calendar days a strategy stays PAUSED before it may be re-examined at all.
 PAUSED_REVIEW_DAYS = 3
+
+#: Long scheduler/backoff waits check the stop flag at least this often.
+COOPERATIVE_WAIT_POLL_SECONDS = 1.0
 
 
 def source_fingerprint() -> str:
@@ -99,7 +107,7 @@ class AgentDaemon:
         config: AgentConfig,
         loop,
         health: HealthMonitor | None = None,
-        sleep: Callable[[float], None] = time.sleep,
+        sleep: Callable[[float], None] | None = None,
         now: Callable[[], datetime] | None = None,
         scheduler=None,
         startup_reconciler=None,
@@ -107,6 +115,10 @@ class AgentDaemon:
         strategy_library: StrategyLibrary | None = None,
         reflection_memory: ReflectionMemory | None = None,
         curriculum_agent: StructuredCurriculumAgent | None = None,
+        #: Asked to choose which of the broker's candidates the system should watch. None
+        #: leaves the mechanical top-k in place, which is what the system did before this
+        #: existed - a missing model must not be able to empty the watchlist.
+        attention_transport: Callable[[str, dict], object] | None = None,
         #: Called with the running cycle count after each cycle, so a caller that needs a
         #: per-cycle number can hold it. The incumbent cadence is defined over cycles but
         #: reads `reflection.json`, which is a 30-minute-old snapshot, so without this the
@@ -124,12 +136,13 @@ class AgentDaemon:
         self.config = config
         self.loop = loop
         self.health = health or HealthMonitor(config.heartbeat_path)
-        self.sleep = sleep
+        self.sleep = sleep if sleep is not None else self._cooperative_sleep
         self.now = now or (lambda: datetime.now(tz=timezone.utc))
         self.scheduler = scheduler
         self.startup_reconciler = startup_reconciler
         self.fill_reconciler = fill_reconciler
         self.strategy_library = strategy_library
+        self.attention_transport = attention_transport
         self.reflection_memory = reflection_memory
         self.curriculum_agent = curriculum_agent
         self.strategy_admission = strategy_admission
@@ -177,7 +190,7 @@ class AgentDaemon:
         signal.signal(signal.SIGINT, self._request_stop)
         try:
             self._heartbeat("RUNNING", "daemon started")
-            if not self._startup_reconcile():
+            if not self._stop_requested and not self._startup_reconcile():
                 return 1
             while not self._stop_requested:
                 # One failure boundary for the whole loop, not one per call site.
@@ -203,17 +216,25 @@ class AgentDaemon:
                         f"maintenance error, continuing to trade: "
                         f"{type(exc).__name__}: {exc}",
                     )
+                if self._stop_requested:
+                    break
                 if max_cycles is not None and self.cycle_count >= max_cycles:
                     break
                 if self.scheduler is not None and not self._should_trade_now():
+                    if self._stop_requested:
+                        break
                     self._heartbeat("RUNNING", "market closed; maintenance only")
                     if max_cycles is not None:
                         break
-                    self.sleep(self._sleep_seconds())
+                    if not self._stop_requested:
+                        self.sleep(self._sleep_seconds())
                     continue
+                if self._stop_requested:
+                    break
                 if self.daily_cycle_count >= self.config.max_daily_cycles:
                     self._heartbeat("BACKING_OFF", "max daily cycles reached")
-                    self.sleep(self._sleep_seconds())
+                    if not self._stop_requested:
+                        self.sleep(self._sleep_seconds())
                     continue
                 round_started = time.monotonic()
                 for symbol in self._round_symbols():
@@ -236,6 +257,17 @@ class AgentDaemon:
     def stop(self) -> None:
         self._stop_requested = True
 
+    def _cooperative_sleep(self, seconds: float) -> None:
+        """Keep normal cadence while bounding how long a stop waits for idle sleep."""
+        if seconds < 0:
+            raise ValueError("sleep length must be non-negative")
+        deadline = time.monotonic() + seconds
+        while not self._stop_requested:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(remaining, COOPERATIVE_WAIT_POLL_SECONDS))
+
     def _should_trade_now(self) -> bool:
         """Is the market open, and does the broker answer?
 
@@ -251,6 +283,8 @@ class AgentDaemon:
         does not turn into a tight retry loop against it, and it resets the moment a call succeeds -
         so a single stall costs one skipped round rather than the session.
         """
+        if self._stop_requested:
+            return False
         try:
             open_now = self.scheduler.should_trade_now()
             self._record_broker(True)
@@ -270,7 +304,8 @@ class AgentDaemon:
                 message=f"broker clock unreadable, not trading this round: "
                         f"{type(exc).__name__}: {exc}",
             )
-            self.sleep(delay)
+            if not self._stop_requested:
+                self.sleep(delay)
             return False
         if self._clock_failures:
             # Only worth recording when something had actually gone wrong.
@@ -278,10 +313,20 @@ class AgentDaemon:
         return bool(open_now)
 
     def _run_symbol(self, symbol: str) -> None:
+        if self._stop_requested:
+            return
+        # One count per attempted cycle, including exceptions after run_once.
+        # Reporting or maintenance failures cannot turn one cycle into two.
+        self.cycle_count += 1
+        self.daily_cycle_count += 1
         try:
             record = self.loop.run_once(symbol)
-            self.cycle_count += 1
-            self.daily_cycle_count += 1
+            if record is not None:
+                self.last_cycle_id = record.cycle_id
+            if self._stop_requested:
+                if record is None:
+                    self.error_count += 1
+                return
             if self.on_cycle_count is not None:
                 # Reported even when the cycle failed, so the number stays monotone and never
                 # skips. A cadence measured against a counter that jumped would be a cadence
@@ -293,7 +338,8 @@ class AgentDaemon:
                 self.error_count += 1
                 self._heartbeat("BACKING_OFF", f"broker data unavailable for {symbol}")
                 return
-            self.last_cycle_id = record.cycle_id
+            if self._stop_requested:
+                return
             # Whether the model answered, recorded from the one signal that says so.
             #
             # `decision_source == "llm"` means it did. `fallback_policy_engine` means it did not -
@@ -311,17 +357,19 @@ class AgentDaemon:
             # the flag at its last known value, which is the honest statement: nothing new is
             # known about the model from a cycle that did not ask it.
             self._post_cycle_model_flag(record)
+            if self._stop_requested:
+                return
             self._post_cycle()
-            self._heartbeat("RUNNING", f"completed cycle for {symbol}")
+            if not self._stop_requested:
+                self._heartbeat("RUNNING", f"completed cycle for {symbol}")
         except Exception as exc:
-            self.cycle_count += 1
-            self.daily_cycle_count += 1
             self.error_count += 1
             self._heartbeat("BACKING_OFF", f"cycle error for {symbol}: {exc}")
 
-    def _request_stop(self, signum, _frame) -> None:  # pragma: no cover - signal wiring is integration behavior
+    def _request_stop(self, _signum, _frame) -> None:
+        # Signals may interrupt a journal append. Do not reenter IO or its lock;
+        # the ordinary run loop writes the final heartbeat after the boundary.
         self._stop_requested = True
-        self._heartbeat("STOPPING", f"received signal {signum}")
 
     def _startup_reconcile(self) -> bool:
         if self.startup_reconciler is None:
@@ -357,15 +405,22 @@ class AgentDaemon:
             self.daily_cycle_count = 0
 
     def _post_cycle(self) -> None:
-        if self.journal is None or self.reflection_memory is None:
+        if self._stop_requested or self.journal is None or self.reflection_memory is None:
             return
         if self.cycle_count % self.reflect_every == 0:
-            self._reflect(evidence=self._latest_evidence_batch())
+            evidence = self._latest_evidence_batch()
+            if self._stop_requested:
+                return
+            self._reflect(evidence=evidence)
+            if self._stop_requested:
+                return
             self._manage_strategy_lifecycle()
+            if self._stop_requested:
+                return
         if self.cycle_count % self.curriculum_every == 0 and self.curriculum_agent is not None:
             self._curriculum_proposal()
 
-    def _cumulative_cycles_by_strategy(self) -> tuple[dict[str, int], dict[str, int]]:
+    def _cumulative_cycles_by_strategy(self, records=None) -> tuple[dict[str, int], dict[str, int]]:
         """Lifetime service per strategy: cycles served, and BUY/SELL decisions made.
 
         The reflection window is `reflection_window` records - 50 by default, about
@@ -384,7 +439,7 @@ class AgentDaemon:
         attempts: dict[str, int] = {}
         if self.journal is None:
             return cycles, attempts
-        for record in self.journal.read_all():
+        for record in self.journal.read_all() if records is None else records:
             strategy_id = record.decision.strategy_id
             if not strategy_id:
                 continue
@@ -398,15 +453,19 @@ class AgentDaemon:
         if self.journal is None or self.reflection_memory is None:
             return
         try:
-            recent = self.journal.last_n(self.config.reflection_window)
-            cumulative_cycles, cumulative_trade_attempts = self._cumulative_cycles_by_strategy()
+            full_records = self.journal.read_all()
+            if self.knowledge_admission is not None:
+                self.knowledge_admission.knowledge_library.verify_journal_sources(full_records)
+            recent = full_records[-self.config.reflection_window:]
+            cumulative_cycles, cumulative_trade_attempts = self._cumulative_cycles_by_strategy(full_records)
             reflection = self.reflection_memory.reflect(
                 recent,
                 evidence=evidence,
                 fills=self._confirmed_fills(),
-                seeded_fills=self._confirmed_fill_activities(),
+                seeded_fills=self._confirmed_fill_activities(full_records),
                 cumulative_cycles=cumulative_cycles,
                 cumulative_trade_attempts=cumulative_trade_attempts,
+                full_records=full_records,
             )
             self.reflection_memory.save(reflection)
             self._append_event(
@@ -437,7 +496,7 @@ class AgentDaemon:
             )
 
     def _screen_candidate(
-        self, strategy_id: str, *, _events=None, _latest_payloads=None, _day_up=None
+        self, strategy_id: str, *, _events=None, _latest_payloads=None, _day_up=None, _spec=None
     ) -> None:
         """Screen a candidate on the decisions it has actually produced.
 
@@ -463,11 +522,15 @@ class AgentDaemon:
         if self.journal is None:
             return
         try:
+            spec = _spec or next((s for s in self.strategy_library.list() if s.strategy_id == strategy_id), None) if self.strategy_library else None
             decisions = offline_validation.collect_decisions(
                 self.journal.read_events("COUNTERFACTUAL_EVALUATED")
                 if _events is None else _events,
                 strategy_id,
+                strategy=spec,
             )
+            if spec is None:
+                decisions = []
             result = offline_validation.validate(
                 decisions, strategy_id=strategy_id, day_up=_day_up
             )
@@ -481,6 +544,11 @@ class AgentDaemon:
             )
             return
         payload = result.to_payload()
+        payload.update({
+            "eligibility_version": ELIGIBILITY_VERSION,
+            "strategy_provenance": capture(spec).model_dump(mode="json") if spec else None,
+            "source_cycle_ids": [d.cycle_id for d in decisions],
+        })
         if _latest_payloads is not None and _latest_payloads.get(strategy_id) == payload:
             return
         self._append_event(
@@ -521,6 +589,7 @@ class AgentDaemon:
         if self.journal is None:
             return {}
         latest: dict[str, object] = {}
+        current = {s.strategy_id: capture(s).behavior_digest for s in self.strategy_library.list()} if self.strategy_library else {}
         try:
             events = (
                 _validation
@@ -531,6 +600,13 @@ class AgentDaemon:
             return {}
         for event in events:
             if not event.strategy_id:
+                continue
+            p = valid_provenance(event.payload.get("strategy_provenance"))
+            if (event.payload.get("eligibility_version") != ELIGIBILITY_VERSION or p is None
+                    or p.strategy_id != event.strategy_id
+                    or current.get(event.strategy_id) != p.behavior_digest
+                    or (event.payload.get("scored", 0) and not event.payload.get("source_cycle_ids"))):
+                latest.pop(event.strategy_id, None)
                 continue
             latest[event.strategy_id] = offline_validation.OfflineValidationResult.from_payload(
                 event.strategy_id, event.payload, event.event_id
@@ -550,7 +626,7 @@ class AgentDaemon:
         ones, because "we cannot tell yet" is a result worth having on the record
         and it is what stops a thin strategy from being treated as validated.
         """
-        if self.journal is None or self.strategy_library is None:
+        if self._stop_requested or self.journal is None or self.strategy_library is None:
             return
         events = (
             self.journal.read_events("COUNTERFACTUAL_EVALUATED")
@@ -564,23 +640,31 @@ class AgentDaemon:
         )
         # Once per pass, over every strategy's rows: the base rate each screen is read against.
         day_up = offline_validation.day_direction(events)
+        if self._stop_requested:
+            return
         for spec in self.strategy_library.list():
+            if self._stop_requested:
+                break
             if spec.lifecycle in {"RETIRED"}:
                 continue
             self._screen_candidate(
                 spec.strategy_id, _events=events, _latest_payloads=latest_payloads,
                 _day_up=day_up,
+                _spec=spec,
             )
 
-    def _recorded_counterfactual_verdicts(self, events) -> dict[str, str]:
+    def _recorded_counterfactual_verdicts(self, events) -> dict[str, tuple]:
         """The verdict last journalled for each cycle, as `{cycle_id: verdict}`."""
-        recorded: dict[str, str] = {}
+        recorded: dict[str, tuple] = {}
         for event in events:
             payload = event.payload if isinstance(event.payload, dict) else {}
             for row in coerce.field_dict_tuple(payload.get("rows"), "payload.rows"):
                 cycle_id = coerce.field_str(row.get("cycle_id"), "row.cycle_id")
                 if cycle_id:
-                    recorded[cycle_id] = coerce.field_str(row.get("verdict"), "row.verdict")
+                    recorded[cycle_id] = (
+                        coerce.field_str(row.get("verdict"), "row.verdict"),
+                        row.get("eligibility_version"), row.get("eligibility"), row.get("strategy_provenance"),
+                    )
         return recorded
 
     def _record_counterfactuals(self, *, _events) -> None:
@@ -609,10 +693,10 @@ class AgentDaemon:
         if self.journal is None:
             return
         try:
-            symbol = self.config.symbols[0] if self.config.symbols else "SPY"
-            report = counterfactual.evaluate(
+            symbols = list(self.config.symbols)
+            report = counterfactual.evaluate_symbols(
                 self.journal.read_all(),
-                symbol=symbol,
+                symbols=symbols,
                 horizon_hours=self.config.counterfactual_horizon_hours,
                 assumed_cost_pct=self.config.assumed_round_trip_cost_pct,
             )
@@ -631,7 +715,9 @@ class AgentDaemon:
         fresh = [
             row
             for row in report.rows
-            if recorded.get(row.cycle_id) != row.verdict
+            if recorded.get(row.cycle_id) != (
+                row.verdict, row.eligibility_version, row.eligibility, row.strategy_provenance,
+            )
         ]
         if not fresh:
             # Every decision already carries the verdict it has now, so there is
@@ -640,20 +726,28 @@ class AgentDaemon:
             # again would add a row that says only that the pass ran.
             return
         counts = report.counts()
+        # Per symbol, because "the screen has nothing to judge" and "the screen has nothing to
+        # judge for TLT" are different facts and only the second one is a coverage defect.
+        per_symbol: dict[str, dict[str, int]] = {}
+        for row in report.rows:
+            bucket = per_symbol.setdefault(row.symbol, {})
+            bucket[row.verdict] = bucket.get(row.verdict, 0) + 1
         self._append_event(
             "COUNTERFACTUAL_EVALUATED",
             status="SUCCESS",
             message=(
+                f"symbols={len(symbols)} "
                 f"hold_quality={report.hold_quality()} "
                 f"scored={len(report.scored)} pending={report.pending_count} "
                 f"gap={report.gap_count} new_or_changed={len(fresh)}/{len(report.rows)}"
             ),
             payload={
-                "symbol": symbol,
+                "symbols": symbols,
                 "horizon_hours": self.config.counterfactual_horizon_hours,
                 "assumed_round_trip_cost_pct": self.config.assumed_round_trip_cost_pct,
                 "hold_quality": report.hold_quality(),
                 "counts": counts,
+                "counts_by_symbol": per_symbol,
                 "scored": len(report.scored),
                 "pending": report.pending_count,
                 "gap": report.gap_count,
@@ -663,6 +757,12 @@ class AgentDaemon:
                         "cycle_id": row.cycle_id,
                         "action": row.action,
                         "strategy_id": row.strategy_id,
+                        "symbol": row.symbol,
+                        "decision_symbol": row.decision_symbol,
+                        "decision_strategy_id": row.decision_strategy_id,
+                        "strategy_provenance": row.strategy_provenance,
+                        "eligibility_version": row.eligibility_version,
+                        "eligibility": row.eligibility,
                         "decided_at": row.decided_at.isoformat(),
                         "price_at_decision": row.price_at_decision,
                         "price_at_horizon": row.price_at_horizon,
@@ -688,25 +788,25 @@ class AgentDaemon:
         return None, (self.config.symbols[0] if self.config.symbols else "SPY")
 
     def _open_book(self) -> list[dict[str, object]]:
-        """Positions from the most recent real snapshot, for the curriculum context.
+        """Positions from the latest recorded real snapshot, for curriculum context.
 
-        Only the fields an exit decision needs, and only what the broker reported.
+        This reads the journal, not a fresh broker snapshot. Include every nonzero
+        signed holding; a recorded flat book must supersede older positions.
         """
         if self.journal is None:
             return []
-        for record in reversed(self.journal.read_all()):
-            held = [
-                {
-                    "symbol": position.symbol,
-                    "quantity": position.quantity,
-                    "market_value": round(position.market_value, 2),
-                }
-                for position in record.snapshot.positions
-                if position.quantity > 0
-            ]
-            if held:
-                return held
-        return []
+        records = self.journal.last_n(1)
+        if not records:
+            return []
+        return [
+            {
+                "symbol": position.symbol,
+                "quantity": position.quantity,
+                "market_value": round(position.market_value, 2),
+            }
+            for position in records[-1].snapshot.positions
+            if position.quantity != 0
+        ]
 
     def _recent_rejections(self, limit: int = 6) -> list[dict[str, str]]:
         """Rejected proposals with the reason, newest verdict per strategy id.
@@ -718,6 +818,15 @@ class AgentDaemon:
         trading activity, never its own output, so a refused id looked unused.
         Deduplicated because the same id is reviewed again on every retry and six
         copies of one sentence teaches nothing a single copy does not.
+
+        Dedup by id was not enough, because the ids are not what repeats. Measured
+        2026-10-14: the six most recent refusals carried three distinct reason
+        strings, and normalising the one number that differs between them left two.
+        Five of the six were the same probation-capacity sentence - 1,240 of the
+        2,002 characters sent. Grouping them was tried and withdrawn: it only merges
+        byte-identical reasons, so it recovered about 400 of 8,192 tokens (5%), in
+        exchange for changing the prompt shape the model reads. The budget is fixed
+        at CURRICULUM_NUM_CTX instead, which buys four times that.
         """
         if self.journal is None:
             return []
@@ -735,7 +844,7 @@ class AgentDaemon:
         ]
 
     def _curriculum_proposal(self) -> None:
-        if self.reflection_memory is None or self.curriculum_agent is None:
+        if self._stop_requested or self.reflection_memory is None or self.curriculum_agent is None:
             return
         try:
             reflection = self.reflection_memory.load()
@@ -743,33 +852,51 @@ class AgentDaemon:
                 return
             strategies = self.strategy_library.list() if self.strategy_library else []
             exploration_summary = self._recent_exploration_summary()
+            if self._stop_requested:
+                return
             self._record_no_exploration_lesson(exploration_summary)
             # Retry once on transport/connection errors — the LLM endpoint
             # (Ollama) can transiently time out under load. A single retry with
             # a 5-second backstop is sufficient; anything worse should surface
             # as a curriculum failure event for operator attention.
             try:
+                prior_rejections = self._recent_rejections()
+                open_positions = self._open_book()
+                last_price, symbol = self._last_market()
+                if self._stop_requested:
+                    return
                 task = self.curriculum_agent.propose(
                     reflection=reflection,
                     current_strategies=strategies,
                     recent_exploration_summary=exploration_summary,
-                    prior_rejections=self._recent_rejections(),
+                    prior_rejections=prior_rejections,
                     guardian_max_position_value=self.config.max_position_value,
-                    open_positions=self._open_book(),
-                    last_price=self._last_market()[0],
-                    symbol=self._last_market()[1],
+                    open_positions=open_positions,
+                    last_price=last_price,
+                    symbol=symbol,
                 )
             except (ConnectionError, TimeoutError, OSError):
+                # Keep the actual transport failure, but never start another
+                # request after stop, including a stop during preparation.
+                if self._stop_requested:
+                    raise
                 self.sleep(5)
+                if self._stop_requested:
+                    raise
+                prior_rejections = self._recent_rejections()
+                open_positions = self._open_book()
+                last_price, symbol = self._last_market()
+                if self._stop_requested:
+                    raise
                 task = self.curriculum_agent.propose(
                     reflection=reflection,
                     current_strategies=strategies,
                     recent_exploration_summary=exploration_summary,
-                    prior_rejections=self._recent_rejections(),
+                    prior_rejections=prior_rejections,
                     guardian_max_position_value=self.config.max_position_value,
-                    open_positions=self._open_book(),
-                    last_price=self._last_market()[0],
-                    symbol=self._last_market()[1],
+                    open_positions=open_positions,
+                    last_price=last_price,
+                    symbol=symbol,
                 )
             strategy_id = task.strategy_spec.strategy_id if task.strategy_spec is not None else None
             # A fallback task is a hard-coded constant, not model output. It is
@@ -797,12 +924,17 @@ class AgentDaemon:
                     "recent_exploration_summary": exploration_summary,
                 },
             )
+            if self._stop_requested:
+                return
             if task.task_type == "STRATEGY_SPEC" and task.strategy_spec and self.strategy_admission is not None:
                 # Give admission the real prices so a TREND_FOLLOW anchored to
                 # a fabricated level is rejected instead of entering the library.
                 self.strategy_admission.set_market_prices(self._last_known_prices())
+                strategy_results = self._strategy_results()
+                if self._stop_requested:
+                    return
                 result = self.strategy_admission.admit(
-                    task.strategy_spec, self._strategy_results()
+                    task.strategy_spec, strategy_results
                 )
                 self._append_event(
                     "STRATEGY_ADMISSION_REVIEWED",
@@ -812,6 +944,8 @@ class AgentDaemon:
                     task_id=task.task_id,
                     payload={"accepted": result.accepted, "reason": result.reason},
                 )
+                if self._stop_requested:
+                    return
                 # Offline validation runs on the candidate's *existing* recorded
                 # decisions, not on a replay of its rule. In this system a strategy
                 # is context handed to the model, not an executable rule, so a
@@ -834,7 +968,7 @@ class AgentDaemon:
             )
 
     def _maintenance(self) -> None:
-        if not self._due(self.last_maintenance_at, self.config.maintenance_interval_seconds):
+        if self._stop_requested or not self._due(self.last_maintenance_at, self.config.maintenance_interval_seconds):
             return
         # Beat before the work, not only after it. The heartbeat used to be written
         # once per loop iteration, after this method returned, so a maintenance
@@ -850,28 +984,50 @@ class AgentDaemon:
         # 900s later, so the check keeps its ability to catch a real hang; only the
         # honest "I am working" silence is removed.
         self._heartbeat("RUNNING", "maintenance in progress")
+        if self._stop_requested:
+            return
         self._resolve_unresolved_submissions()
+        if self._stop_requested:
+            return
         self._resolve_pending_fills()
+        if self._stop_requested:
+            return
         evidence = self._latest_evidence_batch()
+        if self._stop_requested:
+            return
         if self._due(self.last_evidence_at, self.config.evidence_interval_seconds):
             evidence = self._ingest_broker_evidence()
+            if self._stop_requested:
+                return
         # Bound before the branch below: `_manage_strategy_lifecycle` runs after it and
         # takes the same read, and a name bound only inside the `if` would be undefined
         # on the path where there is no journal - which is the path the tests exercise.
         validation_events = None
         self._appended = []
         if self.journal is not None:
+            if self.knowledge_admission is not None:
+                self.knowledge_admission.knowledge_library.verify_journal_sources(self.journal.read_all())
+                if self._stop_requested:
+                    return
             self._record_pnl_evidence(evidence)
+            if self._stop_requested:
+                return
             self._verify_profit_target(evidence)
+            if self._stop_requested:
+                return
             # One read of the counterfactual ledger, shared. It used to be parsed
             # twice per pass - once here and once in `_screen_all_strategies` - and
             # each read grew with the journal, so the cost of every maintenance pass
             # rose with the number of passes that had already run.
             counterfactual_events = self.journal.read_events("COUNTERFACTUAL_EVALUATED")
+            if self._stop_requested:
+                return
             # Also read once. `_offline_evidence_by_strategy` parsed every validation
             # event on every pass already, so this adds no scan - it removes one - and
             # the same read is what tells the screen whether a verdict actually moved.
             validation_events = self.journal.read_events("OFFLINE_VALIDATION_COMPLETED")
+            if self._stop_requested:
+                return
             # Each stage hands what it appended to the next, so a pass acts on its own
             # results. The screen used to run on the read taken before the counterfactuals
             # were recorded, and the lifecycle on the read taken before the screen - so every
@@ -879,24 +1035,36 @@ class AgentDaemon:
             # verdict reached the lifecycle one pass after that.
             mark = len(self._appended)
             self._record_counterfactuals(_events=counterfactual_events)
+            if self._stop_requested:
+                return
             counterfactual_events = [
                 *counterfactual_events,
                 *self._appended_since(mark, "COUNTERFACTUAL_EVALUATED"),
             ]
             self._record_calibration_lesson()
+            if self._stop_requested:
+                return
             self._retire_lessons_without_effect()
+            if self._stop_requested:
+                return
             mark = len(self._appended)
             self._screen_all_strategies(
                 _events=counterfactual_events, _validation=validation_events
             )
+            if self._stop_requested:
+                return
             validation_events = [
                 *validation_events,
                 *self._appended_since(mark, "OFFLINE_VALIDATION_COMPLETED"),
             ]
         if self.reflection_memory is not None and self._due(self.last_reflection_at, self.config.reflection_interval_seconds):
             self._reflect(evidence=evidence)
+            if self._stop_requested:
+                return
         if self.curriculum_agent is not None and self.reflection_memory is not None and self._due(self.last_curriculum_at, self.config.curriculum_interval_seconds):
             self._curriculum_proposal()
+            if self._stop_requested:
+                return
         self._manage_strategy_lifecycle(_validation=validation_events)
         self.last_maintenance_at = self.now()
 
@@ -1007,10 +1175,10 @@ class AgentDaemon:
             )
             return None
 
-    def _confirmed_fill_activities(self):
+    def _confirmed_fill_activities(self, records=None):
         if self.journal is None:
             return []
-        return confirmed_fill_activities(self.journal, self.journal.read_all())
+        return confirmed_fill_activities(self.journal, self.journal.read_all() if records is None else records)
 
     def _record_pnl_evidence(self, evidence: BrokerEvidenceBatch | None) -> None:
         if self.journal is None:
@@ -1041,29 +1209,26 @@ class AgentDaemon:
             owner_fills=owner_fill_activities(self.journal),
         )
         pnl = report.pnl
+        # Broker account history cannot establish the agent's capital or return.
         status = "unproven"
-        satisfied = False
-        if pnl is not None and report.pnl_evidence in {PNL_EVIDENCE_ACCOUNT_VERIFIED, PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED} and pnl.account_return_pct is not None:
-            if pnl.account_return_pct >= self.config.profit_target_return_pct:
-                status = "satisfied"
-                satisfied = True
-            else:
-                status = "not satisfied"
         # Only write a journal event when the target status transitions, so a
-        # routine "not satisfied" reading does not flood the log.
+        # routine "unproven" reading does not flood the log.
         if status == self._last_profit_target_status:
             return
         self._last_profit_target_status = status
         self._append_event(
             "PROFIT_TARGET_CHECKED",
-            status="SUCCESS" if satisfied else "SKIPPED",
+            status="SKIPPED",
             message=f"profit target {status}",
             payload={
                 "target_daily_return_pct": self.config.profit_target_return_pct,
                 "pnl_evidence": report.pnl_evidence,
-                "satisfied": satisfied,
+                "satisfied": False,
                 "status": status,
+                "comparison_status": "UNKNOWN",
+                "comparison_reason": "agent allocation, cash flows and aligned rolling equity history are unavailable",
                 "account_return_pct": None if pnl is None else pnl.account_return_pct,
+                "account_return_scope": "account_only_diagnostic",
                 "paper_only": self.config.mode == "paper",
             },
         )
@@ -1181,6 +1346,7 @@ class AgentDaemon:
         records = self.journal.read_all()
         if not records:
             return
+        self.knowledge_admission.knowledge_library.verify_journal_sources(records)
         verdicts = {
             row.cycle_id: row.verdict
             # The same symbol and cost the ledger is scored with. Left at the defaults, this
@@ -1373,7 +1539,7 @@ class AgentDaemon:
         reflection = self.reflection_memory.load()
         if reflection is None:
             return []
-        return self.reflection_memory.strategy_results(reflection)
+        return self.reflection_memory.strategy_results(reflection, self.strategy_library.list() if self.strategy_library else [])
 
     def _manage_strategy_lifecycle(self, *, _validation=None) -> None:
         if self.lifecycle_manager is None or self.strategy_library is None or self.reflection_memory is None:
@@ -1381,7 +1547,7 @@ class AgentDaemon:
         reflection = self.reflection_memory.load()
         if reflection is None:
             return
-        results = self.reflection_memory.strategy_results(reflection)
+        results = self.reflection_memory.strategy_results(reflection, self.strategy_library.list())
         # Phase 6: promotion is evidence-gated, so the lifecycle review is given the
         # offline validation verdict for each strategy. Without this the gate would
         # see "no evidence" for everyone and block every promotion permanently -
@@ -1389,8 +1555,44 @@ class AgentDaemon:
         evidence = self._offline_evidence_by_strategy(_validation=_validation)
         decisions = self.lifecycle_manager.review(self.strategy_library.list(), results, evidence)
         decisions.extend(self._reconsider_paused(results, evidence))
+        decisions.extend(self._drifted_reference_retirements())
         for decision in decisions:
             self._apply_lifecycle_decision(decision)
+
+    def _drifted_reference_retirements(self) -> list:
+        """Retire a servable strategy that admission would refuse today for a drifted reference.
+
+        The plan's P1 item, second half: "make the lifecycle able to retire a strategy whose
+        reference has drifted from the market rather than waiting for a human". Measured three
+        times now - TLT, XLF and SPY were each drained one share per cycle by a strategy whose
+        trigger band emitted a single action forever, and each time a human paused it. The
+        pause stops that instance and does not stop the next one.
+
+        The predicate is admission's own, not a second number: a spec whose `reference_price`
+        has drifted far enough that the gate would refuse it today is a spec that should not
+        keep serving. Two answers to "is this reference usable" is how they start disagreeing,
+        which is the mistake `VIX_STALE_AFTER_DAYS` was extracted to avoid in this same work.
+
+        Only PROBATION and ACTIVE. PAUSED and RETIRED are already out of service, and a
+        BASELINE holds no reference.
+        """
+        admission = getattr(self, "strategy_admission", None)
+        if admission is None or self.strategy_library is None:
+            return []
+        out = []
+        for spec in self.strategy_library.list():
+            if spec.lifecycle not in {"PROBATION", "ACTIVE"} or not spec.enabled:
+                continue
+            reason = admission._reference_price_rejection_reason(spec)
+            if reason is None:
+                continue
+            out.append(
+                StrategyLifecycleDecision(
+                    spec, "RETIRED",
+                    f"reference drifted from the market: {reason}",
+                )
+            )
+        return out
 
     def _retire_lessons_without_effect(self) -> None:
         """Take a lesson out of the prompt once the ablation shows it changes nothing.
@@ -1595,11 +1797,38 @@ class AgentDaemon:
             self._append_event("CYCLE_FAILED", status="FAILED", message=f"could not list held symbols: {exc}")
         if self.config.universe == "tradable" and self.config.attention_slots > 0:
             try:
-                symbols += gateway.attention_symbols(
-                    self.config.attention_slots, min_price=self.config.min_price, exclude=frozenset(seen)
+                # The candidate list is wider than the slots, because the model is choosing
+                # from it rather than receiving the answer. Asking for exactly
+                # `attention_slots` and then choosing among them would be a choice with one
+                # option.
+                candidates = gateway.attention_symbols(
+                    max(self.config.attention_slots, ATTENTION_CANDIDATES),
+                    min_price=self.config.min_price, exclude=frozenset(seen),
                 )
             except Exception as exc:
                 self._append_event("CYCLE_FAILED", status="FAILED", message=f"could not pick attention symbols: {exc}")
+                return symbols
+            choice = attention.select_attention(
+                candidates,
+                k=self.config.attention_slots,
+                transport=self.attention_transport,
+                context={"held": len(seen), "slots": self.config.attention_slots},
+            )
+            # Recorded every round, including when the model did not choose. The plan's
+            # 24-hour evaluation compares chosen symbols against unchosen ones, and it
+            # cannot do that from a record that only keeps the rounds the model won.
+            self._append_event(
+                "ATTENTION_SELECTED", status="SUCCESS",
+                message=f"watchlist from {choice.source}: {', '.join(choice.symbols) or 'none'}",
+                payload={
+                    "source": choice.source,
+                    "symbols": list(choice.symbols),
+                    "reasons": dict(choice.reasons),
+                    "candidates": list(candidates),
+                    "note": choice.note,
+                },
+            )
+            symbols += [s for s in choice.symbols if s not in seen]
         return symbols
 
     def _round_sleep_seconds(self, elapsed: float) -> int:
@@ -1724,9 +1953,21 @@ class AgentDaemon:
         if decision is None:
             return
         source = getattr(decision, "decision_source", None)
+        rationale = getattr(decision, "rationale", "")
         if source == "llm":
             self._record_model(True)
-        elif getattr(decision, "rationale", "") == FAIL_CLOSED_RATIONALE:
+        elif rationale == FAIL_CLOSED_RATIONALE:
+            self._record_model(False)
+        elif LLM_UNAVAILABLE_MARKER in rationale:
+            # The model was asked and did not produce a usable answer. `_fallback` marks
+            # every such decision with this marker and carries the cause after it - a
+            # timeout, a refused connection, a response with no JSON object in it.
+            #
+            # Without this branch the flag kept its last known value, so a parse failure
+            # was invisible to the monitor: reported 2026-10-14 as 23% of decisions on
+            # 10-12 and 9% on 10-13, and unverifiable from the journal, because no event
+            # recorded a decision-path failure at all. A failure the system does not
+            # count is a failure nobody fixes.
             self._record_model(False)
 
     def _journal_recency(self) -> tuple[datetime | None, float | None]:

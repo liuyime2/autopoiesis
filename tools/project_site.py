@@ -184,6 +184,13 @@ def _page(title: str, current: str, body: list[str], figures: Figures) -> str:
 # --- the five pages -------------------------------------------------------------------------
 
 
+def _agent_accounting(benchmark: dict) -> dict:
+    agent = benchmark.get("agent") or {}
+    if agent.get("performance_contract") != "agent-accounting-v1":
+        return {}
+    return agent
+
+
 def _card(label, value, sub):
     return ('<div class="card"><dt>' + html.escape(str(label)) + '</dt><dd>'
             + html.escape(str(value)) + '</dd><p>' + html.escape(str(sub)) + '</p></div>')
@@ -196,8 +203,6 @@ def overview(figures: Figures) -> list[str]:
     record = figures.named("record")
     signals = figures.named("signals")
     target = benchmark.get("target") or {}
-    agent = benchmark.get("agent") or {}
-    spy = benchmark.get("agent", {}).get("spy_pct") if agent else None
 
     body = [
         '<p>A research instrument, not a product. It trades a paper account, grades its own '
@@ -214,11 +219,11 @@ def overview(figures: Figures) -> list[str]:
                     'rather than as zero: ' + html.escape(', '.join(broken)) + '.</p>')
 
     body.append('<dl class="grid">')
-    body.append(_card('agent, after cost', _pct(agent.get('return_pct')) if agent else 'UNKNOWN',
-                      'return on deployed capital over the record window'))
+    body.append(_card('agent, after cost', 'UNKNOWN',
+                      'allocation and aligned rolling equity history unavailable'))
     body.append(_card('vs SPY holding',
-                      (str(agent.get('excess')) + ' pts') if agent else 'UNKNOWN',
-                      'excess on the same capital and the same window'))
+                      'UNKNOWN',
+                      'aligned portfolio comparison unavailable'))
     body.append(_card('trading days on record', record.get('trading_days', 0),
                       'against a ' + str(target.get('trading_days', 60)) + '-day target'))
     body.append(_card('gate', str(gate.get('check_classes')) + ' classes',
@@ -233,24 +238,23 @@ def overview(figures: Figures) -> list[str]:
     body.append('<li>The gate can fail, and is made to fail on purpose to prove it. '
                 '<code>make verify-self-test</code> plants the defects each class exists to '
                 'catch, including a NaN limit that silently stops comparing.</li>')
-    body.append('<li>The research stage is autonomous: a scheduled job fetches real bars, sweeps '
-                'candidates, and records every trial, and the evidence bar rises with the '
-                'number tried.</li>')
+    body.append('<li>Research requires a registered contract and validated real bars before '
+                'evaluating candidates and recording trials. Scheduled operation requires '
+                'a configured contract, usable cache and verified successful runs.</li>')
     body.append('</ul>')
 
     body.append('<h2>What it has not shown</h2>')
     body.append('<ul>')
     body.append('<li><strong>That it beats holding.</strong> '
-                + (_pct(agent.get('return_pct')) if agent else 'UNKNOWN')
-                + ' after cost against SPY ' + (_pct(spy) if spy is not None else 'UNKNOWN')
+                + 'UNKNOWN after cost against SPY UNKNOWN'
                 + ' over ' + str(record.get('trading_days', 0)) + ' of '
                 + str(target.get('trading_days', 60))
-                + ' trading days. The denominator is printed with the number.</li>')
+                + ' recorded dates. Allocated capital and aligned equity are unavailable.</li>')
     body.append('<li><strong>Any directional edge.</strong> '
                 + str(signals.get('hypotheses', 0))
-                + ' hypotheses about what predicts returns have been through a family-wise '
-                'gate. Volatility is the one judgment that holds, and it is a statement about '
-                'risk, not direction.</li>')
+                + ' hypotheses appear in the historical signal ledger. These aggregate '
+                'verdict counts do not establish validated alpha or certify statistical '
+                'error control.</li>')
     body.append('<li><strong>Live trading.</strong> Not present. <code>live</code> mode is '
                 'refused by the configuration loader.</li>')
     body.append('</ul>')
@@ -261,7 +265,7 @@ def evidence(figures: Figures) -> list[str]:
     benchmark = figures.named("benchmark")
     record = figures.named("record")
     signals = figures.named("signals")
-    agent = benchmark.get("agent") or {}
+    agent = _agent_accounting(benchmark)
     target = benchmark.get("target") or {}
     budget = benchmark.get("risk_budget") or {}
     rows = benchmark.get("strategies") or []
@@ -271,15 +275,14 @@ def evidence(figures: Figures) -> list[str]:
                 'budget, over a rolling ' + str(target.get('trading_days', 60))
                 + '-trading-day window. The record holds '
                 + str(record.get('trading_days', 0)) + ' trading days, so the window is '
-                + ('met' if target.get('met') else 'not met')
-                + ' and the verdict is not yet falsified.</p>')
+                + 'not established by these dates alone'
+                + '; allocation and aligned equity/control history are unavailable.</p>')
     body.append('<dl class="grid">')
     body.append(_card('agent return on deployed capital',
-                      _pct(agent.get('return_pct')) if agent else 'UNKNOWN',
-                      _money(agent.get('pnl'), sign=True) + ' on '
-                      + _money(agent.get('capital')) + ' deployed'))
-    body.append(_card('SPY, same window', _pct(agent.get('spy_pct')) if agent else 'UNKNOWN',
-                      'buy-and-hold on the same capital'))
+                      'UNKNOWN',
+                      _money(agent.get('pnl'), sign=True) + ' PnL; allocated capital UNKNOWN'))
+    body.append(_card('SPY, same window', 'UNKNOWN',
+                      'aligned agent capital and rolling window unavailable'))
     body.append(_card('after cost', _money(agent.get('assumed_cost')) if agent else 'UNKNOWN',
                       'assumed '
                       + str(benchmark.get('cost', {}).get('assumed_round_trip_cost_pct'))
@@ -302,9 +305,9 @@ def evidence(figures: Figures) -> list[str]:
                         + '</td><td class="num">' + html.escape(str(row.get('excess')))
                         + '</td></tr>')
         body.append('</table></div>')
-        body.append('<p class="note">Each row puts both legs on the same capital and the same '
-                    'window. One weak strategy failing is not the agent failing, so this is a '
-                    'diagnostic and is labelled as one.</p>')
+        body.append('<p class="note">Strategy returns use historical peak exposure as a '
+                    'diagnostic denominator. They do not establish agent allocation, '
+                    'a continuous equity curve, or project profitability.</p>')
 
     if signals.get('present'):
         body.append('<h2>The signal ledger</h2>')
@@ -322,13 +325,14 @@ def evidence(figures: Figures) -> list[str]:
                         + '</span></td><td class="num">' + str(count) + '</td></tr>')
         body.append('</table></div>')
         body.append('<p>' + str(signals.get('hypotheses')) + ' distinct hypotheses, '
-                    + str(signals.get('rows')) + ' recorded verdicts. The bar rises with the '
-                    'number tried, so a bigger search cannot buy a cheaper pass.</p>')
+                    + str(signals.get('rows')) + ' historical recorded verdicts. These are ledger '
+                    'counts, not certification under the current research contract or evidence '
+                    'of validated alpha.</p>')
     else:
         body.append('<p class="note">No signal ledger in the published figures, so the research '
                     'record reads UNKNOWN rather than as zero.</p>')
 
-    body.append('<h2>The risk budget these results were produced inside</h2>')
+    body.append('<h2>Risk configuration used for this measurement</h2>')
     body.append('<div class="tablewrap"><table><tr><th>limit</th><th class="num">value</th></tr>')
     for label, key in (('max position value', 'max_position_value'),
                        ('max total exposure', 'max_total_exposure'),
@@ -338,9 +342,9 @@ def evidence(figures: Figures) -> list[str]:
             body.append('<tr><td>' + html.escape(label) + '</td><td class="num">'
                         + format(budget[key], ',.2f') + '</td></tr>')
     body.append('</table></div>')
-    body.append('<p class="note">Enforced by the Guardian independently of the decision maker. '
-                'A decision maker that abstains on risk grounds is acting as a second risk '
-                'authority and can halt trading without appearing to.</p>')
+    body.append('<p class="note">These values come from the configuration used to collect '
+                'this measurement. Historical risk configuration and compliance are not '
+                'established by these values.</p>')
     return body
 
 
@@ -419,10 +423,11 @@ def safety(figures: Figures) -> list[str]:
         'happening.</p>',
         '<h2>What is not claimed</h2>',
         '<ul>'
-        '<li>Paper results are not live results. The broker fees are zero on paper, so the '
+        '<li>Paper results are not live results. No broker fees were observed in this paper '
+        'record. The '
         'reported net charges an explicitly assumed round-trip cost on the notional actually '
         'traded, and the page says so.</li>'
-        '<li>No figure here is a certification. The target is not met, and the record holds '
+        '<li>No figure here is a certification. The target remains unproven, and the record holds '
         'fewer trading days than the target window.</li>'
         '</ul>',
     ]
@@ -458,8 +463,9 @@ def build(figures: Figures) -> list[str]:
         'is how an sdist missing <code>examples/</code> was found.</p>',
         '<h2>Reproducing the results</h2>',
         '<p>Every figure on this site names its command. <code>make benchmark</code> prints the '
-        'target and the agent-level figure with its denominator; '
-        '<code>make research-signals</code> reproduces the signal ledger; '
+        'raw paper-account accounting and an UNKNOWN portfolio comparison; '
+        '<code>make research-search SPEC=&lt;registered-spec&gt;</code> evaluates validated '
+        'cached bars under the declared research contract; '
         '<code>make audit</code> runs the recorded-defect audit.</p>',
         '<p class="note">Reproducing them needs a paper account and the same bar cache. A fresh '
         'clone with no credentials can build, test and gate the project; it cannot reproduce '

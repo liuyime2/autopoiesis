@@ -6,6 +6,7 @@ import os
 import signal
 import subprocess
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -18,9 +19,7 @@ from autopoiesis.daemon import AgentDaemon
 from autopoiesis.data_gateway import AlpacaDataGateway
 from autopoiesis.evaluator import (
     OWNER_FILLS_KEY,
-    PNL_EVIDENCE_ACCOUNT_VERIFIED,
     PNL_EVIDENCE_MISSING,
-    PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED,
     DeterministicEvaluator,
     confirmed_fill_activities,
     owner_fill_activities,
@@ -33,6 +32,7 @@ from autopoiesis.journal import JsonlJournal
 from autopoiesis.knowledge_admission import KnowledgeAdmission
 from autopoiesis.knowledge_library import KnowledgeLibrary
 from autopoiesis.llm_decision import (
+    ATTENTION_NUM_CTX,
     CURRICULUM_NUM_CTX,
     CURRICULUM_TIMEOUT_S,
     HybridDecisionEngine,
@@ -54,7 +54,10 @@ from autopoiesis.trade_counter import TradeCounter
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the minimum Alpaca paper-trading agent.")
     parser.add_argument("--check-env", action="store_true", help="Check external dependencies without trading.")
-    parser.add_argument("--once", action="store_true", help="Run one paper-trading cycle.")
+    parser.add_argument(
+        "--once", action="store_true",
+        help="Run the paper daemon for at most one cycle; exit without a cycle when the scheduler is closed.",
+    )
     parser.add_argument("--daemon", action="store_true", help="Run the 24x7 paper-trading daemon.")
     parser.add_argument("--status", action="store_true", help="Print daemon heartbeat status.")
     parser.add_argument("--stop", action="store_true", help="Send SIGTERM to the daemon pidfile process.")
@@ -69,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Journal the account owner's fills of allowlisted symbols from the full fill history (read-only).",
     )
     parser.add_argument("--evidence-report", action="store_true", help="Report broker-backed PnL evidence from journal and latest ingest.")
-    parser.add_argument("--verify-profit-target", action="store_true", help="Verify the 10 percent daily paper-profit target using broker evidence only.")
+    parser.add_argument("--verify-profit-target", action="store_true", help="Report the configured daily paper-profit target in percentage points; UNKNOWN until agent allocation and aligned equity are available.")
     parser.add_argument("--max-cycles", type=int, default=None, help="Optional controlled daemon cycle limit for smoke tests.")
     parser.add_argument("--doctor", action="store_true", help="Check the whole system and exit non-zero on any fault.")
     parser.add_argument(
@@ -316,50 +319,7 @@ def _execution_sink(config, client, journal):
 
 
 def _run_once(config: AgentConfig) -> int:
-    missing = config.missing_alpaca_credentials()
-    if missing:
-        print(json.dumps({"error": "missing Alpaca credentials", "missing": missing}, sort_keys=True))
-        return 1
-
-    if not config.is_paper_endpoint():
-        print(json.dumps({"error": "Alpaca base URL must be paper trading"}, sort_keys=True))
-        return 1
-
-    try:
-        from autopoiesis.broker_client import create_alpaca_client
-    except ImportError as exc:
-        print(json.dumps({"error": "alpaca-trade-api is not installed", "detail": str(exc)}, sort_keys=True))
-        return 1
-
-    client = create_alpaca_client(
-        key_id=config.alpaca_api_key or "",
-        secret_key=config.alpaca_secret_key or "",
-        base_url=config.alpaca_base_url,
-    )
-    loop = TradingLoop(
-        data_gateway=AlpacaDataGateway(client=client),
-        decision_engine=OllamaDecisionEngine(
-            base_url=config.ollama_base_url,
-            model=config.model,
-            gpu_devices=config.gpu_devices,
-            timeout=config.llm_timeout_seconds,
-        ),
-        guardian=Guardian(
-            allowlist=config.allowlist,
-            max_position_value=config.max_position_value,
-            max_daily_loss=config.max_daily_loss,
-        ),
-        executor=_execution_sink(config, client, JsonlJournal(config.journal_path)),
-        journal=JsonlJournal(config.journal_path),
-        mode=config.mode,
-        trade_counter=TradeCounter(journal=JsonlJournal(config.journal_path)),
-    )
-    record = loop.run_once(config.symbols[0])
-    if record is None:
-        print(json.dumps({"error": "broker data unavailable; see journal CYCLE_FAILED event"}, sort_keys=True))
-        return 1
-    print(record.model_dump_json(indent=2))
-    return 0
+    return _run_daemon(config, max_cycles=1)
 
 
 def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
@@ -383,7 +343,17 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         secret_key=config.alpaca_secret_key or "",
         base_url=config.alpaca_base_url,
     )
-    journal = JsonlJournal(config.journal_path)
+    daemon = _build_agent_daemon(config, client)
+    return daemon.run(max_cycles=max_cycles)
+
+
+def _build_agent_daemon(
+    config: AgentConfig, client, *, journal: JsonlJournal | None = None,
+) -> AgentDaemon:
+    """Assemble the production pipeline without running or reconciling it."""
+    if journal is not None and journal.path.resolve() != config.journal_path.resolve():
+        raise ValueError("supplied journal path does not match agent configuration")
+    journal = journal if journal is not None else JsonlJournal(config.journal_path)
     strategy_library = StrategyLibrary(config.strategy_dir)
     knowledge_library = KnowledgeLibrary(config.knowledge_dir)
     reflection_memory = ReflectionMemory(config.journal_path.parent / "reflection.json")
@@ -478,6 +448,9 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
             "universe": config.universe,
         },
         cost_basis=cost_basis,
+        # Guardian's ceiling, so the uncovered path does not pay for a decision that will
+        # be refused. Same number, one source.
+        stale_after_seconds=config.stale_after_seconds,
         risk_provider=risk_judgment.block,
         # What the symbol is, and what is published about it. Both are context: neither is a
         # signal, and the instruction says so.
@@ -513,10 +486,15 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         on_cycle_count=lambda n: served_count.__setitem__("cycles", n),
         curriculum_agent=(
             StructuredCurriculumAgent(
-                transport=_ollama_curriculum_transport(config),
+                transport=_ollama_curriculum_transport(config, should_stop=lambda: daemon._stop_requested),
                 state_path=config.journal_path.parent / "curriculum_state.json",
             )
             if config.curriculum_enabled
+            else None
+        ),
+        attention_transport=(
+            _ollama_attention_transport(config, should_stop=lambda: daemon._stop_requested)
+            if config.universe == "tradable" and config.attention_slots > 0
             else None
         ),
         strategy_admission=StrategyAdmission(guardian=guardian, strategy_library=strategy_library),
@@ -532,10 +510,10 @@ def _run_daemon(config: AgentConfig, *, max_cycles: int | None = None) -> int:
         reflect_every=config.reflect_every,
         curriculum_every=config.curriculum_every,
     )
-    return daemon.run(max_cycles=max_cycles)
+    return daemon
 
 
-def _ollama_curriculum_transport(config: AgentConfig):
+def _ollama_curriculum_transport(config: AgentConfig, *, should_stop: Callable[[], bool] | None = None):
     engine = OllamaDecisionEngine(
         base_url=config.ollama_base_url,
         model=config.model,
@@ -556,13 +534,78 @@ def _ollama_curriculum_transport(config: AgentConfig):
             "format": schema,
             "options": {"temperature": 0.1, "num_ctx": CURRICULUM_NUM_CTX},
         }
+        if should_stop is not None and should_stop():
+            raise RuntimeError("curriculum model request refused: daemon stop requested")
         response = engine.transport(f"{engine.base_url}/api/generate", payload, engine.timeout)
-        return str(response.get("response", ""))
+        body = str(response.get("response") or "")
+        if body:
+            return body
+
+        # An empty body used to reach the JSON parser as `""`, which raised "constrained
+        # response contained no JSON object" - a message true of every cause and specific to
+        # none. Measured 2026-10-14: six CURRICULUM_FAILED in twelve hours, all with that
+        # message and only `error_type` journalled, and nothing on record could say which of
+        # the three cases below had happened. `done_reason` and `error` are the two fields
+        # that answer it, and both were being discarded here.
+        #
+        # `done_reason=length` with an empty body is context exhaustion, not a refusal: the
+        # prompt and the answer schema together left no room to answer. That case is named in
+        # `llm_decision.py` from the incident that set `CURRICULUM_NUM_CTX` to 8192, so it is
+        # the one this whole curriculum stage has been hitting.
+        if not isinstance(response, dict):
+            raise ValueError(
+                f"curriculum model reply was not an object: {type(response).__name__}"
+            )
+        done = str(response.get("done_reason") or "")
+        error = str(response.get("error") or "")
+        if done == "length":
+            raise ValueError(
+                "curriculum model ran out of context before answering "
+                f"(done_reason=length, num_ctx={CURRICULUM_NUM_CTX}, "
+                f"prompt_chars={len(prompt)}); the prompt and the answer schema did not fit "
+                "together, so the model had no tokens left to produce a body"
+            )
+        if error:
+            raise ValueError(f"curriculum model returned an error: {error}")
+        raise ValueError(
+            "curriculum model returned no body and no cause "
+            f"(done_reason={done or 'unset'!r}, keys={sorted(response)})"
+        )
 
     def transport(context):
         return generate_curriculum_task_json(call=call, prompt_context=context)
 
     return transport
+
+
+def _ollama_attention_transport(config: AgentConfig, *, should_stop: Callable[[], bool] | None = None):
+    """Ask the model which candidates to watch. Returns the raw body; `attention` parses it.
+
+    A separate, much smaller request than the curriculum's: the prompt is a symbol list and
+    the schema is two fields, so it does not need the curriculum's context window or its
+    two-minute timeout. It uses the decision timeout because it sits in the trading loop -
+    a watchlist choice that takes two minutes is a cycle the loop did not spend deciding.
+    """
+    engine = OllamaDecisionEngine(
+        base_url=config.ollama_base_url,
+        model=config.model,
+        gpu_devices=config.gpu_devices,
+        timeout=CURRICULUM_TIMEOUT_S,
+    )
+
+    def call(prompt: str, schema: dict) -> object:
+        payload = {
+            "model": config.model,
+            "prompt": prompt,
+            "stream": False,
+            "format": schema,
+            "options": {"temperature": 0.2, "num_ctx": ATTENTION_NUM_CTX},
+        }
+        if should_stop is not None and should_stop():
+            raise RuntimeError("attention model request refused: daemon stop requested")
+        return engine.transport(f"{engine.base_url}/api/generate", payload, engine.timeout)
+
+    return call
 
 
 def _stop_daemon(config: AgentConfig) -> int:
@@ -808,28 +851,21 @@ def _verify_profit_target(config: AgentConfig) -> int:
         owner_fills=owner_fill_activities(journal),
     )
     pnl = report.pnl
+    # Broker account history establishes provenance, not the agent's capital or return.
     result = {
-        "target_daily_return_pct": 0.10,
+        "target_daily_return_pct": config.profit_target_return_pct,
         "pnl_evidence": report.pnl_evidence,
         "satisfied": False,
         "status": "unproven",
+        "comparison_status": "UNKNOWN",
+        "comparison_reason": "agent allocation, cash flows and aligned rolling equity history are unavailable",
+        "exit_code": 2,
         "account_return_pct": None if pnl is None else pnl.account_return_pct,
+        "account_return_scope": "account_only_diagnostic",
         "paper_only": config.mode == "paper",
     }
-    if pnl is None or report.pnl_evidence not in {PNL_EVIDENCE_ACCOUNT_VERIFIED, PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED}:
-        print(json.dumps(result, indent=2, sort_keys=True))
-        return 1
-    if pnl.account_return_pct is None:
-        print(json.dumps(result, indent=2, sort_keys=True))
-        return 1
-    if pnl.account_return_pct >= 0.10:
-        result["satisfied"] = True
-        result["status"] = "satisfied"
-        print(json.dumps(result, indent=2, sort_keys=True))
-        return 0
-    result["status"] = "not satisfied"
     print(json.dumps(result, indent=2, sort_keys=True))
-    return 1
+    return 2
 
 
 def _latest_evidence_batch(journal: JsonlJournal) -> BrokerEvidenceBatch | None:

@@ -281,3 +281,98 @@ def test_a_post_cycle_model_flag_helper_is_what_the_loop_calls():
     daemon._last_model_at = None
     daemon._last_model_ok = None
     assert callable(daemon._post_cycle_model_flag)
+
+
+def test_a_decision_the_model_failed_to_produce_counts_as_a_model_failure():
+    """The third fact, and the one that was missing.
+
+    `_post_cycle_model_flag` distinguished "the model answered" from "the loop's
+    fail-closed path", and left every other fallback alone. But `_fallback` marks a
+    timeout, a refused connection and a response with no JSON object with
+    `LLM_UNAVAILABLE_MARKER`, and none of those matched either branch - so the flag kept
+    its last value and the failure was invisible.
+
+    Reported 2026-10-14 as 23% of decisions on 10-12 and 9% on 10-13, and unverifiable:
+    no event in the journal recorded a decision-path failure, so the rate could not be
+    re-derived. A failure the system does not count is a failure nobody fixes.
+    """
+    from autopoiesis.daemon import AgentDaemon
+    from autopoiesis.llm_decision import LLM_UNAVAILABLE_MARKER
+    from autopoiesis.models import TradeDecision
+
+    daemon = AgentDaemon.__new__(AgentDaemon)
+    daemon.now = lambda: NOW
+    daemon._last_model_at = None
+    daemon._last_model_ok = None
+
+    class _Record:
+        def __init__(self, decision):
+            self.decision = decision
+
+    def _decide(rationale):
+        daemon._post_cycle_model_flag(_Record(TradeDecision(
+            symbol="SPY", action="HOLD", quantity=0, confidence=0.0, rationale=rationale,
+            decision_source="fallback_policy_engine",
+        )))
+
+    # A decline: never asked, so nothing is learned.
+    _decide("strategy:x snapshot symbol is outside strategy universe")
+    assert daemon._last_model_ok is None
+
+    # The model answered.
+    daemon._post_cycle_model_flag(_Record(TradeDecision(
+        symbol="SPY", action="HOLD", quantity=0, confidence=0.5,
+        rationale="no signal", decision_source="llm",
+    )))
+    assert daemon._last_model_ok is True
+
+    # Asked, and produced nothing usable. This is the case that was missing.
+    _decide(f"strategy:x | {LLM_UNAVAILABLE_MARKER}ValueError: LLM response did not "
+            f"contain a JSON object")
+    assert daemon._last_model_ok is False, (
+        "a parse failure is a model failure and must be counted, not left at the "
+        "previous value"
+    )
+
+
+def test_the_marker_is_the_one_the_fallback_actually_writes():
+    """The reader and the writer must share the constant, or they drift silently.
+
+    This is the failure `FAIL_CLOSED_RATIONALE`'s own comment names: a reason string that
+    exists in two places is a reason the two can drift until the monitor quietly stops
+    distinguishing an outage from a decline.
+    """
+    from autopoiesis.llm_decision import LLM_UNAVAILABLE_MARKER, HybridDecisionEngine
+
+    engine = HybridDecisionEngine.__new__(HybridDecisionEngine)
+
+    class _Spec:
+        strategy_id = "s1"
+
+    class _Snapshot:
+        symbol = "SPY"
+
+    class _Rule:
+        """Applies the update, like the real TradeDecision does. Returning `self` would
+        discard it and the test would pass without ever exercising the composition."""
+
+        def __init__(self):
+            self.action = "SELL"
+            self.quantity = 1
+            self.rationale = "rule"
+
+        def model_copy(self, update=None):
+            clone = _Rule()
+            for key, value in (update or {}).items():
+                setattr(clone, key, value)
+            return clone
+
+    engine._selected_spec = _Spec()
+    engine._selected_provenance = None
+    engine._rule_decision = _Rule()
+    decision = engine._fallback(_Snapshot(), "ValueError: no JSON object")
+
+    assert LLM_UNAVAILABLE_MARKER in decision.rationale, (
+        f"the daemon reads {LLM_UNAVAILABLE_MARKER!r} and the fallback must write it: "
+        f"{decision.rationale}"
+    )

@@ -50,6 +50,7 @@ from autopoiesis.config import AgentConfig
 from autopoiesis.daemon import AgentDaemon
 from autopoiesis.guardian import Guardian
 from autopoiesis.journal import JsonlJournal
+from autopoiesis.learning_evidence import capture
 from autopoiesis.loop import TradingLoop
 from autopoiesis.models import StrategySpec, TradeDecision
 from autopoiesis.reflection_memory import ReflectionMemory
@@ -81,9 +82,15 @@ class MomentumEngine:
     testing a system nobody ships.
     """
 
-    def __init__(self, gateway: ReplayDataGateway, strategy_id: str):
+    def __init__(self, gateway: ReplayDataGateway, strategy_id: str, spec=None):
         self.gateway = gateway
         self.strategy_id = strategy_id
+        #: Stamped on every decision, because the counterfactual ledger refuses a row whose
+        #: provenance is absent and the screen therefore scores nothing. Production stamps
+        #: this in `HybridDecisionEngine.decide_snapshot`; the replay replaces that engine
+        #: wholesale, so nothing stamped it and `OFFLINE_VALIDATION_COMPLETED` reported
+        #: `scored: 0` after 282 counterfactual evaluations. Measured 2026-10-16.
+        self.provenance = capture(spec) if spec is not None else None
 
     def decide(self, context: dict) -> TradeDecision:
         index = self.gateway.cursor
@@ -101,6 +108,7 @@ class MomentumEngine:
         return TradeDecision(
             symbol="SPY", action=action, quantity=quantity, confidence=0.6,
             rationale=why, strategy_id=self.strategy_id,
+            strategy_provenance=self.provenance,
         )
 
 
@@ -145,7 +153,7 @@ def run(bars_path: str = BARS) -> dict:
 
     loop = TradingLoop(
         data_gateway=gateway,
-        decision_engine=MomentumEngine(gateway, STRATEGY_ID),
+        decision_engine=MomentumEngine(gateway, STRATEGY_ID, library.try_load(STRATEGY_ID)),
         guardian=Guardian(
             allowlist=config.allowlist,
             max_position_value=config.max_position_value,

@@ -170,6 +170,16 @@ class StructuredCurriculumAgent:
                 "No trade is not failure; no exploration is failure.",
                 "If recent_exploration_summary.no_exploration is true, propose the next distinct small admissible strategy instead of repeating generic EVALUATE or near-duplicate TREND_FOLLOW.",
                 "Every entry in recently_rejected is a strategy you already proposed and admission refused. Read the reason and change what it names: kind, symbols, action, quantity, or max_position_value. Renaming the same trade does not make it a new strategy and will be refused identically.",
+                # Measured 2026-10-14. Demanding a SELL was met with FIXED_SIZE SELL 1,
+                # which has no condition and therefore cannot decline to fire: TLT 188
+                # shares sold, XLE and XLF emptied. If required_action is SELL you must
+                # choose TREND_FOLLOW (reference_price, threshold_pct) or RULE (signal,
+                # lookback, threshold_pct, when_above, when_below). FIXED_SIZE SELL will
+                # be refused, because a sell with nothing that can be false would sell
+                # every cycle it is selected until the position is empty. If no
+                # conditional exit is possible for a symbol, that is a fact to report -
+                # propose something else and say so in the rationale.
+                "An exit must be able to decline to fire: a SELL with no market condition is refused. Use TREND_FOLLOW or RULE, never FIXED_SIZE, for an exit.",
                 "Do not force orders; Guardian, market-open checks, and paper executor remain authoritative.",
                 "Do not claim profitability or target achievement without broker evidence in the supplied context.",
             ],
@@ -366,6 +376,17 @@ class StructuredCurriculumAgent:
         # ~6.6kB and the model reads it as a table instead of four lists to join.
         metrics = (reflection.strategy_metrics if reflection else None) or {}
         scores = (reflection.strategy_scores if reflection else None) or {}
+        from autopoiesis.learning_evidence import ELIGIBILITY_VERSION, capture, valid_provenance
+
+        verified = {}
+        for spec in strategies:
+            row = metrics.get(spec.strategy_id) or {}
+            p = valid_provenance(row.get("strategy_provenance"))
+            if (row.get("eligibility_version") == ELIGIBILITY_VERSION and row.get("source_cycle_ids")
+                    and p is not None and p.behavior_digest == capture(spec).behavior_digest):
+                verified[spec.strategy_id] = row
+        metrics = verified
+        scores = {sid: score for sid, score in scores.items() if sid in verified}
         return [
             {
                 "strategy_id": spec.strategy_id,

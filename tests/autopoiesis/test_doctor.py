@@ -442,14 +442,33 @@ def test_build_client_returns_none_without_credentials(tmp_path):
 
 
 def test_the_llm_is_reported_against_the_rule_on_paired_cycles_only():
+    """Paired cycles only, and below 20 trading days the figure is withheld.
+
+    The net-value assertion this used to make was `+0.650%` over 2 overrides in one day.
+    That is the reading the 2026-10-14 review rejected: 68 overrides concentrated in three
+    days, 39 of them on 2026-10-07, reported as "+16.9% for the LLM". A total that is one
+    day wearing a percentage sign is not evidence about a model, so the figure is now
+    withheld until there are enough days to mean something - and this asserts both sides of
+    that gate rather than only the convenient one.
+    """
+    from datetime import datetime, timedelta, timezone
     from types import SimpleNamespace
 
-    from autopoiesis.doctor import DoctorReport, _report_llm_against_the_rule
+    from autopoiesis.doctor import (
+        MIN_TRADING_DAYS_FOR_A_CONCLUSION,
+        DoctorReport,
+        _report_llm_against_the_rule,
+    )
 
-    def row(action, rule, value, source="llm"):
-        return SimpleNamespace(action=action, rule_action=rule, override_value_pct=value,
-                               decision_source=source)
+    base = datetime(2026, 10, 1, 14, 30, tzinfo=timezone.utc)
 
+    def row(action, rule, value, source="llm", day=0):
+        return SimpleNamespace(
+            action=action, rule_action=rule, override_value_pct=value,
+            decision_source=source, decided_at=base + timedelta(days=day),
+        )
+
+    # --- below the gate: the figure exists but is not offered as a result ---
     report = DoctorReport()
     _report_llm_against_the_rule(report, [
         row("HOLD", "SELL", 1.05), row("HOLD", "BUY", -0.4), row("BUY", "BUY", 0.0),
@@ -457,10 +476,58 @@ def test_the_llm_is_reported_against_the_rule_on_paired_cycles_only():
         row("SELL", "SELL", 0.0, source="fallback_policy_engine"),
     ])
     check = next(c for c in report.checks if c.name == "llm vs rule")
-    assert "3 paired LLM decision(s), 2 override(s)" in check.detail
-    assert "1 of them worth more than the rule" in check.detail
-    assert "+0.650%" in check.detail
+    assert check.status.value == "warn", check.detail
+    assert "INSUFFICIENT EVIDENCE" in check.detail, check.detail
+    assert "2 override(s) over 1 trading day(s)" in check.detail, check.detail
+    assert str(MIN_TRADING_DAYS_FOR_A_CONCLUSION) in check.detail, (
+        "the gate has to say what it is waiting for: " + check.detail
+    )
+    assert "must not be read as a result" in check.detail, check.detail
+    assert "+0.650" in check.detail, (
+        "the unwithheld figure is still shown, labelled as not a result: " + check.detail
+    )
 
+    # --- at the gate: the same total is now a conclusion ---
+    enough = DoctorReport()
+    rows = [row("HOLD", "SELL", 0.05, day=day)
+            for day in range(MIN_TRADING_DAYS_FOR_A_CONCLUSION)]
+    rows.append(row("HOLD", "BUY", -0.5, day=0))
+    _report_llm_against_the_rule(enough, rows)
+    check = next(c for c in enough.checks if c.name == "llm vs rule")
+    assert check.status.value == "ok", check.detail
+    assert "INSUFFICIENT EVIDENCE" not in check.detail, check.detail
+    assert f"over {MIN_TRADING_DAYS_FOR_A_CONCLUSION} trading day(s)" in check.detail, check.detail
+    assert "By day:" in check.detail, (
+        "the distribution is the part that shows whether one day carries the total: "
+        + check.detail
+    )
+
+    # --- no pair at all is a different statement from a thin one ---
     empty = DoctorReport()
     _report_llm_against_the_rule(empty, [row("BUY", None, None)])
     assert next(c for c in empty.checks if c.name == "llm vs rule").status.value == "warn"
+
+
+def test_the_row_shape_that_has_no_execution_status_is_recorded_as_a_caveat():
+    """The count includes system skips and says so, rather than implying it excluded them.
+
+    `CounterfactualRow` carries no execution status, so a cycle where the executor or the
+    Guardian skipped an order looks exactly like a model that chose differently. The
+    2026-10-14 review found 16 such skips inside the 84 reported "overrides". Excluding
+    them needs the status on the row; until then the caveat is in the output, because a
+    figure that quietly includes them is the defect this whole correction is about.
+    """
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from autopoiesis.doctor import DoctorReport, _report_llm_against_the_rule
+
+    stamp = datetime(2026, 10, 1, 14, 30, tzinfo=timezone.utc)
+    report = DoctorReport()
+    _report_llm_against_the_rule(report, [
+        SimpleNamespace(action="HOLD", rule_action="SELL", override_value_pct=0.5,
+                        decision_source="llm", decided_at=stamp),
+    ])
+    detail = next(c for c in report.checks if c.name == "llm vs rule").detail
+    assert "no execution status" in detail, detail
+    assert "not done" in detail, detail

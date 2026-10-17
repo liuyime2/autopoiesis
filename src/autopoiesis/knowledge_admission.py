@@ -33,12 +33,27 @@ class KnowledgeAdmission:
         summary = " ".join(artifact.summary.lower().split())
         answer = " ".join(artifact.answer.lower().split())
         for other in existing:
+            # Withheld legacy content is not usable knowledge. A new verified
+            # derivation may supersede it without inventing its missing sources.
+            if not self.knowledge_library.lesson_verified(other):
+                continue
             if " ".join(other.summary.lower().split()) == summary and \
                     " ".join(other.answer.lower().split()) == answer:
                 return True
         return False
 
     def admit(self, artifact: KnowledgeArtifact) -> KnowledgeAdmissionResult:
+        from autopoiesis.learning_evidence import ELIGIBILITY_VERSION
+
+        # Producer/model fields are not authority: resolve actual cycles and
+        # replace any supplied stamp with the admission gate's own result.
+        if artifact.source_kind == "journal":
+            digest = self.knowledge_library.journal_source_digest(artifact.source_refs)
+            if digest is None:
+                return KnowledgeAdmissionResult(False, "journal artifact cites unknown or ineligible cycles", artifact.artifact_id)
+            artifact = artifact.model_copy(update={
+                "eligibility_version": ELIGIBILITY_VERSION, "verified_source_digest": digest,
+            })
         if self.knowledge_library.exists(artifact.artifact_id):
             return KnowledgeAdmissionResult(
                 accepted=False,
@@ -74,6 +89,7 @@ class KnowledgeAdmission:
             )
 
         self.knowledge_library.save(artifact.model_copy(update={"status": "ACCEPTED"}))
+        self.knowledge_library.verify_lesson(artifact)
         self._content_hashes.add(c_hash)
         self._retire_earlier_versions(artifact)
         return KnowledgeAdmissionResult(

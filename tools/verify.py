@@ -21,6 +21,7 @@ Two properties matter more than the tally:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -51,6 +52,10 @@ WARN = "WARN"
 #: Every test file, and the check class it belongs to. Assigning a file to more
 #: than one class is allowed; leaving one unassigned fails the gate.
 TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
+    "test_fresh_clone.py": ("unit-integration",),
+    "test_local_backup_installer.py": ("unit-integration", "crash-recovery"),
+    "test_learning_evidence.py": ("pnl-accounting", "lifecycle-invariants", "point-in-time-no-leakage"),
+    "test_research_contract.py": ("unit-integration", "point-in-time-no-leakage", "lifecycle-invariants"),
     "test_broker_evidence.py": ("broker-reconciliation", "crash-recovery"),
     "test_broker_client.py": ("broker-reconciliation", "unit-integration"),
     "test_broker_latency_sample.py": ("unit-integration",),
@@ -70,6 +75,29 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
         "unit-integration", "data-integrity", "shadow-live-consistency",
     ),
     "test_counterfactual.py": ("decision-outcome-counterfactual",),
+    "test_counterfactual_multi_symbol.py": ("decision-outcome-counterfactual",),
+    "test_readiness_unit_dir_default.py": ("unit-integration", "crash-recovery"),
+    "test_realized_pnl_attribution.py": ("pnl-accounting", "lifecycle-invariants"),
+    "test_curriculum_empty_body_cause.py": ("unit-integration", "crash-recovery"),
+    "test_strategy_pause.py": ("risk-controls", "lifecycle-invariants"),
+    "test_unconditional_sell.py": ("risk-controls", "pnl-accounting"),
+    "test_fallback_exposure_limit.py": ("risk-controls", "decision-outcome-counterfactual"),
+    "test_uncovered_symbol_decision.py": ("decision-outcome-counterfactual", "model-provenance"),
+    "test_attention_selection.py": ("model-provenance", "unit-integration"),
+    "test_hold_reason_read_tolerance.py": ("crash-recovery", "unit-integration"),
+    "test_judged_candidate_leaves_probation.py": ("lifecycle-invariants", "unit-integration"),
+    "test_replay_audit_survives_failed_confirmations.py": ("replay-determinism", "broker-reconciliation"),
+    "test_vix_freshness_alarm.py": ("risk-controls", "unit-integration"),
+    "test_vix_refresh.py": ("risk-controls", "unit-integration"),
+    "test_drifted_reference_retirement.py": ("lifecycle-invariants", "risk-controls"),
+    "test_gpu_devices_reserved.py": ("crash-recovery", "unit-integration"),
+    "test_decision_empty_body_cause.py": ("crash-recovery", "decision-outcome-counterfactual"),
+    "test_dividend_cache.py": ("broker-reconciliation", "unit-integration"),
+    "test_probation_restart_budget.py": ("lifecycle-invariants", "selection-pressure-reaches-the-rules"),
+    "test_retired_strategy_readmission.py": ("lifecycle-invariants", "unit-integration"),
+    "test_staleness_not_strategy_fault.py": (
+        "pnl-accounting", "lifecycle-invariants", "guardian-bypass-prevention",
+    ),
     "test_curriculum.py": ("unit-integration", "lifecycle-invariants"),
     "test_daemon.py": (
         "unit-integration", "crash-recovery", "lifecycle-invariants",
@@ -1180,19 +1208,15 @@ def check_type_checking_is_a_real_gate() -> Result:
 
 
 def check_unit_templates_have_no_host_paths() -> Result:
-    """A `.service.in` template must not contain a path from the machine that wrote it.
+    """Check every unit's host paths, explicit renderer ownership and substitutions.
 
-    `tools/ollama.service.in` carried an `ExecStart` pointing at one account's local ollama binary
-    and a matching OLLAMA_MODELS path, because that is where Ollama lives here. `autopoiesis`
-    substituted @ROOT@, @PYTHON@, @ENVBIN@ and @ENVFILE@ but not those, so every install on
-    any other machine produced a unit that systemd could not start - and the failure appears
-    at boot, long after the command that caused it returned success.
-
-    Both are placeholders now, with `autopoiesis` substituting them from OLLAMA_BIN and
-    OLLAMA_MODELS with sane defaults. This checks both halves: no absolute host path in a
-    template, and no placeholder left unsubstituted by the renderer.
+    Legacy units use actual shell render/copy calls. Readiness units use their existing
+    installer against synthetic private paths, capturing staged text without running commands.
     """
-    templates = sorted((ROOT / "tools").glob("*.service.in")) + sorted((ROOT / "tools").glob("*.timer"))
+    templates = sorted(
+        template for pattern in ("*.service.in", "*.timer", "*.timer.in")
+        for template in (ROOT / "tools").glob(pattern)
+    )
     if not templates:
         return Result("unit-templates-portable", SKIP, "no unit templates found")
     problems: list[str] = []
@@ -1205,14 +1229,85 @@ def check_unit_templates_have_no_host_paths() -> Result:
                 problems.append(
                     f"{template.name}:{line_no} hardcodes a host path: {line.strip()[:60]}"
                 )
-    # Every placeholder the renderer is expected to fill must actually be filled by it.
-    renderer = (ROOT / "autopoiesis").read_text(encoding="utf-8")
+    shell = "\n".join(line.split("#", 1)[0] for line in (ROOT / "autopoiesis").read_text().splitlines())
+    shell_owners = {
+        name: command for command, name in re.findall(
+            r'^\s*(render|cp)\s+"?(?:\$ROOT_DIR/)?tools/([-\w.]+)"?\s+', shell, re.MULTILINE,
+        )
+    }
+    render_bodies = re.findall(r"\brender\(\)\s*\{(.*?)^\s*\}", shell, re.MULTILINE | re.DOTALL)
+    shell_markers = set(re.findall(
+        r'(?:\bsed\s+-e|\n\s+-e)\s+"s\|@([A-Z_]+)@\|\$[A-Z_]+\|g"', "\n".join(render_bodies),
+    ))
+    readiness_names: tuple[str, ...] = ()
+    installer = None
+    try:
+        spec = importlib.util.spec_from_file_location("readiness_template_installer", ROOT / "tools/install_market_readiness.py")
+        if spec is None or spec.loader is None:
+            raise ValueError("readiness installer could not be loaded")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        readiness_names = tuple(installer.UNIT_NAMES)
+        if any(Path(name).name != name or not name.endswith((".service", ".timer")) for name in readiness_names):
+            raise ValueError("invalid readiness unit ownership")
+    except Exception as exc:
+        problems.append(f"readiness renderer cannot load ownership: {type(exc).__name__}")
+    readiness_templates = {name + ".in" for name in readiness_names}
     for template in templates:
-        for placeholder in set(re.findall(r"@([A-Z_]+)@", template.read_text(encoding="utf-8"))):
-            if f"@{placeholder}@" not in renderer:
+        if template.name in readiness_templates:
+            continue
+        owner = shell_owners.get(template.name)
+        if owner is None:
+            problems.append(f"{template.name} has no renderer owner")
+            continue
+        text = template.read_text(encoding="utf-8")
+        for placeholder in sorted(set(re.findall(r"@([A-Z_]+)@", text))):
+            if owner != "render" or placeholder not in shell_markers:
                 problems.append(
-                    f"{template.name} uses @{placeholder}@ but autopoiesis never substitutes it"
+                    f"{template.name} uses @{placeholder}@ but shell {owner} never substitutes it"
                 )
+        if "@" in re.sub(r"@([A-Z_]+)@", "", text):
+            problems.append(f"{template.name} has a malformed template marker")
+    if installer is not None and readiness_names:
+        try:
+            with tempfile.TemporaryDirectory(prefix="verify-readiness-") as directory:
+                base = Path(directory).resolve()
+                root, unit_dir, envfile = base / "synthetic-repo", base / "units", base / "external-env"
+                (root / "tools").mkdir(parents=True)
+                unit_dir.mkdir()
+                envfile.touch()
+                python = Path(sys.executable).resolve()
+                fingerprint, cutoff = "a" * 16, "2026-10-13T13:30:00+00:00"
+                values = {
+                    "ROOT": str(root), "PYTHON": str(python), "PYTHONDIR": str(python.parent),
+                    "ENVFILE": str(envfile), "FINGERPRINT": fingerprint, "AFTER": cutoff,
+                }
+                expected: dict[str, str] = {}
+                for name in readiness_names:
+                    template = ROOT / "tools" / (name + ".in")
+                    shutil.copyfile(template, root / "tools" / template.name)
+                    text = template.read_text()
+                    for marker, value in values.items():
+                        text = text.replace(f"@{marker}@", value)
+                    if "@" in text:
+                        raise ValueError(f"{template.name} has an unknown or malformed marker")
+                    expected[name] = text
+                staged: dict[str, str] = {}
+
+                def capture(command, *, check):
+                    if command[:3] == ["systemd-analyze", "--user", "verify"]:
+                        for path in command[3:]:
+                            unit = Path(path)
+                            staged[unit.name] = unit.read_text()
+
+                installer.install(
+                    root=root, python=python, envfile=envfile, expected_fingerprint=fingerprint,
+                    deployment_after=cutoff, unit_dir=unit_dir, runner=capture,
+                )
+                if staged != expected:
+                    raise ValueError("staged unit text differs from declared substitutions")
+        except Exception as exc:
+            problems.append(f"readiness renderer failed: {type(exc).__name__}: {exc}")
     if problems:
         return Result("unit-templates-portable", FAIL, f"{len(problems)}: {problems[:3]}")
     return Result(
@@ -2218,34 +2313,21 @@ def check_config_example_covers_every_variable() -> Result:
 
 
 def check_config_example_names_are_real() -> Result:
-    """Every variable in configs/paper.env.example must exist in the codebase.
+    """Active example keys must have a loader, shell or Make consumer.
 
-    A configuration example is read by whoever is setting the system up, and a name that
-    nothing reads is a setting they will change in the belief it took effect. The names
-    are checked against config.py's own env reads plus the deployed env file's keys,
-    which together are where a variable can legitimately come from.
-
-    `config.py` is not the only reader, and assuming it was made this check host-dependent
-    in the worst possible way. The env file is dual-purpose: `autopoiesis` sources the same file
-    before it ever calls `python -m autopoiesis.cli`, and reads AUTOPOIESIS_ENVBIN out of it to
-    find the environment's bin directory. `AUTOPOIESIS_ENVBIN` is set in the deployed env file
-    on this host and is absent from config.py, so documenting it made this check pass *only
-    because the env file happened to be present* - and a fresh clone, which is exactly where
-    someone reads the example, would have reported a live knob as dead and sent them to delete
-    the line that makes their install work. So `autopoiesis`'s executable code is a reader too.
+    An operator's env file declares values, not readers. Using it as evidence made dead
+    settings pass on configured hosts and working Make settings fail on fresh clones.
     """
     example = ROOT / "configs" / "paper.env.example"
     if not example.exists():
         return Result("config-example-names", FAIL, "configs/paper.env.example is missing")
-    names = set(re.findall(r"^(AUTOPOIESIS_[A-Z_]+|ALPACA_[A-Z_]+|OLLAMA_BASE_URL)=", example.read_text(), re.M))
+    variable = r"(?:AUTOPOIESIS|ALPACA|APCA|OLLAMA)_[A-Z0-9_]+"
+    names = set(re.findall(rf"^[ \t]*({variable})=", example.read_text(), re.M))
     if not names:
         return Result("config-example-names", FAIL, "no variable names found in the example")
-    known = (ROOT / "src" / "autopoiesis" / "config.py").read_text(encoding="utf-8")
-    known += _entry_point_reads()
-    env_file = Path(os.environ.get("XDG_CONFIG_HOME", "")) / "autopoiesis" / "env"
-    if env_file.exists():
-        known += env_file.read_text(encoding="utf-8")
-    unknown = sorted(n for n in names if n not in known)
+    loader = (ROOT / "src" / "autopoiesis" / "config.py").read_text(encoding="utf-8")
+    known = set(re.findall(variable, loader + "\n" + _entry_point_reads()))
+    unknown = sorted(names - known)
     if unknown:
         return Result(
             "config-example-names", FAIL,
@@ -2253,26 +2335,58 @@ def check_config_example_names_are_real() -> Result:
         )
     return Result(
         "config-example-names", PASS,
-        f"all {len(names)} variable names in the example are read by config.py, by autopoiesis, "
-        "or by the env file",
+        f"all {len(names)} variable names in the example are read by config.py, autopoiesis "
+        "or Make",
     )
 
 
 def _entry_point_reads() -> str:
-    """`autopoiesis`'s executable code, whole-line comments dropped.
+    """Actual shell expansions and non-comment Make variable references.
 
-    The same file documents in its header every shell knob it honours, so scanning it whole
-    would count a variable that is only described as having existed. The header is entirely
-    `#` comment lines, so dropping those is enough to make the scan mean "this code reads it".
-    Inline trailing comments are left in: autopoiesis's executable body is short, and excluding
-    them would need a shell tokenizer to do properly.
+    Names in documentation or on an assignment's left side are not consumers. Select
+    shell dollars outside comments, single quotes and escapes; retain double-quoted
+    expansions. Make comments are removed before scanning references.
     """
     script = ROOT / "autopoiesis"
-    if not script.exists():
-        return ""
-    code = [line for line in script.read_text(encoding="utf-8").splitlines()
-            if not line.lstrip().startswith("#")]
-    return "\n".join(code)
+    code = script.read_text(encoding="utf-8") if script.exists() else ""
+    variable = re.compile(r"\$\{?((?:AUTOPOIESIS|ALPACA|APCA|OLLAMA)_[A-Z0-9_]+)\b")
+    reads = []
+    quote = ""
+    word_start = True
+    index = 0
+    while index < len(code):
+        char = code[index]
+        if quote == "'":
+            if char == quote:
+                quote = ""
+            index += 1
+            continue
+        if char == "\\" and index + 1 < len(code):
+            if code[index + 1] != "\n":
+                word_start = False
+            index += 2
+            continue
+        if char in "'\"" and (not quote or char == quote):
+            quote = "" if quote else char
+            word_start = False
+        elif char == "#" and not quote and word_start:
+            newline = code.find("\n", index)
+            index = len(code) if newline < 0 else newline
+            continue
+        else:
+            if char == "$":
+                match = variable.match(code, index)
+                if match:
+                    reads.append(match.group(1))
+            word_start = not quote and (char.isspace() or char in ";|&()<>")
+        index += 1
+    makefile = ROOT / "Makefile"
+    if makefile.exists():
+        make_code = "\n".join(
+            line.split("#", 1)[0] for line in makefile.read_text(encoding="utf-8").splitlines()
+        )
+        reads += re.findall(r"\$\((AUTOPOIESIS_[A-Z0-9_]+)\)", make_code)
+    return "\n".join(reads)
 
 
 def check_docs_do_not_instruct_deleted_commands() -> Result:
@@ -3208,6 +3322,7 @@ def check_all_tests_classified() -> Result:
 # the class-count gate and the run itself cannot disagree: three readers of one list rather
 # than three independent recollections of it.
 BESPOKE_CHECK_NAMES = (
+    "gpu-devices-reserved",
     "self-evolution-closes",
     "selection-pressure-reaches-the-rules",
     "replay-cannot-reach-the-account",
@@ -3688,6 +3803,7 @@ def main() -> int:
     _partial_run = bool(wanted)
     _partial_run_filter = set(wanted) if wanted else set()
 
+    results.append(_safe(check_gpu_devices_reserved, "gpu-devices-reserved"))
     results.append(_safe(check_all_tests_classified, "test-coverage-map"))
     results.append(_safe(check_known_classes_run, "class-coverage"))
     results.append(_safe(check_software_supply_chain, "software-supply-chain"))
@@ -3800,6 +3916,81 @@ def main() -> int:
         return 1
     print("\nOK - all check classes pass")
     return 0
+
+
+
+
+#: Devices this project may pin work to. AGENTS.md section 18: GPUs 5 to 9 belong to work
+#: that is not ours, and no process started from this repository may reach them.
+ALLOWED_GPU_DEVICES = frozenset({"0", "1", "2", "3", "4"})
+
+
+def _gpu_pins() -> list:
+    """Every place this repository pins a GPU, as `(label, raw value)`.
+
+    Read rather than searched for by string: the point is to see what a *runtime* would
+    see, so the unit template and the installed unit are both parsed for the
+    `CUDA_VISIBLE_DEVICES` line and the configuration for `AUTOPOIESIS_GPU_DEVICES`.
+    """
+    pins = []
+    template = ROOT / "tools" / "ollama.service.in"
+    if template.is_file():
+        for line in template.read_text(encoding="utf-8").splitlines():
+            if line.startswith("Environment=CUDA_VISIBLE_DEVICES="):
+                pins.append((str(template.relative_to(ROOT)), line.split("=", 2)[2]))
+    installed = Path("/home/liuyime2/.config/systemd/user/ollama.service")
+    if installed.is_file():
+        for line in installed.read_text(encoding="utf-8").splitlines():
+            if line.startswith("Environment=CUDA_VISIBLE_DEVICES="):
+                pins.append((str(installed), line.split("=", 2)[2]))
+    env = Path(os.environ.get("AUTOPOIESIS_ENV_FILE", "")) if os.environ.get("AUTOPOIESIS_ENV_FILE") else None
+    candidates = [env] if env else []
+    candidates.append(
+        Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
+        / "autopoiesis" / "env"
+    )
+    for path in candidates:
+        if path is None or not path.is_file():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("AUTOPOIESIS_GPU_DEVICES="):
+                pins.append((str(path), line.split("=", 1)[1].strip().strip("'\"")))
+    return pins
+
+
+def check_gpu_devices_reserved() -> Result:
+    """No pin from this repository may name a reserved device. AGENTS.md section 18.
+
+    Measured 2026-10-16, and the reason this is a check rather than a sentence: the
+    agent's Ollama was pinned to GPU 0 in the unit while a second instance, started
+    outside the unit, ran on GPU 2 and port 11500 - two servers competing for a device
+    neither was documented as owning. A pin nobody verifies is a preference.
+    """
+    pins = _gpu_pins()
+    if not pins:
+        return Result(
+            "gpu-devices-reserved", SKIP,
+            "no GPU pin found in this checkout; nothing to check",
+        )
+    violations = []
+    for label, raw in pins:
+        named = {part.strip() for part in str(raw).split(",") if part.strip()}
+        reserved = sorted(named - ALLOWED_GPU_DEVICES)
+        if reserved:
+            violations.append(f"{label} pins {raw!r}, which names reserved device(s) {reserved}")
+    detail = "; ".join(
+        f"{label}={raw}" for label, raw in pins
+    )
+    if violations:
+        return Result(
+            "gpu-devices-reserved", FAIL,
+            "; ".join(violations),
+            "GPUs 5 to 9 belong to work that is not this project's. Pin within 0-4.",
+        )
+    return Result(
+        "gpu-devices-reserved", PASS,
+        f"{len(pins)} GPU pin(s) within {sorted(ALLOWED_GPU_DEVICES)}: {detail}",
+    )
 
 
 if __name__ == "__main__":

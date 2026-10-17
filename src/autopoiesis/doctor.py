@@ -15,9 +15,10 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from autopoiesis import (
     attribution,
@@ -31,6 +32,7 @@ from autopoiesis import (
     strategy_engine,
 )
 from autopoiesis.atomicio import write_json_atomic
+from autopoiesis.broker_client import list_open_orders
 from autopoiesis.broker_evidence import latest_evidence_batch
 from autopoiesis.config import AgentConfig
 from autopoiesis.evaluator import (
@@ -225,6 +227,7 @@ def _check_governance(report: DoctorReport, config: AgentConfig) -> None:
     #    identically. The first run records the baseline; later runs flag any
     #    increase, which is the one direction that matters.
     _check_risk_baseline(report, config)
+    _check_vix_freshness(report, config)
 
     # 3. Every lifecycle on disk must be traceable to a decision the manager made.
     #    PAUSED and RETIRED are terminal by ordering inside one function, not by any
@@ -278,6 +281,68 @@ def _check_governance(report: DoctorReport, config: AgentConfig) -> None:
         #    exists to find, created in the same commit that hunts for it - so
         #    every doctor check is asserted to be present in the report.
         _check_champion_and_search(report, config, journal)
+
+
+def _check_vix_freshness(report: DoctorReport, config: AgentConfig) -> None:
+    """Whether the index-implied floor is actually engaged, or silently off.
+
+    Measured 2026-10-15: the cache's last point was 2026-10-09, six days old, and
+    `vix_floor` refuses a reading more than four days old - correctly, and **silently**.
+    Nothing reported it. The floor had been off since 2026-10-13 and the doctor said
+    `RESULT: OK`, so a risk input that P6 measured as a 12.4% forecast-error improvement
+    was absent from every decision for two days without one line saying so.
+
+    The staleness guard is right and is not touched here. What was missing is the alarm:
+    a protection that disables itself is worth nothing if the only way to learn it is to
+    read the cache's last date by hand.
+    """
+    from autopoiesis.risk_judgment import VIX_CACHE
+
+    # The module's own constant, not a path rebuilt from the config. `vix_floor` reads
+    # `VIX_CACHE`, so a second path here could point somewhere the floor never looks and
+    # report on a file that does not matter.
+    path = VIX_CACHE
+    if not path.exists():
+        report.add(
+            "vix freshness", WARN,
+            f"no VIX cache at {path}; the index-implied floor cannot engage",
+            "the floor is a floor on the volatility forecast, not a requirement, so "
+            "decisions continue - but nothing is being floored",
+        )
+        return
+    try:
+        series = json.loads(path.read_text(encoding="utf-8"))
+        history = series.get("^VIX") or {}
+        last = max(history) if history else None
+    except Exception as exc:
+        report.add("vix freshness", WARN, f"cache unreadable: {type(exc).__name__}")
+        return
+    if last is None:
+        report.add("vix freshness", WARN, "cache holds no ^VIX points")
+        return
+
+    # The same ceiling `vix_floor` applies. Read rather than restated: two numbers for one
+    # rule is how the two answers to "is this stale" start disagreeing.
+    from autopoiesis.risk_judgment import VIX_STALE_AFTER_DAYS
+
+    # Local, because that is what `vix_floor` uses. Measuring the age in UTC here made the
+    # two disagree by a day either side of midnight - which is the drift this shared
+    # constant exists to prevent, reintroduced through the clock instead of the number.
+    age = (date.today() - date.fromisoformat(last)).days
+    if age > VIX_STALE_AFTER_DAYS:
+        report.add(
+            "vix freshness", WARN,
+            f"the VIX cache's last point is {last}, {age} days old; the floor has been "
+            f"disengaged since the reading passed {VIX_STALE_AFTER_DAYS} days, and nothing "
+            f"refreshes it on a schedule",
+            "refresh the cache before the open; the floor is measured to cut the "
+            "volatility forecast error by 12.4% and is currently contributing nothing",
+        )
+        return
+    report.add(
+        "vix freshness", OK,
+        f"last point {last}, {age} day(s) old, within the {VIX_STALE_AFTER_DAYS}-day ceiling",
+    )
 
 
 def _check_risk_baseline(report: DoctorReport, config: AgentConfig) -> None:
@@ -363,6 +428,16 @@ def _check_lifecycle_provenance(
     for event in journal.read_events("STRATEGY_LIFECYCLE_UPDATED"):
         strategy_id = event.strategy_id or event.payload.get("strategy_id")
         new_lifecycle = event.payload.get("new_lifecycle")
+        if not isinstance(new_lifecycle, str) and event.payload.get("source") == "operator_pause":
+            # An operator pause writes `new_lifecycle` so this reader finds it, but three
+            # pauses were written on 2026-10-14 before that was noticed, carrying only
+            # `lifecycle`. The journal is append-only evidence, so those events cannot be
+            # rewritten to suit a reader; the reader has to read what was recorded. This
+            # is deliberately narrow - only an event that names itself an operator pause
+            # gets the second key, so a lifecycle-manager event missing `new_lifecycle`
+            # is still reported rather than silently accepted.
+            candidate = event.payload.get("lifecycle")
+            new_lifecycle = candidate if isinstance(candidate, str) else None
         if isinstance(strategy_id, str) and isinstance(new_lifecycle, str):
             decided[strategy_id] = new_lifecycle
 
@@ -555,9 +630,15 @@ def _check_decision_quality(
     """
     symbol = config.symbols[0] if config.symbols else "SPY"
     try:
-        result = counterfactual.evaluate(
+        # Every configured symbol, not the first one. `evaluate` takes one symbol and builds
+        # one price series from it, which has to stay that way - a TLT decision is a question
+        # about TLT's next 24 hours. But this check graded the first symbol only, so the
+        # 2026-10-14 review found the decision-quality figure and the llm-vs-rule figure
+        # below it were both SPY-only while the account traded TLT, XLE, XLF, BIL and XLB.
+        # A metric about the model, computed from one symbol of six, is a metric about SPY.
+        result = counterfactual.evaluate_symbols(
             records,
-            symbol=symbol,
+            symbols=tuple(config.symbols) if config.symbols else (symbol,),
             horizon_hours=config.counterfactual_horizon_hours,
             assumed_cost_pct=config.assumed_round_trip_cost_pct,
         )
@@ -569,12 +650,14 @@ def _check_decision_quality(
         return
     quality = result.hold_quality()
     counts = result.counts()
+    by_symbol = _scored_by_symbol(result)
     detail = (
         f"hold_quality={quality} over {len(result.scored)} scored "
         f"({result.pending_count} pending, {result.gap_count} refused as gaps); "
         f"holds: {counts.get('GOOD_HOLD', 0)} good, "
         f"{counts.get('MISSED_ALPHA', 0)} missed alpha, "
         f"{counts.get('FALSE_TRADE', 0)} false trade"
+        + (f"; by symbol: {by_symbol}" if by_symbol else "")
     )
     if quality is None:
         report.add(
@@ -586,6 +669,19 @@ def _check_decision_quality(
     _report_llm_against_the_rule(report, result.rows)
 
 
+def _scored_by_symbol(result) -> str:
+    """Scored counts per symbol, so a figure computed over all of them can be read per one.
+
+    Added with the move from `evaluate` to `evaluate_symbols`: a single total over six
+    symbols hides that one symbol contributed most of it, which is how the SPY-only figure
+    survived unnoticed.
+    """
+    counts: dict[str, int] = {}
+    for row in result.scored:
+        counts[row.symbol] = counts.get(row.symbol, 0) + 1
+    return ", ".join(f"{symbol}={count}" for symbol, count in sorted(counts.items()))
+
+
 def _report_llm_against_the_rule(report: DoctorReport, rows: list) -> None:
     """What the model's departures from the strategy's rule were worth, paired per cycle.
 
@@ -594,6 +690,27 @@ def _report_llm_against_the_rule(report: DoctorReport, rows: list) -> None:
     rule's. Their sum is the model's increment over the rule on identical inputs - the
     number the PnL-lot attribution could only approximate. Cycles before that have no pair
     and are not counted, rather than estimated.
+
+    Three corrections made 2026-10-14, each because the figure was being read as a
+    conclusion it could not support:
+
+    - **Per trading day, and withheld under 20 of them.** The reported "+16.9%" was a sum
+      over 68 overrides concentrated in three days, 39 of them on 2026-10-07 alone. A total
+      that is one day wearing a percentage sign is not evidence about a model. The plan's
+      acceptance is explicit: below 20 trading days, report that the evidence is
+      insufficient rather than report a net figure.
+
+    - **A reasonless disagreement is already excluded upstream.** `HybridDecisionEngine`
+      returns the rule's own decision with `decision_source="policy_engine"` when the model
+      departed without an `override_reason`, so it never enters this count. Asserted rather
+      than assumed, because the exclusion lives in another module and could be removed
+      without this one noticing.
+
+    - **A system skip cannot be excluded here, and that is recorded rather than faked.**
+      `CounterfactualRow` carries no execution status, so a cycle where the executor or
+      Guardian skipped an order is indistinguishable from a model that chose differently.
+      Excluding them needs the status on the row; until it is there, the count includes
+      them and this says so.
     """
     paired = [
         row for row in rows
@@ -607,14 +724,62 @@ def _report_llm_against_the_rule(report: DoctorReport, rows: list) -> None:
         )
         return
     overrides = [row for row in paired if row.action != row.rule_action]
+    if not overrides:
+        report.add(
+            "llm vs rule", OK,
+            f"{len(paired)} paired LLM decision(s) across "
+            f"{len(_trading_days(paired))} trading day(s), none of them a departure from "
+            f"the rule",
+        )
+        return
+
+    days = _trading_days(overrides)
     total = sum(row.override_value_pct for row in overrides)
     helped = sum(1 for row in overrides if row.override_value_pct > 0)
+    per_day = _per_day_override_totals(overrides)
+    distribution = ", ".join(f"{day}={value:+.3f}%" for day, value in sorted(per_day.items()))
+    caveats = (
+        "; the row carries no execution status, so a cycle the executor or Guardian "
+        "skipped is counted here as a departure - excluding those needs the status on the "
+        "row and is not done"
+    )
+
+    if len(days) < MIN_TRADING_DAYS_FOR_A_CONCLUSION:
+        report.add(
+            "llm vs rule", WARN,
+            f"INSUFFICIENT EVIDENCE: {len(overrides)} override(s) over {len(days)} trading "
+            f"day(s), below the {MIN_TRADING_DAYS_FOR_A_CONCLUSION} needed before a net "
+            f"figure means anything about the model. By day: {distribution}. The "
+            f"unwithheld total would be {total:+.3f}% of probe value and must not be read "
+            f"as a result" + caveats,
+        )
+        return
     report.add(
         "llm vs rule", OK,
-        f"{len(paired)} paired LLM decision(s), {len(overrides)} override(s) of the rule, "
-        f"{helped} of them worth more than the rule; overrides net {total:+.3f}% of probe "
-        f"value (one share, 24h, after the assumed cost)",
+        f"{len(paired)} paired LLM decision(s), {len(overrides)} override(s) of the rule "
+        f"over {len(days)} trading day(s), {helped} of them worth more than the rule; "
+        f"overrides net {total:+.3f}% of probe value (one share, 24h, after the assumed "
+        f"cost). By day: {distribution}" + caveats,
     )
+
+
+#: Overrides are summed, and a sum is a conclusion. Below this many trading days the
+#: 2026-10-14 review found 68 overrides concentrated in three, 39 of them in one - a total
+#: that is a single day wearing a percentage sign. The plan's acceptance names this number.
+MIN_TRADING_DAYS_FOR_A_CONCLUSION = 20
+
+
+def _trading_days(rows: list) -> set[str]:
+    """Distinct calendar dates the rows were decided on, in exchange-local time."""
+    return {row.decided_at.astimezone(ZoneInfo("America/New_York")).date().isoformat() for row in rows}
+
+
+def _per_day_override_totals(rows: list) -> dict[str, float]:
+    totals: dict[str, float] = {}
+    for row in rows:
+        day = row.decided_at.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+        totals[day] = totals.get(day, 0.0) + row.override_value_pct
+    return totals
 
 
 def _check_experiment_chain(
@@ -714,7 +879,7 @@ def _check_champion_and_search(
         record = memory.load()
         if record is not None:
             results_by_id = {
-                r.strategy_id: r for r in memory.strategy_results(record)
+                r.strategy_id: r for r in memory.strategy_results(record, strategies)
             }
     except Exception:
         results_by_id = {}
@@ -936,38 +1101,50 @@ def _check_pnl_attribution(
     # 29 shares are unmatched - the FAIL could never fire and the severity test in
     # test_attribution.py only passed because its fixture has no unmatched sells. Two
     # conditions that are each independently a failure have to be reported as such.
+    # Collected, then reported once. Two conditions here are independently true - unmatched
+    # sells, and a model that subtracted from a positive total - and an earlier version
+    # emitted them as two lines carrying the same check name, which is the duplicate the
+    # 2026-10-13 daily report showed. The independence that matters is that neither finding
+    # may be suppressed by the other, and that is preserved: both are collected and the
+    # worst severity wins. Two lines is not independence, it is a reader unable to tell
+    # whether the second line is a different problem or the same one repeated.
+    #
+    # The `elif` chain between the model conditions is kept deliberately: they are
+    # mutually exclusive statements about the same quantity, and the first matching one
+    # is the most specific true description of it.
+    findings: list[tuple[str, str]] = []
     if unmatched_shares:
-        report.add(
-            "pnl attribution", WARN,
-            detail + f"; {unmatched_shares:g} share(s) were sold that no BUY accounts "
-            "for, so the PnL of those exits is not in the total above at all - their "
-            "proceeds are real and their cost basis is not on the record, so the omitted "
-            "term can be positive or negative and the figure is incomplete rather than "
-            "exact. This is a property of the account, not a fault in the trading path - "
-            "run `make status`",
-        )
+        # Severity only. `detail` already states this in full - it carries an
+        # `UNMATCHED SELLS n:` clause naming the strategies and saying the PnL is absent
+        # from the total - and the version this replaces restated all of it a second time
+        # in the same line. The finding that matters here is that the line cannot be OK
+        # while shares are unaccounted for; the explanation is already written above it.
+        findings.append((WARN, ""))
     if result.closed_lots and model_lots > 0 and result.model_pnl <= 0.0:
-        report.add(
-            "pnl attribution", FAIL,
-            detail + f"; the model opened {model_lots} lot(s) and contributed "
+        findings.append((
+            FAIL,
+            f"the model opened {model_lots} lot(s) and contributed "
             f"{result.model_pnl:+.2f} to a total of {result.total_realized_pnl:+.2f}",
-        )
+        ))
     elif result.closed_lots and result.model_pnl == 0.0 and model_open > 0:
-        report.add(
-            "pnl attribution", WARN,
-            detail + f"; the model has {model_open:g} share(s) OPEN and none closed, "
-            "so its realized contribution is 0.00 by construction rather than "
-            "because it did nothing - the closed-lot figure above belongs entirely "
-            "to the baseline rule",
-        )
+        findings.append((
+            WARN,
+            f"the model has {model_open:g} share(s) OPEN and none closed, so its realized "
+            "contribution is 0.00 by construction rather than because it did nothing - the "
+            "closed-lot figure above belongs entirely to the baseline rule",
+        ))
     elif result.closed_lots and result.model_pnl == 0.0:
-        report.add(
-            "pnl attribution", WARN,
-            detail + "; the model has opened no lots, so it has neither helped nor "
-            "hurt - the figure above belongs entirely to the baseline rule",
-        )
-    else:
+        findings.append((
+            WARN,
+            "the model has opened no lots, so it has neither helped nor hurt - the figure "
+            "above belongs entirely to the baseline rule",
+        ))
+    if not findings:
         report.add("pnl attribution", OK, detail)
+        return
+    severity = FAIL if FAIL in [status for status, _ in findings] else WARN
+    notes = [note for _, note in findings if note]
+    report.add("pnl attribution", severity, "; ".join([detail, *notes]))
 
 
 def _check_llm_fallback(
@@ -1034,24 +1211,30 @@ def _check_model_registry(
     if registry.total_decisions == 0:
         report.add("model registry", WARN, "no decisions on record")
         return
-    unattributed = registry.models[model_registry.UNATTRIBUTED].decisions \
-        if model_registry.UNATTRIBUTED in registry.models else 0
-    # Severity has to be proportional. This check warned only when *every* decision
-    # was unattributed, so a record that is 93% unattributed - 920 of 987, the
-    # state it is actually in - reported OK on the strength of the 67 that do
-    # carry a name. The docstring is right that back-filling would be worse, and
-    # right that the total-absence case is worth a warning; it drew the line at the
-    # only value that cannot be a majority. The question this check exists to answer
-    # is how much of the decision record can be attributed at all, and "almost none
-    # of it" is not an OK. The boundary is inclusive: exactly half unattributed is a
-    # coin flip on provenance, which is not a state to report as healthy. The first
-    # version used a strict `>` and a test caught 50/50 reporting OK.
-    if unattributed and unattributed >= registry.total_decisions / 2:
+    # Severity is measured against the decisions the model actually answered, not against
+    # every decision on the journal. Measured 2026-10-14: this reported "1824 of 3221
+    # (57%) cannot be attributed to a model" while only 67 of those 1824 were decisions the
+    # model made - the rest were the rule path, where `model` is None by definition and
+    # nothing is wrong. That is the same conflation `_post_cycle_model_flag` had to fix for
+    # `last_model_ok`, and it matters more here: a 57% failure that is really a 4% one is a
+    # monitor that gets ignored, which is the failure mode the check exists to prevent.
+    #
+    # The boundary stays inclusive at half, and now applies to the asked set. A journal
+    # where most of what the model answered cannot be attributed is still not an OK.
+    if registry.asked == 0:
         report.add(
             "model registry", WARN,
-            f"{unattributed} of {registry.total_decisions} decision(s) "
-            f"({unattributed / registry.total_decisions:.0%}) cannot be attributed "
-            f"to a model; {registry.summary()}",
+            registry.summary(),
+            "the model has not answered a decision on this journal yet, so there is "
+            "nothing whose provenance could be checked",
+        )
+        return
+    if registry.unattributed_asked >= registry.asked / 2:
+        report.add(
+            "model registry", WARN,
+            f"{registry.unattributed_asked} of the {registry.asked} decision(s) the model "
+            f"answered ({registry.unattributed_asked / registry.asked:.0%}) cannot be "
+            f"attributed to a model; {registry.summary()}",
             "provenance was not captured for these; they are left unattributed "
             "deliberately rather than back-filled",
         )
@@ -1181,7 +1364,7 @@ def _check_broker(report: DoctorReport, config: AgentConfig, client, skip: bool)
     )
     try:
         positions = client.list_positions()
-        orders = client.list_orders(status="open")
+        orders = list_open_orders(client)
     except Exception as exc:
         report.add("broker positions", FAIL, f"{type(exc).__name__}: {exc}")
         return

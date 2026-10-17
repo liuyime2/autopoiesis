@@ -255,3 +255,73 @@ def test_the_after_cost_figure_is_the_one_reported():
     assert payload["after_cost_pnl"] == 555.72
     assert payload["cost_headline"].startswith("+555.72")
     assert payload["observed_fees"] == 0.0
+
+
+def test_pnl_attribution_is_reported_exactly_once(tmp_path):
+    """One check name, one line. Two findings, one report entry.
+
+    Reported 2026-10-14: the 2026-10-13 daily report printed two `pnl attribution` lines,
+    a WARN and an OK. Two conditions in the branch are independently true - unmatched
+    sells, and a model that subtracted from a positive total - and they were emitted as
+    two entries with the same name.
+
+    The existing tests could not see it: the helper above returns
+    `{c.name: status for c in report.checks}`, and a dict keyed by name keeps only the
+    last entry, so a duplicate was silently discarded. This asserts on the list.
+
+    Both findings must still be present in the one line, and the worse severity must win,
+    because the point of evaluating them independently was that neither may be suppressed
+    by the other.
+    """
+    from autopoiesis.config import AgentConfig
+    from autopoiesis.doctor import DoctorReport, _check_pnl_attribution
+    from autopoiesis.journal import JsonlJournal
+    from autopoiesis.models import JournalEvent
+
+    cfg = AgentConfig(
+        mode="paper", symbols=("SPY",), allowlist=frozenset({"SPY"}),
+        alpaca_api_key="k", alpaca_secret_key="s",
+        alpaca_base_url="https://paper-api.alpaca.markets",
+        ollama_base_url="http://localhost:11434", model="q", gpu_devices="0",
+        journal_path=tmp_path / "journal.jsonl",
+        max_position_value=5_000, max_daily_loss=500,
+    )
+    journal = JsonlJournal(cfg.journal_path)
+    # A lot the model opened and lost money on, so the FAIL arm is live...
+    journal.append_event(JournalEvent(
+        event_id="e0", event_type="PNL_EVIDENCE_RECORDED", timestamp=TS, status="SUCCESS",
+        message="m",
+        payload={
+            "pnl": {
+                "closed_lots": [_lot("o1", -50.0, strategy_id="s1")],
+                # ...and a sell no BUY accounts for, so the WARN arm is live at the same
+                # time. Both true, which is the state that produced two lines. Keyed by
+                # strategy, which is the shape the check reads.
+                "unmatched_sell_quantity": {"s1": 3.0},
+            },
+            "rejected_orders": 0, "fill_quantity_ratio": 1.0,
+        },
+    ))
+    report = DoctorReport()
+    _check_pnl_attribution(report, cfg, journal, [_cycle("o1", "llm")])
+
+    named = [c for c in report.checks if c.name == "pnl attribution"]
+    assert len(named) == 1, (
+        f"one check name must be one line; got {len(named)}: "
+        f"{[(c.status.value, c.detail[:60]) for c in named]}"
+    )
+    # The first version of this test passed for the wrong reason: `journal` and `records`
+    # were passed in the wrong order, the check took its unreadable-journal path and
+    # returned before reaching any finding. A one-line assertion is satisfied by that too.
+    # So the arms are asserted live rather than assumed.
+    detail = named[0].detail
+    assert "journal unreadable" not in detail, f"the check did not run: {detail[:120]}"
+    assert "closed lot" in detail, f"the model arm must be live: {detail[:200]}"
+    assert "UNMATCHED SELLS" in detail, (
+        f"the unmatched-sell arm must be live too, or this test does not cover the state "
+        f"that produced two lines: {detail[:300]}"
+    )
+    assert named[0].status.value == "fail", (
+        f"the model lost money on a lot it opened, which is the FAIL arm, and it must "
+        f"outrank the unmatched-sell WARN rather than be replaced by it: {detail[:200]}"
+    )

@@ -1,0 +1,14 @@
+[Unit]
+Description=Refresh the VIX cache on weekday mornings, before the preflight
+
+[Timer]
+# 08:15, thirty minutes ahead of the 08:45 preflight, so the floor is engaged for the
+# session rather than one cycle into it. `Persistent` because a missed run means a stale
+# reading, and a stale reading silently disengages the floor - which is exactly the state
+# this timer exists to prevent.
+OnCalendar=Mon..Fri *-*-* 08:15:00 America/New_York
+Persistent=true
+AccuracySec=60s
+
+[Install]
+WantedBy=timers.target

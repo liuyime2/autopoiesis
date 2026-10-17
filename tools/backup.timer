@@ -1,0 +1,11 @@
+[Unit]
+Description=Back up the autopoiesis journal every hour
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=120
+AccuracySec=60s
+
+[Install]
+WantedBy=timers.target

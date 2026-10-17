@@ -9,6 +9,7 @@ can never promote, and it says so when it does not know.
 """
 
 import pytest
+from synthetic_evidence import synthetic_clean_events, synthetic_row_metadata
 
 from autopoiesis import offline_validation as ov
 
@@ -121,7 +122,7 @@ def test_decisions_are_read_from_the_journal_with_the_latest_winning():
              "verdict": "GOOD_HOLD", "net_return_pct": -1.0},
         ]}},
     ]
-    decisions = ov.collect_decisions(events, "s")
+    decisions = ov.collect_decisions(synthetic_clean_events(events), "s")
 
     assert len(decisions) == 1
     assert decisions[0].verdict == "GOOD_HOLD"
@@ -136,7 +137,7 @@ def test_decisions_are_scoped_to_one_strategy():
         {"cycle_id": "c2", "strategy_id": "theirs", "action": "HOLD",
          "verdict": "FALSE_TRADE", "net_return_pct": -1.0},
     ]}}]
-    decisions = ov.collect_decisions(events, "mine")
+    decisions = ov.collect_decisions(synthetic_clean_events(events), "mine")
 
     assert [d.cycle_id for d in decisions] == ["c1"]
 
@@ -388,6 +389,7 @@ def test_day_direction_is_the_market_s_move_not_the_decisions_grade():
     class _E:
         def __init__(self, rows):
             self.payload = {"rows": rows}
+            synthetic_clean_events([self])
 
     def row(cid, action, verdict, day, net):
         return {"cycle_id": cid, "action": action, "verdict": verdict,
@@ -489,6 +491,6 @@ def test_a_strategy_is_screened_on_its_rule_not_on_the_model_s_override():
              "net_return_pct": -1.0, "decided_at": "2026-10-07T16:00:00"},
         ]}
 
-    first, second = collect_decisions([_E()], "s")
+    first, second = collect_decisions(synthetic_clean_events([_E()]), "s")
     assert (first.action, first.verdict) == ("SELL", "FALSE_TRADE")
     assert (second.action, second.verdict) == ("HOLD", "GOOD_HOLD"), "unpaired rows are unchanged"

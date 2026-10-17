@@ -13,6 +13,7 @@ live journal all 67 LLM decisions are PENDING, so the module's job today is to s
 from datetime import date, datetime, timezone
 
 import pytest
+from synthetic_evidence import synthetic_clean_record
 
 from autopoiesis import calibration
 from autopoiesis.models import (
@@ -28,7 +29,7 @@ TS = datetime(2026, 6, 1, 14, 30, tzinfo=timezone.utc)
 
 
 def _record(cycle_id, confidence, action="HOLD", source="llm", price=100.0):
-    return CycleRecord(
+    return synthetic_clean_record(CycleRecord(
         cycle_id=cycle_id,
         snapshot=DataSnapshot(
             symbol="SPY", timestamp=TS, market_open=True, last_price=price,
@@ -46,7 +47,7 @@ def _record(cycle_id, confidence, action="HOLD", source="llm", price=100.0):
         execution=ExecutionResult(
             status="SKIPPED", order_id=None, filled_quantity=0, message="hold",
         ),
-    )
+    ))
 
 
 def _rows(specs):

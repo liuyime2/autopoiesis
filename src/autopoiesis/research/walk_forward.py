@@ -10,7 +10,7 @@ The controls here are deliberately blunt, because a subtle correction is a
 correction that gets tuned until it flatters the result:
 
 * **Walk-forward.** The series is cut into contiguous folds. Each fold is trained
-  on everything before it and evaluated only on the fold itself. Only the
+  on a length-matched preceding segment and evaluated only on the fold itself. Only the
   out-of-sample leg counts toward a verdict. An in-sample-only result is reported
   separately and cannot make a strategy look good.
 
@@ -19,10 +19,11 @@ correction that gets tuned until it flatters the result:
   results looks profitable grows with N and a report that omits N is a report
   hiding its own selection bias.
 
-* **Bonferroni-style gate.** A fold must clear a threshold divided by the number of
-  trials, so searching harder demands a correspondingly better result. This is
-  crude and conservative on purpose; a fancier correction would be one more thing
-  to be wrong about.
+* **Sample-size heuristic.** Required trades rise with the square root of cumulative
+  attempts. This is not Bonferroni or family-wise error control, and trades from
+  adjacent folds are not proven independent. Positive OOS return and stress survival
+  are diagnostic screens; independent holdout and formal statistical validation
+  remain necessary before claiming a validated edge.
 
 * **Stress.** The same fold is re-run with worse costs, an adverse constant price
   shift, and a random adverse jitter. A strategy whose edge only exists at
@@ -128,17 +129,10 @@ class WalkForwardResult:
     def required_trades(self) -> int:
         """How many out-of-sample trades this many trials demands before it counts.
 
-        This is the multiple-testing control, and the obvious version of it did
-        nothing: `OOS_RETURN_THRESHOLD_PCT / trials` is `0.0 / 40`, which is still
-        `0.0`, so searching forty variants cost nothing and the control was
-        decoration. Dividing a zero bar by anything is still no bar.
-
-        The real risk of trying N specs is not that the winner's return is too small
-        in units, it is that the winner was selected on noise - and the cure for
-        that is *more evidence*, not a different return threshold. So the trial
-        count raises the number of independent out-of-sample trades required, on a
-        square-root schedule: search harder, and demand proportionally more of the
-        only thing that is not negotiable.
+        A square-root sample-size heuristic raises the evidence requirement as
+        cumulative attempts grow. It supplies neither a statistical significance
+        level nor a family-wise false-positive bound. Counted trades and adjacent
+        folds are not proven independent; a passing verdict remains diagnostic.
         """
         return math.ceil(BASE_REQUIRED_TRADES * math.sqrt(max(1, self.trials)))
 
@@ -289,7 +283,7 @@ def run_walk_forward(
     counts.** `run_backtest` opens a position only when flat and force-closes it at the
     segment's last bar, so an always-BUY rule makes exactly one counted trade per
     segment: `out_of_sample_trades == n_folds` is an identity, measured at 3, 10, 27, 52
-    and 60 folds. The gate needs `required_trades` independent out-of-sample bets -
+    and 60 folds. The gate needs `required_trades` counted out-of-sample trades -
     52 at 27 trials - so a hardcoded 3 folds made it unsatisfiable by construction, and
     all 26 recorded trials returned INSUFFICIENT for that reason alone.
 

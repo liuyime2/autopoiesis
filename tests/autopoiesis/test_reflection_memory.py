@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+from synthetic_evidence import synthetic_clean_record, synthetic_provenance
+
 from autopoiesis.evaluator import PNL_EVIDENCE_MISSING
 from autopoiesis.models import (
     AccountSnapshot,
@@ -26,7 +28,7 @@ def record(*, status="SUBMITTED", guardian_approved=True, guardian_reason="appro
             equity=100_000, cash=100_000, buying_power=100_000, portfolio_value=100_000, daily_loss=0
         ),
     )
-    return CycleRecord(
+    return synthetic_clean_record(CycleRecord(
         cycle_id="c1",
         snapshot=snapshot,
         decision=TradeDecision(
@@ -46,7 +48,7 @@ def record(*, status="SUBMITTED", guardian_approved=True, guardian_reason="appro
         ),
         strategy_id=strategy_id,
         error=has_error,
-    )
+    ))
 
 
 def test_reflection_empty_records():
@@ -160,6 +162,9 @@ def test_strategy_results_preserve_strategy_pnl_fields():
         summary="test",
         strategy_metrics={
             "s1": {
+                "eligibility_version": 1,
+                "strategy_provenance": synthetic_provenance("s1").model_dump(mode="json"),
+                "source_cycle_ids": ["synthetic-c1"],
                 "cycles": 1,
                 "submitted_orders": 1,
                 "rejected_orders": 0,
@@ -196,9 +201,4 @@ def test_strategy_results_load_older_reflection_shape():
         summary="legacy",
     )
 
-    [result] = memory.strategy_results(reflection)
-
-    assert result.strategy_id == "legacy"
-    assert result.cycles == 5
-    assert result.submitted_orders == 2
-    assert result.rejected_orders == 1
+    assert memory.strategy_results(reflection) == [], "legacy aggregate counts cannot certify attribution"

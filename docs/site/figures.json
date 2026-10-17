@@ -3,42 +3,47 @@
     "benchmark": {
       "agent": {
         "assumed_cost": 35.8189,
-        "capital": 45233.9,
-        "excess": -0.88,
-        "pnl": 820.77,
+        "capital": null,
+        "comparison_reason": "agent allocation, cash flows and aligned rolling equity history are unavailable",
+        "comparison_status": "UNKNOWN",
+        "diagnostic_market_return_pct": 3.319998,
+        "excess": null,
+        "observed_fees": 0,
+        "performance_contract": "agent-accounting-v1",
+        "pnl": 811.72,
         "realized": 757.95,
-        "return_pct": 1.81,
-        "spy_pct": 2.69,
-        "unrealized": 98.64
+        "return_pct": null,
+        "spy_pct": null,
+        "unrealized": 89.59
       },
       "cost": {
         "assumed_round_trip_cost_pct": 0.05
       },
-      "exit_code": 1,
+      "exit_code": 2,
       "record": {
-        "cycles": 2060,
+        "cycles": 2326,
+        "day_count_basis": "distinct cycle dates; not continuous exchange-calendar coverage",
         "first": "2026-06-09",
-        "journal": "runtime/autopoiesis/journal.jsonl",
-        "last": "2026-10-09",
-        "trading_days": 19
+        "last": "2026-10-12",
+        "trading_days": 20
       },
       "risk_budget": {
         "max_daily_loss": 500.0,
-        "max_position_value": 25000.0,
-        "max_total_exposure": 90000.0,
-        "max_trades_per_day": 100
+        "max_position_value": 5000.0,
+        "max_total_exposure": 20000.0,
+        "max_trades_per_day": 10
       },
       "strategies": [
         {
           "excess": "-0.02",
-          "market_pct": "+0.97%",
-          "return_pct": "+0.95%",
+          "market_pct": "+0.93%",
+          "return_pct": "+0.91%",
           "strategy_id": "trend-follow-20260627-001"
         },
         {
           "excess": "-0.07",
-          "market_pct": "+0.46%",
-          "return_pct": "+0.39%",
+          "market_pct": "+0.42%",
+          "return_pct": "+0.35%",
           "strategy_id": "trend-follow-20260727-001"
         },
         {
@@ -54,33 +59,36 @@
           "strategy_id": "fixed-size-buy-001"
         },
         {
-          "excess": "-1.33",
-          "market_pct": "+2.15%",
-          "return_pct": "+0.81%",
+          "excess": "-1.84",
+          "market_pct": "+2.62%",
+          "return_pct": "+0.78%",
           "strategy_id": "fixed-size-probe-0001"
         },
         {
-          "excess": "-2.89",
-          "market_pct": "+6.87%",
+          "excess": "-2.85",
+          "market_pct": "+6.82%",
           "return_pct": "+3.97%",
           "strategy_id": "tiny-fixed-size-001"
         }
       ],
       "target": {
-        "covered": 19,
+        "covered": 20,
         "met": false,
-        "trading_days": 60
+        "recorded_days_sufficient": false,
+        "status": "UNKNOWN",
+        "trading_days": 60,
+        "window_covered": false
       }
     },
     "gate": {
-      "check_classes": 55
+      "check_classes": 56
     },
     "record": {
-      "cycles": 2060,
+      "cycles": 2326,
+      "day_count_basis": "distinct cycle dates; not continuous exchange-calendar coverage",
       "first": "2026-06-09",
-      "journal": "runtime/autopoiesis/journal.jsonl",
-      "last": "2026-10-09",
-      "trading_days": 19
+      "last": "2026-10-12",
+      "trading_days": 20
     },
     "signals": {
       "hypotheses": 129,
@@ -95,9 +103,9 @@
       }
     },
     "tests": {
-      "test_files": 87,
-      "tests": 1289
+      "test_files": 94,
+      "tests": 1506
     }
   },
-  "generated_at": "2026-10-11T17:07:44.175384+00:00"
+  "generated_at": "2026-10-13T05:22:53.826239+00:00"
 }

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -21,6 +21,9 @@ Side = Literal["BUY", "SELL"]
 BrokerEvidenceStatus = Literal["SUCCESS", "PARTIAL", "FAILED"]
 DecisionSource = Literal["llm", "fallback_policy_engine", "policy_engine", "baseline"]
 HoldReason = Literal["no_signal", "risk_limit_near", "market_uncertain", "await_confirmation", "other"]
+#: The same set as a value, for a reader deciding whether a recorded value is one it knows.
+#: Kept beside the Literal so the two cannot drift.
+_HOLD_REASONS = frozenset(get_args(HoldReason))
 AttributionStatus = Literal["LINKED", "UNLINKED"]
 StrategyKind = Literal["HOLD_BASELINE", "TREND_FOLLOW", "FIXED_SIZE", "RULE"]
 #: The signals a RULE strategy may read. Each is a percent figure over `lookback` bars.
@@ -30,6 +33,7 @@ CurriculumTaskType = Literal["STRATEGY_SPEC", "OPTIMIZE", "EVALUATE"]
 CurriculumTaskSource = Literal["llm", "fallback"]
 DaemonStatus = Literal["STARTING", "RUNNING", "BACKING_OFF", "STOPPING", "STOPPED", "ERROR"]
 JournalEventType = Literal[
+    "ATTENTION_SELECTED",
     "REFLECTION_GENERATED",
     "REFLECTION_FAILED",
     "STRATEGY_EVALUATION_RECORDED",
@@ -544,13 +548,9 @@ class PnLEvidence(BaseModel):
     #: `market_return_pct` above, is what `strategy_excess_vs_market_pct` subtracts.
     strategy_market_return_pct: dict[str, float] = Field(default_factory=dict)
     #: Per strategy, `strategy_return_pct` minus `strategy_market_return_pct`. This is the
-    #: project's success metric and nothing else reported it: the promotion gate
-    #: screens on decision quality, which the counterfactual ledger measures, and
-    #: that ledger cannot see this number by construction - a trade's return there
-    #: is holding from the same instant less cost, so every decision shows an excess
-    #: of exactly the assumed cost over holding. See
-    #: The holding benchmark's denominator was corrected in the archive's dated log; the
-    #: current definition is in `evaluator.py`.
+    #: per-strategy peak-exposure diagnostic. Its denominator and exposure window
+    #: do not establish portfolio alpha or the project's profitability target.
+    #: The current diagnostic definition is in `evaluator.py`.
     strategy_excess_vs_market_pct: dict[str, float] = Field(default_factory=dict)
     unattributed_pnl: float | None = None
     window_start: datetime | None = None
@@ -604,6 +604,16 @@ class PnLEvidence(BaseModel):
         return _require_real_source(source)
 
 
+class StrategyProvenance(BaseModel):
+    """Immutable decision-time behavior; lifecycle changes do not alter it."""
+
+    model_config = ConfigDict(frozen=True)
+    strategy_id: str
+    universe: tuple[str, ...]
+    behavior_json: str
+    behavior_digest: str
+
+
 class StrategySpec(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -642,6 +652,26 @@ class StrategySpec(BaseModel):
     #: retries, not an attempt limit: nothing here decides that a strategy has had enough
     #: chances. That stays with the screen and the promotion gate, which judge outcomes.
     probation_restarts: int = Field(default=0, ge=0)
+    #: How many times this strategy has been re-admitted after a retirement.
+    #:
+    #: Retirement is terminal in the sense that nothing reopens it by itself, and until
+    #: 2026-10-13 it was terminal in the stronger sense that the admission gate could not
+    #: reopen it either: `admit` refused any id the library already held, without looking at
+    #: the lifecycle, so a strategy retired for a reason that later turned out to be wrong had
+    #: no route back except editing the live library by hand.
+    #:
+    #: Measured live that afternoon. `fixed-size-bil-sell-001` was retired at 09:39:38 EDT
+    #: with "severe operational failure rate 1.00", charged for one cycle in which Guardian
+    #: correctly refused a 1546-second-old quote - a refusal the market, not the strategy,
+    #: caused. The staleness attribution that let that happen is fixed. At 14:55:54 EDT the
+    #: curriculum proposed `fixed-size-bil-sell-001` by name, rediscovering the need on its
+    #: own, and the gate refused it as "strategy_id already exists; duplicate admission
+    #: rejected". The self-healing was blocked by the thing meant to authorise it.
+    #:
+    #: This is a bound on how many times the gate will reverse its own retirement, not a
+    #: count of chances a strategy gets to trade. The retired reasons that do not expire -
+    #: broker-verified negative realized PnL - are refused before this is consulted at all.
+    readmissions: int = Field(default=0, ge=0)
     created_at: datetime
     rationale: str = Field(min_length=1)
 
@@ -753,6 +783,8 @@ class KnowledgeArtifact(BaseModel):
     created_at: datetime
     status: KnowledgeArtifactStatus = "PROPOSED"
     rationale: str = Field(min_length=1)
+    eligibility_version: int = 0
+    verified_source_digest: str | None = None
 
     @field_validator("artifact_id")
     @classmethod
@@ -799,6 +831,9 @@ class StrategyEvaluation(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     strategy_id: str = Field(min_length=1)
+    eligibility_version: int = 0
+    strategy_provenance: StrategyProvenance | None = None
+    source_cycle_ids: tuple[str, ...] = ()
     cycles: int = Field(ge=0)
     #: Cycles this strategy was selected for across the whole journal, as opposed to
     #: `cycles`, which counts only the reflection window. See `StrategyResult` for why
@@ -836,6 +871,9 @@ class StrategyEvaluation(BaseModel):
 
 
 class EvaluationReport(BaseModel):
+    raw_cumulative_cycles: dict[str, int] = Field(default_factory=dict)
+    raw_cumulative_trade_attempts: dict[str, int] = Field(default_factory=dict)
+    learning_exclusions: dict[str, int] = Field(default_factory=dict)
     model_config = ConfigDict(frozen=True)
 
     generated_at: datetime
@@ -880,6 +918,8 @@ class StrategyResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     strategy_id: str = Field(min_length=1)
+    eligibility_version: int = 0
+    behavior_digest: str | None = None
     #: Cycles this strategy was selected for, **within the reflection window**.
     #: This is a freshness measure: error and rejection rates, the score and the
     #: exploration floor are all recent-behaviour judgements and belong here.
@@ -1027,6 +1067,7 @@ class TradeDecision(BaseModel):
     confidence: float = Field(ge=0, le=1)
     rationale: str = Field(min_length=1)
     strategy_id: str | None = None
+    strategy_provenance: StrategyProvenance | None = None
     #: Which model produced this decision, e.g. "qwen3.8:27b".
     #:
     #: This is provenance, and it was missing. Every decision recorded
@@ -1042,6 +1083,14 @@ class TradeDecision(BaseModel):
     model: str | None = None
     hold_reason: HoldReason | None = None
     """Why a HOLD was chosen, stated by the model.
+
+    Validated on construction, and read tolerantly by the journal. The asymmetry is
+    deliberate. On 2026-10-15 the fallback wrote a value outside this set -
+    `llm_unavailable_exposure_blocked` - the record appended cleanly, and it then failed
+    validation on the way back in: five XLE cycles were unreadable and `market-open-verify`
+    failed with `CORRUPT_HISTORY`. The journal is append-only, so that record cannot be
+    rewritten to suit the set, and `_scan` coerces the value to `other` on read rather than
+    losing the cycle. Writing one is still refused, which is what the writer should do.
 
     Without this a risk-driven abstention is indistinguishable from an ordinary
     one in the audit trail. Guardian logs "approved" for a HOLD, so when the model

@@ -58,6 +58,37 @@ def test_every_page_the_nav_names_exists(generated):
     )
 
 
+def test_legacy_peak_ratio_is_not_published_as_portfolio_return():
+    module = _load()
+    figures = module.Figures(data={"benchmark": {"agent": {
+        "return_pct": 989.12, "spy_pct": 1.0, "excess": 988.12,
+        "pnl": 1.0, "capital": 1.0}}})
+    text = "".join(module.overview(figures) + module.evidence(figures))
+    assert "+989.12%" not in text
+    assert "UNKNOWN" in text
+
+
+def test_unknown_accounting_payload_builds_public_pages():
+    module = _load()
+    figures = module.Figures(data={"benchmark": {"agent": {
+        "performance_contract": "agent-accounting-v1", "comparison_status": "UNKNOWN",
+        "comparison_reason": "allocation unavailable", "pnl": 28.0, "realized": 30.0,
+        "unrealized": 0.0, "assumed_cost": 2.0, "capital": None,
+        "return_pct": None, "spy_pct": None, "excess": None}}})
+    text = "".join(module.overview(figures) + module.evidence(figures))
+    assert "None pts" not in text
+    assert "UNKNOWN" in text
+
+
+def test_accounting_contract_does_not_certify_a_stale_positive_return():
+    module = _load()
+    figures = module.Figures(data={"benchmark": {"agent": {
+        "performance_contract": "agent-accounting-v1", "return_pct": 989.12,
+        "spy_pct": 1.0, "excess": 988.12, "pnl": 28.0}}})
+    text = "".join(module.overview(figures) + module.evidence(figures))
+    assert "+989.12%" not in text
+
+
 def test_each_page_is_complete_and_has_one_h1(generated):
     _module, _figures, pages = generated
     for key, text in pages.items():
@@ -81,16 +112,16 @@ def test_no_figure_is_quoted_that_the_published_file_does_not_carry(generated):
     """
     _module, figures, pages = generated
     agent = figures.named("benchmark").get("agent") or {}
-    if not agent:
-        pytest.skip("no published agent figure on this checkout")
     text = "".join(pages.values())
-    for value in (agent["return_pct"], agent["spy_pct"]):
-        assert f"{value:+.2f}%" in text, f"{value:+.2f}% is not on any page"
-    # The agent's return and SPY's are quoted as percentages with a sign; the excess is quoted
-    # as points. Both must be the published figures, so a reader can check them against the file.
-    assert f"{agent['excess']:+.2f} pts" in pages["index"]
-    assert f"{agent['pnl']:+,.2f}" in text
-    assert f"{agent['capital']:,.2f}" in text
+    assert "UNKNOWN" in pages["index"]
+    if agent.get("performance_contract") != "agent-accounting-v1":
+        for value in (agent.get("return_pct"), agent.get("spy_pct")):
+            if value is not None:
+                assert f"{value:+.2f}%" not in pages["index"]
+        return
+    if agent.get("pnl") is not None:
+        assert f"{agent['pnl']:+,.2f}" in text
+    assert agent.get("return_pct") is None and agent.get("excess") is None
 
 
 def test_the_published_figures_are_current_enough_to_publish(generated):

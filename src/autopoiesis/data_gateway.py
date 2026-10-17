@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import math
 from datetime import date, datetime, timedelta, timezone
 from itertools import pairwise
 from typing import cast
 
+from autopoiesis.broker_client import list_open_orders
 from autopoiesis.models import (
     AccountSnapshot,
     DataSnapshot,
@@ -91,12 +93,18 @@ class AlpacaDataGateway:
 
     def snapshot(self, symbol: str) -> DataSnapshot:
         symbol = symbol.upper()
+        try:
+            asset = self.client.get_asset(symbol)
+        except Exception as exc:
+            raise BrokerDataUnavailable(f"could not read broker asset metadata ({type(exc).__name__})") from exc
+        if getattr(asset, "class", None) != "us_equity":
+            raise BrokerDataUnavailable(f"broker asset class for {symbol} is unsupported or unknown")
         clock = self.client.get_clock()
         account = self.client.get_account()
         last_price, price_time = self._latest_price(symbol)
 
-        equity = float(account.equity)
-        portfolio_value = float(account.portfolio_value)
+        equity = _required_float(getattr(account, "equity", None), "account", "equity")
+        portfolio_value = _required_float(getattr(account, "portfolio_value", None), "account", "portfolio_value")
         day_start_equity = self._safe_float(account, "last_equity")
         day_start_equity_known = day_start_equity is not None and day_start_equity > 0
         # The `..._known` flag cannot narrow `day_start_equity` for the arithmetic, so
@@ -122,8 +130,8 @@ class AlpacaDataGateway:
             source="alpaca",
             account=AccountSnapshot(
                 equity=equity,
-                cash=float(account.cash),
-                buying_power=float(account.buying_power),
+                cash=_required_float(getattr(account, "cash", None), "account", "cash"),
+                buying_power=_required_float(getattr(account, "buying_power", None), "account", "buying_power"),
                 portfolio_value=portfolio_value,
                 daily_loss=daily_loss,
                 day_start_equity_known=day_start_equity_known,
@@ -423,16 +431,13 @@ class AlpacaDataGateway:
         price = getattr(trade, "price", None) or getattr(trade, "p", None)
         if price is None:
             raise BrokerDataUnavailable(f"Alpaca returned no latest trade price for {symbol}")
-        return float(price), _trade_time(trade)
+        return _required_float(price, "trade", "price"), _trade_time(trade)
 
     def _safe_float(self, obj, attr: str) -> float | None:
         value = getattr(obj, attr, None)
         if value is None:
             return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
+        return _required_float(value, "account", attr)
 
     def _fetch_positions(self) -> tuple[PositionSnapshot, ...]:
         try:
@@ -450,7 +455,7 @@ class AlpacaDataGateway:
 
     def _fetch_open_orders(self) -> tuple[OpenOrderSnapshot, ...]:
         try:
-            raw_orders = self.client.list_orders(status="open")
+            raw_orders = list_open_orders(self.client)
         except Exception as exc:
             raise BrokerDataUnavailable(f"could not read broker open orders: {exc}") from exc
         return tuple(
@@ -547,6 +552,9 @@ def _required_float(value, context: str, attr: str) -> float:
     if value is None:
         raise BrokerDataUnavailable(f"broker {context} is missing {attr!r}")
     try:
-        return float(value)
-    except (TypeError, ValueError) as exc:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
         raise BrokerDataUnavailable(f"broker {context} has non-numeric {attr!r}: {value!r}") from exc
+    if not math.isfinite(number):
+        raise BrokerDataUnavailable(f"broker {context} has non-finite {attr!r}")
+    return number

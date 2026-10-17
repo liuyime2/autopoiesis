@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -121,7 +123,71 @@ def _run_main(module) -> str:
     return buffer.getvalue()
 
 
-def test_the_published_record_contains_both_new_sections(tmp_path, monkeypatch):
+@pytest.fixture
+def isolated_record(tmp_path, monkeypatch):
+    """Synthetic provenance inputs; never read the host journal or broker."""
+    module = _load()
+    runtime = tmp_path / "runtime" / "autopoiesis"
+    runtime.mkdir(parents=True)
+    monkeypatch.setattr(module, "RUNTIME", runtime)
+    monkeypatch.setattr(module, "_journal_path", lambda: str(runtime / "journal.jsonl"))
+    monkeypatch.setattr(module, "_broker_clock", lambda: "synthetic broker clock (no network)")
+    return module
+
+
+@pytest.fixture
+def git_record(tmp_path, monkeypatch, isolated_record):
+    """A real disposable Git repository, with synthetic file contents."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args):
+        return subprocess.run(
+            ("git", *args), cwd=repo, capture_output=True, text=True, check=True,
+        )
+
+    git("init", "--quiet")
+    git("config", "user.email", "synthetic@example.invalid")
+    git("config", "user.name", "Synthetic test")
+    (repo / "tracked").write_text("original\n", encoding="utf-8")
+    git("add", "tracked")
+    # A disposable fixture must not need host signing keys or run host hooks.
+    git("-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
+        "commit", "--quiet", "-m", "Synthetic baseline")
+    monkeypatch.setattr(isolated_record, "ROOT", repo)
+    return isolated_record, git
+
+
+@pytest.mark.parametrize("state", ["clean", "unstaged", "staged", "untracked"])
+def test_git_provenance_reports_actual_tree_state(git_record, state):
+    module, git = git_record
+    if state in ("unstaged", "staged"):
+        (module.ROOT / "tracked").write_text("changed\n", encoding="utf-8")
+    if state == "staged":
+        git("add", "tracked")
+    if state == "untracked":
+        (module.ROOT / "untracked").write_text("synthetic\n", encoding="utf-8")
+
+    text = _run_main(module)
+    expected = "no" if state == "clean" else "yes"
+    assert f"dirty:  {expected}\n" in text
+
+
+def test_git_provenance_reports_unknown_outside_a_repository(tmp_path, monkeypatch, isolated_record):
+    monkeypatch.setattr(isolated_record, "ROOT", tmp_path)
+    assert "dirty:  unknown\n" in _run_main(isolated_record)
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError("git absent"), subprocess.TimeoutExpired("git", 120)])
+def test_git_provenance_reports_unknown_when_git_cannot_run(monkeypatch, isolated_record, error):
+    def failed_command(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(subprocess, "run", failed_command)
+    assert "dirty:  unknown\n" in _run_main(isolated_record)
+
+
+def test_the_published_record_contains_both_new_sections(isolated_record):
     """The end-to-end check on what the tool prints, on a runtime it can have anywhere.
 
     **Synthetic, and deliberately so.** The version this replaces ran `main()` against whatever
@@ -134,16 +200,13 @@ def test_the_published_record_contains_both_new_sections(tmp_path, monkeypatch):
     this host. It is a fixed input to the question the test actually asks: does a field the helper
     computes reach the printed record? That question needs a heartbeat to exist, not a real one.
     """
-    module = _load()
-    runtime = tmp_path / "runtime" / "autopoiesis"
-    runtime.mkdir(parents=True)
+    module = isolated_record
+    runtime = module.RUNTIME
     (runtime / "heartbeat.json").write_text(json.dumps(_HEARTBEAT), encoding="utf-8")
     (runtime / "research_trials.jsonl").write_text(
         json.dumps({"strategy_id": "t1", "bars": 100, "fingerprint": "sha256:aaaa"}) + "\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(module, "RUNTIME", runtime)
-
     text = _run_main(module)
 
     for heading in ("## code", "## configuration in effect", "## research data",
@@ -152,11 +215,20 @@ def test_the_published_record_contains_both_new_sections(tmp_path, monkeypatch):
     assert "status:" in text
     assert "broker answered:" in text
     assert "model answered:" in text
+    assert "synthetic broker clock (no network)" in text
+    assert "(no cycle records yet)" in text
     assert "sha256:synthetic" in text, (
         "the daemon state has to carry what the helper read, not a placeholder"
     )
 
 
+_HOST_PROVENANCE = pytest.mark.skipif(
+    os.environ.get("AUTOPOIESIS_TEST_HOST_PROVENANCE") != "1",
+    reason="real-host provenance is opt-in: make test-provenance-host",
+)
+
+
+@_HOST_PROVENANCE
 def test_the_real_record_on_this_host_still_prints_its_daemon_state():
     """The published record, on the runtime this host actually produced.
 
@@ -219,11 +291,16 @@ def test_the_fingerprint_field_the_reader_uses_is_the_one_the_ledger_writes():
         "the ledger writer must keep writing the documented field name"
     )
 
-    # And, where a system has actually run, the reader must find a fingerprint on the real
-    # ledger. This is the direction the old test could not check: it wrote the row itself, so it
-    # agreed with the reader by construction.
+
+@_HOST_PROVENANCE
+def test_the_real_ledger_on_this_host_carries_the_writer_fingerprint():
+    """Explicit integration check against real host records, never ordinary unit inputs."""
+    module = _load()
+    lines = _ledger_lines()
+    if not lines:
+        pytest.skip("no research trial ledger in this checkout")
     keys = set()
-    for line in _ledger_lines():
+    for line in lines:
         try:
             row = json.loads(line)
         except json.JSONDecodeError:

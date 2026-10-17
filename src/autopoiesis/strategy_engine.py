@@ -245,6 +245,10 @@ class StrategyLifecycleManager:
         result: StrategyResult | None,
         evidence: object | None = None,
     ) -> StrategyLifecycleDecision | None:
+        from autopoiesis.learning_evidence import ELIGIBILITY_VERSION, capture
+
+        clean_result = bool(result is not None and getattr(result, "eligibility_version", 0) == ELIGIBILITY_VERSION
+                            and getattr(result, "behavior_digest", None) == capture(strategy).behavior_digest)
         if strategy.lifecycle in {"BASELINE", "PAUSED", "RETIRED"}:
             return None
         # A screen verdict that says REJECT retires the strategy here, in the rule set,
@@ -267,14 +271,18 @@ class StrategyLifecycleManager:
             return StrategyLifecycleDecision(strategy, "RETIRED", rejection)
         if result is None:
             return None
+        if result.pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED and not clean_result:
+            return None
 
-        # Broker-verified PnL stands on its own, so the PnL rule is evaluated
+        # Clean broker PnL can retire without recent cycles, so its loss rule is evaluated
         # before the cycle-count gate. A strategy can open a lot in one window and
         # have it closed in a later one, leaving zero cycles in the reflection
         # window; requiring cycles > 0 first meant the only PnL-driven transition
         # in the system was unreachable for exactly the strategies that had real
         # PnL to report. Every other rule below is cycle-based and keeps its gate.
         if (
+            clean_result
+            and
             result.pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
             and result.realized_pnl is not None
             and result.realized_pnl < 0
@@ -318,11 +326,12 @@ class StrategyLifecycleManager:
             # matters. Probation is still earned by cycles - a single lucky trade
             # does not shorten it - but once the cycle bar is met, broker-verified
             # realized PnL is what decides the outcome, and the journal records
-            # which. Without a closed lot there is no PnL to judge on, so
-            # promotion falls back to the operational metrics rather than blocking
-            # a strategy that may simply have nothing to close.
+            # which. Attribution and the offline screen still gate promotion;
+            # raw accounting labels cannot substitute for clean learning evidence.
             if (
-                result.pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
+                clean_result
+                and self._promotion_evidence_gate(evidence) is None
+                and result.pnl_evidence == PNL_EVIDENCE_STRATEGY_REALIZED_VERIFIED
                 and result.realized_pnl is not None
             ):
                 return StrategyLifecycleDecision(
@@ -388,16 +397,44 @@ class StrategyLifecycleManager:
             # evidence run, caused by a rule that was not needed to close the loop. The
             # candidate ends PAUSED either way, which holds no probation slot.
             if result.submitted_orders <= 0:
-                return StrategyLifecycleDecision(
-                    strategy,
-                    "PROBATION",
-                    (
-                        f"served its full {result.cumulative_cycles}-cycle probation "
-                        f"budget without submitting an order, so it has no outcome to "
-                        f"judge; returns to probation to be served again"
-                    ),
-                    update={"probation_restarts": strategy.probation_restarts + 1},
-                )
+                # A candidate that has been *judged on its decisions* is not in this
+                # branch's case, and returning it to probation is what kept the queue
+                # closed. This rule exists for a candidate with no outcome to judge; the
+                # counterfactual ledger scores the decisions a strategy actually produced,
+                # and the paragraph above already names that as "a real bar rather than an
+                # infinite probation". It never got consulted, because this check runs
+                # first.
+                #
+                # Measured 2026-10-15 with the market open, against the live library:
+                # `trend-follow-20260824-001` had 43 informative scored decisions (all
+                # GOOD_HOLD) and had been returned 98 times; `trend-follow-20260804-001`
+                # had 15 (all GOOD_TRADE) and 69. Neither had ever submitted an order,
+                # because Guardian's own limits refused every one it emitted - 63 refusals
+                # for the daily trade cap in a single session - and weakening those is not
+                # on the table. So the two candidates with the most evidence were the two
+                # that could never leave.
+                #
+                # With enough scored decisions the candidate falls through to the same
+                # promotion gate the rest of the lifecycle uses, which either promotes it
+                # or states why not. Nothing here widens a limit, and a candidate with too
+                # few scored decisions behaves exactly as before.
+                scored = 0
+                if evidence is not None:
+                    scored = getattr(evidence, "scored", 0) or 0
+                if scored < self.min_promotion_scored_decisions:
+                    return StrategyLifecycleDecision(
+                        strategy,
+                        "PROBATION",
+                        (
+                            f"served its full {result.cumulative_cycles}-cycle probation "
+                            f"budget without submitting an order and only {scored} scored "
+                            f"decision(s), below the {self.min_promotion_scored_decisions} "
+                            f"needed to judge it; returns to probation to be served again"
+                        ),
+                        update={"probation_restarts": strategy.probation_restarts + 1},
+                    )
+            if not clean_result:
+                return None
             gate = self._promotion_evidence_gate(evidence)
             if gate is not None:
                 return None
@@ -479,8 +516,7 @@ class StrategyLifecycleManager:
             return "offline validation rejected its recorded decisions"
         return (
             f"offline validation verdict is {verdict!r}, which is not a pass; "
-            "promotion requires either broker-verified PnL from a closed lot or "
-            "decision quality that cleared the evidence gate"
+            "promotion requires clean attribution and decision quality that cleared the evidence gate"
         )
 
     def _is_degenerate_no_exploration(self, strategy: StrategySpec, result: StrategyResult) -> bool:
@@ -861,6 +897,17 @@ class StrategyExecutor:
         self,
         strategy: StrategySpec,
         snapshot: DataSnapshot,
+        prices: Sequence[float] | None = None,
+    ) -> TradeDecision:
+        from autopoiesis.learning_evidence import capture
+
+        decision = self._decide(strategy, snapshot, prices)
+        return decision.model_copy(update={
+            "strategy_id": strategy.strategy_id, "strategy_provenance": capture(strategy),
+        })
+
+    def _decide(
+        self, strategy: StrategySpec, snapshot: DataSnapshot,
         prices: Sequence[float] | None = None,
     ) -> TradeDecision:
         """`prices` are earlier observed prices, oldest first, ending before `snapshot`.

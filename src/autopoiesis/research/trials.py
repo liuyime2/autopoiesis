@@ -18,15 +18,17 @@ production. It satisfies both requirements rather than trading one for the other
 * every trial is recorded, pass or fail, with the verdict and the numbers behind it;
 * production never reads it, so a research run cannot influence what trades.
 
-Writes are append-only and atomic, and a failure to record never raises into a
-research run - a trial that cannot be journalled is still worth evaluating, and losing
-the run would be worse than losing the record.
+Writes are append-only and fsynced. The low-level writer reports failure; the CLI
+returns nonzero for incomplete persistence. Strict research reads refuse corrupt
+history so cumulative attempt counts cannot silently reset.
 """
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,6 +36,28 @@ from typing import Any
 #: Kept out of the production journal's directory naming so a stray glob cannot
 #: mistake one for the other.
 DEFAULT_TRIALS_PATH = Path("runtime") / "autopoiesis" / "research_trials.jsonl"
+
+
+def trials_path(path: Path | None = None) -> Path:
+    """Explicit runtime ledger; relative paths resolve against the working directory."""
+    return Path(path if path is not None else
+                os.getenv("AUTOPOIESIS_RESEARCH_TRIALS", str(DEFAULT_TRIALS_PATH)))
+
+
+@contextmanager
+def trial_session(path: Path | None = None):
+    """Refuse concurrent CLI evaluation before reading cumulative attempts or backtesting."""
+    target = trials_path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ValueError(f"another research session holds trial ledger {target}") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def record_trial(
@@ -48,7 +72,7 @@ def record_trial(
     than in the bookkeeping, so a write failure is reported by the return value
     rather than raised into the caller.
     """
-    target = Path(path or DEFAULT_TRIALS_PATH)
+    target = trials_path(path)
     stamp = (now or datetime.now(timezone.utc)).isoformat()
     line = json.dumps({"recorded_at": stamp, **payload}, sort_keys=True)
     try:
@@ -65,13 +89,13 @@ def record_trial(
     return True
 
 
-def read_trials(path: Path | None = None) -> list[dict[str, Any]]:
+def read_trials(path: Path | None = None, *, strict: bool = False) -> list[dict[str, Any]]:
     """Every recorded trial. A torn final line is skipped rather than raising.
 
     A crash mid-append is expected, and refusing to read the whole file because of it
     would mean one bad write loses the record of every trial before it.
     """
-    target = Path(path or DEFAULT_TRIALS_PATH)
+    target = trials_path(path)
     if not target.exists():
         return []
     out: list[dict[str, Any]] = []
@@ -80,8 +104,14 @@ def read_trials(path: Path | None = None) -> list[dict[str, Any]]:
             continue
         try:
             out.append(json.loads(line))
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            if strict:
+                raise ValueError("corrupt trial ledger; refusing to reset cumulative attempt count") from exc
             continue
+        if not isinstance(out[-1], dict):
+            if strict:
+                raise ValueError("invalid trial ledger row")
+            out.pop()
     return out
 
 
@@ -89,8 +119,8 @@ def summarise(trials: list[dict[str, Any]]) -> dict[str, Any]:
     """How many trials ran, and how many passed.
 
     `trials_run` is the number that matters for overfitting control: it is the
-    denominator the multiple-testing gate divides by, and a report that omits it
-    hides its own selection bias.
+    input to the cumulative sample-size heuristic, and omitting it hides how many
+    candidates were tried. This accounting is not a formal family-wise error bound.
     """
     by_verdict: dict[str, int] = {}
     for trial in trials:
