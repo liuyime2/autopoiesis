@@ -101,3 +101,26 @@ Post-deployment events: 6, of which the only non-SUCCESS is
 rather than a fault. Zero cycles ran, which is correct: the market is closed on a Saturday.
 
 `gpu-devices-reserved` reports PASS with both pins inside 0-4.
+
+## The gate is green, 2026-10-17 10:30 EDT
+
+    classes: 56   passed: 56   failed: 0   test executions: 3254 across 114 test files
+    OK - all check classes pass
+    exit=0
+
+`replay-audit` passes because the account holder directed the fix on 2026-10-17: the three
+figures are reported and three invariants asserted in place of the equalities that five
+measurements showed cannot be satisfied by construction. `self-evolution-closes` passes at
+the root cause. `gpu-devices-reserved` passes, after the class that never ran and counted
+twice was fixed.
+
+The deployment rule's exception is therefore no longer in use. The earlier record in this
+file explained why `replay-audit` was expected red; that explanation is superseded, and the
+condition it was written for - a red gate - no longer holds.
+
+One correction to that earlier record: it said the gate had no red class left, which was
+not measured and was not true. The class it was said about was crashing the gate with
+NameError at the time. It is true now, and the command above is why.
+
+The daemon runs the same source as the tree: fingerprint `be20d1a210109ce6`, daemon and disk
+and both readiness units.
