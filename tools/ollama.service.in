@@ -23,9 +23,14 @@ ExecStart=@OLLAMA_BIN@ serve
 # (ollama.log) served on :11435 with CUDA_VISIBLE_DEVICES=3 while the agent was
 # configured for :11434 and GPU 0; these three settings are the reconciled
 # values the agent is actually verified against.
+#
+# Moved from GPU 0 to GPUs 2 and 3 on 2026-10-16 at the account holder's request.
+# GPUs 2 and 3 carry other work, so this is a pin rather than a free choice: the
+# agent must not be able to reach a device the operator has not set aside for it,
+# which is what a visible-devices pin is for.
 Environment=OLLAMA_MODELS=@OLLAMA_MODELS@
 Environment=OLLAMA_HOST=127.0.0.1:11434
-Environment=CUDA_VISIBLE_DEVICES=0
+Environment=CUDA_VISIBLE_DEVICES=2,3
 # From 0.13 the build auto-detects Vulkan as well as CUDA, and will shard one
 # model across all ten GPUs over PCIe instead of using CUDA on a single device:
 # deepseek-r1:8b went from 2.3s to 254s per call, and the journal shows a
