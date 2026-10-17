@@ -265,6 +265,39 @@ and the plan's "priority 3, free, direct" is right - but the reason it is not hi
 the calendar has not reached it yet, not that it does not matter. A fix landed after
 2026-11-02 would be a fix landed after the first mis-scored decisions.
 
+## 3e. The dividend fix, attempted and reverted 2026-10-17
+
+`tools/refresh_dividends.py` is in the tree and works. The adjustment was implemented in
+`counterfactual._price_series` and **reverted**, and the reason is a design error worth
+recording rather than a bug.
+
+**It corrupted the reported price.** `_price_series` does not only feed the return
+arithmetic - its price becomes `CounterfactualRow.price_at_horizon`, and
+`test_point_in_time` asserts that value is a real observed quote. The adjustment made it
+749.523516 against a set of real quotes, so the check failed correctly. The point-in-time
+property is not decoration: a row whose horizon price is not a price is a row nothing can
+audit.
+
+**It was also not the no-op it looked like.** All three TLT ex-dates precede 2026-10-08, so
+for TLT the cumulative cancels - but **SPY's 2026-06-18 falls inside the retained window**,
+which starts 2026-06-09. So the adjustment moved real verdicts, and
+`test_replaying_the_live_journal_reproduces_the_recorded_verdicts` failed with it.
+
+**Where the adjustment belongs**: on the return, not on the series. The counterfactual
+computes `(price_at_horizon / price_at_decision - 1)`; the distribution has to enter that
+expression as `(price_at_horizon + D_between) / price_at_decision - 1`, leaving both
+reported prices exactly as observed. That is a change at the call site rather than in the
+series builder, and it is the next attempt.
+
+Two things this leaves in place and one it does not:
+
+- In place: the cache, the tool, and the measurement that nothing has been mis-scored yet.
+- In place: the finding that the provider covers every cycled symbol including BIL - an
+  earlier note said BIL had no records, and that was a date-range artifact in the query, not
+  a gap in the provider. BIL has 13.
+- Not in place: any change to the counterfactual. It is exactly as it was, and the defect
+  it has remains latent until around 2026-11-02.
+
 ## 4. Acceptance
 
 - `make verify` reports 55/55 locally, and CI reports green, on the same commit.

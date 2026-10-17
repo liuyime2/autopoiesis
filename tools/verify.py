@@ -92,6 +92,7 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_drifted_reference_retirement.py": ("lifecycle-invariants", "risk-controls"),
     "test_gpu_devices_reserved.py": ("crash-recovery", "unit-integration"),
     "test_decision_empty_body_cause.py": ("crash-recovery", "decision-outcome-counterfactual"),
+    "test_dividend_cache.py": ("broker-reconciliation", "unit-integration"),
     "test_probation_restart_budget.py": ("lifecycle-invariants", "selection-pressure-reaches-the-rules"),
     "test_retired_strategy_readmission.py": ("lifecycle-invariants", "unit-integration"),
     "test_staleness_not_strategy_fault.py": (
