@@ -336,6 +336,45 @@ The three options, and what each costs:
 The deadline is what makes this a decision rather than a queue item: option 3 has a date
 attached to it, and it is about five weeks away.
 
+## 3g. Quote freshness: the root cause, measured 2026-10-17
+
+The review reported 44 decisions in one session refused for a stale quote, the oldest by 18
+hours, against a free IEX feed covering roughly 2-3% of volume. The cause is narrower than
+"the feed is thin", and it is in our code:
+
+    data_gateway._latest_price_and_time -> quote_time = _trade_time(trade)
+
+`quote_time` is **the last trade's timestamp**, and `Guardian._is_stale` measures freshness
+against it. For a thinly-traded symbol the last *trade* can be hours old while the *quote* -
+the bid and ask - is current. So the system refuses a decision it could legitimately take,
+and it refuses it for a reason that names the wrong instrument: the price is not stale, the
+last print is.
+
+`_trade_time` itself is careful and correct - it tries both `t` and `timestamp` because
+guessing which one the client populates would silently drop the check. The defect is the
+choice of what to measure, not how it is read.
+
+**The client has no quote method.** `broker_client` exposes `get_latest_trade` and
+`get_latest_trades` and nothing for quotes, so the fix is not a call-site change - it needs
+a method, and the SDK underneath is `alpaca-py`, whose `get_stock_latest_quote` returns bid
+and ask with their own timestamps.
+
+**The fix, when it is made**: measure freshness against the quote's timestamp and keep
+using the trade price, or use the quote's mid. Which of the two is a real question and not a
+detail - the trade price is what the account's own fills execute against, and a mid is a
+number nothing trades at - so the first step is to decide that, and the second is the
+client method.
+
+**Not attempted here**, and the reason is stated rather than implied: it needs the SDK
+signature confirmed against the installed version, a client method, and the same tests the
+other broker paths have. A half-landed change to the price a decision is made on is worse
+than the refusals it would remove, because the refusals are visible in the journal and a
+wrong price is not.
+
+**What this does not need**: a paid SIP subscription. The review listed that as 2b, for
+thin symbols generally. This item is 2, and it is free - the quotes already exist in the
+free feed for the symbols that have them; the system is reading the wrong field.
+
 ## 4. Acceptance
 
 - `make verify` reports 55/55 locally, and CI reports green, on the same commit.
