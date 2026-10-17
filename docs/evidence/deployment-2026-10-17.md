@@ -124,3 +124,16 @@ NameError at the time. It is true now, and the command above is why.
 
 The daemon runs the same source as the tree: fingerprint `be20d1a210109ce6`, daemon and disk
 and both readiness units.
+
+## Second deployment, 2026-10-17 18:03 EDT
+
+Commit `6bb85f3`, fingerprint `066c7b255fa86806`, deployed with the market closed.
+
+The gate was 55/56 immediately before, the only red being
+`daemon-source-matches-worktree` - the daemon running superseded code, which is what a
+deploy fixes. Two other classes had been red on the first attempt and were fixed rather
+than waived: `tools-readme-accurate` (the new `refresh_dividends.py` was undocumented) and
+`config-comment-figures-true` (87 documented against 88 measured, the new one being the
+dividend cache read).
+
+All four fingerprints agree after the restart.
