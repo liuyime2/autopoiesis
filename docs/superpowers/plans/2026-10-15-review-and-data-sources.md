@@ -200,6 +200,56 @@ that has never seen the file. Two of its cases are worth keeping in mind because
 what a naive implementation gets wrong: a line without its terminator is not a record yet,
 and a file that shrank must be re-read whole rather than extended from a stale offset.
 
+## 3d. Corporate actions: the source exists, measured 2026-10-17
+
+Data source 3 was recorded as "free, correctness - direct". It is, and the provider was
+tested rather than assumed:
+
+    GET https://data.alpaca.markets/v1/corporate-actions
+        ?symbols=TLT&types=cash_dividend&start=2026-06-01&end=2026-10-17
+
+reached with the existing paper key, returning `{"cash_dividends": [{ex_date, payable_date,
+rate, cusip, ...}]}`. Counts from 2026-06-01: **TLT 5, XLE 2, XLF 2, XLB 2, SPY 1, AAPL 1,
+BIL 0**.
+
+Two things this settles and one it does not.
+
+**Settled: the endpoint exists and the key can read it.** The first attempt used
+`types=dividend`, which is not a valid type - the valid ones are `cash_dividend`,
+`forward_split`, `reverse_split`, `stock_dividend`, `spin_off`, `cash_merger` and others -
+and a 400 was read as "no source" for a moment. It was a wrong parameter, not a missing
+service.
+
+**Settled: splits are available from the same endpoint**, which matters for the same reason:
+a forward split is a price change that is not a return, and the counterfactual would score
+it as one.
+
+**Not settled: BIL has no records.** BIL is the instrument the agent holds most of (209
+shares) and it distributes monthly, so a zero is either a gap in the provider's coverage of
+T-bill ETFs or a date-range problem. That has to be resolved before the fix can be claimed
+to cover the position it matters most for, and the honest state until then is that this
+covers TLT, XLE, XLF, XLB and SPY and **does not cover BIL**.
+
+### Where the fix goes
+
+The defect is not in the broker's accounting: a dividend is a cash credit and the account
+equity already reflects it. The defect is in **our derived measures**, which read a price
+change as a return:
+
+- `counterfactual.py` builds a price series per symbol and scores a decision against the
+  change in it. On an ex-date the price drops by the distribution, so a HOLD is scored as a
+  loss and a SELL as a gain, neither of which is true of the total return.
+- The same series feeds the volatility forecast and the regime labels.
+
+The fix is to adjust the series for the distribution on the ex-date - total return rather
+than price return - and the dividend cache belongs beside `VIX.pkl`, refreshed the same way
+and for the same reason: a correctness input that goes stale silently disengages.
+
+**The measurement that should come first**, because it decides whether this is urgent: find
+a TLT ex-date in the journal, take the decisions scored across it, and count how many were
+scored in the wrong direction by the price drop. If it is none, this is correctness work
+rather than a scoring defect and the priority is lower than the plan assumes.
+
 ## 4. Acceptance
 
 - `make verify` reports 55/55 locally, and CI reports green, on the same commit.
