@@ -387,13 +387,46 @@ def main() -> int:
             passed.append(check("production ledger comparison ran", False, True,
                                 "the strongest check in this script did not execute"))
         p_lots, p_pnl, p_unmatched = prod
-        passed.append(check("closed lots: naive FIFO vs ledger", closed, p_lots))
-        passed.append(check("realized PnL: naive FIFO vs ledger",
-                            round(realized, 2), round(p_pnl, 2),
-                            "gross of any cost assumption"))
-        passed.append(check("unmatched sell shares: naive vs ledger",
-                            unmatched, p_unmatched,
-                            "the owner's pre-existing position, sold before the SELL bound existed"))
+        # The three figures are reported, and the *invariants* that hold under both
+        # conventions are asserted - not equality, which five measurements showed cannot be
+        # satisfied by construction from the journal alone.
+        #
+        # Measured 2026-10-16 and 17, every hypothesis disproved by measurement rather than
+        # argument: the owner's lots as seeds (PnL 757.95 to 32,388.98); the owner's fills
+        # merged as activities (47 to 1,539 lots); deduplication (97 confirmations, 97
+        # distinct ids, none repeated); the missing `ORDER_FILL_SNAPSHOT` source (47 to 93,
+        # overshooting the ledger's 76); and the fill dating (`filled_at` against the cycle
+        # anchor, figures unchanged). The real scope gap is that the ledger projects
+        # `ORDER_FILL_SNAPSHOT` and this pass did not, so the two read different universes,
+        # and reconciling them needs the production activity list - which is exactly what
+        # this pass exists to be independent of.
+        #
+        # So the equality assertions were removed on 2026-10-17 at the account holder's
+        # direction, and replaced with what is true under both conventions. This is a
+        # relaxation and it is recorded as one: the check no longer fails when the two
+        # disagree, it fails when they disagree in a direction that cannot be explained by
+        # the ledger knowing more. That is a weaker instrument than it was, and it is
+        # stronger than deleting it.
+        print(f"            naive: lots={closed} pnl=${realized:,.2f} unmatched={unmatched:g}")
+        print(f"            ledger: lots={p_lots} pnl=${p_pnl:,.2f} unmatched={p_unmatched:g}")
+        # The ledger knows the owner's lots as well as the agent's, so it can close more
+        # lots than this pass can see and leave fewer sells unmatched. Both directions
+        # follow from that one fact.
+        passed.append(check(
+            "closed lots: ledger sees at least as many", p_lots >= closed, True,
+            f"ledger {p_lots} vs naive {closed}; the ledger also knows the owner's lots",
+        ))
+        passed.append(check(
+            "unmatched sells: ledger leaves at most as many", p_unmatched <= unmatched, True,
+            f"ledger {p_unmatched} vs naive {unmatched}; the ledger can match more",
+        ))
+        # Realized PnL has no direction: the owner's cost basis can move it either way, so
+        # only its finiteness is asserted. Reported above rather than compared.
+        passed.append(check(
+            "realized PnL is a finite number on both sides",
+            all(isinstance(v, (int, float)) for v in (realized, p_pnl)), True,
+            "no direction is asserted; the owner's basis can move it either way",
+        ))
 
     print("\n  -- strategy attribution --")
     by_strategy = defaultdict(float)

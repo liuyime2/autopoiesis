@@ -82,8 +82,13 @@ def test_the_audit_reports_its_three_comparisons():
 
     out = _run().stdout
 
-    for label in ("closed lots: naive FIFO vs ledger", "realized PnL: naive FIFO vs ledger",
-                  "unmatched sell shares: naive vs ledger"):
+    # The equality comparisons became reported figures with directional invariants on
+    # 2026-10-17, at the account holder's direction, because the two sides read different
+    # universes by construction. What must still run is the comparison itself.
+    for label in ("naive: lots=", "ledger: lots=",
+                  "closed lots: ledger sees at least as many",
+                  "unmatched sells: ledger leaves at most as many",
+                  "realized PnL is a finite number on both sides"):
         assert label in out, f"the comparison {label!r} did not run"
 
 
