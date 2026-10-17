@@ -90,6 +90,7 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_vix_freshness_alarm.py": ("risk-controls", "unit-integration"),
     "test_vix_refresh.py": ("risk-controls", "unit-integration"),
     "test_drifted_reference_retirement.py": ("lifecycle-invariants", "risk-controls"),
+    "test_gpu_devices_reserved.py": ("gpu-devices-reserved", "home-independence"),
     "test_probation_restart_budget.py": ("lifecycle-invariants", "selection-pressure-reaches-the-rules"),
     "test_retired_strategy_readmission.py": ("lifecycle-invariants", "unit-integration"),
     "test_staleness_not_strategy_fault.py": (
@@ -285,6 +286,7 @@ CHECK_CLASSES: tuple[str, ...] = (
     "units-where-systemd-looks",
     "daemon-source-matches-worktree",
     "unit-environment-files",
+    "gpu-devices-reserved",
     "replay-audit",
     "shadow-not-executed",
     "shadow-stage-exercised",
@@ -3319,6 +3321,7 @@ def check_all_tests_classified() -> Result:
 # the class-count gate and the run itself cannot disagree: three readers of one list rather
 # than three independent recollections of it.
 BESPOKE_CHECK_NAMES = (
+    "gpu-devices-reserved",
     "self-evolution-closes",
     "selection-pressure-reaches-the-rules",
     "replay-cannot-reach-the-account",
@@ -3799,6 +3802,7 @@ def main() -> int:
     _partial_run = bool(wanted)
     _partial_run_filter = set(wanted) if wanted else set()
 
+    results.append(_safe(check_gpu_devices_reserved, "gpu-devices-reserved"))
     results.append(_safe(check_all_tests_classified, "test-coverage-map"))
     results.append(_safe(check_known_classes_run, "class-coverage"))
     results.append(_safe(check_software_supply_chain, "software-supply-chain"))
@@ -3915,3 +3919,76 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+#: Devices this project may pin work to. AGENTS.md section 18: GPUs 5 to 9 belong to work
+#: that is not ours, and no process started from this repository may reach them.
+ALLOWED_GPU_DEVICES = frozenset({"0", "1", "2", "3", "4"})
+
+
+def _gpu_pins() -> list:
+    """Every place this repository pins a GPU, as `(label, raw value)`.
+
+    Read rather than searched for by string: the point is to see what a *runtime* would
+    see, so the unit template and the installed unit are both parsed for the
+    `CUDA_VISIBLE_DEVICES` line and the configuration for `AUTOPOIESIS_GPU_DEVICES`.
+    """
+    pins = []
+    template = ROOT / "tools" / "ollama.service.in"
+    if template.is_file():
+        for line in template.read_text(encoding="utf-8").splitlines():
+            if line.startswith("Environment=CUDA_VISIBLE_DEVICES="):
+                pins.append((str(template.relative_to(ROOT)), line.split("=", 2)[2]))
+    installed = Path("/home/liuyime2/.config/systemd/user/ollama.service")
+    if installed.is_file():
+        for line in installed.read_text(encoding="utf-8").splitlines():
+            if line.startswith("Environment=CUDA_VISIBLE_DEVICES="):
+                pins.append((str(installed), line.split("=", 2)[2]))
+    env = Path(os.environ.get("AUTOPOIESIS_ENV_FILE", "")) if os.environ.get("AUTOPOIESIS_ENV_FILE") else None
+    candidates = [env] if env else []
+    candidates.append(
+        Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
+        / "autopoiesis" / "env"
+    )
+    for path in candidates:
+        if path is None or not path.is_file():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("AUTOPOIESIS_GPU_DEVICES="):
+                pins.append((str(path), line.split("=", 1)[1].strip().strip("'\"")))
+    return pins
+
+
+def check_gpu_devices_reserved() -> Result:
+    """No pin from this repository may name a reserved device. AGENTS.md section 18.
+
+    Measured 2026-10-16, and the reason this is a check rather than a sentence: the
+    agent's Ollama was pinned to GPU 0 in the unit while a second instance, started
+    outside the unit, ran on GPU 2 and port 11500 - two servers competing for a device
+    neither was documented as owning. A pin nobody verifies is a preference.
+    """
+    pins = _gpu_pins()
+    if not pins:
+        return Result(
+            "gpu-devices-reserved", SKIP,
+            "no GPU pin found in this checkout; nothing to check",
+        )
+    violations = []
+    for label, raw in pins:
+        named = {part.strip() for part in str(raw).split(",") if part.strip()}
+        reserved = sorted(named - ALLOWED_GPU_DEVICES)
+        if reserved:
+            violations.append(f"{label} pins {raw!r}, which names reserved device(s) {reserved}")
+    detail = "; ".join(
+        f"{label}={raw}" for label, raw in pins
+    )
+    if violations:
+        return Result(
+            "gpu-devices-reserved", FAIL,
+            "; ".join(violations),
+            "GPUs 5 to 9 belong to work that is not this project's. Pin within 0-4.",
+        )
+    return Result(
+        "gpu-devices-reserved", PASS,
+        f"{len(pins)} GPU pin(s) within {sorted(ALLOWED_GPU_DEVICES)}: {detail}",
+    )

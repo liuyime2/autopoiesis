@@ -203,3 +203,25 @@ success criterion:
 - no bypass of market-open checks;
 - no LLM-generated shell execution;
 - no automatic weakening of hard risk limits.
+
+### 18. GPUs 5 to 9 are not ours
+
+This host has ten GPUs and other work on it. **GPUs 0 to 4 are available to this
+project; GPUs 5 to 9 are reserved for work that is not ours, and no process started
+from this repository may reach them.**
+
+The rule is enforced rather than trusted. `make verify` runs the `gpu-devices-reserved`
+class, which reads every GPU pin this repository can reach - the Ollama unit template,
+the installed unit, the `AUTOPOIESIS_GPU_DEVICES` configuration and the unit's
+`CUDA_VISIBLE_DEVICES` - and fails if any of them names a reserved device. A rule that
+lives only in prose is a rule that holds until someone is in a hurry.
+
+Two things this is not. It is not a statement about which device is fastest, and it is
+not a ban on *reading* a reserved device's state: `nvidia-smi` may be queried for any
+GPU, because knowing what the host is doing is not the same as taking it. What is
+forbidden is **pinning this project's work to a device that belongs to someone else**.
+
+Measured 2026-10-16, and the reason the rule is written down at all: the agent's Ollama
+was pinned to GPU 0 while a second instance - started outside the unit - ran on GPU 2
+and port 11500, so two Ollama servers were competing for a device neither was
+documented as owning. A pin is only meaningful if something checks it.

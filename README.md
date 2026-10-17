@@ -7,7 +7,7 @@ broker's own records — and retires the ones that cannot.**
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![Paper trading only](https://img.shields.io/badge/trading-paper%20only-orange.svg)](#safety)
-[![Gate: 55 check classes](https://img.shields.io/badge/gate-55%20check%20classes-brightgreen.svg)](tools/verify.py)
+[![Gate: 56 check classes](https://img.shields.io/badge/gate-56%20check%20classes-brightgreen.svg)](tools/verify.py)
 [![Lint: ruff](https://img.shields.io/badge/lint-ruff-261230.svg)](ruff.toml)
 [![Types: mypy](https://img.shields.io/badge/types-mypy-2a6db2.svg)](pyproject.toml)
 [![Broker: Alpaca](https://img.shields.io/badge/broker-Alpaca%20paper-yellow.svg)](https://alpaca.markets/)
@@ -58,7 +58,7 @@ yourself. Autopoiesis is built around that second part:
 | **Constrained strategy DSL** | New strategies are parameter-only rules (`RULE`, `TREND_FOLLOW`, …) checked by a schema. The model never writes code. |
 | **Bounded short selling** | SHORT/COVER sit behind `AUTOPOIESIS_SHORTS` (`off` / `shadow` / `paper`), with their own Guardian rule. Off by default. |
 | **Broker-verified accounting** | FIFO lot ledger, realised and unrealised PnL, owner/agent segregation and diagnostic strategy comparisons. Agent allocation and aligned portfolio benchmark remain unavailable. |
-| **Self-checking** | `make verify` runs 55 check classes over code *and* the running system; `make verify-self-test` breaks the gate on purpose to prove it can fail. A watchdog restarts the daemon, and a report is written after every close. |
+| **Self-checking** | `make verify` runs 56 check classes over code *and* the running system; `make verify-self-test` breaks the gate on purpose to prove it can fail. A watchdog restarts the daemon, and a report is written after every close. |
 | **Reproducible** | One script clones the committed tree into a new venv with no credentials and runs everything; its log is committed. |
 
 ## How it works
@@ -202,7 +202,7 @@ make install                    # pip install -e ".[dev]"
 make check                      # ruff + mypy + the test suite
 make smoke-offline              # config and CLI end to end, no broker contacted
 python examples/minimal_cycle.py  # the Guardian approving one order and refusing another
-make verify                     # the full gate: 55 check classes
+make verify                     # the full gate: 56 check classes
 ```
 
 On Debian or Ubuntu, run `sudo apt install python3-venv` first. conda also works: the `make`
@@ -259,7 +259,7 @@ Every task is a `make` target.
 |---|---|---|
 | `make check` | lint + mypy + tests | no |
 | `make smoke-offline` | config and CLI end to end with `--skip-broker` | no |
-| `make verify` | the gate: 55 check classes; `CLASS=<name>` re-runs one | no¹ |
+| `make verify` | the gate: 56 check classes; `CLASS=<name>` re-runs one | no¹ |
 | `make verify-self-test` | breaks the gate on purpose and checks it fails | no |
 | `make smoke` | read-only broker connection and snapshot checks | yes |
 | `make fast` | check + smoke + the gate | yes |
@@ -370,7 +370,7 @@ src/autopoiesis/          the package (import name autopoiesis). 49 modules, 4 e
   models.py             shared schema, imported by 26 modules
   research/             walk-forward backtests; production may not import it
 tools/                  the gate (verify.py), benchmark, daily report, probes, systemd templates
-tests/autopoiesis/       112 test files
+tests/autopoiesis/       113 test files
 examples/               the smallest runnable example, no broker needed
 configs/                paper.env.example: every environment variable with its default
 docs/                   ARCHITECTURE.md, evidence/, history/
