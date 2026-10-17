@@ -80,3 +80,24 @@ That decision belongs to the account holder: report the difference with a direct
 invariant instead of asserting equality (relaxes an assertion), let the naive pass read the
 production list (leaves a check that can only agree), or drop the two assertions (loses an
 instrument that did find a real scope difference).
+
+## Verification, from the commands that ran
+
+Deployed 2026-10-17 07:54 EDT, market closed.
+
+    daemon PID           2251645, NRestarts=0, ActiveState=active, error_count=0
+    daemon fingerprint   be20d1a210109ce6
+    on-disk fingerprint  be20d1a210109ce6
+    market-preflight     be20d1a210109ce6
+    market-open-verify   be20d1a210109ce6
+    timers armed         7
+
+All four agree. The readiness timers were reinstalled in the same operation, because they
+carry the fingerprint they expect and would have failed Monday's checks with
+`SOURCE_MISMATCH`.
+
+Post-deployment events: 6, of which the only non-SUCCESS is
+`PROFIT_TARGET_CHECKED: profit target unproven`, which is a true statement about the record
+rather than a fault. Zero cycles ran, which is correct: the market is closed on a Saturday.
+
+`gpu-devices-reserved` reports PASS with both pins inside 0-4.
