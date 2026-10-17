@@ -298,6 +298,44 @@ Two things this leaves in place and one it does not:
 - Not in place: any change to the counterfactual. It is exactly as it was, and the defect
   it has remains latent until around 2026-11-02.
 
+## 3f. The dividend fix at the call site: implemented, and it needs a decision
+
+The second attempt put the adjustment where section 3e said it belonged - on the return
+expression, `(price_at_horizon + D_between) / price_at_decision - 1` - with
+`_horizon_quote` extended to return the quote's own timestamp so the window ends at the
+quote actually used. Both reported prices stayed exactly as observed, and
+`test_point_in_time` passed. That part is settled and is what the next attempt should start
+from.
+
+**It was reverted anyway, because it changes verdicts already in the journal.**
+
+`test_replaying_the_live_journal_reproduces_the_recorded_verdicts` failed with **28
+journalled SPY verdicts that no longer reproduce** - same verdicts, different values, for
+example `GOOD_HOLD` at `-0.444362` recorded against `-0.190756` recomputed. SPY's
+2026-06-18 ex-date falls inside the retained window that starts 2026-06-09, so every SPY
+decision spanning it was scored without the distribution.
+
+**Those verdicts were wrong when they were written.** That is the whole point of the fix.
+But the journal is the system of record, and a change that makes a recomputation disagree
+with what was written is not a change I will make on my own authority - it is the same
+shape as `replay-audit`: it changes what the system reports, and the account holder decides
+that.
+
+The three options, and what each costs:
+
+1. **Apply it and accept the divergence.** The record's old verdicts stay as written, new
+   ones are correct, and the test changes from "reproduces the record" to "is deterministic
+   and the divergence is explained". The record then holds two arithmetics, labelled by
+   date.
+2. **Apply it and recompute the affected verdicts** into new events, leaving the originals
+   in place - append-only, so nothing is destroyed and the correction is itself evidence.
+   This is the most faithful to the journal's own discipline, and it is more work.
+3. **Do not apply it.** The defect stays latent until the next ex-date, around 2026-11-02,
+   and the first mis-scored decisions are then real rather than reconstructed.
+
+The deadline is what makes this a decision rather than a queue item: option 3 has a date
+attached to it, and it is about five weeks away.
+
 ## 4. Acceptance
 
 - `make verify` reports 55/55 locally, and CI reports green, on the same commit.
