@@ -262,6 +262,14 @@ vix-refresh:
 vix-check:
 	@$(PY) tools/refresh_vix.py --check
 
+# Cash distributions, so a decision scored across an ex-date is scored against the total
+# return rather than a price that fell by the distribution.
+dividends-refresh:
+	@$(PY) tools/refresh_dividends.py
+
+dividends-check:
+	@$(PY) tools/refresh_dividends.py --check
+
 # Take one strategy out of service, audited. STRATEGY_IDS is required; REASON is
 # required, because a pause nobody can explain is indistinguishable from a mistake.
 # The lifecycle is written to the strategy file and `StrategyLibrary.list()` re-reads

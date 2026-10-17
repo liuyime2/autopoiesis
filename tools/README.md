@@ -69,6 +69,17 @@ own units rather than a step in `market-preflight`, which is read-only by contra
 writes. Measured 2026-10-15: without them the cache had been stale since 2026-10-09 and the
 floor had been silently disengaged since 2026-10-13.
 
+## Keeping the price series honest about distributions
+
+**`refresh_dividends.py`** merges cash distributions from Alpaca's corporate-actions
+endpoint into a cache the counterfactual reads, so a decision scored across an ex-date is
+scored against the total return rather than a price that fell by the distribution.
+`make dividends-refresh` refreshes; `make dividends-check` reports coverage.
+
+The provider was tested rather than assumed, and the first attempt read a 400 as a missing
+service: `types=dividend` is invalid, `types=cash_dividend` is the one. Counts: TLT 13,
+BIL 13, XLE 5, XLF 5, XLB 5, SPY 4.
+
 ## The independent audit
 
 **`replay_audit.py`** re-derives the load-bearing PnL figures straight from the raw
