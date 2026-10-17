@@ -235,9 +235,51 @@ class OllamaDecisionEngine:
             },
         }
         response = self.transport(f"{self.base_url}/api/generate", payload, self.timeout)
-        decision = parse_decision_json(
-            str(response.get("response", "")), model_name=self.model,
-        )
+        # The shape check comes first. `str(response.get("response") or "")` on a non-dict
+        # raises AttributeError before any of the diagnosis below can run, so a transport
+        # that hands back something unexpected would report a Python error instead of what
+        # it actually returned - which is the failure mode this whole block exists to end.
+        if not isinstance(response, dict):
+            raise ValueError(
+                f"decision model reply was not an object: {type(response).__name__}"
+            )
+        body = str(response.get("response") or "")
+        if not body:
+            # The same defect the curriculum had, one level down, and it is why the
+            # decision path's failure rate could not be measured. Measured 2026-10-16:
+            # 43 of the fallbacks on 10-15 and 10-16 carried exactly one cause -
+            # "ValueError: LLM response did not contain a JSON object" - and nothing on
+            # record said *why* the model returned no object. `done_reason` and `error`
+            # are the two fields that answer it, and both were discarded here.
+            #
+            # `done_reason=length` with an empty body is context exhaustion: the prompt
+            # and the answer schema together left no room to answer. That is the case the
+            # 4096 above is sized against, and the one that has to be visible in the
+            # journal before the window can be re-derived from a measurement rather than
+            # from a guess.
+            done = str(response.get("done_reason") or "")
+            error = str(response.get("error") or "")
+            prompt_tokens = response.get("prompt_eval_count")
+            answer_tokens = response.get("eval_count")
+            thinking = len(str(response.get("thinking") or ""))
+            if error:
+                raise ValueError(f"decision model returned an error: {error}")
+            if done == "length":
+                raise ValueError(
+                    "decision model ran out of context before answering "
+                    f"(done_reason=length, num_ctx={DECISION_NUM_CTX}, "
+                    f"prompt_tokens={prompt_tokens}, answer_tokens={answer_tokens}, "
+                    f"prompt_chars={len(str(payload.get('prompt', '')))}, "
+                    f"thinking_chars={thinking}); the prompt and the answer schema did not "
+                    "fit together, so the model had no tokens left to produce a body"
+                )
+            raise ValueError(
+                "decision model returned no body and no cause "
+                f"(done_reason={done or 'unset'!r}, prompt_tokens={prompt_tokens}, "
+                f"answer_tokens={answer_tokens}, thinking_chars={thinking}, "
+                f"keys={sorted(response)})"
+            )
+        decision = parse_decision_json(body, model_name=self.model)
         return decision.model_copy(update={"decision_source": "llm"})
 
     @staticmethod
