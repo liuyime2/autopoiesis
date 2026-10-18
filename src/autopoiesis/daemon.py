@@ -228,18 +228,22 @@ class AgentDaemon:
                         break
                     if not self._stop_requested:
                         self.sleep(self._sleep_seconds())
-                        # Beat on waking, not only before sleeping. Measured 2026-10-18 on an idle
-                        # Sunday daemon: doctor reported it dead at age 969s, and the arithmetic is
-                        # the whole story - the scheduler caps a closed-market sleep at 75% of the
-                        # staleness budget (675s of 900s) precisely so a slow maintenance pass can
-                        # overrun, but that leaves 225s for the overrun and the pass was taking
-                        # about 294s. So the gap between beats was 675 + 294 = 969s, over a
-                        # threshold of 900, for a process that was alive and correctly parked.
+                        # Beat on waking, not only before sleeping. The scheduler caps a
+                        # closed-market sleep at 75% of the staleness budget (675s of 900s) so a
+                        # slow maintenance pass can overrun; without this beat the gap between
+                        # beats was sleep *plus* the following maintenance, i.e. 675 + the pass,
+                        # and a pass over 225s therefore went stale while the daemon was parked
+                        # and idle. Beating here makes the longest gap max(sleep, maintenance).
                         #
-                        # Beating here makes the longest gap max(sleep, maintenance) instead of
-                        # their sum: 675s. It does not blind the check - a daemon that genuinely
-                        # wedges still goes stale, because `_maintenance` beats on entry and this
-                        # beat only lands when the wait ends.
+                        # Measured 2026-10-18, and the measurement corrected the diagnosis: after
+                        # this fix was deployed the heartbeat was *still* stale at 960s, with
+                        # message "maintenance in progress" - the dominant cause was never the
+                        # sleep but a maintenance pass running longer than the budget, so this is
+                        # a real gap closed and not the one that was observed. What that pass
+                        # needs is a beat tied to its own progress, which is a change to
+                        # `_maintenance` and is not made here. The correction is written down
+                        # because the first version of this comment asserted the wrong cause, and
+                        # a wrong cause left in the source is read as an explanation.
                         self._heartbeat("RUNNING", "market closed; woke for maintenance")
                     continue
                 if self._stop_requested:
