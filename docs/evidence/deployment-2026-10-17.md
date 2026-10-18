@@ -137,3 +137,23 @@ than waived: `tools-readme-accurate` (the new `refresh_dividends.py` was undocum
 dividend cache read).
 
 All four fingerprints agree after the restart.
+
+## Third deployment, 2026-10-18 02:45 EDT
+
+Commit `6675b14`, fingerprint `a6fe12b5d72497b8`, deployed with the market closed.
+
+The P2 window fix. `DECISION_NUM_CTX` 4096 to 6144, from a measurement rather than a
+principle: prompt 1,539 tokens, answer 1,245 of which 3,494 characters are the thinking
+block, done_reason=stop, spare 1,312 of 4,096 - 32% on an answer whose length nothing
+bounds. The failure rate went 2.0% to 5.6% to 13.7% across three days with that one cause.
+
+All four fingerprints agree after the restart. Monday's open is the first session with it
+live, and the acceptance is a parse-failure rate below 2%.
+
+### Still unexplained, from the audit of 2026-10-17
+
+The audit reports three daemon restarts on the evening of 2026-10-17 - 21:59, 22:24 and
+22:48 - all after the 18:03 deployment, with no explanation in this record. This record
+does not have one either: `NRestarts=0` is what systemd reports now, and the restarts were
+not this session's. They are noted rather than explained, because inventing a cause for
+them would be worse than leaving the gap visible.
