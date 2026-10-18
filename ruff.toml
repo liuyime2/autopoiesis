@@ -8,10 +8,13 @@
 # house style it does not follow. `BLE001` (blind `except`) is deliberately excluded:
 # the daemon is designed to catch broadly and record the failure in the journal rather
 # than die mid-cycle, which is a correctness property here, not an oversight. Enabling
-# it would have produced 88 findings, all of them intentional. One arrived on 2026-10-17
-# with the dividend cache: a cache that cannot be read must leave the arithmetic exactly as
-# it was rather than degrade it into a guess, so the read is caught and an empty result
-# returned. One arrived on 2026-10-15
+# it would have produced 89 findings, all of them intentional. One arrived on 2026-10-18
+# with the quote read: a symbol whose quote endpoint is down must still be priced from its last
+# trade, and the staleness gate must fall back to the trade's timestamp rather than lose its
+# check, so that read is caught and nothing returned rather than raising. One arrived on
+# 2026-10-17 with the dividend cache: a cache that cannot be read must leave the arithmetic
+# exactly as it was rather than degrade it into a guess, so the read is caught and an empty
+# result returned. One arrived on 2026-10-15
 # with the VIX refresh: a fetch that fails must not corrupt the cache it was going to merge
 # into, so the failure is caught, reported on stderr and returned as a non-zero exit rather
 # than raised. One arrived on 2026-10-15
@@ -56,7 +59,7 @@ select = [
 ignore = [
     # The daemon catches broadly on purpose: a maintenance failure must be journaled
     # and survive, not crash the process and take the paper run down with it. Each of
-    # these 88 sites records what failed (see `_agent_holding_errors`,
+    # these 89 sites records what failed (see `_agent_holding_errors`,
     # `_should_trade_now`, which refuses to let an unreadable broker clock kill the
     # process the way a network stall did twice on 2026-10-08, and
     # `_maintenance`'s try/except, the doctor's per-check isolation, and
