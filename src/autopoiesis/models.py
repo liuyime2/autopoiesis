@@ -215,15 +215,33 @@ class DataSnapshot(BaseModel):
     day_start_equity: float | None = None
     positions: tuple[PositionSnapshot, ...] = Field(default_factory=tuple)
     open_orders: tuple[OpenOrderSnapshot, ...] = Field(default_factory=tuple)
-    #: When the price itself was observed, as the broker reported it. `timestamp` above is the
-    #: broker's *clock*, which is a different fact: a cycle taken while the market is open against a
-    #: quote that printed an hour ago has a fresh clock and a stale price, and measuring only the
-    #: clock passes it. Measured 2026-10-09 - `_latest_price` kept the price and discarded the trade's
-    #: own timestamp, so this did not exist and nothing downstream could check it.
+    #: When the *quote* was observed - the bid and ask, not the last trade. Three different facts
+    #: live here and were conflated until 2026-10-18: `timestamp` is the broker's clock,
+    #: `quote_time` is the market for this symbol being alive, and `price_time` is how old the
+    #: price actually is.
+    #:
+    #: It used to carry the *trade*'s timestamp, so a symbol whose last print lagged the clock was
+    #: refused for a "stale quote" while its bid and ask were current. Measured 2026-10-18 across
+    #: 2,495 journalled cycles: 82 refusals naming a stale price quote, 47 of them inside one hour
+    #: on 2026-10-15 with the reported age climbing from 1,172s to 4,834s for SPY of all things -
+    #: which is a frozen print timestamp, not a market that had stopped trading.
+    #:
+    #: The gateway falls back to `price_time` when the broker reports no quote, because a quote
+    #: outage must not turn this into "nothing to check": a check that disappears on error is
+    #: weaker than the one it replaces.
     #:
     #: Optional, because not every source reports one. An absent value is "nothing to check", not
-    #: "stale": a broker without trade timestamps must not stop trading.
+    #: "stale": a broker without quote timestamps must not stop trading.
     quote_time: datetime | None = None
+    #: When the last *trade* printed, which is the price the decision uses. Kept as its own fact
+    #: rather than folded into `quote_time` so that the age of the price stays knowable: the
+    #: account holder's decision of 2026-10-18 was to keep pricing decisions on the last trade, so
+    #: the freshness gate measures the quote and the price's own age is reported instead of gating.
+    price_time: datetime | None = None
+    #: The quote the freshness check above is about, kept as evidence rather than only as a
+    #: timestamp: without them a reader cannot tell a live two-sided market from a placeholder.
+    bid_price: float | None = Field(default=None, gt=0)
+    ask_price: float | None = Field(default=None, gt=0)
 
     @field_validator("symbol")
     @classmethod

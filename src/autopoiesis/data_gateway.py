@@ -55,6 +55,21 @@ def _trade_time(trade) -> datetime | None:
     return None
 
 
+def _quote_side(value) -> float | None:
+    """One side of a quote as a positive float, or `None` when there is no side to read.
+
+    A zero or negative side is "not quoted" rather than a price, and recording it as one would put
+    a number in the snapshot that no market produced.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number) or number <= 0:
+        return None
+    return number
+
+
 class BrokerDataUnavailable(RuntimeError):
     """Broker state could not be read.
 
@@ -102,6 +117,7 @@ class AlpacaDataGateway:
         clock = self.client.get_clock()
         account = self.client.get_account()
         last_price, price_time = self._latest_price(symbol)
+        bid_price, ask_price, quoted_at = self._latest_quote(symbol)
 
         equity = _required_float(getattr(account, "equity", None), "account", "equity")
         portfolio_value = _required_float(getattr(account, "portfolio_value", None), "account", "portfolio_value")
@@ -123,10 +139,20 @@ class AlpacaDataGateway:
             timestamp=timestamp,
             market_open=bool(clock.is_open),
             last_price=last_price,
-            # When the price itself printed, kept rather than discarded. The Guardian compares
-            # both this and the broker's clock, because a fresh clock over an hour-old quote used
-            # to pass the staleness check - and every risk figure is computed from that quote.
-            quote_time=price_time,
+            # Three facts, three fields, because they used to be two fields and one fact. `quote_time`
+            # is when the *market* for this symbol last quoted; `price_time` is when the price the
+            # decision uses last printed. Until 2026-10-18 the first held the second, so a symbol
+            # whose print lagged its quote was refused for a stale quote while its bid and ask were
+            # current - 82 refusals across 2,495 cycles, 47 of them in one hour on 2026-10-15.
+            #
+            # The fallback is deliberate and is not the old behaviour sneaking back: a quote outage
+            # would otherwise leave `quote_time` empty, and an empty value is "nothing to check",
+            # which is weaker than the check it replaces. With the fallback the gate is never
+            # weaker than before, only more accurate where a real quote exists.
+            quote_time=quoted_at or price_time,
+            price_time=price_time,
+            bid_price=bid_price,
+            ask_price=ask_price,
             source="alpaca",
             account=AccountSnapshot(
                 equity=equity,
@@ -432,6 +458,30 @@ class AlpacaDataGateway:
         if price is None:
             raise BrokerDataUnavailable(f"Alpaca returned no latest trade price for {symbol}")
         return _required_float(price, "trade", "price"), _trade_time(trade)
+
+    def _latest_quote(self, symbol: str) -> tuple[float | None, float | None, datetime | None]:
+        """The NBBO and when it was quoted, or `(None, None, None)`.
+
+        This is the fact the staleness check should have been measuring: it says whether the market
+        for this symbol is alive. `_latest_price` says what the price is. The two arrive on different
+        feeds, which is how a symbol can carry a current two-sided quote and a print that has not
+        moved for eighty minutes - the shape of all 82 stale-quote refusals measured on 2026-10-18.
+
+        A quote that cannot be read returns nothing rather than raising. Refusing to trade because
+        the quote endpoint blipped is a worse defect than the one being fixed, and the caller falls
+        back to the trade's timestamp so that a quote outage cannot silently disable the check.
+        """
+        try:
+            quote = self.client.get_latest_quote(symbol)
+        except Exception:
+            return (None, None, None)
+        if quote is None:
+            return (None, None, None)
+        return (
+            _quote_side(getattr(quote, "bid_price", None) or getattr(quote, "bp", None)),
+            _quote_side(getattr(quote, "ask_price", None) or getattr(quote, "ap", None)),
+            _trade_time(quote),
+        )
 
     def _safe_float(self, obj, attr: str) -> float | None:
         value = getattr(obj, attr, None)

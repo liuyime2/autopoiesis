@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 from collections.abc import Callable, Mapping
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -32,6 +32,21 @@ LLM_UNAVAILABLE_MARKER = "llm_unavailable: "
 #: what keeps these out of every per-strategy metric and out of the lifecycle: they are not
 #: a strategy's decisions and must never be scored as one.
 NO_STRATEGY_MARKER = "no_strategy"
+
+
+def _age_seconds(clock: datetime | None, observed: datetime | None) -> float | None:
+    """How long before the clock `observed` happened, in seconds, or `None` if unknowable.
+
+    `None` rather than 0.0: "the broker did not report a time" and "the time is now" are different
+    facts, and collapsing them would tell the model a stale print was current.
+    """
+    if clock is None or observed is None:
+        return None
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=timezone.utc)
+    if observed.tzinfo is None:
+        observed = observed.replace(tzinfo=timezone.utc)
+    return round((clock - observed).total_seconds(), 1)
 
 
 def parse_decision_json(text: str, *, model_name: str | None = None) -> TradeDecision:
@@ -701,6 +716,14 @@ class HybridDecisionEngine:
             "timestamp": snapshot.timestamp.isoformat(),
             "market_open": snapshot.market_open,
             "last_price": snapshot.last_price,
+            # What that number *is*, and how old. The account holder's decision of 2026-10-18 was
+            # to keep pricing decisions on the last trade rather than the quote mid, which makes the
+            # age of that print a fact the model has to be told: the freshness gate measures the
+            # quote, so a stale print beside a live quote is precisely the case it lets through.
+            # Leaving it unsaid would make the model the one reader of the context unable to see it.
+            "last_price_source": "last_trade",
+            "last_trade_age_seconds": _age_seconds(snapshot.timestamp, snapshot.price_time),
+            "quote_age_seconds": _age_seconds(snapshot.timestamp, snapshot.quote_time),
             "equity": snapshot.account.equity,
             "cash": snapshot.account.cash,
             "buying_power": snapshot.account.buying_power,

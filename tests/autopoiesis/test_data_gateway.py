@@ -56,13 +56,28 @@ class FakeOrder:
 
 
 class FakeClient:
-    def __init__(self, *, positions=(), orders=(), account=None, is_open=True, price=500.0, fail=None):
+    def __init__(
+        self,
+        *,
+        positions=(),
+        orders=(),
+        account=None,
+        is_open=True,
+        price=500.0,
+        fail=None,
+        bid=499.99,
+        ask=500.01,
+        quote_time=None,
+    ):
         self._positions = list(positions)
         self._orders = list(orders)
         self._account = account or FakeAccount()
         self._is_open = is_open
         self._price = price
         self._fail = fail or set()
+        self._bid = bid
+        self._ask = ask
+        self._quote_time = quote_time
 
     def _guard(self, name):
         if name in self._fail:
@@ -79,6 +94,10 @@ class FakeClient:
     def get_latest_trade(self, symbol):
         self._guard("get_latest_trade")
         return FakeTrade(self._price)
+
+    def get_latest_quote(self, symbol):
+        self._guard("get_latest_quote")
+        return SimpleNamespace(bid_price=self._bid, ask_price=self._ask, timestamp=self._quote_time)
 
     def get_asset(self, symbol):
         self._guard("get_asset")
@@ -97,7 +116,15 @@ def test_gateway_uses_method_names_that_exist_on_the_real_alpaca_client():
     """The exact regression: wrong client method names, silently swallowed."""
     tradeapi = pytest.importorskip("alpaca_trade_api")
 
-    for method in ("list_positions", "list_orders", "get_clock", "get_account", "get_latest_trade", "get_asset"):
+    for method in (
+        "list_positions",
+        "list_orders",
+        "get_clock",
+        "get_account",
+        "get_latest_trade",
+        "get_latest_quote",
+        "get_asset",
+    ):
         assert hasattr(tradeapi.REST, method), f"REST.{method} is required by AlpacaDataGateway"
 
     for removed in ("get_all_positions", "get_orders"):
@@ -270,3 +297,43 @@ def test_synthetic_equity_snapshot_keeps_unsupported_holdings_in_whole_account_e
     snapshot = AlpacaDataGateway(client=FakeClient(positions=positions)).snapshot("SPY")
     assert {position.symbol for position in snapshot.positions} == {"BTCUSD", "OPTION"}
     assert sum(abs(position.market_value) for position in snapshot.positions) == 3000
+
+
+def test_the_quote_time_is_the_quotes_and_the_price_time_is_the_trades():
+    """Three facts, three fields. They used to be two fields and one fact.
+
+    `quote_time` held the *trade*'s timestamp, so the staleness gate refused a symbol whose print
+    lagged its quote while its bid and ask were current - 82 refusals across 2,495 journalled cycles,
+    47 of them inside one hour on 2026-10-15 with the age climbing to 4,834s for SPY. This pins the
+    split at the gateway, which is where the two feeds meet and where they were merged.
+    """
+    quoted_at = datetime(2026, 10, 15, 14, 30, tzinfo=timezone.utc)
+    snapshot = AlpacaDataGateway(
+        client=FakeClient(bid=499.99, ask=500.01, quote_time=quoted_at)
+    ).snapshot("SPY")
+
+    assert snapshot.quote_time == quoted_at
+    assert snapshot.bid_price == 499.99
+    assert snapshot.ask_price == 500.01
+    # The trade this fake returns carries no timestamp at all, which is the other half of the point:
+    # an absent price time is "unknowable", not "now", and must not be read as fresh.
+    assert snapshot.price_time is None
+
+
+def test_a_quote_outage_falls_back_to_the_trade_time_rather_than_disabling_the_check():
+    """A check that disappears when a dependency fails is weaker than the one it replaces.
+
+    The gateway writes `quote_time = quoted_at or price_time`. Without that fallback, a broker that
+    stopped answering the quote endpoint would leave the field empty, and an empty field is
+    "nothing to check" in the Guardian - so the gate would silently stop gating exactly when the
+    data got worse. This pins the composition so the fallback cannot be dropped as redundant.
+    """
+    trade = SimpleNamespace(price=500.0, t=datetime(2026, 10, 15, 13, 0, tzinfo=timezone.utc))
+    client = FakeClient(fail={"get_latest_quote"})
+    client.get_latest_trade = lambda symbol: trade
+
+    snapshot = AlpacaDataGateway(client=client).snapshot("SPY")
+
+    assert snapshot.quote_time == trade.t
+    assert snapshot.price_time == trade.t
+    assert snapshot.bid_price is None and snapshot.ask_price is None

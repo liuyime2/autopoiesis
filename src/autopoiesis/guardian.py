@@ -264,15 +264,23 @@ class Guardian:
         return GuardianResult(approved=True, reason="approved")
 
     def _is_stale(self, snapshot: DataSnapshot, *, now: datetime | None) -> bool:
-        """Is *either* the clock or the price too old to trade on?
+        """Is *either* the clock or the market for this symbol too old to trade on?
 
-        `snapshot.timestamp` is the broker's clock. `snapshot.quote_time` is when the price itself
-        was observed, and it is the one that matters for every risk figure computed from that price:
-        position value, exposure, the `min_price` floor, and the volatility forecast's input. A
-        snapshot with a fresh clock and an hour-old price used to pass this check, and under a
-        widened universe that is reachable - a thinly traded $6 symbol's last print can be forty
-        minutes behind the clock, and every number derived from it is then wrong in the direction
-        that flatters a trade.
+        `snapshot.timestamp` is the broker's clock. `snapshot.quote_time` is when the quote - the bid
+        and ask - was last observed, and it is the one that says whether this symbol's market is
+        alive. A snapshot with a fresh clock over a market that stopped quoting used to pass this
+        check, so the quote's own time is kept and compared.
+
+        It carried the *trade*'s timestamp until 2026-10-18, which made the gate refuse the wrong
+        thing: a symbol whose last print lagged its quote was refused for a "stale quote" while its
+        bid and ask were current. Measured that day across 2,495 journalled cycles: 82 refusals
+        naming a stale price quote, 47 of them inside one hour on 2026-10-15 with the reported age
+        climbing from 1,172s to 4,834s for SPY - a frozen print timestamp, not a dead market.
+
+        The price's own age has not been dropped, only moved: `snapshot.price_time` carries it, and
+        the decision context reports it to the model as `last_trade_age_seconds`. What changed is
+        that it is *known* rather than gating, because the account holder's decision of 2026-10-18
+        was to keep pricing decisions on the last trade and to measure freshness against the quote.
 
         The two are checked separately and the reason names which one failed, because "data snapshot
         is stale" against a clock that reads now is unactionable for an operator.
