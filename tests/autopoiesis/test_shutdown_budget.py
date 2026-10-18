@@ -52,9 +52,11 @@ def test_the_budget_is_derived_from_the_largest_declared_stage(tool):
     largest = inventory.largest
 
     assert largest is not None, "no bounded stage found; the budget would be buffer-only"
-    assert largest.seconds == pytest.approx(600.0), (
+    assert largest.seconds == pytest.approx(300.0), (
         "the curriculum generation holds the largest declared timeout; anything larger means a "
-        "stage was added without this list being updated"
+        "stage was added without this list being updated. It moved 600 -> 300 on 2026-10-18: a "
+        "curriculum stage makes two of these calls, so at 600 a single stage could reach 1,200s "
+        "against the daemon's 900s heartbeat budget"
     )
     assert inventory.budget == pytest.approx(largest.seconds + tool.STOP_BUFFER_SECONDS)
 
@@ -77,7 +79,14 @@ def test_cooperative_default_wait_is_in_the_stage_inventory(tool, monkeypatch):
     stage = next((stage for stage in inventory.stages if stage.name == "daemon cooperative wait"), None)
     assert stage is not None, "default scheduler/backoff waits are missing from the stop inventory"
     assert stage.seconds == pytest.approx(1.0)
-    assert inventory.budget == pytest.approx(630.0)
+    # 330 = the largest bounded stage plus the buffer. The largest is `curriculum generation
+    # (off-hours)` at `CURRICULUM_TIMEOUT_S`, which moved 600 -> 300 on 2026-10-18 because a
+    # curriculum *stage* makes two of those calls and 2 x 600 outlived the daemon's 900s heartbeat
+    # budget: an idle Sunday daemon sat at heartbeat age 1,287s with its journal silent for
+    # twenty-one minutes and `doctor` called it dead. Lowering it lowers the stop window this
+    # inventory is about, which is why the number is pinned here rather than derived - the point of
+    # this test is that a timeout change is noticed by something other than a production stall.
+    assert inventory.budget == pytest.approx(330.0)
 
     # A synthetic source declaration change must change the reported bound without importing it.
     read_text = Path.read_text

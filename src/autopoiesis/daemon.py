@@ -1004,12 +1004,35 @@ class AgentDaemon:
         # 900s later, so the check keeps its ability to catch a real hang; only the
         # honest "I am working" silence is removed.
         self._heartbeat("RUNNING", "maintenance in progress")
+
+        def stage(name: str) -> None:
+            """Beat after a stage, so the heartbeat means work advanced and not only that a pass
+            began.
+
+            Measured 2026-10-18, and it is why this exists: an idle Sunday daemon sat at heartbeat
+            age 1,287s with the message "maintenance in progress" while its journal had produced no
+            event for twenty-one minutes. `doctor` called it dead, correctly - nothing in the
+            heartbeat or the journal said otherwise - and the whole gate went red with it.
+
+            The cause was arithmetic rather than a hang. The pass beats once, on entry, and then
+            runs stages that block on the network; the curriculum stage alone makes two model calls
+            at `CURRICULUM_TIMEOUT_S` each, so a single pass could outlive the 900s staleness budget
+            without anything being wrong except that nobody had said "still working".
+
+            A beat per stage bounds the gap by the longest *single* stage instead of by the whole
+            pass. It keeps the check's teeth: a stage that wedges still goes stale, because the next
+            beat only lands when that stage returns.
+            """
+            self._heartbeat("RUNNING", f"maintenance: {name} done")
+
         if self._stop_requested:
             return
         self._resolve_unresolved_submissions()
+        stage("submission resolution")
         if self._stop_requested:
             return
         self._resolve_pending_fills()
+        stage("fill resolution")
         if self._stop_requested:
             return
         evidence = self._latest_evidence_batch()
@@ -1017,6 +1040,7 @@ class AgentDaemon:
             return
         if self._due(self.last_evidence_at, self.config.evidence_interval_seconds):
             evidence = self._ingest_broker_evidence()
+            stage("broker evidence")
             if self._stop_requested:
                 return
         # Bound before the branch below: `_manage_strategy_lifecycle` runs after it and
@@ -1071,6 +1095,7 @@ class AgentDaemon:
             self._screen_all_strategies(
                 _events=counterfactual_events, _validation=validation_events
             )
+            stage("strategy screen")
             if self._stop_requested:
                 return
             validation_events = [
@@ -1079,13 +1104,16 @@ class AgentDaemon:
             ]
         if self.reflection_memory is not None and self._due(self.last_reflection_at, self.config.reflection_interval_seconds):
             self._reflect(evidence=evidence)
+            stage("reflection")
             if self._stop_requested:
                 return
         if self.curriculum_agent is not None and self.reflection_memory is not None and self._due(self.last_curriculum_at, self.config.curriculum_interval_seconds):
             self._curriculum_proposal()
+            stage("curriculum")
             if self._stop_requested:
                 return
         self._manage_strategy_lifecycle(_validation=validation_events)
+        stage("lifecycle")
         self.last_maintenance_at = self.now()
 
     def _last_known_prices(self) -> dict[str, float]:

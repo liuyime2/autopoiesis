@@ -191,7 +191,18 @@ CURRICULUM_NUM_CTX = 12288
 #: curriculum is an off-hours job, not the 5-minute trading loop, so paying two
 #: minutes for a correct answer is the right trade. The decision path keeps 120s
 #: because it answers in ~12s.
-CURRICULUM_TIMEOUT_S = 600
+#:
+#: 300 rather than 600, measured 2026-10-18, and the constraint is the daemon's
+#: heartbeat rather than the model. One curriculum *stage* makes two of these
+#: calls - the task, then the strategy spec for the kind it named - so the stage's
+#: worst case is twice this number, and a maintenance pass that beats only on entry
+#: goes stale if any stage outlives `stale_after_seconds` (900). At 600 the stage
+#: could reach 1,200s and did: an idle Sunday daemon sat at heartbeat age 1,287s
+#: with its journal silent for twenty-one minutes, and doctor called it dead.
+#: 300 is still more than twice the 141.9s this prompt has ever measured, so the
+#: working range is untouched; what it bounds is a call that is not coming back.
+#: `test_the_curriculum_stage_fits_the_heartbeat_budget` holds the relationship.
+CURRICULUM_TIMEOUT_S = 300
 #: The watchlist choice: a symbol list in, two fields out. It sits in the trading loop
 #: rather than off-hours, so it gets the decision window and not the curriculum's - a
 #: watchlist that takes two minutes is a cycle the loop did not spend deciding.

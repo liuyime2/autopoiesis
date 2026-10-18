@@ -481,6 +481,66 @@ def test_daemon_market_closed_does_not_consume_cycle(tmp_path):
     assert daemon.daily_cycle_count == 0
 
 
+def test_the_curriculum_stage_fits_the_heartbeat_budget(tmp_path):
+    """No single maintenance stage may outlive the staleness budget.
+
+    Measured 2026-10-18: an idle Sunday daemon sat at heartbeat age 1,287s with the message
+    "maintenance in progress" and a journal silent for twenty-one minutes, and `doctor` called it
+    dead. The cause was arithmetic, not a hang - the curriculum stage makes two model calls, each
+    allowed `CURRICULUM_TIMEOUT_S`, and at 600s one stage could reach 1,200s against a 900s budget.
+
+    This pins the relationship rather than the number, so raising either side has to be argued
+    against the other instead of discovered in production.
+    """
+    from autopoiesis.llm_decision import CURRICULUM_TIMEOUT_S
+
+    budget = config(tmp_path).stale_after_seconds
+    # Two calls per curriculum stage: the task, then the strategy spec for the kind it named.
+    worst_stage = 2 * CURRICULUM_TIMEOUT_S
+    assert worst_stage < budget, (
+        f"a curriculum stage can take {worst_stage}s against a {budget}s staleness budget; a "
+        "maintenance pass that outlives the budget is reported as a dead daemon"
+    )
+
+
+def test_maintenance_beats_after_each_stage(tmp_path):
+    """The heartbeat must mean work advanced, not merely that a pass began.
+
+    Without this, a pass whose stages block on the network reports "maintenance in progress" for
+    twenty minutes and is indistinguishable from a hang - which is exactly what `doctor` reported
+    on 2026-10-18, and it was right to, because nothing said otherwise.
+    """
+    daemon = AgentDaemon.__new__(AgentDaemon)
+    statuses: list[str] = []
+    for name, value in (
+        ("config", config(tmp_path, interval=1)),
+        ("_heartbeat", lambda status, message: statuses.append(message)),
+        ("_stop_requested", False),
+        ("journal", None),
+        ("knowledge_admission", None),
+        ("reflection_memory", None),
+        ("curriculum_agent", None),
+        ("last_maintenance_at", None),
+        ("last_evidence_at", None),
+        ("_appended", []),
+        ("_resolve_unresolved_submissions", lambda: 0),
+        ("_resolve_pending_fills", lambda: 0),
+        ("_latest_evidence_batch", lambda: None),
+        ("_ingest_broker_evidence", lambda: None),
+        ("_manage_strategy_lifecycle", lambda **kwargs: None),
+        ("now", lambda: datetime.now(tz=timezone.utc)),
+    ):
+        setattr(daemon, name, value)
+
+    daemon._maintenance()
+
+    assert statuses[0] == "maintenance in progress", statuses
+    for expected in ("submission resolution", "fill resolution", "broker evidence", "lifecycle"):
+        assert any(expected in message for message in statuses), (expected, statuses)
+    # The count is the point: a pass that beats once cannot report progress through a long stage.
+    assert len(statuses) >= 5, statuses
+
+
 def test_a_closed_market_beats_again_after_waking(tmp_path):
     """The gap between beats must be the wait, not the wait plus the maintenance that follows it.
 
