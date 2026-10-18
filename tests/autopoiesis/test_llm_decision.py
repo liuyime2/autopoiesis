@@ -56,7 +56,7 @@ def test_ollama_engine_uses_configured_model_and_gpu_devices():
 # --------------------------------------------------------------------------
 
 def test_num_ctx_leaves_headroom_for_the_largest_real_context():
-    """num_ctx=4096 must fit the largest context the engine can actually build.
+    """The window must fit the largest context the engine can actually build.
 
     A window cut for speed that truncates a real decision mid-JSON is a
     correctness bug wearing a speedup's clothes. The engine's context carries the
@@ -118,7 +118,9 @@ def test_num_ctx_is_not_left_at_the_server_default():
     except Exception:
         pass
 
-    assert captured["options"]["num_ctx"] == 4096
+    from autopoiesis.llm_decision import DECISION_NUM_CTX
+
+    assert captured["options"]["num_ctx"] == DECISION_NUM_CTX
 
 
 def test_temperature_stays_low():
@@ -202,7 +204,12 @@ def test_the_two_windows_are_not_assumed_equal():
     """
     from autopoiesis.llm_decision import CURRICULUM_NUM_CTX, DECISION_NUM_CTX
 
-    assert DECISION_NUM_CTX == 4096
+    # Re-derived 2026-10-18, not raised on principle. The 4096 was sized from a ~253-token
+    # prompt and a ~814-token answer. Measured against the live model with a realistic
+    # context: prompt 1,539, answer 1,245 of which 3,494 characters are the thinking block,
+    # leaving 1,312 spare - 32% on an answer whose length nothing bounds. The failure rate
+    # went 2.0% -> 5.6% -> 13.7% across three days with one cause, an empty body.
+    assert DECISION_NUM_CTX == 6144
     # Re-derived 2026-10-14, not raised on principle. The 8192 was sized from a
     # 3441-token prompt and a 1452-token answer. Measured against the live model
     # with the live context, both halves have grown - prompt 4,556 and answer

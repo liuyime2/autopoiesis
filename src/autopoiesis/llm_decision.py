@@ -139,7 +139,21 @@ DECISION_INSTRUCTION = (
 #: 4096 is truncation, not a slow answer: 655 tokens of room for a reply that
 #: needs ~1200. 8192 is chosen over 6144 because the margin must survive the
 #: context growing, not merely the context that happened to exist today.
-DECISION_NUM_CTX = 4096
+#: Measured 2026-10-18 against the live model with a realistic context, because the
+#: failure rate had gone 2.0% -> 5.6% -> 13.7% over three days with one cause every time:
+#: "LLM response did not contain a JSON object". The diagnostic added on 2026-10-17 names
+#: it - an empty body, which is what `done_reason=length` looks like.
+#:
+#: The measurement: prompt 1,539 tokens, answer 1,245 - of which 3,494 characters are the
+#: thinking block - done_reason=stop, spare 1,312 of 4,096. That is 32% headroom on an
+#: answer whose length is not bounded by anything: `thinking` is free text the model writes
+#: to whatever length it likes, and when it runs longer than the spare the whole response is
+#: lost rather than truncated into something parseable.
+#:
+#: 6144 is 1.5x, and the spare becomes 3,360 - more than the entire answer measured here.
+#: Latency was measured on the curriculum prompt at 141.9s at 8192 against 141.8s at 12288,
+#: so the window is not what costs time; the answer length is.
+DECISION_NUM_CTX = 6144
 #: Worst case must be prompt + answer + growth. 8192 was sized from 3441 measured
 #: prompt and 1452 measured answer, leaving 3299 spare. A chars/3.6 estimate said
 #: 2838 and was 19% low, because JSON punctuation and short keys are cheap per
