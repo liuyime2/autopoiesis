@@ -157,3 +157,51 @@ The audit reports three daemon restarts on the evening of 2026-10-17 - 21:59, 22
 does not have one either: `NRestarts=0` is what systemd reports now, and the restarts were
 not this session's. They are noted rather than explained, because inventing a cause for
 them would be worse than leaving the gap visible.
+
+## P5: `codex/rsi-audit-repairs` merged into `main`, 2026-10-18
+
+P5 asks for the branch to be merged into `main` once the gate and the three CI versions are
+green, and for `main`'s CI run number and result to be written here. This is that section.
+
+Measured before pushing:
+
+- `main` was `49063c8` (2026-10-12) and is an **ancestor** of the branch tip, so this is a
+  fast-forward, not a three-way merge: no conflict was possible and no history was rewritten.
+- The branch tip is `162cbcf`, 125 commits ahead of `main`, 190 files changed, +21,137/-1,826.
+- Local full gate immediately before the push: `classes: 56  passed: 56  failed: 0`,
+  `OK - all check classes pass`.
+- CI on `162cbcf` before the merge: run **#324** (push) and run **#326** (pull_request), each
+  with `gate (3.10)`, `gate (3.11)`, `gate (3.12)` and `release` all `success`.
+
+The merge itself:
+
+```
+git push origin HEAD:main
+   49063c8..162cbcf  HEAD -> main
+```
+
+Pull request **#10** (`codex/rsi-audit-repairs` -> `main`) is recorded as **merged** by
+GitHub: `merged_at 2026-10-18T12:31:32Z`, `merge_commit_sha 162cbcf`.
+
+CI on `main` - the run number this section exists for:
+
+| Workflow | Run | Sha | Result | Jobs |
+| --- | --- | --- | --- | --- |
+| `ci` | **#327** | `162cbcf` | **success** | gate (3.10) 2.2m, gate (3.11) 2.7m, gate (3.12) 2.9m, release 0.5m |
+| `pages` | **#27** | `162cbcf` | **success** | build 0.5m, deploy 0.3m |
+
+`main` was red before this. `ci` run **#118** on `49063c8` (2026-10-13) concluded
+`failure`, and it had stayed that way for five days because nothing was merged into it.
+The branch's work is the first thing to make `main` green since 2026-10-13.
+
+Deliberately not on `main`: commit `7bfac1a`, the 2026-10-18 review appendix to
+`docs/PLAN_2026-10-14.md`, exists only on this machine's local `master`. It is the account
+holder's own commit on a line that diverged before the branch, it is documentation-only, and
+P5 asks for the branch merge. Carrying it in would have put a commit on `main` that the gate
+run above did not cover, so it stays where it is; the branch that owns it can push it and it
+will fast-forward.
+
+One measurement worth keeping, because it is the reason the 2026-10-18 review asked for the
+gate to be split: the `ci` `gate` jobs took 2.2 to 2.9 minutes each, while the local full
+`make verify` took about 23 minutes on this host. They are not the same cost, and the plan's
+"gate green" was satisfied by the local full one.
