@@ -481,6 +481,41 @@ def test_daemon_market_closed_does_not_consume_cycle(tmp_path):
     assert daemon.daily_cycle_count == 0
 
 
+def test_a_closed_market_beats_again_after_waking(tmp_path):
+    """The gap between beats must be the wait, not the wait plus the maintenance that follows it.
+
+    Measured 2026-10-18 on an idle Sunday daemon: `doctor` reported it dead at age 969s, and the
+    arithmetic is the whole story. The scheduler caps a closed-market sleep at 75% of the staleness
+    budget - 675s of 900s - precisely so a slow maintenance pass can overrun, but that leaves 225s
+    for the overrun and the pass was taking about 294s. So the gap between beats was
+    675 + 294 = 969s, over a threshold of 900, for a process that was alive and correctly parked.
+
+    Beating on waking makes the longest gap `max(sleep, maintenance)` instead of their sum. It does
+    not blind the check: a daemon that genuinely wedges still goes stale, because `_maintenance`
+    beats on entry and this beat only lands once the wait is over.
+    """
+    cfg = config(tmp_path, interval=0)
+    statuses: list[tuple[str, str]] = []
+    daemon = AgentDaemon(
+        config=cfg,
+        loop=FakeLoop(),
+        # Waking is what the test needs to observe, so the wait ends by asking the daemon to stop.
+        sleep=lambda seconds: setattr(daemon, "_stop_requested", True),
+        scheduler=FakeScheduler(False),
+    )
+    daemon._heartbeat = lambda status, message: statuses.append((status, message))
+
+    daemon.run()
+
+    messages = [message for _, message in statuses]
+    assert "market closed; maintenance only" in messages, messages
+    assert "market closed; woke for maintenance" in messages, messages
+    # The beat that matters is the one the wait is followed by, not merely one that exists.
+    assert messages.index("market closed; woke for maintenance") == (
+        messages.index("market closed; maintenance only") + 1
+    ), messages
+
+
 def test_daemon_market_closed_runs_maintenance_without_trading(tmp_path):
     cfg = replace(config(tmp_path, interval=0), maintenance_interval_seconds=1, evidence_interval_seconds=1, reflection_interval_seconds=1)
     journal = JsonlJournal(cfg.journal_path)

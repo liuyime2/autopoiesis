@@ -228,6 +228,19 @@ class AgentDaemon:
                         break
                     if not self._stop_requested:
                         self.sleep(self._sleep_seconds())
+                        # Beat on waking, not only before sleeping. Measured 2026-10-18 on an idle
+                        # Sunday daemon: doctor reported it dead at age 969s, and the arithmetic is
+                        # the whole story - the scheduler caps a closed-market sleep at 75% of the
+                        # staleness budget (675s of 900s) precisely so a slow maintenance pass can
+                        # overrun, but that leaves 225s for the overrun and the pass was taking
+                        # about 294s. So the gap between beats was 675 + 294 = 969s, over a
+                        # threshold of 900, for a process that was alive and correctly parked.
+                        #
+                        # Beating here makes the longest gap max(sleep, maintenance) instead of
+                        # their sum: 675s. It does not blind the check - a daemon that genuinely
+                        # wedges still goes stale, because `_maintenance` beats on entry and this
+                        # beat only lands when the wait ends.
+                        self._heartbeat("RUNNING", "market closed; woke for maintenance")
                     continue
                 if self._stop_requested:
                     break
@@ -235,6 +248,9 @@ class AgentDaemon:
                     self._heartbeat("BACKING_OFF", "max daily cycles reached")
                     if not self._stop_requested:
                         self.sleep(self._sleep_seconds())
+                        # The same beat-on-waking as above, for the same measured reason: this
+                        # path waits just as long and is reached on every busy session's afternoon.
+                        self._heartbeat("BACKING_OFF", "max daily cycles reached; woke")
                     continue
                 round_started = time.monotonic()
                 for symbol in self._round_symbols():
