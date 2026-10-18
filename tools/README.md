@@ -13,7 +13,7 @@ this refactor removed.
 
 ## The gate — `verify.py`
 
-**`python tools/verify.py`** is the project gate: 56 check classes, non-zero exit on any
+**`python tools/verify.py`** is the project gate: 57 check classes, non-zero exit on any
 failure. `make verify` runs it. Three modes:
 
 - `--self-test` breaks the gate on purpose and asserts it reports failure, because a
@@ -68,6 +68,31 @@ it, installed by `install_market_readiness.py` alongside the readiness pair. The
 own units rather than a step in `market-preflight`, which is read-only by contract; this one
 writes. Measured 2026-10-15: without them the cache had been stale since 2026-10-09 and the
 floor had been silently disengaged since 2026-10-13.
+
+## Turning "the gate was green" into something a deploy can fail on
+
+**`record_deployment.py`** runs the full gate and appends what it observed to
+`docs/evidence/deployments.jsonl`, keyed by the source fingerprint. `make record-deployment` runs
+it.
+
+Why a tool and not a line typed into the deployment record: a record an operator types is a record
+an operator can type wrongly, and the failure is invisible afterwards - the record says the gate
+passed, and it did, on a different tree, at a different time. Only running it can tell the
+difference, so this runs it, and writes nothing at all when the gate is red. A ledger that can hold
+a red run gets read as "the gate was run", and that is the one thing a red run must never become.
+
+`make verify` then has a class for it: `deploy-gate-record` fails when the installed fingerprint has
+no passing record from a *full* run. The tier is written by the tool rather than typed, so a
+`--fast` record cannot claim it. What the check deliberately does not do is compare the recorded
+class count against today's: the first version did, and it deadlocked the moment a check class was
+added - the record said 56, the full run said 57, the gate went red, and this tool refuses to write
+while the gate is red, so the record could never be brought up to date.
+
+The order is install, then verify, then record - not verify, install, record. `daemon-source-matches-worktree`
+and `doctor` are red before every install by construction, because the daemon is still running the
+old build, so a rule requiring a green gate *before* installing is unsatisfiable. A deploy is
+instead complete only when the installed build has a record, and a red gate cannot produce one - so
+a bad install keeps its red, visibly, as an unrecorded build.
 
 ## Keeping the price series honest about distributions
 

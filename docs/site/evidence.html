@@ -72,21 +72,20 @@ footer.site{border-top:1px solid var(--line);margin-top:3rem;padding:1.5rem 2rem
 </header>
 <main id="main">
 <h2>The target, and where it stands</h2>
-<p>Beat SPY buy-and-hold on deployed capital after cost, within the risk budget, over a rolling 60-trading-day window. The record holds 20 trading days, so the window is not established by these dates alone; allocation and aligned equity/control history are unavailable.</p>
+<p>Beat SPY buy-and-hold on deployed capital after cost, within the risk budget, over a rolling 60-trading-day window. The record holds 24 trading days, so the window is not established by these dates alone; allocation and aligned equity/control history are unavailable.</p>
 <dl class="grid">
-<div class="card"><dt>agent return on deployed capital</dt><dd>UNKNOWN</dd><p>+811.72 PnL; allocated capital UNKNOWN</p></div>
+<div class="card"><dt>agent return on deployed capital</dt><dd>UNKNOWN</dd><p>+459.41 PnL; allocated capital UNKNOWN</p></div>
 <div class="card"><dt>SPY, same window</dt><dd>UNKNOWN</dd><p>aligned agent capital and rolling window unavailable</p></div>
-<div class="card"><dt>after cost</dt><dd>35.82</dd><p>assumed 0.05% round trip</p></div>
-<div class="card"><dt>realized + unrealized</dt><dd>+757.95 / +89.59</dd><p>from the FIFO lot ledger</p></div>
+<div class="card"><dt>after cost</dt><dd>56.78</dd><p>assumed 0.05% round trip</p></div>
+<div class="card"><dt>realized + unrealized</dt><dd>+601.37 / -85.19</dd><p>from the FIFO lot ledger</p></div>
 </dl>
 <h2>Per strategy, as a diagnostic</h2>
 <div class="tablewrap"><table><tr><th>strategy</th><th class="num">return</th><th class="num">SPY, same window</th><th class="num">excess</th></tr>
-<tr><td>trend-follow-20260627-001</td><td class="num">+0.91%</td><td class="num">+0.93%</td><td class="num">-0.02</td></tr>
-<tr><td>trend-follow-20260727-001</td><td class="num">+0.35%</td><td class="num">+0.42%</td><td class="num">-0.07</td></tr>
-<tr><td>trend-follow-buy-001</td><td class="num">+3.85%</td><td class="num">+4.51%</td><td class="num">-0.66</td></tr>
-<tr><td>fixed-size-buy-001</td><td class="num">+1.92%</td><td class="num">+2.84%</td><td class="num">-0.91</td></tr>
-<tr><td>fixed-size-probe-0001</td><td class="num">+0.78%</td><td class="num">+2.62%</td><td class="num">-1.84</td></tr>
-<tr><td>tiny-fixed-size-001</td><td class="num">+3.97%</td><td class="num">+6.82%</td><td class="num">-2.85</td></tr>
+<tr><td>fixed-size-probe-0001</td><td class="num">-0.42%</td><td class="num">-0.91%</td><td class="num">+0.48</td></tr>
+<tr><td>trend-follow-20261003-001</td><td class="num">-1.13%</td><td class="num">-1.15%</td><td class="num">+0.01</td></tr>
+<tr><td>fixed-size-buy-bil-001</td><td class="num">+0.00%</td><td class="num">+0.01%</td><td class="num">-0.01</td></tr>
+<tr><td>fixed-size-xle-buy-001</td><td class="num">+1.15%</td><td class="num">+1.19%</td><td class="num">-0.03</td></tr>
+<tr><td>trend-follow-tlt-001</td><td class="num">-0.11%</td><td class="num">+0.01%</td><td class="num">-0.12</td></tr>
 </table></div>
 <p class="note">Strategy returns use historical peak exposure as a diagnostic denominator. They do not establish agent allocation, a continuous equity curve, or project profitability.</p>
 <h2>The signal ledger</h2>
@@ -100,15 +99,15 @@ footer.site{border-top:1px solid var(--line);margin-top:3rem;padding:1.5rem 2rem
 <p>129 distinct hypotheses, 173 historical recorded verdicts. These are ledger counts, not certification under the current research contract or evidence of validated alpha.</p>
 <h2>Risk configuration used for this measurement</h2>
 <div class="tablewrap"><table><tr><th>limit</th><th class="num">value</th></tr>
-<tr><td>max position value</td><td class="num">5,000.00</td></tr>
-<tr><td>max total exposure</td><td class="num">20,000.00</td></tr>
+<tr><td>max position value</td><td class="num">25,000.00</td></tr>
+<tr><td>max total exposure</td><td class="num">90,000.00</td></tr>
 <tr><td>max daily loss</td><td class="num">500.00</td></tr>
-<tr><td>max trades per day</td><td class="num">10.00</td></tr>
+<tr><td>max trades per day</td><td class="num">100.00</td></tr>
 </table></div>
 <p class="note">These values come from the configuration used to collect this measurement. Historical risk configuration and compliance are not established by these values.</p>
 </main>
 <footer class="site">
-<p>Figures published 2026-10-13 05:22 UTC from <code>docs/site/figures.json</code>. A number that cannot be computed reads UNKNOWN, which is a different claim from zero.</p>
+<p>Figures published 2026-10-18 23:02 UTC from <code>docs/site/figures.json</code>. A number that cannot be computed reads UNKNOWN, which is a different claim from zero.</p>
 <p>Apache-2.0. Paper trading only; no live venue is reachable from this code.</p>
 </footer>
 </body></html>

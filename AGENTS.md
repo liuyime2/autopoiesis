@@ -228,7 +228,7 @@ documented as owning. A pin is only meaningful if something checks it.
 
 ### 19. The gate has two tiers, and they are evidence for different things
 
-`make verify` is the full gate: all 56 classes. `make verify-fast` is the deploy-time tier: 50 of
+`make verify` is the full gate: all 57 classes. `make verify-fast` is the deploy-time tier: 51 of
 them.
 
 **Why two.** Measured on the deployment host on 2026-10-18: the full gate takes about 23 minutes.
@@ -248,8 +248,27 @@ passed when the gate was not run.
   the daemon's own health after the restart. It is **not** evidence about behaviour and must never be
   quoted as if it were.
 
-A deploy therefore needs both, in that order. The fast tier is the only one that can be run inside
-the window where its answer still changes a decision.
+A deploy therefore needs both - and **not in that order**, which took building the check to
+discover. Two classes are deploy-dependent by construction: `daemon-source-matches-worktree` and
+`doctor`'s daemon problem are red whenever a new build is about to be installed, because the daemon
+is still running the old one. A full gate is therefore red *before every install*, and a rule
+demanding it be green first is unsatisfiable - which is the kind of rule that gets ignored and then
+misreported as satisfied.
+
+So the order is: install, then `make verify`, then `make record-deployment`. **A deploy is not
+complete until the installed build has a record.** That is what the `deploy-gate-record` class
+enforces, and its teeth are in what it refuses: a build whose gate is red cannot be recorded,
+because `make record-deployment` writes nothing when the gate is red. So a bad install does not
+lose its red - it keeps it, visibly, as an unrecorded build, until the code is fixed. What CI adds
+is the other half: every push and pull request runs the full gate, so the code being installed has
+already been verified before anyone installs it.
+
+**And it is enforced, not asserted.** `make record-deployment` runs the full gate and writes the
+verdict it observed to `docs/evidence/deployments.jsonl`, keyed by the source fingerprint; the
+`deploy-gate-record` class fails when the installed fingerprint has no passing record from a *full*
+run. The tier is written by that tool rather than typed, so a `--fast` record cannot claim it. This
+half of the rule was prose until 2026-10-18, and prose is what gets skipped when someone is in a
+hurry.
 
 **What the fast tier leaves out, and why that is a split by kind rather than a convenient one.** It
 excludes two kinds of check, and the measured costs confirmed the kinds were the right ones:

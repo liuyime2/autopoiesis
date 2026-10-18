@@ -7,6 +7,19 @@ it, on the operator's machine, because it describes the system's history rather 
 
 ## Unreleased
 
+- The gate has two tiers. `make verify-fast` runs 51 of the 57 classes in about four minutes and
+  is what a deploy runs at install time; `make verify` runs all 57 and is what CI runs on every
+  push and pull request. AGENTS.md 19 states what each is evidence for, because the full gate had
+  grown to about 23 minutes on the deployment host - longer than a working session, which had made
+  "run the gate before deploying" a rule nobody could keep.
+- A deployment now fails the gate unless the installed build has a recorded full-gate pass.
+  `make record-deployment` runs the gate and writes what it observed to
+  `docs/evidence/deployments.jsonl`; the `deploy-gate-record` class requires it, and the tier is
+  written by that tool rather than typed, so a `--fast` record cannot claim it. The tool writes
+  nothing when the gate is red, so a bad install keeps its red as an unrecorded build. The order is
+  install, then verify, then record: `daemon-source-matches-worktree` and `doctor` are red before
+  every install by construction, which makes "green before installing" unsatisfiable.
+
 ## 0.1.0a1 - 2026-10-10
 
 The first published build of the paper-trading agent. `pyproject.toml` version `0.1.0a1`,
@@ -20,7 +33,7 @@ was produced by running a command on this host, and the command is named so it c
 
 ### Verified on this build
 
-- The gate: `make verify` reports **56 check classes, 0 failed**, over 1859 test executions in 81
+- The gate: `make verify` reports **57 check classes, 0 failed**, over 1859 test executions in 81
   files. `pytest` reports **1183 passed**; `ruff check src/ tools/ tests/ examples/` and
   `mypy src/autopoiesis` are clean.
 - The credential-free path claimed by the README quick start. In a fresh clone at this tag, with
@@ -115,7 +128,7 @@ was produced by running a command on this host, and the command is named so it c
   rewritten.
 - `autopoiesis` and `make` run in a plain venv; conda is optional.
 - CI runs mypy, matching `make check`.
-- The gate has 56 check classes. `fact-docs-current`, which made archived audit documents
+- The gate has 57 check classes. `fact-docs-current`, which made archived audit documents
   restate live counts, is retired; `screen-direction-neutral` is new.
 - The offline screen reads each strategy against what its days alone would have scored,
   rejecting only when it is worse beyond noise.

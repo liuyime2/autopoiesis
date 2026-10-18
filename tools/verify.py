@@ -2538,6 +2538,101 @@ def check_the_running_daemon_matches_the_worktree() -> Result:
     )
 
 
+def check_the_installed_build_has_a_full_gate_record() -> Result:
+    """The build that is installed must have a recorded full-gate pass.
+
+    AGENTS.md 19 says a deploy needs the full gate green on the commit being deployed and the fast
+    gate green at install time. The fast half was enforced; the full half was a sentence in a
+    document, and a sentence is exactly what gets skipped when someone is in a hurry. Worse, its
+    absence is invisible afterwards: the deployment record says the gate passed, and it did - on a
+    different tree, at a different time.
+
+    So the rule is now a check. The installed fingerprint must appear in
+    `docs/evidence/deployments.jsonl`, written by `tools/record_deployment.py`, which runs the gate
+    itself. What is required of the record is that it came from a *full* run - the tier is written
+    by the tool, never typed, so a `--fast` record cannot claim it - and that it reported a pass.
+
+    It deliberately does **not** compare the recorded class count against today's. The first
+    version did, and the first thing it did was deadlock: adding this very check took the full
+    count from 56 to 57, the existing record said 56, the gate went red - and
+    `make record-deployment` refuses to write while the gate is red, so the record could never be
+    brought up to date. A count that has to match today's is a count that cannot be extended.
+
+    What it does not do is check *order*. A timestamp in a ledger is typed by the same person the
+    rule constrains, so requiring `recorded_at` to precede the install would be a control that
+    looks like one and is not. What makes the record trustworthy is that a tool ran the gate and
+    wrote down what it saw, not that the timestamps look right.
+    """
+    heartbeat = ROOT / "runtime" / "autopoiesis" / "heartbeat.json"
+    if not heartbeat.exists():
+        return Result("deploy-gate-record", SKIP, "no heartbeat; nothing is installed to check")
+    try:
+        installed = json.loads(heartbeat.read_text(encoding="utf-8")).get("source_fingerprint")
+    except (OSError, json.JSONDecodeError) as exc:
+        return Result("deploy-gate-record", FAIL, f"unreadable heartbeat: {exc}")
+    if not installed:
+        return Result(
+            "deploy-gate-record", FAIL,
+            "the running heartbeat carries no source_fingerprint, so nothing can say which build "
+            "is installed and no record can be matched to it",
+        )
+
+    ledger = ROOT / "docs" / "evidence" / "deployments.jsonl"
+    if not ledger.exists():
+        return Result(
+            "deploy-gate-record", FAIL,
+            f"the installed build {installed} has no record at all: {ledger.relative_to(ROOT)} is "
+            "absent. Run `make record-deployment` before installing",
+        )
+    entries = []
+    for number, line in enumerate(ledger.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            return Result("deploy-gate-record", FAIL, f"ledger line {number} is not JSON: {exc}")
+
+    matching = [e for e in entries if e.get("fingerprint") == installed]
+    if not matching:
+        return Result(
+            "deploy-gate-record", FAIL,
+            f"the installed build {installed} has no full-gate record; {len(entries)} other "
+            "deployment(s) are recorded. Run `make record-deployment` on the tree being deployed",
+        )
+    gate = matching[-1].get("gate") or {}
+    failed = gate.get("failed")
+    if failed != 0:
+        return Result(
+            "deploy-gate-record", FAIL,
+            f"the record for {installed} says the full gate had {failed} failure(s); a deploy "
+            "needs a green one",
+        )
+    # The tier, not the count. Comparing `classes` against today's full count deadlocked the tool
+    # that writes these records the first time a check class was added: the record said 56, the
+    # full run said 57, so the gate was red - and `make record-deployment` refuses to write while
+    # the gate is red, so the record could never be brought up to date. A count that has to match
+    # today's cannot be extended, and the tool that repairs the record is the first casualty.
+    # "full" is written by that tool, never typed, which is what makes it worth requiring.
+    if gate.get("tier") != "full":
+        return Result(
+            "deploy-gate-record", FAIL,
+            f"the record for {installed} came from the {gate.get('tier')!r} tier; only a full run "
+            "is the claim a deploy needs. Run `make record-deployment`",
+        )
+    if not gate.get("classes") or gate.get("passed") != gate.get("classes"):
+        return Result(
+            "deploy-gate-record", FAIL,
+            f"the record for {installed} reports {gate.get('passed')}/{gate.get('classes')}; a "
+            "passing full run reports the same number twice",
+        )
+    return Result(
+        "deploy-gate-record", PASS,
+        f"installed build {installed} has a full-gate record: "
+        f"{gate.get('passed')}/{gate.get('classes')} at {gate.get('commit')}",
+    )
+
+
 def check_units_are_where_systemd_looks() -> Result:
     """A --user unit is only reboot-persistent if it lives where the manager reads.
 
@@ -3392,6 +3487,9 @@ BESPOKE_CHECK_NAMES = (
     "list-count-matches-run",
     "pipeline-targets-exist",
     "gate-class-count-consistent",
+    # The installed build has a full-gate record: AGENTS.md 19's first half, which was a sentence
+    # in a document until 2026-10-18 and is now something a deploy can fail on.
+    "deploy-gate-record",
 )
 
 REPOSITORY_CHECK_CLASSES: frozenset[str] = frozenset({
@@ -3874,6 +3972,7 @@ def main() -> int:
     results.append(_safe(check_home_independence, "home-independence"))
     results.append(_safe(check_units_are_where_systemd_looks, "units-where-systemd-looks"))
     results.append(_safe(check_the_running_daemon_matches_the_worktree, "daemon-source-matches-worktree"))
+    results.append(_safe(check_the_installed_build_has_a_full_gate_record, "deploy-gate-record"))
     results.append(_safe(check_docs_do_not_instruct_deleted_commands, "docs-no-deleted-commands"))
     results.append(_safe(check_the_example_still_runs, "example-runs"))
     results.append(_safe(check_tools_readme_names_real_files, "tools-readme-accurate"))

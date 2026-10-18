@@ -79,7 +79,7 @@ endif
 
 .DEFAULT_GOAL := help
 .PHONY: help setup install check lint lint-files type test test-provenance-host smoke smoke-offline fast fast-no-broker daily-report benchmark broker-latency-sample \
-        verify verify-fast verify-self-test doctor audit integrity classes classes-list \
+        verify verify-fast verify-self-test record-deployment doctor audit integrity classes classes-list \
         install-service run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc \
         site refresh-figures benchmark-json dist release-check fresh-clone example-cycle cli-help \
         attest-archive-baseline fetch-replay-bars research-search research-run \
@@ -140,6 +140,12 @@ verify:
 # deployed, and the deployment record is where that is written down.
 verify-fast:
 	@$(PY) tools/verify.py --fast
+
+# Run the full gate and write down the verdict it produced, for the build being deployed.
+# `deploy-gate-record` fails when the installed fingerprint has no such record, so this is the
+# step that turns AGENTS.md 19's first half from a sentence into something a deploy can fail on.
+record-deployment:
+	@$(PY) tools/record_deployment.py $(if $(NOTE),--note "$(NOTE)",)
 
 attest-archive-baseline:
 	@test -n "$$AUTOPOIESIS_OPERATOR_ID" || (echo "AUTOPOIESIS_OPERATOR_ID is required" >&2; exit 2)
