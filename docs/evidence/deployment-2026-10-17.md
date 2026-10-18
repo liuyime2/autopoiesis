@@ -205,3 +205,75 @@ One measurement worth keeping, because it is the reason the 2026-10-18 review as
 gate to be split: the `ci` `gate` jobs took 2.2 to 2.9 minutes each, while the local full
 `make verify` took about 23 minutes on this host. They are not the same cost, and the plan's
 "gate green" was satisfied by the local full one.
+
+## Fourth deployment, 2026-10-18 10:23 EDT - quote freshness
+
+Commits `298a096` and `3277c91`, fingerprint `53ba1c5e6d468151`, deployed with the market closed.
+
+### The baseline, measured before the change
+
+Over the 2,495 cycle records in `journal.jsonl` and its two archives, the Guardian refused for a
+stale price quote:
+
+| Day | Refusals naming a stale price quote |
+| --- | --- |
+| 2026-10-12 | 7 |
+| 2026-10-13 | 12 |
+| 2026-10-14 | 13 |
+| 2026-10-15 | 47 |
+| 2026-10-16 | 3 |
+
+82 in total, almost all of them BIL, and 47 of them inside one hour on 2026-10-15 with the reported
+age climbing from 1,172s to 4,834s across that hour - for SPY as much as for the thin symbols. SPY's
+last print is never eighty minutes old during a session, so the print *timestamp* had stopped
+advancing and the gate was refusing on the wrong fact.
+
+**A correction to this record's own earlier claim.** At one point a figure of "44 refusals a day"
+was reported. It was never measured, and it is wrong: the measured figure is 82 in total across five
+days. This section replaces that number rather than leaving both in the record, because a number
+that was never run is worse than no number - it is a claim wearing evidence's clothes.
+
+### What changed
+
+The snapshot carries three facts where two fields used to hold one: the broker's clock (`timestamp`),
+when the quote was observed (`quote_time`), and when the price printed (`price_time`). Only the first
+two gate. The account holder's decision of 2026-10-18 was to keep pricing decisions on the last trade
+rather than move them to the quote mid.
+
+The fallback is the safety-relevant part: `quote_time = quoted_at or price_time`. Without it a quote
+outage would leave the field empty, and empty means "nothing to check" in the Guardian - so the gate
+would have stopped gating exactly when the data got worse. Two tests pin that composition so it
+cannot be dropped later as redundant.
+
+Nothing is hidden. `price_time` is on the snapshot, and the decision context reports
+`last_price_source`, `last_trade_age_seconds` and `quote_age_seconds`, because the model is the one
+reader that would otherwise be unable to see how old the price it is deciding on is. Bid and ask are
+recorded as evidence of the quote and are not used to price anything.
+
+### Verified against the live broker
+
+A real snapshot with the market closed (Sunday 2026-10-18):
+
+| Symbol | last trade | bid | ask | trade age | quote age |
+| --- | --- | --- | --- | --- | --- |
+| SPY | 763.31 | 763.50 | 764.60 | 146,214s | 146,403s |
+| BIL | 91.56 | 91.55 | 91.57 | 149,099s | 145,762s |
+| TLT | 80.01 | 80.00 | 80.07 | 148,198s | 146,788s |
+
+The two feeds are demonstrably different facts, which is the whole point: SPY's quote is *older* than
+its trade, while BIL's is 3,337s - fifty-six minutes - *newer*. A gap in BIL's direction is what the
+refusals were made of.
+
+### Gate
+
+Before the deploy: `classes: 56  passed: 54  failed: 2`, both reds being the daemon running
+superseded code, which is what a deploy fixes. On the first attempt three classes were red;
+`config-comment-figures-true` (88 documented against 89 measured) was fixed rather than waived.
+
+After the deploy the two were re-checked individually rather than by a full 56-class re-run:
+`daemon-source-matches-worktree` PASS (daemon and worktree both at `53ba1c5e6d468151`),
+`make doctor` `RESULT: OK with 11 warning(s)`, `config-comment-figures-true` PASS. All four
+fingerprints agree: daemon, disk, `market-preflight.service`, `market-open-verify.service`.
+
+The next session is the first with it live, and the acceptance is that the "stale price quote"
+refusals stop appearing for symbols whose bid and ask are current.
