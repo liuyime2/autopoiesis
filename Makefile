@@ -79,7 +79,7 @@ endif
 
 .DEFAULT_GOAL := help
 .PHONY: help setup install check lint lint-files type test test-provenance-host smoke smoke-offline fast fast-no-broker daily-report benchmark broker-latency-sample \
-        verify verify-self-test doctor audit integrity classes classes-list \
+        verify verify-fast verify-self-test doctor audit integrity classes classes-list \
         install-service run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc \
         site refresh-figures benchmark-json dist release-check fresh-clone example-cycle cli-help \
         attest-archive-baseline fetch-replay-bars research-search research-run \
@@ -132,6 +132,14 @@ help:
 
 verify:
 	@$(PY) tools/verify.py $(if $(CLASS),--only $(CLASS),)
+
+# The deploy-time tier. Same gate, minus the classes that read the journalled history and the
+# bulk of the test suite - about 23 minutes down to about 2 on 2026-10-18. What it is evidence
+# for is narrower, and AGENTS.md 19 states exactly how narrow: it confirms the tree being
+# installed, not the tree's behaviour. The full gate still has to be green on the commit being
+# deployed, and the deployment record is where that is written down.
+verify-fast:
+	@$(PY) tools/verify.py --fast
 
 attest-archive-baseline:
 	@test -n "$$AUTOPOIESIS_OPERATOR_ID" || (echo "AUTOPOIESIS_OPERATOR_ID is required" >&2; exit 2)

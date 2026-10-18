@@ -771,8 +771,36 @@ def _durable_unit_dir() -> str | None:
 _RUNTIME_PRESENT_AT_START = (ROOT / "runtime" / "autopoiesis").is_dir()
 
 
+#: The classes a `--fast` run leaves out, with the reason and the measured cost. A deploy-time
+#: gate has to fit in the time an operator has at the moment of deploying, and the full gate had
+#: grown past that - about 23 minutes on 2026-10-18, which is longer than a working session and
+#: therefore a rule nobody could follow. This is not a weaker gate; it is a *different* one, and
+#: AGENTS.md 19 states what each tier is evidence for.
+#:
+#: The split is by *kind*, and the numbers below are what confirmed the kind was right:
+#:
+#:   - the journalled history: reading the accumulated journal is real work that grows with the
+#:     deployment's age, and it is not what a deploy installs. `self-evolution-closes` alone was
+#:     638s of a 1,720s run, 37%.
+#:   - the bulk of the test suite: `unit-integration` is 57 files and 582s. The tests still gate
+#:     every commit; they are what the full tier is for.
+#:
+#: Excluded by name rather than included by name, so a class added later is in the fast tier by
+#: default. The opposite choice - a list of what to run - means every new check silently escapes
+#: the tier that runs most often, which is the failure `check_all_tests_classified` exists to
+#: prevent one level down.
+FAST_TIER_EXCLUDED: dict[str, str] = {
+    "self-evolution-closes": "reads the journalled history; 638s measured 2026-10-18",
+    "unit-integration": "the bulk of the suite, 57 files; 582s measured 2026-10-18",
+    "replay-determinism": "replays history; 163s measured 2026-10-18",
+    "broker-reconciliation": "replays history; 143s measured 2026-10-18",
+    "replay-audit": "reads the journalled ledger; 44s measured 2026-10-18",
+    "screen-direction-neutral": "replays history; 18s measured 2026-10-18",
+}
+
+
 def _wanted(name: str) -> bool:
-    """Whether a check should run under `--only`.
+    """Whether a check should run under `--only` or under `--fast`.
 
     Every bespoke check was appended unconditionally, so `make verify CLASS=pnl-accounting`
     ran 34 of the gate's 45 rows and took 32 seconds - while README, Makefile help and
@@ -781,13 +809,21 @@ def _wanted(name: str) -> bool:
     the advertised use is precisely the one nobody runs on a failing build.
 
     One predicate, consulted by one wrapper, so a new bespoke check cannot forget.
+
+    `--fast` is expressed here as an exclusion rather than as an inclusion set, which is what
+    keeps `doctor` and `defect-regression-audit` in it: those two are appended only when no
+    inclusion filter is set, and a deploy-time tier that could not ask whether the daemon it
+    just restarted is healthy would be missing the one check it exists for.
     """
+    if name in _fast_run_excluded:
+        return False
     if not _partial_run_filter:
         return True
     return name in _partial_run_filter
 
 
 _partial_run_filter: set[str] = set()
+_fast_run_excluded: set[str] = set()
 
 
 def _safe(check, name: str):
@@ -806,16 +842,23 @@ def _safe(check, name: str):
     """
     if not _wanted(name):
         return None  # not requested; see _wanted
+    started = time.time()
     try:
-        return check()
+        result = check()
     except (Exception, SystemExit) as exc:  # a raising check is a failing check
         # SystemExit included: a check that calls sys.exit would otherwise terminate the
         # whole gate, which is the failure mode this wrapper exists to prevent.
-        return Result(
+        result = Result(
             name, FAIL,
             f"raised {type(exc).__name__}: {exc}. The check did not run to a verdict; "
             "every other row below is unaffected.",
         )
+    # Attributed here rather than inside each check. Only the pytest classes measured themselves,
+    # so every bespoke check reported 0.0s and the gate could not say which class was making it
+    # take longer than a working session - the split into a fast and a full tier was chosen from
+    # measurements, and a gate that cannot report its own cost cannot be split by evidence.
+    result.duration = round(time.time() - started, 1)
+    return result
 
 
 def _dated_section_ranges(text: str) -> list[tuple[int, int]]:
@@ -3731,6 +3774,9 @@ def main() -> int:
                         help="prove the gate can fail, then exit")
     parser.add_argument("--only", nargs="*", default=None,
                         help="run only these check classes")
+    parser.add_argument("--fast", action="store_true",
+                        help="the deploy-time tier: every class except the ones that read the "
+                             "journalled history or run the bulk of the test suite")
     parser.add_argument("--list", action="store_true",
                         help="print the check classes and exit")
     args = parser.parse_args()
@@ -3770,6 +3816,14 @@ def main() -> int:
               f"{len(CHECK_CLASSES)} declared in CHECK_CLASSES, "
               f"{len(bespoke_only)} appended by main() only, "
               f"{extra_rows} extra result row from syntax-import")
+        # The fast tier, printed with the cost that put each class out of it. A tier whose
+        # membership cannot be read off the tool is a tier that gets re-argued from memory.
+        fast = sorted(names - set(FAST_TIER_EXCLUDED))
+        print(f"\n{len(fast) + extra_rows} classes on a fast run (--fast): "
+              f"{len(fast)} of the {len(names)} named above, "
+              f"plus the same extra syntax-import row")
+        for name in sorted(FAST_TIER_EXCLUDED):
+            print(f"  not in the fast tier: {name:<28} {FAST_TIER_EXCLUDED[name]}")
         return 0
     if args.self_test:
         return self_test()
@@ -3799,9 +3853,13 @@ def main() -> int:
             print(f"        {len(known) + 1} classes exist; run `make classes`", file=sys.stderr)
             return 2
 
-    global _partial_run, _partial_run_filter
-    _partial_run = bool(wanted)
+    global _partial_run, _partial_run_filter, _fast_run_excluded
+    _partial_run = bool(wanted) or args.fast
     _partial_run_filter = set(wanted) if wanted else set()
+    # `--fast` excludes by name; `--only` includes by name. They compose the way an operator
+    # expects: `--only` already means "this subset", so a class the fast tier leaves out is
+    # excluded from it as well rather than re-admitted by naming it.
+    _fast_run_excluded = set(FAST_TIER_EXCLUDED) if args.fast else set()
 
     results.append(_safe(check_gpu_devices_reserved, "gpu-devices-reserved"))
     results.append(_safe(check_all_tests_classified, "test-coverage-map"))
@@ -3909,6 +3967,12 @@ def main() -> int:
         f"passed: {len(results) - len(failed)}   failed: {len(failed)}   "
         f"test executions: {executions} across {len(TEST_CLASS_MAP)} test files"
     )
+    # The cost of the gate, per class, because it had grown past the length of a working session
+    # and nothing said which class was doing it. The fast/full split (AGENTS.md 19) is defined
+    # from these numbers rather than from a guess about which checks "feel" slow - a tier chosen
+    # by feel is a tier that gets re-litigated every time someone is in a hurry.
+    slowest = sorted(results, key=lambda r: r.duration, reverse=True)[:6]
+    print("slowest: " + ", ".join(f"{r.name} {r.duration:.0f}s" for r in slowest if r.duration >= 1))
     if failed:
         print("\nFAIL - the gate is red:")
         for r in failed:

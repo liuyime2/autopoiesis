@@ -225,3 +225,47 @@ Measured 2026-10-16, and the reason the rule is written down at all: the agent's
 was pinned to GPU 0 while a second instance - started outside the unit - ran on GPU 2
 and port 11500, so two Ollama servers were competing for a device neither was
 documented as owning. A pin is only meaningful if something checks it.
+
+### 19. The gate has two tiers, and they are evidence for different things
+
+`make verify` is the full gate: all 56 classes. `make verify-fast` is the deploy-time tier: 50 of
+them.
+
+**Why two.** Measured on the deployment host on 2026-10-18: the full gate takes about 23 minutes.
+That is longer than a working session, so "the gate must be green before deploying" had stopped
+being a rule anyone could keep - and a rule that cannot be kept is not a rule, it is a preference
+that gets broken quietly. Quietly is the part that matters: the deployment record then says the gate
+passed when the gate was not run.
+
+**What each tier is evidence for, and nothing else.**
+
+- **`make verify` green on a commit** — that commit's *behaviour* is verified. Required once for
+  every commit that will be deployed, and the verdict, with the commit it was taken on, goes into
+  the deployment record.
+- **`make verify-fast` green at the moment of installing** — that the tree being installed is the
+  tree that was verified, and that the artefacts a deploy touches agree with each other: the systemd
+  units, the environment file, the daemon's source fingerprint, the figures the documents claim, and
+  the daemon's own health after the restart. It is **not** evidence about behaviour and must never be
+  quoted as if it were.
+
+A deploy therefore needs both, in that order. The fast tier is the only one that can be run inside
+the window where its answer still changes a decision.
+
+**What the fast tier leaves out, and why that is a split by kind rather than a convenient one.** It
+excludes two kinds of check, and the measured costs confirmed the kinds were the right ones:
+
+- the checks that read the **journalled history** — `self-evolution-closes` alone is 638s of the
+  run, because it replays the journal, and the journal grows with the deployment's age. That cost is
+  a property of this host's history, not of the commit being deployed.
+- the checks that run the **bulk of the test suite** — `unit-integration` is 57 files and 582s.
+
+The membership is declared as an exclusion list, `FAST_TIER_EXCLUDED` in `tools/verify.py`, so a
+class added later is in the fast tier by default. A list of what to *run* would mean every new check
+silently escapes the tier that runs most often — the same defect `check_all_tests_classified` exists
+to prevent one level down.
+
+**Three things this is not.** It is not a weaker gate: no ceiling, acceptance rule or check has been
+changed, and nothing is waived. It is not a replacement for CI, which still runs the full gate on
+every push and pull request across three Python versions — and is fast there for exactly the reason
+above, that a fresh clone has no journalled history to replay. And it is not permission to deploy on
+the fast tier alone.
