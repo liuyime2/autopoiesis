@@ -1604,6 +1604,7 @@ class AgentDaemon:
         decisions = self.lifecycle_manager.review(self.strategy_library.list(), results, evidence)
         decisions.extend(self._reconsider_paused(results, evidence))
         decisions.extend(self._drifted_reference_retirements())
+        decisions.extend(self._unproven_accumulation_retirements())
         for decision in decisions:
             self._apply_lifecycle_decision(decision)
 
@@ -1638,6 +1639,67 @@ class AgentDaemon:
                 StrategyLifecycleDecision(
                     spec, "RETIRED",
                     f"reference drifted from the market: {reason}",
+                )
+            )
+        return out
+
+    def _unproven_accumulation_retirements(self) -> list:
+        """Retire a BUY-only strategy that has spent its whole declared position budget.
+
+        Measured 2026-10-19. `fixed-size-buy-bil-001` was serving as an incumbent, buying one share
+        of a T-bill ETF every few cycles, at $19,962 of its own $25,000 `max_position_value`, with
+        26 recorded cycles and no realized outcome anywhere - and nothing in the lifecycle could end
+        it. The plan asked for exactly this decision to be the system's rather than a human's, which
+        is what `_drifted_reference_retirements` above does for a drifted reference.
+
+        Why a BUY-only spec is the right subject and not merely a convenient one: a spec whose only
+        declared action is BUY cannot close a lot, so it cannot produce a realized outcome *by
+        construction*. No amount of waiting turns it into evidence, and the screen that judges
+        strategies on decision quality keeps judging an experiment that has no result to reach.
+        Waiting is not a policy for a strategy that cannot finish.
+
+        The trigger is the strategy's *own* declared budget rather than a number invented here.
+        `max_position_value` is the limit the spec already carries and the Guardian already
+        enforces, so "the budget is spent" needs no second opinion about how much is too much - the
+        same reason the reference check above reuses admission's predicate instead of a threshold of
+        its own. Two answers to "how much may this hold" is how they start disagreeing.
+
+        What this does not do is sell. This system's exits are strategies, and BIL already has two -
+        `trend-follow-bil-001` and `trend-follow-bil-sell-001` both declare SELL and both sit
+        outside their trigger band. With the accumulator out of service the selector's only
+        actionable BIL candidate is an exit, so every BIL cycle becomes a decision about leaving
+        rather than about adding. That is the whole of the mechanism: the system ends the
+        experiment at its own budget and hands the symbol to its own exit.
+        """
+        if self.strategy_library is None:
+            return []
+        # A recorded market value that is not a number is skipped rather than coerced: this rule
+        # retires strategies, and retiring one on a guessed position size is worse than not firing.
+        book: dict[str, float] = {}
+        for row in self._open_book():
+            raw = row.get("market_value")
+            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                book[str(row.get("symbol") or "").upper()] = float(raw)
+        if not book:
+            return []
+        out = []
+        for spec in self.strategy_library.list():
+            if spec.lifecycle not in {"PROBATION", "ACTIVE"} or not spec.enabled:
+                continue
+            if str(spec.parameters.get("action") or "").upper() != "BUY":
+                continue
+            budget = spec.max_position_value
+            if not isinstance(budget, (int, float)) or isinstance(budget, bool) or budget <= 0:
+                continue
+            held = max((book.get(str(symbol).upper(), 0.0) for symbol in spec.symbols), default=0.0)
+            if held < budget:
+                continue
+            out.append(
+                StrategyLifecycleDecision(
+                    spec, "RETIRED",
+                    f"declared position budget spent: {held:.2f} of its own {budget:.2f} "
+                    "max_position_value, with no realized outcome and a BUY-only spec that cannot "
+                    "close a lot to produce one",
                 )
             )
         return out
