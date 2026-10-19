@@ -16,7 +16,10 @@ it, on the operator's machine, because it describes the system's history rather 
   `make record-deployment` runs the gate and writes what it observed to
   `docs/evidence/deployments.jsonl`; the `deploy-gate-record` class requires it, and the tier is
   written by that tool rather than typed, so a `--fast` record cannot claim it. The tool writes
-  nothing when the gate is red, so a bad install keeps its red as an unrecorded build. The order is
+  nothing when the gate is red, so a bad install keeps its red as an unrecorded build.
+  The one exception is named: `deploy-gate-record` cannot be green
+  while the record it demands is being written, and the entry stores the failing
+  classes so the exception is countable. The order is
   install, then verify, then record: `daemon-source-matches-worktree` and `doctor` are red before
   every install by construction, which makes "green before installing" unsatisfiable.
 

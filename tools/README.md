@@ -81,6 +81,8 @@ passed, and it did, on a different tree, at a different time. Only running it ca
 difference, so this runs it, and writes nothing at all when the gate is red. A ledger that can hold
 a red run gets read as "the gate was run", and that is the one thing a red run must never become.
 
+There is exactly one exception, and it is named rather than waived: `deploy-gate-record` cannot be green while the record it demands is being written, so the tool accepts a red gate whose only failing class is that one - and stores the failing classes in the entry, so a record accepted for any other reason is visible in the file instead of reading as a clean pass.
+
 `make verify` then has a class for it: `deploy-gate-record` fails when the installed fingerprint has
 no passing record from a *full* run. The tier is written by the tool rather than typed, so a
 `--fast` record cannot claim it. What the check deliberately does not do is compare the recorded

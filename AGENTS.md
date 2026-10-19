@@ -270,6 +270,8 @@ run. The tier is written by that tool rather than typed, so a `--fast` record ca
 half of the rule was prose until 2026-10-18, and prose is what gets skipped when someone is in a
 hurry.
 
+There is exactly one exception, and it is named rather than waived: `deploy-gate-record` cannot be green while the record it demands is being written, so the tool accepts a red gate whose only failing class is that one - and stores the failing classes in the entry, so a record accepted for any other reason is visible in the file instead of reading as a clean pass.
+
 **What the fast tier leaves out, and why that is a split by kind rather than a convenient one.** It
 excludes two kinds of check, and the measured costs confirmed the kinds were the right ones:
 
