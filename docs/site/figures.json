@@ -2,30 +2,30 @@
   "figures": {
     "benchmark": {
       "agent": {
-        "assumed_cost": 56.7791,
+        "assumed_cost": 56.8591,
         "capital": null,
         "comparison_reason": "agent allocation, cash flows and aligned rolling equity history are unavailable",
         "comparison_status": "UNKNOWN",
-        "diagnostic_market_return_pct": 3.163243,
+        "diagnostic_market_return_pct": 3.28101,
         "excess": null,
         "observed_fees": 0,
         "performance_contract": "agent-accounting-v1",
-        "pnl": 459.41,
-        "realized": 601.37,
+        "pnl": 500.34,
+        "realized": 601.13,
         "return_pct": null,
         "spy_pct": null,
-        "unrealized": -85.19
+        "unrealized": -43.94
       },
       "cost": {
         "assumed_round_trip_cost_pct": 0.05
       },
       "exit_code": 2,
       "record": {
-        "cycles": 3674,
+        "cycles": 3708,
         "day_count_basis": "distinct cycle dates; not continuous exchange-calendar coverage",
         "first": "2026-06-09",
-        "last": "2026-10-16",
-        "trading_days": 24
+        "last": "2026-10-19",
+        "trading_days": 25
       },
       "risk_budget": {
         "max_daily_loss": 500.0,
@@ -35,38 +35,44 @@
       },
       "strategies": [
         {
-          "excess": "+0.48",
-          "market_pct": "-0.91%",
-          "return_pct": "-0.42%",
-          "strategy_id": "fixed-size-probe-0001"
+          "excess": "+0.03",
+          "market_pct": "+0.19%",
+          "return_pct": "+0.22%",
+          "strategy_id": "fixed-size-buy-spy-001"
         },
         {
           "excess": "+0.01",
-          "market_pct": "-1.15%",
-          "return_pct": "-1.13%",
+          "market_pct": "-0.35%",
+          "return_pct": "-0.34%",
           "strategy_id": "trend-follow-20261003-001"
         },
         {
+          "excess": "+0.01",
+          "market_pct": "-0.22%",
+          "return_pct": "-0.22%",
+          "strategy_id": "trend-follow-tlt-001"
+        },
+        {
           "excess": "-0.01",
-          "market_pct": "+0.01%",
-          "return_pct": "+0.00%",
+          "market_pct": "+0.02%",
+          "return_pct": "+0.01%",
           "strategy_id": "fixed-size-buy-bil-001"
         },
         {
           "excess": "-0.03",
-          "market_pct": "+1.19%",
-          "return_pct": "+1.15%",
+          "market_pct": "+1.44%",
+          "return_pct": "+1.41%",
           "strategy_id": "fixed-size-xle-buy-001"
         },
         {
-          "excess": "-0.12",
-          "market_pct": "+0.01%",
-          "return_pct": "-0.11%",
-          "strategy_id": "trend-follow-tlt-001"
+          "excess": "-0.16",
+          "market_pct": "-0.11%",
+          "return_pct": "-0.26%",
+          "strategy_id": "fixed-size-probe-0001"
         }
       ],
       "target": {
-        "covered": 24,
+        "covered": 25,
         "met": false,
         "recorded_days_sufficient": false,
         "status": "UNKNOWN",
@@ -75,14 +81,14 @@
       }
     },
     "gate": {
-      "check_classes": 57
+      "check_classes": 58
     },
     "record": {
-      "cycles": 3674,
+      "cycles": 3709,
       "day_count_basis": "distinct cycle dates; not continuous exchange-calendar coverage",
       "first": "2026-06-09",
-      "last": "2026-10-16",
-      "trading_days": 24
+      "last": "2026-10-19",
+      "trading_days": 25
     },
     "signals": {
       "hypotheses": 129,
@@ -98,8 +104,8 @@
     },
     "tests": {
       "test_files": 115,
-      "tests": 2007
+      "tests": 2011
     }
   },
-  "generated_at": "2026-10-18T23:02:08.670104+00:00"
+  "generated_at": "2026-10-19T14:22:20.095628+00:00"
 }

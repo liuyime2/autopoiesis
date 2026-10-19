@@ -228,7 +228,7 @@ documented as owning. A pin is only meaningful if something checks it.
 
 ### 19. The gate has two tiers, and they are evidence for different things
 
-`make verify` is the full gate: all 57 classes. `make verify-fast` is the deploy-time tier: 51 of
+`make verify` is the full gate: all 58 classes. `make verify-fast` is the deploy-time tier: 52 of
 them.
 
 **Why two.** Measured on the deployment host on 2026-10-18: the full gate takes about 23 minutes.

@@ -3500,6 +3500,9 @@ BESPOKE_CHECK_NAMES = (
     # The installed build has a full-gate record: AGENTS.md 19's first half, which was a sentence
     # in a document until 2026-10-18 and is now something a deploy can fail on.
     "deploy-gate-record",
+    # The installed Ollama unit still says what the template says. Its absence cost a live
+    # session's model participation on 2026-10-19: a pin nobody compares is a pin that drifts.
+    "installed-unit-matches-the-template",
 )
 
 REPOSITORY_CHECK_CLASSES: frozenset[str] = frozenset({
@@ -3983,6 +3986,7 @@ def main() -> int:
     results.append(_safe(check_units_are_where_systemd_looks, "units-where-systemd-looks"))
     results.append(_safe(check_the_running_daemon_matches_the_worktree, "daemon-source-matches-worktree"))
     results.append(_safe(check_the_installed_build_has_a_full_gate_record, "deploy-gate-record"))
+    results.append(_safe(check_the_installed_ollama_unit_matches_the_template, "installed-unit-matches-the-template"))
     results.append(_safe(check_docs_do_not_instruct_deleted_commands, "docs-no-deleted-commands"))
     results.append(_safe(check_the_example_still_runs, "example-runs"))
     results.append(_safe(check_tools_readme_names_real_files, "tools-readme-accurate"))
@@ -4163,6 +4167,106 @@ def check_gpu_devices_reserved() -> Result:
     return Result(
         "gpu-devices-reserved", PASS,
         f"{len(pins)} GPU pin(s) within {sorted(ALLOWED_GPU_DEVICES)}: {detail}",
+    )
+
+
+def _installed_unit_path(unit: str) -> Path | None:
+    """Where systemd actually loads `unit` from, or the conventional path.
+
+    Asked of systemd rather than assumed, because the answer is what a *runtime* sees - and this
+    host has already been bitten by a unit installed where the manager does not look.
+    """
+    if shutil.which("systemctl"):
+        try:
+            proc = subprocess.run(
+                ["systemctl", "--user", "show", unit, "-p", "FragmentPath", "--value"],
+                capture_output=True, text=True, timeout=15,
+            )
+            path = proc.stdout.strip()
+            if proc.returncode == 0 and path:
+                return Path(path)
+        except Exception:
+            pass
+    candidate = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "systemd" / "user" / unit
+    return candidate if candidate.is_file() else None
+
+
+def _environment_pairs(path: Path, *, skip_placeholders: bool = False) -> dict[str, str]:
+    """`Environment=` lines as a mapping.
+
+    Placeholders are skipped on the template side: `@OLLAMA_BIN@` and `@OLLAMA_MODELS@` are
+    substituted at install time, so requiring the installed unit to carry the literal placeholder
+    would fail on every correct installation.
+    """
+    pairs: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("Environment="):
+            continue
+        body = line[len("Environment="):].strip()
+        if "=" not in body:
+            continue
+        key, value = body.split("=", 1)
+        value = value.strip().strip('"')
+        if skip_placeholders and "@" in value:
+            continue
+        pairs[key.strip()] = value
+    return pairs
+
+
+def check_the_installed_ollama_unit_matches_the_template() -> Result:
+    """The installed Ollama unit must carry every environment value the template declares.
+
+    Measured 2026-10-19, and it cost a live session's model participation to learn. The installed
+    unit pinned `CUDA_VISIBLE_DEVICES=4` while `tools/ollama.service.in` declares `2,3`. GPU 4 was
+    43,907 of 46,080 MiB used, so the model loaded 13.5 of its 18.1 GB into VRAM and left the rest to
+    the CPU - and every decision call then timed out at 120s and fell back to the rule engine. The
+    preflight failed with MODEL_RESPONSE_NOT_OBSERVED, 24 curriculum calls had timed out overnight,
+    and nothing anywhere said "the unit disagrees with the template".
+
+    `gpu-devices-reserved` could not catch it: that class asks whether a pin names a *reserved*
+    device, and GPU 4 is not reserved. The question that was missing is whether the installed unit
+    still says what this repository says it should.
+
+    Compared key by key rather than line by line, so the installed unit may carry values the
+    template does not mention - this host's unit also sets `CUDA_DEVICE_ORDER=PCI_BUS_ID`, which the
+    template does not, and which is load-bearing. What may not happen is a template value being
+    different on disk, which is exactly the shape of the defect.
+    """
+    template = ROOT / "tools" / "ollama.service.in"
+    if not template.is_file():
+        return Result("installed-unit-matches-the-template", SKIP, "no ollama.service.in in this checkout")
+    installed = _installed_unit_path("ollama.service")
+    if installed is None or not installed.is_file():
+        return Result(
+            "installed-unit-matches-the-template", SKIP,
+            "no installed ollama.service; there is nothing this checkout installed to compare with",
+        )
+    declared = _environment_pairs(template, skip_placeholders=True)
+    if not declared:
+        return Result(
+            "installed-unit-matches-the-template", SKIP,
+            "the template declares no environment values; nothing to compare",
+        )
+    actual = _environment_pairs(installed)
+    differing = {
+        key: (value, actual.get(key))
+        for key, value in declared.items()
+        if actual.get(key) != value
+    }
+    if differing:
+        detail = "; ".join(
+            f"{key}: template {value!r} but installed {found!r}"
+            for key, (value, found) in sorted(differing.items())
+        )
+        return Result(
+            "installed-unit-matches-the-template", FAIL,
+            f"{installed} disagrees with tools/ollama.service.in on {len(differing)} value(s): {detail}. "
+            "Reinstall the unit from the template; a pin the template does not have is a runtime "
+            "this repository is not verifying",
+        )
+    return Result(
+        "installed-unit-matches-the-template", PASS,
+        f"{installed} carries all {len(declared)} value(s) tools/ollama.service.in declares",
     )
 
 

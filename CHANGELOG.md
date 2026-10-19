@@ -7,7 +7,13 @@ it, on the operator's machine, because it describes the system's history rather 
 
 ## Unreleased
 
-- The gate has two tiers. `make verify-fast` runs 51 of the 57 classes in about four minutes and
+- The gate has a class that compares the installed `ollama.service` with `tools/ollama.service.in`
+  value by value. Its absence cost a live session's model participation on 2026-10-19: the installed
+  unit pinned GPU 4 while the template declares 2,3, GPU 4 was 95% full, the model half-loaded onto
+  the CPU, and every decision timed out at 120s into the rule-engine fallback - with nothing
+  anywhere saying the unit disagreed with the template. `gpu-devices-reserved` could not see it,
+  because GPU 4 is not a reserved device.
+- The gate has two tiers. `make verify-fast` runs 52 of the 58 classes in about four minutes and
   is what a deploy runs at install time; `make verify` runs all 57 and is what CI runs on every
   push and pull request. AGENTS.md 19 states what each is evidence for, because the full gate had
   grown to about 23 minutes on the deployment host - longer than a working session, which had made
@@ -36,7 +42,7 @@ was produced by running a command on this host, and the command is named so it c
 
 ### Verified on this build
 
-- The gate: `make verify` reports **57 check classes, 0 failed**, over 1859 test executions in 81
+- The gate: `make verify` reports **58 check classes, 0 failed**, over 1859 test executions in 81
   files. `pytest` reports **1183 passed**; `ruff check src/ tools/ tests/ examples/` and
   `mypy src/autopoiesis` are clean.
 - The credential-free path claimed by the README quick start. In a fresh clone at this tag, with
@@ -131,7 +137,7 @@ was produced by running a command on this host, and the command is named so it c
   rewritten.
 - `autopoiesis` and `make` run in a plain venv; conda is optional.
 - CI runs mypy, matching `make check`.
-- The gate has 57 check classes. `fact-docs-current`, which made archived audit documents
+- The gate has 58 check classes. `fact-docs-current`, which made archived audit documents
   restate live counts, is retired; `screen-direction-neutral` is new.
 - The offline screen reads each strategy against what its days alone would have scored,
   rejecting only when it is worse beyond noise.
