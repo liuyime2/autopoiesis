@@ -70,3 +70,31 @@ def test_an_owner_history_ingest_is_not_mistaken_for_the_latest_evidence_batch(t
             status="SUCCESS", message="m", payload=payload,
         ))
     assert latest_evidence_batch(journal) == batch
+
+
+def test_a_failed_ingest_after_a_good_batch_is_not_mistaken_for_the_latest_batch(tmp_path):
+    """The failure shares the event type as well, and it is written *after* the batch that worked.
+
+    Measured 2026-10-18: a journal holding 92 SUCCESS and 7 PARTIAL batches with one FAILED event
+    at the end read as 0 closed lots and $0.00 against a naive 47 and $757.95, because the reader
+    took the last event of the type instead of the most recent batch. That failed `replay-audit`'s
+    own invariant on a journal that was correct - the figures were blanked on the one day an
+    ingest had failed, which is the day they matter most.
+    """
+    from uuid import uuid4
+
+    from autopoiesis.broker_evidence import latest_evidence_batch
+    from autopoiesis.journal import JsonlJournal
+    from autopoiesis.models import BrokerEvidenceBatch, JournalEvent
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    batch = BrokerEvidenceBatch(generated_at=T0, window_start=T0, window_end=T0, status="SUCCESS")
+    journal.append_event(JournalEvent(
+        event_id=str(uuid4()), event_type="BROKER_EVIDENCE_INGESTED", timestamp=T0,
+        status="SUCCESS", message="success", payload=batch.model_dump(mode="json"),
+    ))
+    journal.append_event(JournalEvent(
+        event_id=str(uuid4()), event_type="BROKER_EVIDENCE_INGESTED", timestamp=T0,
+        status="FAILED", message="TimeoutError", payload={"error_type": "TimeoutError"},
+    ))
+    assert latest_evidence_batch(journal) == batch

@@ -310,13 +310,24 @@ def latest_evidence_batch(journal) -> BrokerEvidenceBatch | None:
         return None
     # The owner-history ingest shares the event type but is not a window batch; reading it
     # as one returned None and blanked every PnL figure built on "the latest batch".
-    events = [
-        e for e in journal.read_events("BROKER_EVIDENCE_INGESTED")
-        if "owner_fills" not in (e.payload or {})
-    ]
-    if not events:
-        return None
-    try:
-        return BrokerEvidenceBatch.model_validate(events[-1].payload)
-    except Exception:
-        return None
+    #
+    # So does a *failure*. `_ingest_broker_evidence` writes this same event type with
+    # `status="FAILED"` and a payload of `{"error_type": ...}`, and the first version of this
+    # reader took the last event of the type and gave up if it did not validate - so one
+    # timed-out ingest blanked every figure built on the latest batch. Measured 2026-10-18:
+    # 92 SUCCESS and 7 PARTIAL batches were on record with a single FAILED event after them,
+    # and `replay-audit` read the ledger as 0 closed lots and $0.00 against a naive 47 and
+    # $757.95 - failing its own invariant on a journal that was correct.
+    #
+    # It now looks for the most recent *batch*, which is what this function has always said it
+    # returns. The last event of the type is not the same thing, and the difference only shows
+    # up on the day something fails, which is the day the figures matter most.
+    for event in reversed(journal.read_events("BROKER_EVIDENCE_INGESTED")):
+        payload = event.payload or {}
+        if "owner_fills" in payload:
+            continue
+        try:
+            return BrokerEvidenceBatch.model_validate(payload)
+        except Exception:
+            continue
+    return None
