@@ -230,6 +230,23 @@ class AgentDaemon:
                     self._maintenance()
                 except Exception as exc:
                     self.error_count += 1
+                    # Journalled as well as heartbeaten. The heartbeat is overwritten within
+                    # minutes, so this increment used to leave a counter with no recoverable
+                    # cause - and that is what happened on 2026-10-19: `error_count` read 1 and
+                    # nothing anywhere said which maintenance step had failed, or when, or with
+                    # what exception. An error counter whose cause disappears is a number that
+                    # teaches an operator to ignore it.
+                    #
+                    # The write is guarded because a health path must not be the thing that kills
+                    # the daemon: if the journal cannot take the record, the heartbeat below still
+                    # carries it, and the loop continues trading.
+                    try:
+                        self._append_event(
+                            "CYCLE_FAILED", status="FAILED",
+                            message=f"maintenance: {type(exc).__name__}: {exc}",
+                        )
+                    except Exception:
+                        pass
                     self._heartbeat(
                         "BACKING_OFF",
                         f"maintenance error, continuing to trade: "
