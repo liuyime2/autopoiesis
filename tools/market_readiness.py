@@ -291,9 +291,25 @@ def _session_evidence(daemon, records, events, state, opened, closed, after, now
         _require(snapshot.quote_time is not None and not daemon.loop.guardian._is_stale(snapshot, now=_timestamp(snapshot.timestamp)), "SESSION_QUOTE_NOT_FRESH")
         _require(not record.error and execution.status not in {"ERROR", "SUBMISSION_UNKNOWN", "REPLAYED"}, "SESSION_EXECUTION_ERROR")
         attributed = eligibility(record) == "ELIGIBLE"
+        # Two markers mean the same thing here, and only one was accepted.
+        #
+        # `selection_unavailable:` is what the engine writes when no strategy matched at all.
+        # `no_strategy:` is what it writes for a symbol no strategy covers - the uncovered-symbol
+        # path. Both produce a HOLD with no strategy, no provenance, no order and a SKIPPED
+        # execution, so both are abstentions rather than evidence about the model. Accepting only
+        # the first made this check fail on any session that asked the model about an uncovered
+        # symbol, which is every session now that `universe=tradable` with four attention slots.
+        #
+        # Measured 2026-10-19: 18 of the day's 27 records were `no_strategy:` abstentions, and
+        # `market-open-verify` failed at 09:45 with SESSION_PROVENANCE_INVALID on a session whose
+        # guardian approved all 25 of its decisions and placed only allowlisted orders.
+        #
+        # This is not a loosening. Every other conjunct still holds: HOLD, quantity zero, no
+        # strategy id, no provenance, SKIPPED. A record with any of those wrong is still refused.
+        abstention = decision.rationale.startswith(("selection_unavailable:", "no_strategy:"))
         safe = (decision.action == "HOLD" and decision.quantity == 0 and decision.strategy_id is None
                 and record.strategy_id is None and decision.strategy_provenance is None
-                and decision.rationale.startswith("selection_unavailable:") and execution.status == "SKIPPED")
+                and abstention and execution.status == "SKIPPED")
         _require(attributed or safe, "SESSION_PROVENANCE_INVALID")
         if safe:
             report["safe_unattributed_abstentions"] += 1
