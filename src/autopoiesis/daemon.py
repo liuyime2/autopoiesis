@@ -33,6 +33,25 @@ from autopoiesis.llm_decision import LLM_UNAVAILABLE_MARKER
 #: How many candidates the model is offered when choosing the watchlist. Wider than the
 #: slots so the choice is a choice; bounded so the prompt stays small.
 ATTENTION_CANDIDATES = 40
+
+#: How many symbols a round decides that nothing can act on, beyond the ones it always decides.
+#:
+#: Measured 2026-10-19 across the first session with a working model: a round decided 6 configured
+#: symbols plus 4 watchlist picks, at about 1.62 minutes of wall time per symbol, so every symbol
+#: was decided roughly every 16 minutes - and `_round_sleep_seconds` already documents the same
+#: arithmetic from the six-symbol era ("each symbol thirteen minutes apart").
+#:
+#: The account holder's instruction was that any symbol may appear and anything may be searched,
+#: but that the ones which meet the bar get special attention. So the bar is not "in the list",
+#: it is "a decision here can change something": the symbol has a serving strategy, or the account
+#: holds it. Those are decided every round. Everything else - a pick the model made, or a
+#: configured symbol with no serving strategy and no position - still appears, and still gets
+#: decided, but on a rotation, so four picks cannot push the cadence of the five that matter past
+#: the point where the agent stops reacting to them.
+#:
+#: One, not two: five qualifying symbols at 1.62 minutes is 8.1, and two discoveries put the round
+#: at 11.3 - past the ten minutes the review asked for. One keeps it at 9.7.
+DISCOVERY_SYMBOLS_PER_ROUND = 1
 from autopoiesis import attention
 from autopoiesis.loop import FAIL_CLOSED_RATIONALE
 from autopoiesis.models import (
@@ -1898,8 +1917,10 @@ class AgentDaemon:
         if gateway is None:
             return symbols
         seen = set(symbols)
+        held_symbols: set[str] = set()
         try:
             for held in gateway.held_symbols():
+                held_symbols.add(str(held).upper())
                 if held not in seen:
                     symbols.append(held)
                     seen.add(held)
@@ -1939,7 +1960,43 @@ class AgentDaemon:
                 },
             )
             symbols += [s for s in choice.symbols if s not in seen]
-        return symbols
+        return self._prioritise_round(symbols, held_symbols)
+
+    def _prioritise_round(self, symbols: list[str], held_symbols: set[str]) -> list[str]:
+        """Decide what can change something every round; rotate the rest.
+
+        This is the account holder's "any symbol may appear, but the ones that meet the bar get
+        special attention", with the bar taken from the system's own records rather than invented:
+        a symbol qualifies if a serving strategy covers it or the account holds it, because in
+        either case a decision there can change something. Everything else is still a symbol the
+        model chose or the operator configured, so it is not dropped - it rotates, which keeps it
+        in front of the model without letting four picks set the cadence of the five that matter.
+        """
+        served: set[str] = set()
+        library = getattr(self, "strategy_library", None)
+        if library is not None:
+            try:
+                for spec in library.list():
+                    if spec.enabled and spec.lifecycle not in {"PAUSED", "RETIRED"}:
+                        served.update(str(symbol).upper() for symbol in (spec.symbols or ()))
+            except Exception:
+                # An unreadable library is a reason to treat nothing as served, not to guess: the
+                # rotation below then applies to everything, which shortens the round rather than
+                # lengthening it.
+                served = set()
+        priority: list[str] = []
+        rest: list[str] = []
+        for symbol in symbols:
+            key = str(symbol).upper()
+            (priority if (key in served or key in held_symbols) else rest).append(symbol)
+        if not priority:
+            # Nothing is served and nothing is held: there is nothing to protect, so the round is
+            # whatever the library and the model asked for. Rotation would hide symbols for no gain.
+            return symbols
+        if len(rest) > DISCOVERY_SYMBOLS_PER_ROUND:
+            start = self.cycle_count % len(rest)
+            rest = [rest[(start + offset) % len(rest)] for offset in range(DISCOVERY_SYMBOLS_PER_ROUND)]
+        return priority + rest
 
     def _round_sleep_seconds(self, elapsed: float) -> int:
         """The rest of the trading interval, counted from the start of the round.

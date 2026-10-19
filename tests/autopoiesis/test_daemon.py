@@ -527,6 +527,47 @@ def test_a_buy_only_strategy_that_spent_its_budget_is_retired(tmp_path):
     assert "budget spent" in decisions[0].reason
 
 
+def test_the_round_decides_what_can_change_every_time_and_rotates_the_rest():
+    """Any symbol may appear; the ones that meet the bar get special attention.
+
+    The bar is the system's own record rather than a list: a symbol qualifies when a serving
+    strategy covers it or the account holds it, because in either case a decision there can change
+    something. Everything else still appears - it rotates - but cannot set the cadence of the five
+    that matter. Measured 2026-10-19: a 10-symbol round at 1.62 minutes per symbol decided every
+    symbol about every 16 minutes.
+    """
+    from types import SimpleNamespace
+
+    class Library:
+        def __init__(self, symbols):
+            self._specs = [
+                SimpleNamespace(strategy_id="s-" + symbol, symbols=(symbol,), enabled=True, lifecycle="PROBATION")
+                for symbol in symbols
+            ]
+        def list(self):
+            return list(self._specs)
+
+    daemon = AgentDaemon.__new__(AgentDaemon)
+    daemon.strategy_library = Library(["SPY", "BIL", "TLT", "XLE"])
+    daemon.cycle_count = 0
+
+    round_input = ["SPY", "BIL", "TLT", "XLB", "XLE", "XLF", "NVDA", "TQQQ", "VXX", "IBIT"]
+    held = {"SPY", "BIL", "TLT", "XLE", "XLB"}
+
+    seen_rest = set()
+    for cycle in range(5):
+        daemon.cycle_count = cycle
+        decided = daemon._prioritise_round(round_input, held)
+        # The five that can change something are decided every round, without exception.
+        assert {"SPY", "BIL", "TLT", "XLE", "XLB"} <= set(decided), decided
+        # One rotating symbol beyond them, not the five the model and the operator also named.
+        rest = [s for s in decided if s not in {"SPY", "BIL", "TLT", "XLE", "XLB"}]
+        assert len(rest) == 1, decided
+        seen_rest.add(rest[0])
+    # Rotation is what keeps "any symbol may appear" true over a few rounds rather than in one.
+    assert seen_rest == {"XLF", "NVDA", "TQQQ", "VXX", "IBIT"}, seen_rest
+
+
 def test_the_curriculum_stage_fits_the_heartbeat_budget(tmp_path):
     """No single maintenance stage may outlive the staleness budget.
 
