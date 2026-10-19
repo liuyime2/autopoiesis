@@ -277,3 +277,69 @@ fingerprints agree: daemon, disk, `market-preflight.service`, `market-open-verif
 
 The next session is the first with it live, and the acceptance is that the "stale price quote"
 refusals stop appearing for symbols whose bid and ask are current.
+
+## The 2026-10-19 open: the preflight failed, and why
+
+The first scheduled pre-open check of the day, `market-preflight.service` at 08:45, **failed**:
+
+```
+{"diagnostics": ["MODEL_RESPONSE_NOT_OBSERVED"], "exit_code": 1, "phase": "preopen",
+ "status": "FAIL", "observed_at": "2026-10-19T12:45:26Z"}
+```
+
+with a preview of `decision_source: "fallback_policy_engine"` and `model_response_observed: false` -
+the agent had fallen back to the rule engine because the model never answered.
+
+**Root cause, measured rather than guessed.** The installed `ollama.service` pinned
+`CUDA_VISIBLE_DEVICES=4`, while this repository's own template `tools/ollama.service.in` declares
+`CUDA_VISIBLE_DEVICES=2,3` (moved there on 2026-10-16 at the account holder's request, per the
+template's own comment). GPU 4 was **43,907 MiB of 46,080 used** - 95% - and the model therefore
+loaded only **13,534,337,431 of 18,133,664,395 bytes into VRAM**, leaving ~4.8 GiB to the CPU:
+
+| Measurement | Value |
+| --- | --- |
+| `engine.decide` with a realistic context | **ReadTimeout at 120.1s**, twice, warm |
+| `/api/ps` | `size_vram` 13.5 GB of 18.1 GB, ~26% offloaded |
+| `nvidia-smi` GPU 4 | 43,907 / 46,080 MiB used |
+| `ollama serve` processes on this host | 12 |
+
+So the decision path's 120s timeout sat inside a cold-or-partially-offloaded inference, and every
+call in that state failed to the fallback engine. The template already documents this exact failure
+mode - "Unloaded, the next call must first read ~16.3 GiB of weights off the model store, measured at
+~3 minutes of load against a 120s client timeout" - but a *pin* is only meaningful if something
+checks it, and the gate's `gpu-devices-reserved` class checks only that a pin names an allowed
+device. It does not check that the installed unit agrees with the template, which is how the
+divergence survived.
+
+**Fix.** Restored the template's value on the installed unit and restarted Ollama:
+
+```
+Environment=CUDA_VISIBLE_DEVICES=2,3
+```
+
+Measured after, with the model resident on GPUs 2 and 3:
+
+| Measurement | Before | After |
+| --- | --- | --- |
+| Model load | 68.6s | **26.5s** |
+| `size_vram` / `size` | 13.5 / 18.1 GB (74%) | **18.3 / 18.3 GB (100%)** |
+| Decision call 1 / 2 / 3 | 120.1s ReadTimeout, twice | **77.5s / 33.1s / 26.3s**, all `decision_source=llm` |
+| GPU 4 used | 43,907 MiB | **29,369 MiB** - ~14.5 GB returned to the work that owns it |
+
+Then the preflight was re-run inside the same window (`now < opened`, market still closed) and
+passed:
+
+```
+{"diagnostics": [], "exit_code": 0, "phase": "preopen", "status": "READY"}
+preview: model_response_observed=True, decision_source=llm, action=BUY
+```
+
+Both reports are on record - `20261019T124941339654Z-preopen.json` (FAIL) and
+`20261019T130456632845Z-preopen.json` (READY) - because a check that failed and was then fixed is
+worth more as two files than as one.
+
+**Not yet fixed, and named so it is not forgotten.** The gate still cannot see a divergence between
+`tools/ollama.service.in` and the installed unit; only the *allowed set* is checked. Until a class
+compares the two, this can happen again the next time something rewrites the unit, and the symptom
+will be a silently slower model rather than an error.
+
