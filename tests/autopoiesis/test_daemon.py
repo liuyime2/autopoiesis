@@ -481,52 +481,6 @@ def test_daemon_market_closed_does_not_consume_cycle(tmp_path):
     assert daemon.daily_cycle_count == 0
 
 
-def test_a_buy_only_strategy_that_spent_its_budget_is_retired(tmp_path):
-    """The system ends an accumulation it can never turn into evidence.
-
-    Measured 2026-10-19: `fixed-size-buy-bil-001` was serving as an incumbent at $19,962 of its own
-    $25,000 budget, 26 cycles in, with no realized outcome anywhere - and nothing in the lifecycle
-    could end it. A BUY-only spec cannot close a lot, so no amount of waiting produces a result for
-    the screen to judge.
-
-    The trigger is the strategy's *own* declared budget, not a number invented for this rule: that
-    is the same reason the reference check reuses admission's predicate rather than a threshold of
-    its own. Two answers to "how much may this hold" is how they start disagreeing.
-    """
-    def spec(sid, action, symbols, budget, lifecycle="PROBATION"):
-        return StrategySpec(
-            strategy_id=sid, name=sid, kind="FIXED_SIZE", symbols=symbols,
-            parameters={"action": action, "quantity": 1, "confidence": 0.5},
-            max_position_value=budget, lifecycle=lifecycle,
-            created_at=datetime.now(tz=timezone.utc), rationale="t",
-        )
-
-    class Library:
-        def __init__(self, specs): self._specs = specs
-        def list(self): return list(self._specs)
-
-    daemon = AgentDaemon.__new__(AgentDaemon)
-    daemon.strategy_library = Library([
-        spec("spent-buy", "BUY", ("BIL",), 25000.0),
-        spec("under-budget", "BUY", ("TLT",), 25000.0),
-        spec("exit", "SELL", ("BIL",), 25000.0),
-        spec("no-position", "BUY", ("XLE",), 100.0),
-        spec("already-out", "BUY", ("BIL",), 25000.0, lifecycle="RETIRED"),
-    ])
-    daemon._open_book = lambda: [
-        {"symbol": "BIL", "quantity": 273, "market_value": 25000.0},
-        {"symbol": "TLT", "quantity": 10, "market_value": 800.0},
-    ]
-
-    decisions = daemon._unproven_accumulation_retirements()
-
-    # Exactly the accumulator whose budget is spent: not the one still under it, not the SELL that
-    # is this system's way of exiting, not a symbol holding nothing, and not one already out.
-    assert {d.strategy.strategy_id for d in decisions} == {"spent-buy"}, decisions
-    assert decisions[0].new_lifecycle == "RETIRED"
-    assert "budget spent" in decisions[0].reason
-
-
 def test_the_round_decides_what_can_change_every_time_and_rotates_the_rest():
     """Any symbol may appear; the ones that meet the bar get special attention.
 

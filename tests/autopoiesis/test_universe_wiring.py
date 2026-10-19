@@ -93,7 +93,10 @@ def test_a_round_covers_configured_then_held_then_attention_symbols_without_dupl
     assert _daemon("allowlist", 4)._round_symbols() == ["SPY", "QQQ"]
     assert _daemon("account", 4)._round_symbols() == ["SPY", "QQQ", "TLT"]            # attention needs `tradable`
     got = _daemon("tradable", 4, held=("TLT", "SPY"), attention=("AAA", "BBB"))._round_symbols()
-    assert got == ["SPY", "QQQ", "TLT", "AAA", "BBB"] and len(set(got)) == len(got)
+    # Configured and held symbols are decided every round; the watchlist fills one rotating slot.
+    # Measured 2026-10-19: with every pick in every round, ten symbols at 1.75 minutes each decided
+    # every symbol every 17.5 minutes, which is the cadence problem the rotation exists to fix.
+    assert got == ["SPY", "QQQ", "TLT", "AAA"] and len(set(got)) == len(got)
 
 
 def test_a_broker_failure_narrows_the_round_instead_of_stopping_it():
@@ -148,6 +151,12 @@ def test_a_model_that_does_not_answer_still_leaves_a_usable_watchlist():
 
     symbols = d._round_symbols()
 
-    assert "AAA" in symbols and "BBB" in symbols, f"the mechanical list must stand: {symbols}"
+    assert {"SPY", "QQQ", "TLT"} <= set(symbols), (
+        f"the configured and held symbols must stand whatever the model does: {symbols}"
+    )
+    others = [s for s in symbols if s not in {"SPY", "QQQ", "TLT"}]
+    assert len(others) == 1, (
+        f"one mechanical attention pick belongs in the round, not all of them: {symbols}"
+    )
     assert events[0][1]["payload"]["source"] == "mechanical"
     assert "TimeoutError" in events[0][1]["payload"]["note"]

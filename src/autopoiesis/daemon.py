@@ -1640,7 +1640,6 @@ class AgentDaemon:
         decisions = self.lifecycle_manager.review(self.strategy_library.list(), results, evidence)
         decisions.extend(self._reconsider_paused(results, evidence))
         decisions.extend(self._drifted_reference_retirements())
-        decisions.extend(self._unproven_accumulation_retirements())
         for decision in decisions:
             self._apply_lifecycle_decision(decision)
 
@@ -1675,67 +1674,6 @@ class AgentDaemon:
                 StrategyLifecycleDecision(
                     spec, "RETIRED",
                     f"reference drifted from the market: {reason}",
-                )
-            )
-        return out
-
-    def _unproven_accumulation_retirements(self) -> list:
-        """Retire a BUY-only strategy that has spent its whole declared position budget.
-
-        Measured 2026-10-19. `fixed-size-buy-bil-001` was serving as an incumbent, buying one share
-        of a T-bill ETF every few cycles, at $19,962 of its own $25,000 `max_position_value`, with
-        26 recorded cycles and no realized outcome anywhere - and nothing in the lifecycle could end
-        it. The plan asked for exactly this decision to be the system's rather than a human's, which
-        is what `_drifted_reference_retirements` above does for a drifted reference.
-
-        Why a BUY-only spec is the right subject and not merely a convenient one: a spec whose only
-        declared action is BUY cannot close a lot, so it cannot produce a realized outcome *by
-        construction*. No amount of waiting turns it into evidence, and the screen that judges
-        strategies on decision quality keeps judging an experiment that has no result to reach.
-        Waiting is not a policy for a strategy that cannot finish.
-
-        The trigger is the strategy's *own* declared budget rather than a number invented here.
-        `max_position_value` is the limit the spec already carries and the Guardian already
-        enforces, so "the budget is spent" needs no second opinion about how much is too much - the
-        same reason the reference check above reuses admission's predicate instead of a threshold of
-        its own. Two answers to "how much may this hold" is how they start disagreeing.
-
-        What this does not do is sell. This system's exits are strategies, and BIL already has two -
-        `trend-follow-bil-001` and `trend-follow-bil-sell-001` both declare SELL and both sit
-        outside their trigger band. With the accumulator out of service the selector's only
-        actionable BIL candidate is an exit, so every BIL cycle becomes a decision about leaving
-        rather than about adding. That is the whole of the mechanism: the system ends the
-        experiment at its own budget and hands the symbol to its own exit.
-        """
-        if self.strategy_library is None:
-            return []
-        # A recorded market value that is not a number is skipped rather than coerced: this rule
-        # retires strategies, and retiring one on a guessed position size is worse than not firing.
-        book: dict[str, float] = {}
-        for row in self._open_book():
-            raw = row.get("market_value")
-            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-                book[str(row.get("symbol") or "").upper()] = float(raw)
-        if not book:
-            return []
-        out = []
-        for spec in self.strategy_library.list():
-            if spec.lifecycle not in {"PROBATION", "ACTIVE"} or not spec.enabled:
-                continue
-            if str(spec.parameters.get("action") or "").upper() != "BUY":
-                continue
-            budget = spec.max_position_value
-            if not isinstance(budget, (int, float)) or isinstance(budget, bool) or budget <= 0:
-                continue
-            held = max((book.get(str(symbol).upper(), 0.0) for symbol in spec.symbols), default=0.0)
-            if held < budget:
-                continue
-            out.append(
-                StrategyLifecycleDecision(
-                    spec, "RETIRED",
-                    f"declared position budget spent: {held:.2f} of its own {budget:.2f} "
-                    "max_position_value, with no realized outcome and a BUY-only spec that cannot "
-                    "close a lot to produce one",
                 )
             )
         return out
@@ -1983,12 +1921,15 @@ class AgentDaemon:
         """Decide what can change something every round; rotate the rest.
 
         This is the account holder's "any symbol may appear, but the ones that meet the bar get
-        special attention", with the bar taken from the system's own records rather than invented:
-        a symbol qualifies if a serving strategy covers it or the account holds it, because in
-        either case a decision there can change something. Everything else is still a symbol the
-        model chose or the operator configured, so it is not dropped - it rotates, which keeps it
-        in front of the model without letting four picks set the cadence of the five that matter.
+        special attention". The bar combines the operator's baseline with the system's own records:
+        a symbol is decided every round when it is configured, when a serving strategy covers it,
+        or when the account holds it - the first is intent, the other two are cases where a decision
+        can change something. What rotates is the *discovery* set: the watchlist picks the model
+        made, which are not otherwise in the round. Those still appear, taking turns, which is what
+        keeps "any symbol may appear" true over a few rounds rather than in one.
         """
+        config = getattr(self, "config", None)
+        configured = {str(symbol).upper() for symbol in (getattr(config, "symbols", ()) or ())}
         served: set[str] = set()
         library = getattr(self, "strategy_library", None)
         if library is not None:
@@ -2005,13 +1946,20 @@ class AgentDaemon:
         rest: list[str] = []
         for symbol in symbols:
             key = str(symbol).upper()
-            (priority if (key in served or key in held_symbols) else rest).append(symbol)
+            (priority if (key in configured or key in served or key in held_symbols) else rest).append(symbol)
         if not priority:
-            # Nothing is served and nothing is held: there is nothing to protect, so the round is
+            # Nothing is configured, served or held: there is nothing to protect, so the round is
             # whatever the library and the model asked for. Rotation would hide symbols for no gain.
             return symbols
         if len(rest) > DISCOVERY_SYMBOLS_PER_ROUND:
-            start = self.cycle_count % len(rest)
+            # `getattr`, because two construction paths never run `__init__`: the tests build an
+            # instance with `__new__` and set only the fields a path needs, and the replay drives
+            # the same daemon without a cycle counter. Reading the attribute directly raised
+            # AttributeError inside the round, which in the replay meant no cycles at all - and the
+            # gate reported that as "the screen never scored a decision", two classes away from
+            # the line that caused it.
+            cycle = int(getattr(self, "cycle_count", 0) or 0)
+            start = cycle % len(rest)
             rest = [rest[(start + offset) % len(rest)] for offset in range(DISCOVERY_SYMBOLS_PER_ROUND)]
         return priority + rest
 
