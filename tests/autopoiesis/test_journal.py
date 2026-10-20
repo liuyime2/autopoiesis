@@ -185,7 +185,9 @@ def test_a_held_lock_fails_loudly_instead_of_hanging(tmp_path):
     from autopoiesis.atomicio import file_lock
 
     lock_path = tmp_path / "x.lock"
-    with file_lock(lock_path, exclusive=True), pytest.raises(TimeoutError) as caught:
+    # Nested on purpose: the outer acquisition is what makes the inner one fail, so they
+    # cannot be one flat `with` - entering both before the body would test nothing.
+    with file_lock(lock_path, exclusive=True), pytest.raises(TimeoutError) as caught:  # noqa: SIM117
         with file_lock(lock_path, exclusive=True, timeout=0.2):
             pass
     assert str(lock_path.name) in str(caught.value), "the message must name the lock that could not be taken"
