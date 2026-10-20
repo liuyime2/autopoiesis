@@ -124,6 +124,73 @@ def test_the_read_lock_is_released_before_records_are_parsed(tmp_path, monkeypat
     )
 
 
+def test_a_writer_appends_while_a_reader_is_parsing(tmp_path, monkeypatch):
+    """The property the parse-outside-the-lock change exists for, tested at the worst moment.
+
+    Measured 2026-10-20: a readiness check scanning 3,892 cycles held the shared lock through every
+    pydantic validation, so the daemon could not take the exclusive lock within its ten seconds and
+    recorded `TimeoutError: could not acquire lock`. Here the append is attempted from inside a record
+    validator - if the lock were still held, it would block for its timeout and raise.
+    """
+    from autopoiesis import journal as journal_module
+
+    path = tmp_path / "journal.jsonl"
+    journal = JsonlJournal(path)
+    journal.append(make_event())
+    writer = JsonlJournal(path)
+
+    real_lock = journal_module.file_lock
+
+    @contextmanager
+    def short_lock(lock_path, *, exclusive=True, timeout=10.0):
+        # One second for a writer: long enough for a released lock, short enough that a held one
+        # fails this test in a second rather than ten.
+        with real_lock(lock_path, exclusive=exclusive, timeout=1.0):
+            yield
+
+    monkeypatch.setattr(journal_module, "file_lock", short_lock)
+
+    outcome: dict[str, str] = {}
+    original = journal_module.JournalEvent.model_validate_json
+
+    @classmethod
+    def appending(cls, *args, **kwargs):
+        if not outcome:
+            try:
+                writer.append_event(make_event("CURRICULUM_FAILED"))
+                outcome["append"] = "ok"
+            except Exception as exc:  # the failure IS the finding, so it is reported not raised
+                outcome["append"] = f"{type(exc).__name__}: {exc}"
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(journal_module.JournalEvent, "model_validate_json", appending)
+
+    journal.read_events()
+
+    assert outcome.get("append") == "ok", (
+        f"an append attempted while a reader was parsing did not succeed: {outcome}. "
+        "That is the read lock being held across the parse, which starves the daemon"
+    )
+    assert len(journal.read_events()) == 2
+
+
+def test_a_held_lock_fails_loudly_instead_of_hanging(tmp_path):
+    """A writer that cannot get the lock must say so, not wait forever.
+
+    The daemon appends under this lock; a silent hang there is a stalled cycle, and a timeout with the
+    lock path in it is what the 2026-10-20 diagnosis was built on - the heartbeat carried
+    `TimeoutError: could not acquire lock on .../journal.jsonl.lock`, which is why the cause was
+    findable at all.
+    """
+    from autopoiesis.atomicio import file_lock
+
+    lock_path = tmp_path / "x.lock"
+    with file_lock(lock_path, exclusive=True), pytest.raises(TimeoutError) as caught:
+        with file_lock(lock_path, exclusive=True, timeout=0.2):
+            pass
+    assert str(lock_path.name) in str(caught.value), "the message must name the lock that could not be taken"
+
+
 def test_daily_attempt_counter_discovers_generations_after_locking(tmp_path, monkeypatch):
     """Synthetic submitted orders before and after rotation count toward the same hard cap."""
     path = tmp_path / "journal.jsonl"
