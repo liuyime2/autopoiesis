@@ -473,6 +473,16 @@ class JsonlJournal:
         records: list = []
         dropped = 0
         want_events = model is JournalEvent
+        # The lock is for the read, not for the parse.
+        #
+        # Measured 2026-10-20: this held the shared lock across every `model_validate_json` of every
+        # record - 25,271 events and 3,892 cycles on the live journal - so a readiness check
+        # scanning it kept the daemon from taking the exclusive lock it appends under. `file_lock`
+        # waits ten seconds for a writer; the parse took longer, so the daemon recorded
+        # `TimeoutError: could not acquire lock`, backed off with a BACKING_OFF heartbeat, and the
+        # verification run that caused it then reported the daemon as not running and failed the
+        # session. Readers share the lock by design, and a shared lock held for the length of a
+        # parse is an exclusive one in all but name.
         with self._read_lock(), contextlib.ExitStack() as stack:
             paths = self.history_paths()
             if not paths:
@@ -480,31 +490,32 @@ class JsonlJournal:
                 self._parse_cache[model] = (signature, [], 0)
                 return [], 0
             handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in paths]
-            for line in itertools.chain.from_iterable(handles):
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                is_event = _EVENT_MARKER in stripped
-                is_cycle = (not is_event) and _CYCLE_MARKER in stripped
-                if not is_event and not is_cycle:
-                    # Neither shape: a torn write, a partial line from a hard
-                    # kill, or schema drift. Previously dropped in silence with
-                    # no counter, so this was invisible for the whole run.
+            raw_lines = list(itertools.chain.from_iterable(handles))
+        for line in raw_lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            is_event = _EVENT_MARKER in stripped
+            is_cycle = (not is_event) and _CYCLE_MARKER in stripped
+            if not is_event and not is_cycle:
+                # Neither shape: a torn write, a partial line from a hard
+                # kill, or schema drift. Previously dropped in silence with
+                # no counter, so this was invisible for the whole run.
+                dropped += 1
+                self._note_drop(stripped)
+                continue
+            if is_event != want_events:
+                # A well-formed record of the other kind. Not an error.
+                continue
+            try:
+                records.append(model.model_validate_json(stripped))
+            except Exception:
+                repaired = _read_tolerantly(model, stripped)
+                if repaired is None:
                     dropped += 1
                     self._note_drop(stripped)
                     continue
-                if is_event != want_events:
-                    # A well-formed record of the other kind. Not an error.
-                    continue
-                try:
-                    records.append(model.model_validate_json(stripped))
-                except Exception:
-                    repaired = _read_tolerantly(model, stripped)
-                    if repaired is None:
-                        dropped += 1
-                        self._note_drop(stripped)
-                        continue
-                    records.append(repaired)
+                records.append(repaired)
         self.last_dropped_lines = dropped
         self._parse_cache[model] = (signature, records, dropped)
         return records, dropped

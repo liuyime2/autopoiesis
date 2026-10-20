@@ -79,6 +79,51 @@ def test_reader_discovers_generations_after_locking(tmp_path, monkeypatch):
     assert [record.cycle_id for record in journal.read_all()] == ["before", "after"]
 
 
+def test_the_read_lock_is_released_before_records_are_parsed(tmp_path, monkeypatch):
+    """A shared lock held for the length of a parse starves the writer.
+
+    Measured 2026-10-20 on the live journal: `_parsed` held the shared lock through every pydantic
+    validation of 25,271 events and 3,892 cycles. `file_lock` gives a writer ten seconds; the parse
+    took longer, so the daemon recorded "TimeoutError: could not acquire lock", backed off with a
+    BACKING_OFF heartbeat, and the readiness check that was verifying the session then reported the
+    daemon as not running - the check broke the thing it was checking.
+    """
+    from autopoiesis import journal as journal_module
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    journal.append(make_event())
+
+    held = {"now": False}
+    parsed_while_held: list[str] = []
+
+    @contextmanager
+    def tracking_lock(*, exclusive: bool = False):
+        held["now"] = True
+        try:
+            yield
+        finally:
+            held["now"] = False
+
+    original = journal_module.JournalEvent.model_validate_json
+
+    @classmethod
+    def watching(cls, *args, **kwargs):
+        if held["now"]:
+            parsed_while_held.append(str(args[0])[:40])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(journal, "_read_lock", tracking_lock)
+    monkeypatch.setattr(journal_module.JournalEvent, "model_validate_json", watching)
+
+    events = journal.read_events()
+
+    assert [event.event_type for event in events] == ["CURRICULUM_PROPOSED"]
+    assert not parsed_while_held, (
+        "a record was parsed while the shared lock was held, and that is what blocks the daemon's "
+        "append for the length of a full scan"
+    )
+
+
 def test_daily_attempt_counter_discovers_generations_after_locking(tmp_path, monkeypatch):
     """Synthetic submitted orders before and after rotation count toward the same hard cap."""
     path = tmp_path / "journal.jsonl"
