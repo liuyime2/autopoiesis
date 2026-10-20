@@ -4,6 +4,11 @@ After=network-online.target autopoiesis.service
 Wants=network-online.target
 
 [Service]
+# Private by default. The runtime directory holds account snapshots, model rationales and
+# the journal; on a shared host a 0022 umask makes the journal world-readable, which it was
+# until 2026-10-20 (measured: runtime 0755, journal.jsonl 0644). A service that creates the
+# files is the only place that can set this for files created *later* - chmod fixes today.
+UMask=0077
 Type=oneshot
 WorkingDirectory=@ROOT@
 Environment=PYTHONPATH=@ROOT@/src

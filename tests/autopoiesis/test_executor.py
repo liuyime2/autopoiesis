@@ -8,8 +8,17 @@ from autopoiesis.models import ExecutionResult, GuardianResult, JournalEvent, Tr
 
 
 class FakeAlpacaClient:
-    def __init__(self):
+    def __init__(self, *, is_open=True):
         self.orders = []
+        self._is_open = is_open
+
+    def get_clock(self):
+        """The executor asks at submit time whether the session is still open.
+
+        A fake without a clock is refused, by design: a client that cannot be asked cannot prove the
+        session is open, and that is the last gate before an order leaves the process.
+        """
+        return type("Clock", (), {"is_open": self._is_open})()
 
     def submit_order(self, **kwargs):
         self.orders.append(kwargs)

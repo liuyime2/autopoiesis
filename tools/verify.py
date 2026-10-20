@@ -228,6 +228,9 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_guardian_shorts.py": ("guardian-bypass-prevention",),
     "test_health.py": ("unit-integration", "broker-reconciliation"),
     "test_journal.py": ("data-integrity", "crash-recovery"),
+    # A deployment record that can name the wrong tree is worse than no record: this file pins the
+    # refusals that keep the entry tied to the tree its verdict was taken on.
+    "test_deployment_record.py": ("crash-recovery",),
     "test_knowledge_admission.py": ("lifecycle-invariants",),
     "test_knowledge_library.py": ("lifecycle-invariants", "data-integrity"),
     "test_knowledge.py": ("lifecycle-invariants",),
@@ -3503,6 +3506,9 @@ BESPOKE_CHECK_NAMES = (
     # The installed Ollama unit still says what the template says. Its absence cost a live
     # session's model participation on 2026-10-19: a pin nobody compares is a pin that drifts.
     "installed-unit-matches-the-template",
+    # The runtime is not readable by other local users: account snapshots, positions and the model's
+    # rationales live there, and on this host it was world-readable until 2026-10-20.
+    "runtime-files-private",
 )
 
 REPOSITORY_CHECK_CLASSES: frozenset[str] = frozenset({
@@ -3987,6 +3993,7 @@ def main() -> int:
     results.append(_safe(check_the_running_daemon_matches_the_worktree, "daemon-source-matches-worktree"))
     results.append(_safe(check_the_installed_build_has_a_full_gate_record, "deploy-gate-record"))
     results.append(_safe(check_the_installed_ollama_unit_matches_the_template, "installed-unit-matches-the-template"))
+    results.append(_safe(check_the_runtime_is_private, "runtime-files-private"))
     results.append(_safe(check_docs_do_not_instruct_deleted_commands, "docs-no-deleted-commands"))
     results.append(_safe(check_the_example_still_runs, "example-runs"))
     results.append(_safe(check_tools_readme_names_real_files, "tools-readme-accurate"))
@@ -4267,6 +4274,52 @@ def check_the_installed_ollama_unit_matches_the_template() -> Result:
     return Result(
         "installed-unit-matches-the-template", PASS,
         f"{installed} carries all {len(declared)} value(s) tools/ollama.service.in declares",
+    )
+
+
+def check_the_runtime_is_private() -> Result:
+    """The runtime must not be readable by other local users.
+
+    Measured 2026-10-20 on this host: `runtime/` was 0755 and `journal.jsonl` 0644, so any local user
+    could read account snapshots, positions and the model's rationales. "It is not in git" is not a
+    permission boundary - it says where a file goes, not who may read it.
+
+    Group and world bits are refused on directories and files alike, under the runtime and under the
+    backup root. The service templates carry `UMask=0077` so files created *later* start private; this
+    check is what notices when an existing tree, a rotation or a restore brings the old mode back.
+    """
+    roots = [ROOT / "runtime", ROOT / "runtime" / "backups"]
+    present = [path for path in roots if path.exists()]
+    if not present:
+        return Result("runtime-files-private", SKIP, "no runtime on this checkout; nothing to protect")
+    exposed: list[str] = []
+    checked = 0
+    for root in present:
+        for path in [root, *root.rglob("*")]:
+            # Symlinks are skipped. Their own mode is always 0777 and meaningless on Linux; what
+            # matters is the target, which this walks to separately when it lives under the runtime
+            # - and which it must not silently vouch for when it points somewhere else (the live
+            # runtime is itself a symlink from the release tree into the shared one).
+            if path.is_symlink():
+                continue
+            try:
+                mode = path.stat().st_mode
+            except OSError:
+                continue
+            checked += 1
+            if mode & 0o077:
+                exposed.append(f"{path.relative_to(ROOT)} {oct(mode & 0o777)}")
+    if exposed:
+        shown = ", ".join(sorted(exposed)[:4])
+        more = "" if len(exposed) <= 4 else f" (+{len(exposed) - 4} more)"
+        return Result(
+            "runtime-files-private", FAIL,
+            f"{len(exposed)} of {checked} runtime entries are readable beyond the owner: {shown}{more}. "
+            "Fix with `chmod -R go-rwx runtime` and keep UMask=0077 on the units that create them",
+        )
+    return Result(
+        "runtime-files-private", PASS,
+        f"{checked} runtime entries are owner-only",
     )
 
 

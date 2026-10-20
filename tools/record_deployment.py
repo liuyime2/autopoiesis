@@ -68,11 +68,53 @@ def _head_commit() -> str:
     return proc.stdout.strip()
 
 
+def _refusal(
+    *,
+    classes: int,
+    passed: int,
+    failed: int,
+    failing: list[str],
+    fingerprint_before: str,
+    fingerprint_after: str,
+    commit_before: str,
+    commit_after: str,
+) -> str | None:
+    """Why this gate run may not be recorded, or `None` when it may.
+
+    Three refusals. A red gate is not recorded, with one named exception: `deploy-gate-record` cannot
+    be green while the record it demands is being written, and `failed == 1` is required as well as
+    the name, because a tally saying two classes failed while only one name parsed is a gate this
+    tool cannot read. And a tree that changed while the gate ran is not recorded - a twenty-five
+    minute run is long enough for a commit, an edit or a deploy, and taking the identity afterwards
+    would stamp the new tree with the old verdict. That third refusal is the 2026-10-20 review's
+    point: this tool used to take commit and fingerprint only after the run.
+    """
+    bootstrap_only = failing == [BOOTSTRAP_CLASS] and failed == 1
+    if failed and not bootstrap_only:
+        return (
+            f"the gate is red ({passed}/{classes}) on {', '.join(failing) or 'unnamed classes'}; "
+            "nothing was written. A ledger that can hold a red run would be read as proof the gate "
+            "was run."
+        )
+    if (fingerprint_before, commit_before) != (fingerprint_after, commit_after):
+        return (
+            f"the tree changed while the gate was running: {commit_before}/{fingerprint_before} "
+            f"became {commit_after}/{fingerprint_after}. Nothing was written, because a verdict "
+            "belongs to the tree it was taken on."
+        )
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dry-run", action="store_true", help="print the line and write nothing")
     parser.add_argument("--note", default="", help="one sentence of context, stored as-is")
     args = parser.parse_args()
+
+    # Frozen before the gate runs. See `_refusal` for why the identity is taken at both ends.
+    fingerprint_before = _fingerprint()
+    commit_before = _head_commit()
+    print(f"recording build {fingerprint_before} at {commit_before}", flush=True)
 
     print("running the full gate; this takes about 23 minutes on the deployment host", flush=True)
     proc = subprocess.run(
@@ -85,6 +127,8 @@ def main() -> int:
     )
     tail = "\n".join(proc.stdout.strip().splitlines()[-12:])
     print(tail, flush=True)
+    fingerprint_after = _fingerprint()
+    commit_after = _head_commit()
 
     match = TALLY.search(proc.stdout)
     if not match:
@@ -92,24 +136,18 @@ def main() -> int:
         return 2
     classes, passed, failed = (int(group) for group in match.groups())
     failing = sorted(set(FAILED_CLASSES.findall(proc.stdout.split("FAIL - the gate is red:")[-1])))
-    # A red gate is not recorded, with one named exception: the check that demands this record
-    # cannot be green while the record is being written. `failed == 1` as well as the name, because
-    # a tally saying two classes failed while only one name parsed is a gate this tool cannot read,
-    # and recording on a gate it cannot read is the failure this whole file exists to prevent.
-    # Storing the failing classes in the entry keeps the exception countable instead of invisible.
-    bootstrap_only = failing == [BOOTSTRAP_CLASS] and failed == 1
-    if failed and not bootstrap_only:
-        print(
-            f"the gate is red ({passed}/{classes}) on {', '.join(failing) or 'unnamed classes'}; "
-            "nothing was written. A ledger that can hold a red run would be read as proof the gate "
-            "was run.",
-            file=sys.stderr,
-        )
+    refusal = _refusal(
+        classes=classes, passed=passed, failed=failed, failing=failing,
+        fingerprint_before=fingerprint_before, fingerprint_after=fingerprint_after,
+        commit_before=commit_before, commit_after=commit_after,
+    )
+    if refusal is not None:
+        print(refusal, file=sys.stderr)
         return 1
 
     entry = {
-        "fingerprint": _fingerprint(),
-        "commit": _head_commit(),
+        "fingerprint": fingerprint_before,
+        "commit": commit_before,
         # When the gate observed this build, not when it was installed. The deploy happens after
         # this tool runs, and a field named `deployed_at` that holds the earlier moment would be
         # the kind of small lie that makes a whole record untrustworthy.

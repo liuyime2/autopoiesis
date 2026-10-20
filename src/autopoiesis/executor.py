@@ -168,15 +168,19 @@ class AlpacaPaperExecutor:
     def _session_is_open(self) -> bool:
         """Whether the broker's clock says the session is open, asked at submit time.
 
-        A client with no clock is not asked again: the loop's snapshot check already covered the
-        moment the cycle began, and there is nothing here to contradict it. A client that *has* a
-        clock and fails to answer is treated as closed, because refusing an order is recoverable on
-        the next cycle and placing one into a closed session is not - the same rule the scheduler
-        applies to a clock it cannot read.
+        Both branches fail closed. A client that cannot be asked cannot prove the session is open,
+        and this is the last gate before an order leaves the process - the loop's snapshot check
+        covered the moment the cycle began, which is not the moment the order is placed. A clock that
+        raises is treated the same way, for the same reason the scheduler treats an unreadable clock
+        as "the market is not known to be open": refusing an order is recoverable on the next cycle,
+        and placing one into a closed session is not.
+
+        This started as "no clock method means nothing to check", which was the wrong call: it made
+        the gate absent exactly for the clients nobody had verified.
         """
         get_clock = getattr(self.client, "get_clock", None)
         if get_clock is None:
-            return True
+            return False
         try:
             return bool(getattr(get_clock(), "is_open", False))
         except Exception:
