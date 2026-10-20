@@ -28,6 +28,22 @@ def ensure_private(path: Path | str, *, mode: int) -> None:
         return
 
 
+def narrow_private(path: Path | str, *, mode: int) -> None:
+    """Best-effort narrowing of a directory this runtime owns, never failing a write over it.
+
+    Separate from `ensure_private` because the two failures mean different things. A *file* this code
+    just wrote is ours, so anything but a delete race is the caller's to see. A *directory* may not be
+    ours at all - the first version narrowed `parent.parent`, which is `/tmp` for a probe writing
+    `/tmp/x/journal.jsonl` and the home directory for a journal a few levels down. It raised
+    PermissionError on `/tmp` and would silently have narrowed a home directory, which is worse than
+    the leak it was fixing.
+    """
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        return
+
+
 def write_text_atomic(path: Path | str, text: str, *, encoding: str = "utf-8") -> None:
     """Replace a file's contents without ever exposing a partial read.
 

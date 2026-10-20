@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict
 
-from autopoiesis.atomicio import ensure_private, file_lock, write_json_atomic
+from autopoiesis.atomicio import ensure_private, file_lock, narrow_private, write_json_atomic
 from autopoiesis.models import CycleRecord, JournalEvent
 
 # Substring prefilter, verified against the recorded journal. A CycleRecord
@@ -531,8 +531,12 @@ class JsonlJournal:
         # runs `autopoiesis doctor` gets a runtime it never asked for, and with the process umask that
         # runtime is 0755 with a 0644 journal - which is how a tree that had never traded still exposed
         # a runtime to every local user on 2026-10-20.
-        for directory in (parent, parent.parent):
-            ensure_private(directory, mode=0o700)
+        narrow_private(parent, mode=0o700)
+        # The grandparent is narrowed only when it is the runtime directory this layout puts above
+        # the journal. Anything else is somebody else's directory: `parent.parent` is `/tmp` for a
+        # probe's temporary journal, and the home directory for one a few levels down.
+        if parent.parent.name == "runtime":
+            narrow_private(parent.parent, mode=0o700)
         with self._locked():
             self._rotate_if_needed(len(payload) + 1)
             with self.path.open("a", encoding="utf-8") as handle:
