@@ -59,6 +59,25 @@ class AlpacaPaperExecutor:
                 message=f"submission refused: unresolved broker order {unresolved_id}",
             )
 
+        # The session must still be open when the order is *placed*, not only when the cycle began.
+        #
+        # Measured 2026-10-20: a cycle whose snapshot was taken at 15:59 placed a day order at
+        # 16:01:05, one minute after the close. The Guardian had approved it against a snapshot that
+        # said the market was open - the model call in between took the better part of a minute - and
+        # the order could never fill: it sat `accepted` until an operator cancelled it, holding the
+        # symbol's open-order slot and tripping the conflicting-order guard on the next session.
+        #
+        # Asked here rather than in the Guardian because this is the only place that can be sure the
+        # answer is still true at submit time, and asked before the intent is journalled so that no
+        # write-ahead record is left for an order that was never placed.
+        if not self._session_is_open():
+            return ExecutionResult(
+                status="SKIPPED", order_id=None, client_order_id=client_order_id,
+                filled_quantity=0,
+                message="submission refused: the market is closed at submit time, so a day order "
+                        "could not fill",
+            )
+
         identity = {
             "client_order_id": client_order_id,
             "cycle_id": cycle_id,
@@ -145,6 +164,23 @@ class AlpacaPaperExecutor:
             broker_status=broker_status,
             message=broker_status,
         )
+
+    def _session_is_open(self) -> bool:
+        """Whether the broker's clock says the session is open, asked at submit time.
+
+        A client with no clock is not asked again: the loop's snapshot check already covered the
+        moment the cycle began, and there is nothing here to contradict it. A client that *has* a
+        clock and fails to answer is treated as closed, because refusing an order is recoverable on
+        the next cycle and placing one into a closed session is not - the same rule the scheduler
+        applies to a clock it cannot read.
+        """
+        get_clock = getattr(self.client, "get_clock", None)
+        if get_clock is None:
+            return True
+        try:
+            return bool(getattr(get_clock(), "is_open", False))
+        except Exception:
+            return False
 
     def client_order_id(self, decision: TradeDecision, *, cycle_id: str | None = None) -> str:
         raw = "|".join(

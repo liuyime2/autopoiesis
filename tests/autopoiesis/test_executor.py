@@ -27,6 +27,51 @@ class FakeAlpacaClient:
         )()
 
 
+def test_an_order_is_not_submitted_after_the_close(tmp_path):
+    """A day order placed after the close cannot fill, and it holds the symbol's open-order slot.
+
+    Measured 2026-10-20: a cycle whose snapshot was taken at 15:59 placed a day order at 16:01:05.
+    The Guardian had approved it against that snapshot - the model call in between took most of a
+    minute - and the order sat `accepted` until it was cancelled by hand, which then tripped the
+    conflicting-order guard on the next session.
+    """
+    class ClosedClient(FakeAlpacaClient):
+        def get_clock(self):
+            return type("Clock", (), {"is_open": False})()
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    client = ClosedClient()
+    executor = AlpacaPaperExecutor(client=client, base_url="https://paper-api.alpaca.markets", journal=journal)
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=1, confidence=0.6, rationale="t")
+
+    result = executor.execute(decision, GuardianResult(approved=True, reason="approved"), cycle_id="c1")
+
+    assert result.status == "SKIPPED"
+    assert "market is closed at submit time" in result.message
+    assert client.orders == [], "nothing may reach the broker once the session has closed"
+    assert journal.read_events("ORDER_SUBMISSION_INTENT") == [], (
+        "no write-ahead intent may be left for an order that was never placed, or reconciliation "
+        "has to resolve a submission that never happened"
+    )
+
+
+def test_an_order_is_submitted_when_the_clock_says_open(tmp_path):
+    """The check must not become a permanent refusal - the same failure the staleness gate had."""
+    class OpenClient(FakeAlpacaClient):
+        def get_clock(self):
+            return type("Clock", (), {"is_open": True})()
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl")
+    client = OpenClient()
+    executor = AlpacaPaperExecutor(client=client, base_url="https://paper-api.alpaca.markets", journal=journal)
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=1, confidence=0.6, rationale="t")
+
+    result = executor.execute(decision, GuardianResult(approved=True, reason="approved"), cycle_id="c2")
+
+    assert client.orders, "an open session must still place the order"
+    assert result.message != "submission refused: the market is closed at submit time, so a day order could not fill"
+
+
 def test_executor_skips_hold_without_order():
     client = FakeAlpacaClient()
     journal = JsonlJournal("unused.jsonl")
