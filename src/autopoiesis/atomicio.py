@@ -10,6 +10,24 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
+def ensure_private(path: Path | str, *, mode: int) -> None:
+    """Narrow a path to `mode`, and say nothing when it is already gone.
+
+    Private has to be established where a file is *created*, not only on the service that happens to
+    create most of them. Measured 2026-10-20: `doctor`, run by the gate on a fresh checkout, created
+    `runtime/autopoiesis` and a journal lock with the process umask - 0755 and 0644 - so a runtime with
+    no account data in it was still readable by every local user, and the gate class that guards the
+    real one failed on a tree that had never traded.
+
+    `FileNotFoundError` is the only refusal swallowed: a caller that lost the race to delete the file
+    has nothing left to protect, and every other failure is the caller's to see.
+    """
+    try:
+        os.chmod(path, mode)
+    except FileNotFoundError:
+        return
+
+
 def write_text_atomic(path: Path | str, text: str, *, encoding: str = "utf-8") -> None:
     """Replace a file's contents without ever exposing a partial read.
 
@@ -73,8 +91,10 @@ def file_lock(path: Path | str, *, exclusive: bool = True, timeout: float = 10.0
     lock_path = Path(path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
-    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
     try:
+        # The lock file is in the runtime directory and its name alone says a journal exists.
+        ensure_private(lock_path, mode=0o600)
         try:
             fcntl.flock(fd, mode | fcntl.LOCK_NB)
         except OSError as exc:

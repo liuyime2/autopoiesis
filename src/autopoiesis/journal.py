@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict
 
-from autopoiesis.atomicio import file_lock, write_json_atomic
+from autopoiesis.atomicio import ensure_private, file_lock, write_json_atomic
 from autopoiesis.models import CycleRecord, JournalEvent
 
 # Substring prefilter, verified against the recorded journal. A CycleRecord
@@ -525,13 +525,21 @@ class JsonlJournal:
             self.last_dropped_samples.append(line[:200])
 
     def _append_json(self, payload: str) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        parent = self.path.parent
+        parent.mkdir(parents=True, exist_ok=True)
+        # Private where it is created, not only on the unit that usually creates it. A checkout that
+        # runs `autopoiesis doctor` gets a runtime it never asked for, and with the process umask that
+        # runtime is 0755 with a 0644 journal - which is how a tree that had never traded still exposed
+        # a runtime to every local user on 2026-10-20.
+        for directory in (parent, parent.parent):
+            ensure_private(directory, mode=0o700)
         with self._locked():
             self._rotate_if_needed(len(payload) + 1)
             with self.path.open("a", encoding="utf-8") as handle:
                 handle.write(payload + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
+            ensure_private(self.path, mode=0o600)
 
     def _rotate_if_needed(self, incoming: int) -> None:
         if not self.path.exists():

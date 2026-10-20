@@ -31,7 +31,7 @@ from autopoiesis import (
     regime,
     strategy_engine,
 )
-from autopoiesis.atomicio import write_json_atomic
+from autopoiesis.atomicio import ensure_private, write_json_atomic
 from autopoiesis.broker_client import list_open_orders
 from autopoiesis.broker_evidence import latest_evidence_batch
 from autopoiesis.config import AgentConfig
@@ -140,6 +140,9 @@ def record(report: DoctorReport, config: AgentConfig, *, history: bool = True) -
         return
     path = config.journal_path.parent / "doctor-history.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Same reason the journal does it: a diagnostic run must not leave a readable history behind.
+    for directory in (path.parent, path.parent.parent):
+        ensure_private(directory, mode=0o700)
     entry = {
         "at": datetime.now(timezone.utc).isoformat(),
         "ok": not report.failures,
@@ -148,6 +151,7 @@ def record(report: DoctorReport, config: AgentConfig, *, history: bool = True) -
     }
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    ensure_private(path, mode=0o600)
     _trim(path, keep=2000)
 
 
