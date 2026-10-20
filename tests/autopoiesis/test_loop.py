@@ -152,6 +152,52 @@ def test_trading_loop_fail_closes_invalid_decision_to_hold():
     assert journal.records == [record]
 
 
+def test_an_addition_needs_a_passing_verdict_and_an_exit_does_not():
+    """The account holder's rule of 2026-10-20: not passed the screen means not accumulating.
+
+    Measured when it was written: three strategies had a verdict, all three
+    INCONCLUSIVE_INSUFFICIENT_EVIDENCE, and the BIL accumulator had none - so taken literally this
+    stops every addition the agent was making. That is the rule. What it must not do is stop an
+    exit, or stop the loop: the blocked addition is journalled as a HOLD that keeps the strategy's
+    id, so the screen still has a decision to score and the strategy can earn the right to add.
+    """
+    class SellEngine:
+        def decide(self, context):
+            return TradeDecision(
+                symbol=context["symbol"], action="SELL", quantity=1, confidence=0.8,
+                rationale="exit", strategy_id="s1",
+            )
+
+    def run(engine, allowed):
+        loop = TradingLoop(
+            data_gateway=FakeDataGateway(), decision_engine=engine,
+            guardian=FakeGuardian(), executor=FakeExecutor(), journal=FakeJournal(), mode="paper",
+        )
+        loop.accumulation_allowed = allowed
+        return loop.run_once("SPY")
+
+    blocked = run(StrategyDecisionEngine(), lambda strategy_id: False)
+    assert blocked.decision.action == "HOLD" and blocked.decision.quantity == 0
+    assert "has not passed the screen" in blocked.decision.rationale
+    assert blocked.strategy_id == "s1", (
+        "the hold must stay attributed, or the screen has nothing to score and the strategy can "
+        "never earn the right to add"
+    )
+
+    # With the predicate saying yes this rule does not fire. The cycle then meets the in-flight
+    # guard - these fakes have no journalled fills to check against - and refuses for a *different*
+    # reason. That difference is the evidence that this rule, and not the other, refused the first
+    # one; asserting BUY here would be asserting the fakes' journal instead.
+    permitted = run(StrategyDecisionEngine(), lambda strategy_id: True)
+    assert "has not passed the screen" not in permitted.decision.rationale
+    assert "re-submit" in permitted.decision.rationale or "in-flight" in permitted.decision.rationale
+
+    exit_ = run(SellEngine(), lambda strategy_id: False)
+    assert "has not passed the screen" not in exit_.decision.rationale, (
+        "an exit is not an addition and is never blocked by this rule"
+    )
+
+
 def test_trading_loop_records_top_level_strategy_id():
     journal = FakeJournal()
     loop = TradingLoop(

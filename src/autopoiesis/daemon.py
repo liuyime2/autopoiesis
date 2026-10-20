@@ -154,6 +154,12 @@ class AgentDaemon:
     ):
         self.config = config
         self.loop = loop
+        #: The latest screen verdict per strategy id, refreshed by the lifecycle each maintenance
+        #: pass. Absent means "no verdict", which is not a pass - the account holder's rule of
+        #: 2026-10-20 is that a strategy which has not passed may hold but may not add.
+        self._screen_verdicts: dict[str, str] = {}
+        if self.loop is not None:
+            self.loop.accumulation_allowed = self._screen_passed
         self.health = health or HealthMonitor(config.heartbeat_path)
         self.sleep = sleep if sleep is not None else self._cooperative_sleep
         self.now = now or (lambda: datetime.now(tz=timezone.utc))
@@ -1637,6 +1643,13 @@ class AgentDaemon:
         # see "no evidence" for everyone and block every promotion permanently -
         # a gate that cannot be satisfied is not a gate, it is a freeze.
         evidence = self._offline_evidence_by_strategy(_validation=_validation)
+        # Cached for the round: the loop asks this per decision, and reading the journal per
+        # decision would put a full scan inside the trading path. The lifecycle already computes
+        # it once per pass, so the loop uses that answer rather than a second one.
+        self._screen_verdicts = {
+            str(strategy_id): str(getattr(result, "verdict", "") or "")
+            for strategy_id, result in (evidence or {}).items()
+        }
         decisions = self.lifecycle_manager.review(self.strategy_library.list(), results, evidence)
         decisions.extend(self._reconsider_paused(results, evidence))
         decisions.extend(self._drifted_reference_retirements())
@@ -1677,6 +1690,25 @@ class AgentDaemon:
                 )
             )
         return out
+
+    def _screen_passed(self, strategy_id: str | None) -> bool:
+        """Whether the screen has passed this strategy. No verdict is not a pass.
+
+        The account holder's rule of 2026-10-20: a strategy that has not passed the screen must not
+        accumulate. Measured when it was written - three strategies had a verdict, all three
+        INCONCLUSIVE_INSUFFICIENT_EVIDENCE, and the BIL accumulator had none - so taken literally
+        this stops every addition the agent was making.
+
+        It does not freeze the loop. The loop turns a blocked BUY into a journalled HOLD carrying
+        the strategy's provenance, and the screen scores HOLDs as well as trades (`GOOD_HOLD` is in
+        the informative set), so a strategy keeps producing the evidence that can let it pass.
+
+        Read from the cache the lifecycle refreshes, not from the journal: this is consulted once
+        per decision, and a journal scan inside the trading path is a cost the cadence cannot pay.
+        """
+        if not strategy_id:
+            return False
+        return (getattr(self, "_screen_verdicts", None) or {}).get(strategy_id) == offline_validation.PASS_SCREENED
 
     def _retire_lessons_without_effect(self) -> None:
         """Take a lesson out of the prompt once the ablation shows it changes nothing.

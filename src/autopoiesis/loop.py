@@ -266,6 +266,32 @@ class TradingLoop:
                     rationale="fail-closed HOLD after trade counter error",
                     strategy_id=decision.strategy_id,
                 )
+        # Additions need a verdict; holds do not.
+        #
+        # The account holder's instruction, 2026-10-20: a strategy that has not passed the screen
+        # must not accumulate. Measured before implementing it: three strategies had a verdict and
+        # all three were INCONCLUSIVE_INSUFFICIENT_EVIDENCE, and the BIL accumulator had no verdict
+        # at all - so this stops every addition the agent was making, which is what "not passed"
+        # means taken literally.
+        #
+        # It does not freeze the loop. A blocked BUY becomes a HOLD that is still journalled with
+        # the strategy's provenance, the screen scores HOLDs as well as trades (`GOOD_HOLD` is in
+        # the informative set), and a strategy that passes is then free to add. What it removes is
+        # only the ability to spend capital before earning the right to.
+        if decision.action == "BUY":
+            allowed = getattr(self, "accumulation_allowed", None)
+            if allowed is not None and not allowed(decision.strategy_id):
+                decision = TradeDecision(
+                    symbol=snapshot.symbol,
+                    action="HOLD",
+                    quantity=0,
+                    confidence=0.0,
+                    rationale=(
+                        "selection_unavailable: this strategy has not passed the screen, so it may "
+                        "hold but not add; capitals need a verdict before they are spent"
+                    ),
+                    strategy_id=decision.strategy_id,
+                )
         guardian_result = self.guardian.review(
             decision,
             snapshot,
