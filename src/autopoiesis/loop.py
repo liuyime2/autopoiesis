@@ -281,17 +281,23 @@ class TradingLoop:
         if decision.action == "BUY":
             allowed = getattr(self, "accumulation_allowed", None)
             if allowed is not None and not allowed(decision.strategy_id):
-                decision = TradeDecision(
-                    symbol=snapshot.symbol,
-                    action="HOLD",
-                    quantity=0,
-                    confidence=0.0,
-                    rationale=(
+                # `model_copy`, not a fresh TradeDecision. A fresh one took the model's
+                # `decision_source` away - it defaults to "baseline" - and took
+                # `strategy_provenance` with it, so the converted decision read as
+                # UNKNOWN_PROVENANCE. Measured 2026-10-20 over the first session with this rule:
+                # all 33 converted holds were unscorable, which is the evidence that lets a
+                # strategy earn the right to add, and `market-open-verify` failed the same session
+                # with SESSION_PROVENANCE_INVALID. A rule that destroys the evidence it depends on
+                # is worse than no rule.
+                decision = decision.model_copy(update={
+                    "action": "HOLD",
+                    "quantity": 0,
+                    "confidence": 0.0,
+                    "rationale": (
                         "selection_unavailable: this strategy has not passed the screen, so it may "
                         "hold but not add; capitals need a verdict before they are spent"
                     ),
-                    strategy_id=decision.strategy_id,
-                )
+                })
         guardian_result = self.guardian.review(
             decision,
             snapshot,

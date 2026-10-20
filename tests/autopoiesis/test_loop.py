@@ -158,15 +158,34 @@ def test_an_addition_needs_a_passing_verdict_and_an_exit_does_not():
     Measured when it was written: three strategies had a verdict, all three
     INCONCLUSIVE_INSUFFICIENT_EVIDENCE, and the BIL accumulator had none - so taken literally this
     stops every addition the agent was making. That is the rule. What it must not do is stop an
-    exit, or stop the loop: the blocked addition is journalled as a HOLD that keeps the strategy's
-    id, so the screen still has a decision to score and the strategy can earn the right to add.
+    exit, or destroy the evidence that lets a strategy earn the right to add.
     """
+    from autopoiesis.learning_evidence import capture
+    from autopoiesis.models import StrategySpec
+
     class SellEngine:
         def decide(self, context):
             return TradeDecision(
                 symbol=context["symbol"], action="SELL", quantity=1, confidence=0.8,
                 rationale="exit", strategy_id="s1",
             )
+
+    class ProvenancedBuyEngine:
+        """A BUY carrying what the model's answer carries: a source and a provenance."""
+
+        def __init__(self):
+            self.decision = TradeDecision(
+                symbol="SPY", action="BUY", quantity=1, confidence=0.8,
+                rationale="strategy decision", strategy_id="s1", decision_source="llm",
+                strategy_provenance=capture(StrategySpec(
+                    strategy_id="s1", name="s1", kind="HOLD_BASELINE", symbols=("SPY",),
+                    parameters={}, max_position_value=100,
+                    created_at=datetime.now(tz=timezone.utc), rationale="t",
+                )),
+            )
+
+        def decide(self, context):
+            return self.decision.model_copy(update={"symbol": context["symbol"]})
 
     def run(engine, allowed):
         loop = TradingLoop(
@@ -176,19 +195,25 @@ def test_an_addition_needs_a_passing_verdict_and_an_exit_does_not():
         loop.accumulation_allowed = allowed
         return loop.run_once("SPY")
 
-    blocked = run(StrategyDecisionEngine(), lambda strategy_id: False)
+    blocked = run(ProvenancedBuyEngine(), lambda strategy_id: False)
     assert blocked.decision.action == "HOLD" and blocked.decision.quantity == 0
     assert "has not passed the screen" in blocked.decision.rationale
-    assert blocked.strategy_id == "s1", (
-        "the hold must stay attributed, or the screen has nothing to score and the strategy can "
-        "never earn the right to add"
+    # The converted hold must keep the model's attribution. A fresh TradeDecision defaults
+    # `decision_source` to "baseline" and drops `strategy_provenance`, and measured 2026-10-20 that
+    # made all 33 converted holds of the first session unscorable - UNKNOWN_PROVENANCE, which is the
+    # exact evidence a strategy needs to earn the right to add - and failed market-open-verify with
+    # SESSION_PROVENANCE_INVALID.
+    assert blocked.decision.decision_source == "llm", "the model answered; the hold must still say so"
+    assert blocked.decision.strategy_provenance is not None, (
+        "without provenance the decision is unscorable and the strategy can never pass the screen"
     )
+    assert blocked.strategy_id == "s1"
 
     # With the predicate saying yes this rule does not fire. The cycle then meets the in-flight
     # guard - these fakes have no journalled fills to check against - and refuses for a *different*
     # reason. That difference is the evidence that this rule, and not the other, refused the first
     # one; asserting BUY here would be asserting the fakes' journal instead.
-    permitted = run(StrategyDecisionEngine(), lambda strategy_id: True)
+    permitted = run(ProvenancedBuyEngine(), lambda strategy_id: True)
     assert "has not passed the screen" not in permitted.decision.rationale
     assert "re-submit" in permitted.decision.rationale or "in-flight" in permitted.decision.rationale
 
