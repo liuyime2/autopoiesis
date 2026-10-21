@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from autopoiesis.fill_reconciler import FILL_EVENT, confirmed_fill_events
-from autopoiesis.models import CycleRecord, JournalEvent, TradeDecision
+from autopoiesis.models import CycleRecord, DecisionIntervention, JournalEvent, TradeDecision
 
 #: What the loop writes when the decision engine's output could not be used. A module constant
 #: rather than a literal at the one call site, because the daemon reads it to decide whether the
@@ -278,9 +278,20 @@ class TradingLoop:
         # the strategy's provenance, the screen scores HOLDs as well as trades (`GOOD_HOLD` is in
         # the informative set), and a strategy that passes is then free to add. What it removes is
         # only the ability to spend capital before earning the right to.
+        intervention: DecisionIntervention | None = None
         if decision.action == "BUY":
             allowed = getattr(self, "accumulation_allowed", None)
             if allowed is not None and not allowed(decision.strategy_id):
+                # Kept before the substitution, because after it the record can no longer say what
+                # the model wanted. This is the difference between "the model chose to hold" and
+                # "the system refused the model's buy", and only one of those is the model's.
+                intervention = DecisionIntervention(
+                    reason="the strategy has not passed the screen, so it may hold but not add",
+                    original_action=decision.action,
+                    original_quantity=decision.quantity,
+                    original_confidence=decision.confidence,
+                    original_rationale=decision.rationale,
+                )
                 # `model_copy`, not a fresh TradeDecision. A fresh one took the model's
                 # `decision_source` away - it defaults to "baseline" - and took
                 # `strategy_provenance` with it, so the converted decision read as
@@ -362,6 +373,7 @@ class TradingLoop:
             execution=execution,
             strategy_id=decision.strategy_id,
             error="; ".join(errors) or None,
+            intervention=intervention,
         )
         self.journal.append(record)
         return record

@@ -1216,6 +1216,30 @@ class ExecutionResult(BaseModel):
     message: str
 
 
+class DecisionIntervention(BaseModel):
+    """What the system changed about the model's proposal, and why.
+
+    The record kept only the final decision, so an addition the system refused looked exactly like a
+    model that had chosen to hold. Measured 2026-10-20: 33 cycles that day carried a `HOLD` whose
+    rationale was the accumulation gate's, and nothing in the record said the model had proposed a
+    BUY - the "model judged", "system intervened" and "what executed" facts had collapsed into one
+    field.
+
+    The original is kept verbatim rather than summarised, because the three questions a reader asks
+    are separable and each needs its own answer: what did the model want, what did the system do to
+    it, and what reached the broker.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    #: The system's own words for what it refused and why.
+    reason: str = Field(min_length=1)
+    original_action: Action
+    original_quantity: int = Field(ge=0)
+    original_confidence: float = Field(ge=0, le=1)
+    original_rationale: str = Field(min_length=1)
+
+
 class CycleRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -1226,6 +1250,10 @@ class CycleRecord(BaseModel):
     execution: ExecutionResult
     strategy_id: str | None = None
     error: str | None = None
+    #: Set only when the system changed the decision before it reached the Guardian. Absent means
+    #: the record's decision is the one the engine produced, which is the common case and must not
+    #: be confusable with "the system changed nothing and the model held".
+    intervention: DecisionIntervention | None = None
 
     @property
     def symbol(self) -> str:

@@ -55,6 +55,14 @@ def day_summary(records, day: date) -> dict:
          r.guardian.reason, r.execution.status)
         for r in todays if r.decision.action in {"SHORT", "COVER"}
     ]
+    # Decisions the system changed before they reached the Guardian. Without this the report counts
+    # a refused addition as a hold the model chose, which is the collapse the 2026-10-20 review named:
+    # "model judged", "system intervened" and "what executed" were one field.
+    interventions = [
+        (r.snapshot.timestamp.astimezone(NEW_YORK).strftime("%H:%M"), r.snapshot.symbol,
+         r.intervention.original_action, r.decision.action, r.intervention.reason)
+        for r in todays if r.intervention is not None
+    ]
     cited = [
         r for r in todays
         if any(k in ((r.decision.rationale or "") + " " + (r.decision.override_reason or "")).lower()
@@ -70,6 +78,7 @@ def day_summary(records, day: date) -> dict:
         "outcomes": outcomes,
         "paired": sum(1 for r in todays if r.decision.rule_action is not None),
         "overrides": overrides,
+        "interventions": interventions,
         "shorts": shorts,
     }
 
@@ -94,6 +103,12 @@ def render(day: date, summary: dict, checks: list[tuple[str, str, str]], verdict
     lines.append(f"overrides    {len(summary['overrides'])} departure(s) from the rule")
     for when, rule, taken, reason in summary["overrides"][:20]:
         lines.append(f"               {when} rule {rule} -> {taken}: {reason[:90]}")
+    lines.append(
+        f"intervened   {len(summary.get('interventions') or [])} decision(s) changed by the system "
+        "before the Guardian (these are not the model's own holds)"
+    )
+    for when, symbol, original, taken, reason in (summary.get("interventions") or [])[:20]:
+        lines.append(f"               {when} {symbol} {original} -> {taken}: {reason[:90]}")
     lines.append(f"shorts       {len(summary['shorts'])} SHORT/COVER decision(s)")
     for when, action, reason, status in summary["shorts"][:20]:
         lines.append(f"               {when} {action} {status}: {reason[:90]}")

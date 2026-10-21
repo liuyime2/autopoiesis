@@ -12,15 +12,37 @@ import daily_report
 
 
 def _cycle(hour_utc, action="HOLD", rule=None, reason=None, status="SKIPPED", source="llm",
-           day=7, guardian="approved", rationale=""):
+           day=7, guardian="approved", rationale="", intervention=None):
     return SimpleNamespace(
-        snapshot=SimpleNamespace(timestamp=datetime(2026, 10, day, hour_utc, tzinfo=timezone.utc)),
+        snapshot=SimpleNamespace(timestamp=datetime(2026, 10, day, hour_utc, tzinfo=timezone.utc), symbol="SPY"),
         decision=SimpleNamespace(action=action, rule_action=rule, override_reason=reason,
                                  decision_source=source, rationale=rationale),
         execution=SimpleNamespace(status=status),
         guardian=SimpleNamespace(reason=guardian),
         error=None,
+        intervention=intervention,
     )
+
+
+def test_an_intervention_is_not_counted_as_the_model_choosing_to_hold():
+    """A refused addition and a chosen hold look identical in `decision` alone.
+
+    Measured 2026-10-20: 33 cycles carried a HOLD whose rationale was the accumulation gate's, and
+    nothing in the record said the model had proposed a BUY. The report must count those separately,
+    or its decision table is a table of the system's output attributed to the model.
+    """
+    records = [
+        _cycle(13, day=7),
+        _cycle(14, day=7, intervention=SimpleNamespace(
+            original_action="BUY", reason="the strategy has not passed the screen")),
+    ]
+
+    summary = daily_report.day_summary(records, date(2026, 10, 7))
+
+    assert len(summary["interventions"]) == 1
+    text = daily_report.render(date(2026, 10, 7), summary, [], "unproven")
+    assert "intervened   1 decision" in text
+    assert "BUY -> HOLD" in text
 
 
 def test_a_day_is_the_new_york_session_and_overrides_carry_their_reason():

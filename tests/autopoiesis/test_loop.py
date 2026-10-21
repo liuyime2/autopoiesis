@@ -208,12 +208,20 @@ def test_an_addition_needs_a_passing_verdict_and_an_exit_does_not():
         "without provenance the decision is unscorable and the strategy can never pass the screen"
     )
     assert blocked.strategy_id == "s1"
+    # The model's proposal survives the substitution, or a reader cannot tell a model that chose to
+    # hold from a system that refused the model's buy.
+    assert blocked.intervention is not None
+    assert blocked.intervention.original_action == "BUY"
+    assert blocked.intervention.original_quantity == 1
+    assert "not passed the screen" in blocked.intervention.reason
+    assert blocked.intervention.original_rationale == "strategy decision"
 
     # With the predicate saying yes this rule does not fire. The cycle then meets the in-flight
     # guard - these fakes have no journalled fills to check against - and refuses for a *different*
     # reason. That difference is the evidence that this rule, and not the other, refused the first
     # one; asserting BUY here would be asserting the fakes' journal instead.
     permitted = run(ProvenancedBuyEngine(), lambda strategy_id: True)
+    assert permitted.intervention is None, "nothing was changed, so nothing is recorded as changed"
     assert "has not passed the screen" not in permitted.decision.rationale
     assert "re-submit" in permitted.decision.rationale or "in-flight" in permitted.decision.rationale
 
