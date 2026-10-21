@@ -152,6 +152,28 @@ def test_trading_loop_fail_closes_invalid_decision_to_hold():
     assert journal.records == [record]
 
 
+def test_a_cycle_records_where_its_time_went():
+    """The instrument R2 needs: a symbol costs about 105 seconds and the model is about 45 of them.
+
+    Measured 2026-10-21 on the live journal - six symbols a round at roughly ten minutes a round. The
+    larger half was invisible: nothing recorded how long the broker read, the decision, the Guardian
+    and the journal each took, so "make the cadence faster" had no target.
+    """
+    loop = TradingLoop(
+        data_gateway=FakeDataGateway(), decision_engine=FakeDecisionEngine(),
+        guardian=FakeGuardian(), executor=FakeExecutor(), journal=FakeJournal(), mode="paper",
+    )
+    loop.accumulation_allowed = None
+
+    record = loop.run_once("SPY")
+
+    assert record.timings is not None
+    for key in ("cycle_ms", "snapshot_ms", "decision_ms", "execution_ms"):
+        assert key in record.timings, (key, record.timings)
+        assert record.timings[key] >= 0.0, (key, record.timings)
+    assert record.timings["cycle_ms"] >= record.timings["decision_ms"], record.timings
+
+
 def test_an_addition_needs_a_passing_verdict_and_an_exit_does_not():
     """The account holder's rule of 2026-10-20: not passed the screen means not accumulating.
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -228,6 +229,8 @@ class TradingLoop:
 
     def run_once(self, symbol: str) -> CycleRecord | None:
         cycle_id = str(uuid4())
+        started = time.monotonic()
+        timings: dict[str, float] = {}
         try:
             snapshot = self.data_gateway.snapshot(symbol)
         except Exception as exc:
@@ -237,6 +240,8 @@ class TradingLoop:
             # curriculum can see that it happened at all.
             self._journal_cycle_failure(cycle_id, symbol, exc)
             return None
+        timings["snapshot_ms"] = round((time.monotonic() - started) * 1000.0, 1)
+        decision_started = time.monotonic()
         errors: list[str] = []
         try:
             if hasattr(self.decision_engine, "decide_snapshot"):
@@ -252,6 +257,7 @@ class TradingLoop:
                 confidence=0.0,
                 rationale=FAIL_CLOSED_RATIONALE,
             )
+        timings["decision_ms"] = round((time.monotonic() - decision_started) * 1000.0, 1)
         trades_today = 0
         if self.trade_counter is not None:
             try:
@@ -364,7 +370,10 @@ class TradingLoop:
             # rejection channel, where a refusal the system issued correctly stopped
             # counting against the strategy. The error channel never got that split.
 
+        execution_started = time.monotonic()
         execution = self.executor.execute(decision, guardian_result, cycle_id=cycle_id)
+        timings["execution_ms"] = round((time.monotonic() - execution_started) * 1000.0, 1)
+        timings["cycle_ms"] = round((time.monotonic() - started) * 1000.0, 1)
         record = CycleRecord(
             cycle_id=cycle_id,
             snapshot=snapshot,
@@ -374,6 +383,7 @@ class TradingLoop:
             strategy_id=decision.strategy_id,
             error="; ".join(errors) or None,
             intervention=intervention,
+            timings=timings,
         )
         self.journal.append(record)
         return record

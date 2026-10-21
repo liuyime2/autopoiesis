@@ -282,7 +282,10 @@ def test_journal_fsyncs_and_locks_appends(tmp_path):
 
 
 def test_journal_stats_reports_utilisation(tmp_path):
-    journal = JsonlJournal(tmp_path / "j.jsonl", max_bytes=1000, lock=False)
+    # 4,000 rather than 1,000: one cycle record grew past a kilobyte on 2026-10-21 when the record
+    # gained `intervention` and `timings`, and the assertion below is about utilisation being a
+    # fraction - not about a record's exact size, which is a figure that drifts with every field.
+    journal = JsonlJournal(tmp_path / "j.jsonl", max_bytes=4000, lock=False)
     assert journal.stats()["exists"] is False
     journal.append(_record("c1"))
 

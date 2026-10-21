@@ -63,6 +63,15 @@ def day_summary(records, day: date) -> dict:
          r.intervention.original_action, r.decision.action, r.intervention.reason)
         for r in todays if r.intervention is not None
     ]
+    # Where the round went. A symbol costs about 105 seconds and the model call is about 45 of them;
+    # the remainder is the Guardian, the in-flight guard and the journal write, which had no figure
+    # before 2026-10-21 and therefore no target.
+    measured = [r.timings for r in todays if getattr(r, "timings", None)]
+    timing = {}
+    for key in ("cycle_ms", "snapshot_ms", "decision_ms", "execution_ms"):
+        values = [m[key] for m in measured if key in m]
+        if values:
+            timing[key] = round(sum(values) / len(values), 1)
     cited = [
         r for r in todays
         if any(k in ((r.decision.rationale or "") + " " + (r.decision.override_reason or "")).lower()
@@ -79,6 +88,7 @@ def day_summary(records, day: date) -> dict:
         "paired": sum(1 for r in todays if r.decision.rule_action is not None),
         "overrides": overrides,
         "interventions": interventions,
+        "timing": timing,
         "shorts": shorts,
     }
 
@@ -109,6 +119,14 @@ def render(day: date, summary: dict, checks: list[tuple[str, str, str]], verdict
     )
     for when, symbol, original, taken, reason in (summary.get("interventions") or [])[:20]:
         lines.append(f"               {when} {symbol} {original} -> {taken}: {reason[:90]}")
+    timing = summary.get("timing") or {}
+    if timing.get("cycle_ms"):
+        rest = timing["cycle_ms"] - timing.get("snapshot_ms", 0) - timing.get("decision_ms", 0) - timing.get("execution_ms", 0)
+        lines.append(
+            f"timing       mean cycle {timing['cycle_ms']:.0f}ms: snapshot {timing.get('snapshot_ms', 0):.0f}, "
+            f"decision {timing.get('decision_ms', 0):.0f}, execution {timing.get('execution_ms', 0):.0f}, "
+            f"guardian+journal {rest:.0f}"
+        )
     lines.append(f"shorts       {len(summary['shorts'])} SHORT/COVER decision(s)")
     for when, action, reason, status in summary["shorts"][:20]:
         lines.append(f"               {when} {action} {status}: {reason[:90]}")

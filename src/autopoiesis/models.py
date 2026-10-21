@@ -1254,6 +1254,15 @@ class CycleRecord(BaseModel):
     #: the record's decision is the one the engine produced, which is the common case and must not
     #: be confusable with "the system changed nothing and the model held".
     intervention: DecisionIntervention | None = None
+    #: Wall-clock milliseconds per phase: `cycle_ms` for the whole cycle, and `snapshot_ms`,
+    #: `decision_ms`, `execution_ms` for the three that can be separated. The remainder -
+    #: `cycle_ms` minus those three - is the Guardian, the in-flight guard and the journal write,
+    #: which is where the cadence work of 2026-10-21 has to start: a symbol costs about 105 seconds
+    #: and the model call is about 45 of them, so the larger half was invisible before this.
+    #:
+    #: Optional because records written before this have no timings, and a missing timing is "not
+    #: measured", not "zero".
+    timings: dict[str, float] | None = None
 
     @property
     def symbol(self) -> str:
