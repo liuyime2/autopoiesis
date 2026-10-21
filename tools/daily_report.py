@@ -172,7 +172,7 @@ def main() -> int:
     day = date.fromisoformat(args.date) if args.date else datetime.now(NEW_YORK).date()
 
     from autopoiesis.atomicio import ensure_private, narrow_private
-from autopoiesis.config import AgentConfig
+    from autopoiesis.config import AgentConfig
     from autopoiesis.doctor import run_doctor
     from autopoiesis.journal import JsonlJournal
 
