@@ -147,7 +147,7 @@ def _pick(checks, name: str):
     return shared, extras
 
 
-def _headline(report, agent: dict | None) -> tuple[str, int]:
+def _headline(report, agent: dict | None, *, covered: bool = False) -> tuple[str, int]:
     """Per-strategy ratios and raw PnL cannot prove the portfolio target."""
     detail, _ = _pick(report.checks, "pnl vs holding")
     rows = _parse_comparison(detail) if detail else None
@@ -160,6 +160,23 @@ def _headline(report, agent: dict | None) -> tuple[str, int]:
             f"by {min(behind, key=lambda r: float(r[3]))[3][1:]} points) - a diagnostic"
             if behind else f"all {len(rows)} strategy ratios are positive diagnostics"
         )
+    measured = agent or {}
+    if measured.get("comparison_status") == "MEASURED" and measured.get("excess") is not None:
+        ahead = measured["excess"] > 0
+        # The *comparison* is measured either way; the *target* is a sixty-trading-day claim, and
+        # until that window is covered it stays unknown. Coupling the exit code to being behind would
+        # make a 27-day record report the target as failed, which is a stronger claim than the record
+        # supports - and `tools/benchmark_json.py` refuses a payload whose code and target status
+        # disagree, which is how that coupling was caught.
+        code = (EXIT_MET if ahead else EXIT_BEHIND) if covered else EXIT_NOTHING_TO_MEASURE
+        return (
+            f"MEASURED: agent {measured['return_pct']:+.4f}% on {measured['capital']:,.2f} of current "
+            f"equity against SPY {measured['spy_pct']:+.4f}% over {measured['window']} - "
+            f"{'ahead of' if ahead else 'behind'} buy-and-hold by "
+            f"{abs(measured['excess']):.4f} point(s); {diagnostic}"
+            + ("" if covered else f". The {TARGET_TRADING_DAYS}-day window is not covered, so the "
+                                 "target itself is neither met nor falsified")
+        ), code
     reason = (agent or {}).get("comparison_reason",
         "agent allocation and aligned rolling equity history are unavailable")
     return f"NOT MEASURABLE: {reason}; {diagnostic}", EXIT_NOTHING_TO_MEASURE
@@ -192,15 +209,59 @@ def _agent_level(config=None) -> dict | None:
         owner_fills=owner_fill_activities(journal))
     if pnl.status == PNL_EVIDENCE_MISSING or not pnl.linked_fill_count:
         return None
+    # The account holder's decision, 2026-10-21: benchmark SPY, capital the current equity, and the
+    # window the record actually covers.
+    #
+    # The account itself opened 2025-10-21 - twelve months before the earliest recorded cycle - so
+    # "since the account opened" cannot be measured without comparing the agent's own PnL against an
+    # index return over a year the agent did not trade: a figure with two windows wearing one name.
+    # The start is the earliest recorded cycle, and the boundary is stated rather than smoothed over.
+    #
+    # Cash flows do not enter this figure because the numerator is the ledger's own PnL, not an equity
+    # difference - which is what the original refusal was about.
+    prices = [
+        (record.snapshot.timestamp, float(record.snapshot.last_price))
+        for record in records
+        if record.snapshot.symbol == "SPY" and record.snapshot.last_price
+    ]
+    capital = float(records[-1].snapshot.account.equity)
+    net = pnl.net_after_assumed_cost
+    if not prices or capital <= 0:
+        return {
+            "performance_contract": "agent-accounting-v1",
+            "comparison_status": "UNKNOWN",
+            "comparison_reason": "no recorded SPY price to benchmark against",
+            "pnl": round(net, 2) if net is not None else None,
+            "realized": round(sum(pnl.strategy_realized_pnl.values()), 2),
+            "unrealized": round(pnl.unrealized_pnl, 2) if pnl.unrealized_pnl is not None else None,
+            "observed_fees": round(sum(pnl.strategy_fees.values()), 4),
+            "capital": round(capital, 2) if capital else None,
+            "return_pct": None, "spy_pct": None, "excess": None,
+            "diagnostic_market_return_pct": pnl.market_return_pct,
+            "assumed_cost": round(sum(pnl.assumed_cost.values()), 4),
+        }
+    started_at, started_price = prices[0]
+    ended_at, ended_price = prices[-1]
+    spy_pct = (ended_price / started_price - 1.0) * 100.0
+    return_pct = (net / capital * 100.0) if net is not None else None
+    window = f"{started_at.date().isoformat()} to {ended_at.date().isoformat()} ({len(prices)} recorded SPY quotes)"
     return {
         "performance_contract": "agent-accounting-v1",
-        "comparison_status": "UNKNOWN",
-        "comparison_reason": "agent allocation, cash flows and aligned rolling equity history are unavailable",
+        "comparison_status": "MEASURED" if return_pct is not None else "UNKNOWN",
+        "comparison_reason": (
+            f"PnL over current equity {capital:,.2f} against SPY over the recorded window {window}; "
+            "the account opened 2025-10-21, twelve months before the first recorded cycle, so the "
+            "window is the record's and not the account's"
+        ),
+        "window": window,
         "pnl": round(pnl.net_after_assumed_cost, 2) if pnl.net_after_assumed_cost is not None else None,
         "realized": round(sum(pnl.strategy_realized_pnl.values()), 2),
         "unrealized": round(pnl.unrealized_pnl, 2) if pnl.unrealized_pnl is not None else None,
         "observed_fees": round(sum(pnl.strategy_fees.values()), 4),
-        "capital": None, "return_pct": None, "spy_pct": None, "excess": None,
+        "capital": round(capital, 2),
+        "return_pct": round(return_pct, 4) if return_pct is not None else None,
+        "spy_pct": round(spy_pct, 4),
+        "excess": round(return_pct - spy_pct, 4) if return_pct is not None else None,
         "diagnostic_market_return_pct": pnl.market_return_pct,
         "assumed_cost": round(sum(pnl.assumed_cost.values()), 4),
     }
@@ -340,7 +401,16 @@ def _run_prose(argv: list[str]) -> int:
         for key in ("realized", "unrealized", "observed_fees", "assumed_cost", "pnl"):
             value = agent[key]
             print(f"  {key:20s} " + (f"{value:+,.4f}" if value is not None else "UNKNOWN"))
-        print(f"  portfolio comparison UNKNOWN: {agent['comparison_reason']}")
+        status = agent.get("comparison_status", "UNKNOWN")
+        if status == "MEASURED":
+            print(
+                f"  portfolio comparison MEASURED: agent {agent['return_pct']:+.4f}% on "
+                f"{agent['capital']:,.2f} of current equity, SPY {agent['spy_pct']:+.4f}% over "
+                f"{agent['window']}, excess {agent['excess']:+.4f} point(s)"
+            )
+            print(f"    {agent['comparison_reason']}")
+        else:
+            print(f"  portfolio comparison {status}: {agent['comparison_reason']}")
         print()
 
     paired, _ = _pick(report.checks, "llm vs rule")
@@ -358,7 +428,7 @@ def _run_prose(argv: list[str]) -> int:
         print(f"pnl evidence          {evidence}")
         print()
 
-    verdict, code = _headline(report, agent)
+    verdict, code = _headline(report, agent, covered=days >= TARGET_TRADING_DAYS)
     print("=" * 78)
     print("target: within a stated risk budget and after costs, beat SPY buy-and-hold over")
     print(f"        a rolling {TARGET_TRADING_DAYS}-trading-day window.")
@@ -382,9 +452,16 @@ def _run_prose(argv: list[str]) -> int:
         "max_trades_per_day": config.max_trades_per_day,
     }
     payload["cost"] = {"assumed_round_trip_cost_pct": config.assumed_round_trip_cost_pct}
+    # Derived from the verdict rather than hardcoded. It was `UNKNOWN` unconditionally, which is why
+    # the target could never be reported as anything else even once the window filled; the status now
+    # follows the same decision the exit code does, so the two cannot disagree.
+    covered = days >= TARGET_TRADING_DAYS
     payload["target"] = {
-        "trading_days": TARGET_TRADING_DAYS, "met": False, "status": "UNKNOWN",
-        "window_covered": False, "recorded_days_sufficient": days >= TARGET_TRADING_DAYS,
+        "trading_days": TARGET_TRADING_DAYS,
+        "met": bool(covered and code == EXIT_MET),
+        "status": ("PASS" if code == EXIT_MET else "FAIL") if covered else "UNKNOWN",
+        "window_covered": covered,
+        "recorded_days_sufficient": covered,
         "covered": days,
     }
     return code

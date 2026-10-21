@@ -121,7 +121,12 @@ def test_no_figure_is_quoted_that_the_published_file_does_not_carry(generated):
         return
     if agent.get("pnl") is not None:
         assert f"{agent['pnl']:+,.2f}" in text
-    assert agent.get("return_pct") is None and agent.get("excess") is None
+    # The comparison is publishable as of the account holder's decision on 2026-10-21: the
+    # denominator is the recorded current equity and SPY is measured over the same recorded window.
+    # While it is UNKNOWN the old guarantee still holds - no return and no excess may be quoted.
+    assert agent.get("comparison_status") in {"MEASURED", "UNKNOWN"}, agent.get("comparison_status")
+    if agent.get("comparison_status") != "MEASURED":
+        assert agent.get("return_pct") is None and agent.get("excess") is None
 
 
 def test_the_published_figures_are_current_enough_to_publish(generated):

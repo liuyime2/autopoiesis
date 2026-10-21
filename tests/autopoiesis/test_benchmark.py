@@ -149,14 +149,35 @@ def test_legacy_positive_ratio_cannot_pass_the_portfolio_target():
 
 
 @pytest.mark.parametrize("unrealized,net,linked", [(0.0, 28.0, 1), (None, None, 1), (0.0, 0.0, 0)])
-def test_synthetic_raw_pnl_never_invents_allocated_capital(monkeypatch, tmp_path, unrealized, net, linked):
+def test_raw_pnl_is_reported_over_the_observed_equity(monkeypatch, tmp_path, unrealized, net, linked):
+    """Capital is the account's current equity, which is observed - not an inferred allocation.
+
+    The account holder's decision of 2026-10-21 names the denominator: current equity. That is a
+    different claim from the one this test used to guard, which was that the tool must never invent an
+    allocation; it still must not, and the difference is that an equity reading is recorded rather
+    than derived. The window comes from the recorded SPY quotes on both sides, so the two figures are
+    over one window instead of two.
+    """
+    from datetime import datetime, timezone
+
     from autopoiesis import broker_evidence, evaluator, journal
     from autopoiesis.config import AgentConfig
 
     config = replace(AgentConfig.documented_defaults(),
         journal_path=tmp_path / "journal.jsonl", assumed_round_trip_cost_pct=0.07)
     monkeypatch.setattr(AgentConfig, "from_env", classmethod(lambda cls: config))
-    monkeypatch.setattr(journal.JsonlJournal, "read_all", lambda self: [object()])
+
+    def record(price, equity, when):
+        return SimpleNamespace(snapshot=SimpleNamespace(
+            symbol="SPY", last_price=price, timestamp=when,
+            account=SimpleNamespace(equity=equity),
+        ))
+
+    records = [
+        record(100.0, 50_000.0, datetime(2026, 6, 9, 13, 30, tzinfo=timezone.utc)),
+        record(110.0, 100_000.0, datetime(2026, 10, 21, 13, 30, tzinfo=timezone.utc)),
+    ]
+    monkeypatch.setattr(journal.JsonlJournal, "read_all", lambda self: records)
     monkeypatch.setattr(broker_evidence, "latest_evidence_batch", lambda j: object())
     monkeypatch.setattr(evaluator, "confirmed_fill_activities", lambda *args: [])
     monkeypatch.setattr(evaluator, "owner_fill_activities", lambda *args: [])
@@ -172,12 +193,22 @@ def test_synthetic_raw_pnl_never_invents_allocated_capital(monkeypatch, tmp_path
 
     monkeypatch.setattr(evaluator, "_pnl_evidence", compute)
     result = _load_benchmark()._agent_level()
+
     if not linked:
         assert result is None
         return
     assert result is not None
-    assert result["capital"] is None
-    assert result["return_pct"] is None and result["excess"] is None
+    assert result["capital"] == 100_000.0, (
+        "capital must be the recorded current equity, not an inferred allocation"
+    )
+    assert result["spy_pct"] == pytest.approx(10.0), "SPY's return over the same recorded window"
+    if net is None:
+        assert result["return_pct"] is None and result["excess"] is None
+        assert result["comparison_status"] == "UNKNOWN"
+    else:
+        assert result["return_pct"] == pytest.approx(net / 100_000.0 * 100.0)
+        assert result["excess"] == pytest.approx(result["return_pct"] - 10.0)
+        assert result["comparison_status"] == "MEASURED"
     assert result["unrealized"] == unrealized
     assert result["pnl"] == net
     assert result["diagnostic_market_return_pct"] == 0.0

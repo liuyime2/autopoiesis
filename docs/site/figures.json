@@ -2,30 +2,31 @@
   "figures": {
     "benchmark": {
       "agent": {
-        "assumed_cost": 57.9941,
-        "capital": null,
-        "comparison_reason": "agent allocation, cash flows and aligned rolling equity history are unavailable",
-        "comparison_status": "UNKNOWN",
-        "diagnostic_market_return_pct": 3.380976,
-        "excess": null,
+        "assumed_cost": 58.4286,
+        "capital": 100005.68,
+        "comparison_reason": "PnL over current equity 100,005.68 against SPY over the recorded window 2026-06-09 to 2026-10-21 (1662 recorded SPY quotes); the account opened 2025-10-21, twelve months before the first recorded cycle, so the window is the record's and not the account's",
+        "comparison_status": "MEASURED",
+        "diagnostic_market_return_pct": 3.705601,
+        "excess": -3.9753,
         "observed_fees": 0,
         "performance_contract": "agent-accounting-v1",
-        "pnl": 503.31,
-        "realized": 603.73,
-        "return_pct": null,
-        "spy_pct": null,
-        "unrealized": -42.43
+        "pnl": 604.48,
+        "realized": 605.5,
+        "return_pct": 0.6044,
+        "spy_pct": 4.5797,
+        "unrealized": 57.41,
+        "window": "2026-06-09 to 2026-10-21 (1662 recorded SPY quotes)"
       },
       "cost": {
         "assumed_round_trip_cost_pct": 0.05
       },
       "exit_code": 2,
       "record": {
-        "cycles": 4090,
+        "cycles": 4183,
         "day_count_basis": "distinct cycle dates; not continuous exchange-calendar coverage",
         "first": "2026-06-09",
-        "last": "2026-10-20",
-        "trading_days": 26
+        "last": "2026-10-21",
+        "trading_days": 27
       },
       "risk_budget": {
         "max_daily_loss": 500.0,
@@ -36,43 +37,43 @@
       "strategies": [
         {
           "excess": "+0.01",
-          "market_pct": "-0.34%",
-          "return_pct": "-0.33%",
+          "market_pct": "+0.26%",
+          "return_pct": "+0.27%",
           "strategy_id": "trend-follow-20261003-001"
         },
         {
           "excess": "+0.01",
-          "market_pct": "+0.13%",
-          "return_pct": "+0.15%",
+          "market_pct": "+0.74%",
+          "return_pct": "+0.75%",
           "strategy_id": "trend-follow-spy-003"
         },
         {
-          "excess": "-0.02",
-          "market_pct": "+0.03%",
-          "return_pct": "+0.00%",
+          "excess": "-0.03",
+          "market_pct": "+0.04%",
+          "return_pct": "+0.01%",
           "strategy_id": "fixed-size-buy-bil-001"
         },
         {
-          "excess": "-0.04",
-          "market_pct": "+0.11%",
-          "return_pct": "+0.06%",
+          "excess": "-0.17",
+          "market_pct": "+0.71%",
+          "return_pct": "+0.54%",
           "strategy_id": "fixed-size-buy-spy-001"
         },
         {
-          "excess": "-0.16",
-          "market_pct": "-0.10%",
-          "return_pct": "-0.26%",
+          "excess": "-0.65",
+          "market_pct": "+0.50%",
+          "return_pct": "-0.15%",
           "strategy_id": "fixed-size-probe-0001"
         },
         {
-          "excess": "-0.20",
-          "market_pct": "+0.83%",
-          "return_pct": "+0.63%",
+          "excess": "-0.75",
+          "market_pct": "+1.03%",
+          "return_pct": "+0.27%",
           "strategy_id": "trend-follow-tlt-buy-001"
         }
       ],
       "target": {
-        "covered": 26,
+        "covered": 27,
         "met": false,
         "recorded_days_sufficient": false,
         "status": "UNKNOWN",
@@ -84,11 +85,11 @@
       "check_classes": 59
     },
     "record": {
-      "cycles": 4090,
+      "cycles": 4184,
       "day_count_basis": "distinct cycle dates; not continuous exchange-calendar coverage",
       "first": "2026-06-09",
-      "last": "2026-10-20",
-      "trading_days": 26
+      "last": "2026-10-21",
+      "trading_days": 27
     },
     "signals": {
       "hypotheses": 129,
@@ -103,9 +104,9 @@
       }
     },
     "tests": {
-      "test_files": 115,
-      "tests": 2016
+      "test_files": 116,
+      "tests": 2027
     }
   },
-  "generated_at": "2026-10-20T21:03:29.226531+00:00"
+  "generated_at": "2026-10-21T16:44:16.371511+00:00"
 }
