@@ -44,11 +44,28 @@ def day_summary(records, day: date) -> dict:
     outcomes = collections.Counter(
         (r.decision.decision_source, r.decision.action, r.execution.status) for r in todays
     )
+    # A departure from the rule is the model's only when the model gave a reason for it. Measured on
+    # 2026-10-21: 62 departures, and 26 of them carried no reason because they were not departures at
+    # all - the accumulation gate's `selection_unavailable: ... has not passed the screen` and the
+    # in-flight guard's `skip: an identical order ...`, both of which the *system* produced. Counting
+    # them here charged the system's refusals to the model, which is the same collapse the record
+    # fixed and the doctor now excludes.
+    from autopoiesis.learning_evidence import model_departed_from_rule
+
+    def _departure(record) -> bool:
+        return model_departed_from_rule(record)
+
     overrides = [
         (r.snapshot.timestamp.astimezone(NEW_YORK).strftime("%H:%M"), r.decision.rule_action,
          r.decision.action, r.decision.override_reason or "")
+        for r in todays if _departure(r)
+    ]
+    abstentions = [
+        (r.snapshot.timestamp.astimezone(NEW_YORK).strftime("%H:%M"), r.decision.rule_action,
+         r.decision.action, (r.decision.rationale or "")[:80])
         for r in todays
         if r.decision.rule_action is not None and r.decision.action != r.decision.rule_action
+        and not _departure(r)
     ]
     shorts = [
         (r.snapshot.timestamp.astimezone(NEW_YORK).strftime("%H:%M"), r.decision.action,
@@ -87,6 +104,7 @@ def day_summary(records, day: date) -> dict:
         "outcomes": outcomes,
         "paired": sum(1 for r in todays if r.decision.rule_action is not None),
         "overrides": overrides,
+        "abstentions": abstentions,
         "interventions": interventions,
         "timing": timing,
         "shorts": shorts,
@@ -110,9 +128,19 @@ def render(day: date, summary: dict, checks: list[tuple[str, str, str]], verdict
         f"risk block   {summary['risk_cited']} decision(s) cite it in their reasons, {summary['risk_cited_trades']} of them trades "
         "(it is meant to size a position down, never to argue for one)"
     )
-    lines.append(f"overrides    {len(summary['overrides'])} departure(s) from the rule")
+    lines.append(
+        f"overrides    {len(summary['overrides'])} departure(s) from the rule by the model, with a "
+        f"reason; {len(summary.get('abstentions') or [])} difference(s) the system produced are "
+        "counted below, not here"
+    )
     for when, rule, taken, reason in summary["overrides"][:20]:
         lines.append(f"               {when} rule {rule} -> {taken}: {reason[:90]}")
+    lines.append(
+        f"abstained    {len(summary.get('abstentions') or [])} decision(s) differ from the rule "
+        "because the system refused or skipped them, not because the model chose so"
+    )
+    for when, rule, taken, why in (summary.get("abstentions") or [])[:10]:
+        lines.append(f"               {when} rule {rule} -> {taken}: {why[:90]}")
     lines.append(
         f"intervened   {len(summary.get('interventions') or [])} decision(s) changed by the system "
         "before the Guardian (these are not the model's own holds)"

@@ -45,6 +45,7 @@ from autopoiesis.fill_reconciler import confirmed_fill_events
 from autopoiesis.health import HealthMonitor
 from autopoiesis.journal import JsonlJournal
 from autopoiesis.knowledge_library import KnowledgeLibrary
+from autopoiesis.learning_evidence import model_departed_from_rule
 from autopoiesis.models import StrategyLifecycle, StrategySpec
 from autopoiesis.reflection_memory import ReflectionMemory
 from autopoiesis.strategy_engine import StrategyLibrary
@@ -671,11 +672,16 @@ def _check_decision_quality(
         )
     else:
         report.add("decision quality", OK, detail)
+    # Cycles that differ from the rule but are not the model's departures: the accumulation gate's
+    # holds and the in-flight guard's skips. One predicate, shared with the daily report, because the
+    # moment two surfaces each decide this for themselves they disagree - and did.
     _report_llm_against_the_rule(
         report, result.rows,
-        intervened=frozenset(
+        system_departures=frozenset(
             record.cycle_id for record in records
-            if getattr(record, "intervention", None) is not None
+            if not model_departed_from_rule(record)
+            and getattr(getattr(record, "decision", None), "rule_action", None) is not None
+            and record.decision.action != record.decision.rule_action
         ),
     )
 
@@ -694,7 +700,7 @@ def _scored_by_symbol(result) -> str:
 
 
 def _report_llm_against_the_rule(
-    report: DoctorReport, rows: list, *, intervened: frozenset[str] = frozenset()
+    report: DoctorReport, rows: list, *, system_departures: frozenset[str] = frozenset()
 ) -> None:
     """What the model's departures from the strategy's rule were worth, paired per cycle.
 
@@ -745,13 +751,13 @@ def _report_llm_against_the_rule(
     # Short-circuited on an empty set: with no interventions this asks no row for a cycle id, which
     # keeps every older row shape - and the fakes that model it - working. A row that cannot name its
     # cycle cannot be matched to an intervention, and matching nothing is the safe answer.
-    def _was_intervened(row) -> bool:
-        return bool(intervened) and getattr(row, "cycle_id", None) in intervened
+    def _system_made(row) -> bool:
+        return bool(system_departures) and getattr(row, "cycle_id", None) in system_departures
 
-    excluded = [row for row in paired if _was_intervened(row)]
+    excluded = [row for row in paired if _system_made(row)]
     overrides = [
         row for row in paired
-        if row.action != row.rule_action and not _was_intervened(row)
+        if row.action != row.rule_action and not _system_made(row)
     ]
     if not overrides:
         report.add(
@@ -775,8 +781,8 @@ def _report_llm_against_the_rule(
     # Stated in both branches. The withholding branch returns early, and an exclusion a reader cannot
     # see is the same misattribution one message earlier.
     intervened_note = (
-        f". {len(excluded)} paired decision(s) were changed by the system before the rule "
-        "comparison and are not counted as the model's departures"
+        f". {len(excluded)} paired decision(s) differ from the rule because the system refused or "
+        "skipped them, not because the model chose so, and are not counted as its departures"
         if excluded else ""
     )
 

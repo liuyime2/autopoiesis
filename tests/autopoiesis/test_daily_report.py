@@ -79,3 +79,27 @@ def test_decisions_that_cite_the_risk_block_are_counted_and_the_trades_among_the
     summary = daily_report.day_summary(records, date(2026, 10, 7))
     assert (summary["risk_cited"], summary["risk_cited_trades"]) == (2, 1)
     assert "cite it in their reasons" in daily_report.render(date(2026, 10, 7), summary, [], "x")
+
+
+def test_a_system_abstention_is_not_counted_as_the_model_overruling_the_rule():
+    """Measured 2026-10-21: 62 departures, 26 of them with no reason because the system made them.
+
+    The accumulation gate writes `selection_unavailable: ... has not passed the screen` and the
+    in-flight guard writes `skip: an identical order ...`. Counting those as the model's departures
+    charged the system's refusals to the model - the same collapse the record fixed and the doctor
+    now excludes.
+    """
+    records = [
+        _cycle(13, day=7, action="HOLD", rule="BUY", reason="volatility too high"),
+        _cycle(14, day=7, action="HOLD", rule="BUY", reason=""),
+        _cycle(15, day=7, action="HOLD", rule="SELL", reason="",
+               intervention=SimpleNamespace(original_action="BUY", reason="not passed the screen")),
+    ]
+
+    summary = daily_report.day_summary(records, date(2026, 10, 7))
+
+    assert len(summary["overrides"]) == 1, summary["overrides"]
+    assert len(summary["abstentions"]) == 2, summary["abstentions"]
+    text = daily_report.render(date(2026, 10, 7), summary, [], "unproven")
+    assert "1 departure(s) from the rule by the model, with a reason" in text
+    assert "2 difference(s) the system produced" in text

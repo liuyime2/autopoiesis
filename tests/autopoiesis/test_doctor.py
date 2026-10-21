@@ -558,9 +558,9 @@ def test_a_cycle_the_system_changed_is_not_counted_as_the_model_overruling_the_r
     _report_llm_against_the_rule(
         report,
         [row("c1", "HOLD", "SELL", 1.05), row("c2", "HOLD", "SELL", 0.5)],
-        intervened=frozenset({"c1"}),
+        system_departures=frozenset({"c1"}),
     )
 
     check = next(c for c in report.checks if c.name == "llm vs rule")
     assert "1 override(s)" in check.detail, check.detail
-    assert "1 paired decision(s) were changed by the system" in check.detail, check.detail
+    assert "1 paired decision(s) differ from the rule because the system" in check.detail, check.detail

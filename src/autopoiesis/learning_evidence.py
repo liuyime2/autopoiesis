@@ -84,3 +84,32 @@ def source_digest(refs: Iterable[str], records: Mapping[str, object]) -> str | N
             return None
         sources.append([ref, record.model_dump(mode="json")])
     return hashlib.sha256(json.dumps(sources, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest() if sources else None
+
+def model_departed_from_rule(record) -> bool:
+    """Whether this cycle is a departure from the rule *the model* made, and said why.
+
+    The single predicate behind three surfaces - the record, the daily report and the doctor's
+    "llm vs rule" figure - because they drifted apart the moment one of them had it. Measured
+    2026-10-21: the daily report called 62 decisions departures from the rule and the doctor summed
+    316 over nine days; 26 of that day's 62 carried no reason because they were not departures at
+    all. The accumulation gate writes `selection_unavailable: ... has not passed the screen` and the
+    in-flight guard writes `skip: an identical order ...`; both are the system acting, and both were
+    being charged to the model.
+
+    Three conditions, each with its own measurement behind it:
+
+    - the rule had an action to depart from, and this cycle's action differs from it;
+    - the system did not change the decision before the Guardian (`intervention` is absent);
+    - the model gave a reason. A reasonless disagreement is not taken as the model's judgement -
+      over 323 comparable cycles, 112 of 113 disagreements were the model declining a trade with
+      nothing recorded about why.
+    """
+    decision = getattr(record, "decision", None)
+    if decision is None:
+        return False
+    rule_action = getattr(decision, "rule_action", None)
+    if rule_action is None or getattr(decision, "action", None) == rule_action:
+        return False
+    if getattr(record, "intervention", None) is not None:
+        return False
+    return bool(str(getattr(decision, "override_reason", "") or "").strip())
