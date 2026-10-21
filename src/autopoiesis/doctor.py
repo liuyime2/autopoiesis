@@ -671,7 +671,13 @@ def _check_decision_quality(
         )
     else:
         report.add("decision quality", OK, detail)
-    _report_llm_against_the_rule(report, result.rows)
+    _report_llm_against_the_rule(
+        report, result.rows,
+        intervened=frozenset(
+            record.cycle_id for record in records
+            if getattr(record, "intervention", None) is not None
+        ),
+    )
 
 
 def _scored_by_symbol(result) -> str:
@@ -687,7 +693,9 @@ def _scored_by_symbol(result) -> str:
     return ", ".join(f"{symbol}={count}" for symbol, count in sorted(counts.items()))
 
 
-def _report_llm_against_the_rule(report: DoctorReport, rows: list) -> None:
+def _report_llm_against_the_rule(
+    report: DoctorReport, rows: list, *, intervened: frozenset[str] = frozenset()
+) -> None:
     """What the model's departures from the strategy's rule were worth, paired per cycle.
 
     Every LLM decision since rule_action was recorded carries the rule's action on the same
@@ -728,7 +736,23 @@ def _report_llm_against_the_rule(report: DoctorReport, rows: list) -> None:
             "starts with the first cycle recorded with rule_action and needs 24h to score",
         )
         return
-    overrides = [row for row in paired if row.action != row.rule_action]
+    # A cycle the *system* changed is not the model departing from the rule. Measured 2026-10-21:
+    # the accumulation gate turns a model BUY into a HOLD, and where the rule said SELL that HOLD
+    # differed from the rule - so the report was about to charge the system's refusal to the model as
+    # a departure, with a probe value computed from an action the model never chose. Excluded here and
+    # counted separately, because "the model overruled the rule" and "the system overruled the model"
+    # are opposite claims.
+    # Short-circuited on an empty set: with no interventions this asks no row for a cycle id, which
+    # keeps every older row shape - and the fakes that model it - working. A row that cannot name its
+    # cycle cannot be matched to an intervention, and matching nothing is the safe answer.
+    def _was_intervened(row) -> bool:
+        return bool(intervened) and getattr(row, "cycle_id", None) in intervened
+
+    excluded = [row for row in paired if _was_intervened(row)]
+    overrides = [
+        row for row in paired
+        if row.action != row.rule_action and not _was_intervened(row)
+    ]
     if not overrides:
         report.add(
             "llm vs rule", OK,
@@ -748,6 +772,13 @@ def _report_llm_against_the_rule(report: DoctorReport, rows: list) -> None:
         "skipped is counted here as a departure - excluding those needs the status on the "
         "row and is not done"
     )
+    # Stated in both branches. The withholding branch returns early, and an exclusion a reader cannot
+    # see is the same misattribution one message earlier.
+    intervened_note = (
+        f". {len(excluded)} paired decision(s) were changed by the system before the rule "
+        "comparison and are not counted as the model's departures"
+        if excluded else ""
+    )
 
     if len(days) < MIN_TRADING_DAYS_FOR_A_CONCLUSION:
         report.add(
@@ -756,7 +787,7 @@ def _report_llm_against_the_rule(report: DoctorReport, rows: list) -> None:
             f"day(s), below the {MIN_TRADING_DAYS_FOR_A_CONCLUSION} needed before a net "
             f"figure means anything about the model. By day: {distribution}. The "
             f"unwithheld total would be {total:+.3f}% of probe value and must not be read "
-            f"as a result" + caveats,
+            f"as a result" + intervened_note + caveats,
         )
         return
     report.add(
@@ -764,7 +795,9 @@ def _report_llm_against_the_rule(report: DoctorReport, rows: list) -> None:
         f"{len(paired)} paired LLM decision(s), {len(overrides)} override(s) of the rule "
         f"over {len(days)} trading day(s), {helped} of them worth more than the rule; "
         f"overrides net {total:+.3f}% of probe value (one share, 24h, after the assumed "
-        f"cost). By day: {distribution}" + caveats,
+        f"cost). By day: {distribution}"
+        + intervened_note
+        + caveats,
     )
 
 

@@ -531,3 +531,36 @@ def test_the_row_shape_that_has_no_execution_status_is_recorded_as_a_caveat():
     detail = next(c for c in report.checks if c.name == "llm vs rule").detail
     assert "no execution status" in detail, detail
     assert "not done" in detail, detail
+
+
+def test_a_cycle_the_system_changed_is_not_counted_as_the_model_overruling_the_rule():
+    """The report compares the model with the rule; the system is a third party.
+
+    Measured 2026-10-21: the accumulation gate turns a model BUY into a HOLD, and where the rule said
+    SELL that HOLD differed from the rule - so the row was about to be charged to the model as a
+    departure, with a probe value computed from an action the model never chose. "The model overruled
+    the rule" and "the system overruled the model" are opposite claims.
+    """
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+
+    from autopoiesis.doctor import DoctorReport, _report_llm_against_the_rule
+
+    base = datetime(2026, 10, 1, 14, 30, tzinfo=timezone.utc)
+
+    def row(cycle_id, action, rule, value, day=0):
+        return SimpleNamespace(
+            cycle_id=cycle_id, action=action, rule_action=rule, override_value_pct=value,
+            decision_source="llm", decided_at=base + timedelta(days=day),
+        )
+
+    report = DoctorReport()
+    _report_llm_against_the_rule(
+        report,
+        [row("c1", "HOLD", "SELL", 1.05), row("c2", "HOLD", "SELL", 0.5)],
+        intervened=frozenset({"c1"}),
+    )
+
+    check = next(c for c in report.checks if c.name == "llm vs rule")
+    assert "1 override(s)" in check.detail, check.detail
+    assert "1 paired decision(s) were changed by the system" in check.detail, check.detail
