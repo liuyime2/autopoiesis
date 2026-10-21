@@ -171,7 +171,8 @@ def main() -> int:
     args = parser.parse_args()
     day = date.fromisoformat(args.date) if args.date else datetime.now(NEW_YORK).date()
 
-    from autopoiesis.config import AgentConfig
+    from autopoiesis.atomicio import ensure_private, narrow_private
+from autopoiesis.config import AgentConfig
     from autopoiesis.doctor import run_doctor
     from autopoiesis.journal import JsonlJournal
 
@@ -199,7 +200,12 @@ def main() -> int:
     text = render(day, summary, checks, verdict)
     out = config.journal_path.parent / "reports" / f"{day.isoformat()}.txt"
     out.parent.mkdir(parents=True, exist_ok=True)
+    # Private where it is written, not only on the unit that usually writes it. Measured 2026-10-21:
+    # this file was created 0644 by a hand run, so the day's report - positions, PnL, the model's
+    # departure list - was readable by every local user on this host.
+    narrow_private(out.parent, mode=0o700)
     out.write_text(text, encoding="utf-8")
+    ensure_private(out, mode=0o600)
     print(text, end="")
     print(f"written to {out}")
     print(json.dumps({"date": day.isoformat(), "cycles": summary["cycles"]}))
