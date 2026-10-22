@@ -72,13 +72,18 @@ def test_the_universe_setting_is_validated_and_a_wider_universe_means_the_whole_
         AgentConfig.from_env()
 
 
-def _daemon(universe, slots=0, held=("TLT",), attention=("AAA",), fail_held=False):
+def _daemon(universe, slots=0, held=("TLT",), attention=("AAA",), fail_held=False, served=("SPY", "QQQ")):
     gw = SimpleNamespace(
         held_symbols=(lambda: (_ for _ in ()).throw(RuntimeError("x")) if fail_held else list(held)),
         attention_symbols=lambda k, **kw: list(attention)[:k],
     )
     d = AgentDaemon.__new__(AgentDaemon)
     d.config = SimpleNamespace(symbols=("SPY", "QQQ"), universe=universe, attention_slots=slots, min_price=5.0)
+    # The real daemon always has a library; these tests used to omit it, which is why the
+    # "configured means priority" clause was never exercised here - it was only ever live.
+    d.strategy_library = SimpleNamespace(list=lambda: [
+        SimpleNamespace(strategy_id="s-" + s, symbols=(s,), enabled=True, lifecycle="ACTIVE") for s in served
+    ])
     # None is the mechanical list, which is what these tests are about: the round's coverage.
     # The model's own choice is covered in test_attention_selection.py.
     d.attention_transport = None
@@ -89,14 +94,39 @@ def _daemon(universe, slots=0, held=("TLT",), attention=("AAA",), fail_held=Fals
     return d
 
 
-def test_a_round_covers_configured_then_held_then_attention_symbols_without_duplicates():
+def test_a_round_decides_what_can_change_every_time_and_rotates_the_rest():
     assert _daemon("allowlist", 4)._round_symbols() == ["SPY", "QQQ"]
     assert _daemon("account", 4)._round_symbols() == ["SPY", "QQQ", "TLT"]            # attention needs `tradable`
     got = _daemon("tradable", 4, held=("TLT", "SPY"), attention=("AAA", "BBB"))._round_symbols()
-    # Configured and held symbols are decided every round; the watchlist fills one rotating slot.
+    # Served and held symbols are decided every round; the watchlist fills one rotating slot.
     # Measured 2026-10-19: with every pick in every round, ten symbols at 1.75 minutes each decided
     # every symbol every 17.5 minutes, which is the cadence problem the rotation exists to fix.
     assert got == ["SPY", "QQQ", "TLT", "AAA"] and len(set(got)) == len(got)
+
+
+def test_a_configured_symbol_with_nothing_to_run_rotates_instead_of_leading_the_round():
+    """Intent is not capability. Measured 2026-10-22, live: 51 of 118 decisions were on XLB,
+    XLE and XLF - configured, and served by no strategy at all - so each could only produce
+    `no_strategy`: no order, no evidence, about 1.6 minutes of model time every round. That
+    was most of the gap between the measured 12-minute per-symbol interval and the ten the
+    review asks for. A configured symbol that nothing serves is discovery, and rotates."""
+    d = _daemon("tradable", 4, held=("TLT",), attention=("AAA",), served=("SPY",))
+    d.config = SimpleNamespace(symbols=("SPY", "QQQ", "ZZZ"), universe="tradable", attention_slots=4, min_price=5.0)
+    d.strategy_library = SimpleNamespace(list=lambda: [
+        SimpleNamespace(strategy_id="s-SPY", symbols=("SPY",), enabled=True, lifecycle="ACTIVE")
+    ])
+    d.attention_transport = None
+    seen = set()
+    for cycle in range(4):
+        d.cycle_count = cycle
+        decided = d._round_symbols()
+        assert decided[0] == "SPY", decided            # served: every round
+        assert "TLT" in decided, decided               # held: every round
+        rest = [s for s in decided if s not in {"SPY", "TLT"}]
+        assert len(rest) == 1, decided                 # one discovery slot, not three
+        seen.update(rest)
+    # QQQ and ZZZ are configured but unserved and unheld: they take turns, they do not lead.
+    assert seen == {"QQQ", "ZZZ", "AAA"}, f"rotation must still cover them: {seen}"
 
 
 def test_a_broker_failure_narrows_the_round_instead_of_stopping_it():

@@ -1953,15 +1953,22 @@ class AgentDaemon:
         """Decide what can change something every round; rotate the rest.
 
         This is the account holder's "any symbol may appear, but the ones that meet the bar get
-        special attention". The bar combines the operator's baseline with the system's own records:
-        a symbol is decided every round when it is configured, when a serving strategy covers it,
-        or when the account holds it - the first is intent, the other two are cases where a decision
-        can change something. What rotates is the *discovery* set: the watchlist picks the model
-        made, which are not otherwise in the round. Those still appear, taking turns, which is what
-        keeps "any symbol may appear" true over a few rounds rather than in one.
+        special attention". The bar is the system's own record, not the operator's list: a symbol is
+        decided every round when a serving strategy covers it or when the account holds it, because
+        in either case a decision there can change something. What rotates is everything else - the
+        watchlist picks the model made *and* a configured symbol that nothing serves. Those still
+        appear, taking turns, which is what keeps "any symbol may appear" true over a few rounds
+        rather than in one.
+
+        Being configured used to be enough to be decided every round, and that was wrong in a way
+        only a live session showed. Measured 2026-10-22: of 118 decisions, 51 were on XLB (13), XLE
+        (16) and XLF (16) - configured symbols with no serving strategy - and each of them could only
+        ever produce `no_strategy`, an order it is not allowed to place and evidence nothing can
+        score. They cost about 1.6 minutes apiece of model time every round, which is most of the gap
+        between the 12-minute per-symbol interval measured that day and the review's ten. Intent is
+        not capability: a configured symbol with nothing to run and nothing to sell is discovery, and
+        discovery rotates.
         """
-        config = getattr(self, "config", None)
-        configured = {str(symbol).upper() for symbol in (getattr(config, "symbols", ()) or ())}
         served: set[str] = set()
         library = getattr(self, "strategy_library", None)
         if library is not None:
@@ -1978,10 +1985,10 @@ class AgentDaemon:
         rest: list[str] = []
         for symbol in symbols:
             key = str(symbol).upper()
-            (priority if (key in configured or key in served or key in held_symbols) else rest).append(symbol)
+            (priority if (key in served or key in held_symbols) else rest).append(symbol)
         if not priority:
-            # Nothing is configured, served or held: there is nothing to protect, so the round is
-            # whatever the library and the model asked for. Rotation would hide symbols for no gain.
+            # Nothing is served or held: there is nothing to protect, so the round is whatever the
+            # library and the model asked for. Rotation would hide symbols for no gain.
             return symbols
         if len(rest) > DISCOVERY_SYMBOLS_PER_ROUND:
             # `getattr`, because two construction paths never run `__init__`: the tests build an
