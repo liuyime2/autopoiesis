@@ -1705,6 +1705,44 @@ def _check_strategy_library(
         )
     else:
         report.add("strategy files", OK, "all parse")
+    _report_universe_coverage(report, config, selectable)
+
+
+def _report_universe_coverage(
+    report: DoctorReport, config: AgentConfig, selectable: list[StrategySpec]
+) -> None:
+    """Say which configured symbols nothing can trade, instead of leaving it to be discovered.
+
+    A configured symbol with no serving strategy can only ever produce `no_strategy`: no order,
+    and evidence nothing can score. Measured 2026-10-22 on the live session: 51 of 118 decisions
+    were spent on XLB (13), XLE (16) and XLF (16), and none of the three had ever had a strategy.
+    That was 43% of the model's work, invisible in every report because a `no_strategy` hold looks
+    exactly like a considered one.
+
+    A warning, not a failure. The list is the operator's, the gap is a fact about it, and turning
+    a configuration choice into a red gate would make the gate an opinion. What the warning
+    refuses is silence.
+    """
+    served = {
+        str(symbol).upper()
+        for spec in selectable
+        for symbol in (spec.symbols or ())
+    }
+    configured = [str(symbol).upper() for symbol in (config.symbols or ())]
+    uncovered = [symbol for symbol in configured if symbol not in served]
+    if not uncovered:
+        report.add(
+            "universe coverage", OK,
+            f"all {len(configured)} configured symbol(s) are served",
+        )
+        return
+    report.add(
+        "universe coverage", WARN,
+        f"{len(uncovered)} of {len(configured)} configured symbol(s) served by no strategy: "
+        f"{', '.join(uncovered[:8])}",
+        "a decision on one of these can only be `no_strategy` - no order, and evidence nothing "
+        "can score. Either admit a strategy for it, or take it out of the configured list",
+    )
 
 
 def _check_knowledge(report: DoctorReport, config: AgentConfig) -> None:

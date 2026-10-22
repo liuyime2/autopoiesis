@@ -564,3 +564,33 @@ def test_a_cycle_the_system_changed_is_not_counted_as_the_model_overruling_the_r
     check = next(c for c in report.checks if c.name == "llm vs rule")
     assert "1 override(s)" in check.detail, check.detail
     assert "1 paired decision(s) differ from the rule because the system" in check.detail, check.detail
+
+
+# --- a configured symbol nothing can trade must be visible, not silent -------
+
+
+def test_doctor_names_the_configured_symbols_that_no_strategy_serves(config):
+    """Measured 2026-10-22, live: 51 of 118 decisions were spent on XLB, XLE and XLF, none of
+    which had ever had a serving strategy, so each could only produce `no_strategy`. A hold with
+    no strategy looks exactly like a considered hold in every report, so the figure was invisible.
+    This makes it a named warning, and keeps it a warning: the configured list is the operator's,
+    and the gate has no business turning a configuration choice red."""
+    from dataclasses import replace
+
+    library = StrategyLibrary(config.strategy_dir)
+    library.save(_spec("a"))  # serves SPY only
+
+    widened = replace(config, symbols=("SPY", "XLE", "XLF"), allowlist=frozenset({"SPY", "XLE", "XLF"}))
+    report = run_doctor(widened, skip_broker=True)
+
+    check = _check(report, "universe coverage")
+    assert check.status is Status.WARN, check
+    assert "XLE" in check.detail and "XLF" in check.detail
+    assert "SPY" not in check.detail.split(":")[-1], check.detail
+
+
+def test_coverage_is_green_when_every_configured_symbol_is_served(config):
+    library = StrategyLibrary(config.strategy_dir)
+    library.save(_spec("a"))
+    report = run_doctor(config, skip_broker=True)
+    assert _check(report, "universe coverage").status is Status.OK
