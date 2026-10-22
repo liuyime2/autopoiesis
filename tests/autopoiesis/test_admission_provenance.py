@@ -250,3 +250,90 @@ def test_matching_decision_passes(tmp_path):
         decisions=[("fine-001", "RETIRED")],
     )
     assert _check(report, "lifecycle provenance").status.value == "ok"
+
+
+# --- a re-admission is a lifecycle transition, and its own record -----------
+
+
+def _readmitted_report(tmp_path, *, file_reason, event_reason):
+    from autopoiesis.doctor import _check_lifecycle_provenance
+
+    sdir = tmp_path / "readmit"
+    sdir.mkdir(exist_ok=True)
+    (sdir / "spy-001.json").write_text(json.dumps({
+        **_spec("spy-001", lifecycle="PROBATION"), "lifecycle_reason": file_reason,
+    }))
+    journal = JsonlJournal(tmp_path / "readmit.jsonl")
+    journal.append_event(JournalEvent(
+        event_id="l0", event_type="STRATEGY_LIFECYCLE_UPDATED",
+        timestamp=datetime(2026, 6, 10, tzinfo=timezone.utc),
+        status="SUCCESS", message="retired", strategy_id="spy-001",
+        payload={"old_lifecycle": "PROBATION", "new_lifecycle": "RETIRED"},
+    ))
+    journal.append_event(JournalEvent(
+        event_id="a0", event_type="STRATEGY_ADMISSION_REVIEWED",
+        timestamp=datetime(2026, 6, 12, tzinfo=timezone.utc),
+        status="ACCEPTED", message=event_reason, strategy_id="spy-001",
+        payload={"accepted": True, "reason": event_reason},
+    ))
+    report = DoctorReport()
+    _check_lifecycle_provenance(report, _Cfg(sdir, journal.path), journal)
+    return next(c for c in report.checks if c.name == "lifecycle provenance")
+
+
+def test_a_readmission_accounts_for_the_state_it_set(tmp_path):
+    """Measured 2026-10-22: `fixed-size-buy-spy-001` was re-admitted out of RETIRED into
+    PROBATION, the admission was journalled with its reason, and this check went red because it
+    read one event type. The decision was recorded; the check was reading the wrong record."""
+    check = _readmitted_report(
+        tmp_path,
+        file_reason="re-admitted after retirement: 26 scored decisions; approved",
+        event_reason="re-admitted after retirement: 26 scored decisions",
+    )
+    assert check.status.value == "ok", check.detail
+
+
+def test_a_hand_edited_state_is_not_laundered_by_an_old_admission(tmp_path):
+    """The exception is a tie to the recorded reason, not an exemption for anything admitted."""
+    check = _readmitted_report(
+        tmp_path,
+        file_reason="edited by hand, nothing to see here",
+        event_reason="re-admitted after retirement: 26 scored decisions",
+    )
+    assert check.status.value == "fail", check.detail
+    assert "spy-001=PROBATION" in check.detail
+
+
+def test_the_daemon_journals_the_transition_an_admission_makes():
+    """The writer half. `admit()` saves a new lifecycle; the daemon is what must say so, because
+    a state that changes with no event behind it is the silent transition this whole file is
+    about."""
+    from types import SimpleNamespace
+
+    from autopoiesis.daemon import AgentDaemon
+
+    spec = SimpleNamespace(lifecycle="PROBATION", lifecycle_reason="re-admitted after retirement: x")
+    daemon = AgentDaemon.__new__(AgentDaemon)
+    daemon.strategy_library = SimpleNamespace(try_load=lambda sid: spec)
+    events = []
+    daemon._append_event = lambda kind, **kw: events.append((kind, kw)) or "evt-1"
+
+    daemon._record_admission_transition(
+        "RETIRED",
+        SimpleNamespace(accepted=True, reason="re-admitted after retirement: x", strategy_id="spy-001"),
+    )
+
+    assert [kind for kind, _ in events] == ["STRATEGY_LIFECYCLE_UPDATED"], events
+    payload = events[0][1]["payload"]
+    assert (payload["old_lifecycle"], payload["new_lifecycle"]) == ("RETIRED", "PROBATION")
+    assert payload["source"] == "admission"
+
+    # A first admission has no state to move out of, and a rejected one moved nothing.
+    events.clear()
+    daemon._record_admission_transition(
+        None, SimpleNamespace(accepted=True, reason="approved", strategy_id="new-001")
+    )
+    daemon._record_admission_transition(
+        "RETIRED", SimpleNamespace(accepted=False, reason="no", strategy_id="spy-001")
+    )
+    assert events == [], events

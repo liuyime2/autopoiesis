@@ -447,6 +447,28 @@ def _check_lifecycle_provenance(
         if isinstance(strategy_id, str) and isinstance(new_lifecycle, str):
             decided[strategy_id] = new_lifecycle
 
+    # The other decision that can set a lifecycle: an accepted admission. It sets PROBATION (or
+    # BASELINE, for the hold baseline) and nothing terminal, so it can only ever explain a state
+    # in that range - which is what keeps this narrow enough not to launder a retirement.
+    #
+    # Measured 2026-10-22: `fixed-size-buy-spy-001` was re-admitted out of RETIRED at 15:57 EDT,
+    # the file said PROBATION, `STRATEGY_ADMISSION_REVIEWED` recorded the decision with its reason,
+    # and this check went red because it read one event type. The daemon now also journals the
+    # transition (see `_record_admission_transition`), which is the durable fix; this reads the
+    # records that already exist, because an append-only journal cannot be given a new past.
+    #
+    # The tie is the file's own `lifecycle_reason` against the recorded reason, so this is
+    # evidence rather than an exemption: a spec edited to PROBATION without the admission's
+    # reason on it still fails.
+    admitted_reasons: dict[str, set[str]] = {}
+    for event in journal.read_events("STRATEGY_ADMISSION_REVIEWED"):
+        if not event.payload.get("accepted"):
+            continue
+        admitted_id = event.strategy_id or event.payload.get("strategy_id")
+        recorded = str(event.payload.get("reason") or "").strip()
+        if isinstance(admitted_id, str) and recorded:
+            admitted_reasons.setdefault(admitted_id, set()).add(recorded)
+
     library = StrategyLibrary(config.strategy_dir)
     unaccounted, undecided = [], []
     for strategy in library.list():
@@ -474,6 +496,8 @@ def _check_lifecycle_provenance(
         # moved three of them to PROBATION and the audit stayed silent, because
         # nothing here compared a default state against its last recorded decision.
         if last != strategy.lifecycle:
+            if _admission_explains(strategy, admitted_reasons.get(strategy.strategy_id, set())):
+                continue
             unaccounted.append(
                 f"{strategy.strategy_id}={strategy.lifecycle} (last decision: {last})"
             )
@@ -491,6 +515,23 @@ def _check_lifecycle_provenance(
             "lifecycle provenance", OK,
             f"{len(decided)} lifecycle decision(s) all traceable to the journal",
         )
+
+
+def _admission_explains(strategy: StrategySpec, recorded_reasons: set[str]) -> bool:
+    """Whether an accepted admission accounts for this spec's lifecycle, not just any admission.
+
+    The file's reason may carry more than the event's: on a re-admission `admit()` writes
+    "<the event's reason>; <the guardian's verdict>" to the spec, and the event only carries the
+    first part. So the tie is a prefix at a separator, not equality - and it is still a tie, not
+    an exemption: a spec edited by hand to PROBATION does not begin with the reason of a decision
+    that was recorded.
+    """
+    if strategy.lifecycle not in {"PROBATION", "BASELINE"}:
+        return False
+    reason = str(strategy.lifecycle_reason or "").strip()
+    if not reason:
+        return False
+    return any(reason == recorded or reason.startswith(recorded + ";") for recorded in recorded_reasons)
 
 
 def _check_admission_provenance(

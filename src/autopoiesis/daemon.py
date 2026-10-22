@@ -995,9 +995,11 @@ class AgentDaemon:
                 strategy_results = self._strategy_results()
                 if self._stop_requested:
                     return
+                before = self._library_lifecycle(task.strategy_spec.strategy_id)
                 result = self.strategy_admission.admit(
                     task.strategy_spec, strategy_results
                 )
+                self._record_admission_transition(before, result)
                 self._append_event(
                     "STRATEGY_ADMISSION_REVIEWED",
                     status="ACCEPTED" if result.accepted else "REJECTED",
@@ -1785,6 +1787,49 @@ class AgentDaemon:
             message=decision.reason,
             strategy_id=decision.strategy.strategy_id,
             payload={**payload, "phase": "applied", "decided_event_id": event_id},
+        )
+
+    def _library_lifecycle(self, strategy_id: str) -> str | None:
+        """The lifecycle on disk for `strategy_id`, or None when the file is not there."""
+        if self.strategy_library is None:
+            return None
+        spec = self.strategy_library.try_load(strategy_id)
+        return spec.lifecycle if spec is not None else None
+
+    def _record_admission_transition(self, before: str | None, result) -> None:
+        """A re-admission is a lifecycle transition, so it gets the same record as one.
+
+        Measured 2026-10-22, live: `fixed-size-buy-spy-001` was re-admitted out of RETIRED into
+        PROBATION at 19:57Z. `admit()` saves the new lifecycle, the daemon journalled
+        `STRATEGY_ADMISSION_REVIEWED`, and nothing claimed the transition itself - so `doctor`'s
+        lifecycle provenance check found the file ahead of its last journalled decision and went
+        red. It was right to: the check exists because eight duplicate retirements once landed on
+        disk with no record behind them.
+
+        The point is not to satisfy the check, it is that the check's premise holds - every state
+        change names the decision that made it. A transition invented by the admission path is
+        still a transition, and the reason it carries is the most informative one in the system.
+
+        A first admission is not a transition: the file did not exist before, there is no state to
+        move out of, and no event is written for it.
+        """
+        if not result.accepted or before is None or self.strategy_library is None:
+            return
+        after = self._library_lifecycle(result.strategy_id)
+        if after is None or after == before:
+            return
+        self._append_event(
+            "STRATEGY_LIFECYCLE_UPDATED",
+            status="SUCCESS",
+            message=result.reason,
+            strategy_id=result.strategy_id,
+            payload={
+                "old_lifecycle": before,
+                "new_lifecycle": after,
+                "reason": result.reason,
+                "phase": "applied",
+                "source": "admission",
+            },
         )
 
     def _reconsider_paused(self, results, evidence) -> list:
