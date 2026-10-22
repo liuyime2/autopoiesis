@@ -5,6 +5,7 @@ import hashlib
 import itertools
 import json
 import os
+import re
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,32 @@ from autopoiesis.models import CycleRecord, JournalEvent
 # events rather than cycles.
 _CYCLE_MARKER = '"execution":'
 _EVENT_MARKER = '"event_id":'
+
+#: The record's own timestamp, read straight out of the line rather than by validating it.
+#: `model_dump_json` writes it compactly, and both record kinds carry one at a fixed place:
+#: an event's is top level, a cycle's is `snapshot.timestamp`. Either is the first one on the line.
+_TIMESTAMP_RE = re.compile(r'"timestamp"\s*:\s*"([^"]+)"')
+
+#: How much of the end of the journal a windowed read starts by looking at, and the most it will
+#: ever look at before giving up and reading everything. Measured 2026-10-22: the live journal grew
+#: 56.1 MB over 2.4 days, about 1 MB an hour, so a 30-minute window is about half a megabyte and
+#: 8 MB is sixteen times that - generous enough that reaching the ceiling means the read is being
+#: asked for something other than a window, not that the window is unusually busy.
+_TAIL_BLOCK_BYTES = 1 << 20
+_TAIL_LIMIT_BYTES = 8 << 20
+
+
+def _line_timestamp(raw: str) -> datetime | None:
+    """The recorded timestamp of a journal line, or None if the line does not have a readable one."""
+    match = _TIMESTAMP_RE.search(raw)
+    if match is None:
+        return None
+    text = match.group(1).strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
 #: Fields whose recorded value a later version may not recognise, and the value to read
@@ -233,7 +260,11 @@ class JsonlJournal:
     def append_event(self, event: JournalEvent) -> None:
         self._append_json(event.model_dump_json())
 
-    def read_all(self) -> list[CycleRecord]:
+    def read_all(self, *, since: datetime | None = None) -> list[CycleRecord]:
+        if since is not None:
+            windowed = self._read_window(CycleRecord, since)
+            if windowed is not None:
+                return windowed
         records, _ = self._scan(CycleRecord, limit=None)
         return records
 
@@ -241,14 +272,132 @@ class JsonlJournal:
         records, _ = self._scan(CycleRecord, limit=n)
         return records
 
-    def read_events(self, event_type: str | None = None, limit: int | None = None) -> list[JournalEvent]:
+    def read_events(
+        self,
+        event_type: str | None = None,
+        limit: int | None = None,
+        *,
+        since: datetime | None = None,
+    ) -> list[JournalEvent]:
         normalized = event_type.strip().upper() if event_type else None
+        if since is not None:
+            windowed = self._read_window(JournalEvent, since)
+            if windowed is not None:
+                events = [
+                    event for event in windowed
+                    if normalized is None or event.event_type == normalized
+                ]
+                return events[-limit:] if limit else events
         events, _ = self._scan(
             JournalEvent,
             limit=limit,
             keep=lambda event: normalized is None or event.event_type == normalized,
         )
         return events
+
+    def _read_window(self, model, since: datetime) -> list | None:
+        """The records of `model` at or after `since`, read from the end of the journal.
+
+        Why this exists. Measured 2026-10-22, live session: `CycleRecord.timings` over 114 cycles
+        put the model call at 52.6 s of a 75.1 s cycle and left 22.1 s unaccounted for. The
+        unaccounted part was this journal: `AgentLoop._identical_order_already_in_flight` asks "was
+        an identical order submitted in the last 30 minutes", and the only reader available parsed
+        the whole file to answer it - 15.78 s for 26,673 events, plus the cycle records. The parse
+        cache could not help, because the daemon appends a record every cycle and every append
+        changes the file's signature, so the cache was invalidated by the very write it had to
+        catch up with.
+
+        The journal is append-only and its records are in time order, so the answer is at the end
+        of the file. This reads backwards in blocks until it reaches a record older than `since`.
+
+        Returning None is the fail-safe: it means the bound could not be established inside the
+        byte ceiling, and the caller must read everything. A window that silently dropped the
+        oldest part of its own window would be a duplicate-order check that reports "nothing in
+        flight" while an unconfirmed order sits just outside the bytes it read - the one wrong
+        answer this check exists to prevent.
+        """
+        lines = self._window_lines(since)
+        if lines is None:
+            return None
+        want_events = model is JournalEvent
+        out: list = []
+        for raw in lines:
+            stripped = raw.strip()
+            if not stripped:
+                continue
+            if (_EVENT_MARKER in stripped) != want_events:
+                continue
+            try:
+                out.append(model.model_validate_json(stripped))
+            except Exception:
+                repaired = _read_tolerantly(model, stripped)
+                if repaired is not None:
+                    out.append(repaired)
+        return out
+
+    def _window_lines(self, since: datetime) -> list[str] | None:
+        """Every complete journal line at or after `since`, oldest first, or None if unbounded."""
+        lines: list[str] = []
+        for path in reversed(self.history_paths()):
+            chunk, status = self._tail_of(path, since)
+            if status == "unbounded":
+                return None
+            lines = chunk + lines
+            if status == "bounded":
+                return lines
+        # Every generation was read and none of them held a record older than the window: the
+        # window reaches the start of the history, which is a bound even though no record marks it.
+        return lines
+
+    def _tail_of(self, path: Path, since: datetime) -> tuple[list[str], str]:
+        """The tail of one journal file at or after `since`, and how the scan ended.
+
+        Three endings, and the caller needs to tell them apart. `bounded` means a record older than
+        the window was found, so this file holds the whole window. `open` means the file was read to
+        its start and every record in it is inside the window, so an earlier generation may hold
+        more of it - a rotation during the window is exactly this case, and treating it as bounded
+        was a real defect caught here first: a 30-minute window that straddled a rotation returned
+        12 events of the 60 it should have. `unbounded` means the byte ceiling was reached before
+        the window's oldest end, and the caller must read everything rather than answer a narrower
+        question.
+        """
+        try:
+            size = path.stat().st_size
+        except OSError:
+            # A generation named in `history_paths` and gone by the time it is opened is not a
+            # reason to answer a narrower question: reporting "bounded" here would silently drop
+            # whatever it held.
+            return [], "unbounded"
+        if size == 0:
+            return [], "open"
+        budget = min(size, _TAIL_BLOCK_BYTES)
+        while True:
+            start = size - budget
+            try:
+                with path.open("rb") as handle:
+                    handle.seek(start)
+                    blob = handle.read(budget)
+            except OSError:
+                return [], "unbounded"
+            decoded = blob.decode("utf-8", errors="replace").split("\n")
+            if start > 0:
+                # The first piece is the tail of a line whose beginning was not read.
+                decoded = decoded[1:]
+            if decoded and decoded[-1] == "":
+                decoded.pop()
+            for index in range(len(decoded) - 1, -1, -1):
+                when = _line_timestamp(decoded[index])
+                if when is None:
+                    continue
+                if when < since:
+                    # Records are appended in time order, so this is the newest record outside the
+                    # window and everything after it is inside.
+                    return decoded[index + 1:], "bounded"
+            if start == 0:
+                return decoded, "open"
+            if budget >= _TAIL_LIMIT_BYTES:
+                return [], "unbounded"
+            budget = min(size, budget * 2)
 
     def count_submitted_on(self, day) -> int:
         """Count potential paper order attempts on a UTC date without read_all().

@@ -76,21 +76,28 @@ class TradingLoop:
         Scoped to a window: an order submitted hours ago with no fill confirmation is a
         different problem - reconciliation, not duplication - and must not block trading
         forever.
+
+        Both reads are asked for the window rather than for the whole history, because that is
+        the question. Measured 2026-10-22: neither clause below can use anything older than
+        `IN_FLIGHT_WINDOW_MINUTES` (a submission outside it is skipped on age, and a fill only
+        matters for a submission inside it), and reading the whole journal anyway cost 15.78 s of
+        a 75.1 s cycle on the live journal - every cycle, because the daemon's own append changed
+        the file signature and the parse cache therefore never hit.
         """
         if self.journal is None or decision.action == "HOLD":
             return None
         window = timedelta(minutes=self.IN_FLIGHT_WINDOW_MINUTES)
         now = datetime.now(timezone.utc)
+        since = now - window
         confirmed: set[str] = set()
         submitted: list[tuple[datetime, str, str]] = []
         try:
-            for event in self.journal.read_events():
+            for event in self.journal.read_events(since=since):
                 if event.event_type == FILL_EVENT:
                     coid = event.payload.get("client_order_id")
                     if isinstance(coid, str):
                         confirmed.add(coid)
-                continue
-            for record in self.journal.last_n(200):
+            for record in self.journal.read_all(since=since):
                 execution = record.execution
                 if execution.status != "SUBMITTED":
                     continue

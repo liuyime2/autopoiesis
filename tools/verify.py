@@ -228,6 +228,10 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_guardian_shorts.py": ("guardian-bypass-prevention",),
     "test_health.py": ("unit-integration", "broker-reconciliation"),
     "test_journal.py": ("data-integrity", "crash-recovery"),
+    # The windowed read is the duplicate-order guard's only reader: if it answers a narrower
+    # question than it was asked it says "nothing in flight" while an order is, which is the one
+    # wrong answer the guard exists to prevent.
+    "test_journal_window.py": ("data-integrity", "crash-recovery", "guardian-bypass-prevention"),
     # A deployment record that can name the wrong tree is worse than no record: this file pins the
     # refusals that keep the entry tied to the tree its verdict was taken on.
     "test_deployment_record.py": ("crash-recovery",),

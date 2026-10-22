@@ -450,11 +450,21 @@ class JournalWithHistory(FakeJournal):
         self.records = list(records)
         self._events = list(events)
 
-    def read_events(self, event_type=None, limit=None):
-        return list(self._events)
+    # `since` is part of the reader's interface, not an optimisation the loop may assume away:
+    # the guard asks for the window because nothing older can change its answer, and a fake that
+    # ignored the argument would let a broken window pass here and fail in production.
+    def read_events(self, event_type=None, limit=None, *, since=None):
+        events = [e for e in self._events if since is None or e.timestamp >= since]
+        normalized = event_type.strip().upper() if event_type else None
+        if normalized is not None:
+            events = [e for e in events if e.event_type == normalized]
+        return events[-limit:] if limit else events
 
     def last_n(self, n):
         return list(self.records)[-n:]
+
+    def read_all(self, *, since=None):
+        return [r for r in self.records if since is None or r.snapshot.timestamp >= since]
 
 
 def _submitted(symbol, action, quantity, strategy_id, minutes_ago, status="SUBMITTED"):
