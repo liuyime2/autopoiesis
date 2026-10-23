@@ -40,6 +40,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Private by default: a preregistered spec is a research contract, and the runtime
+# directory that holds it is world-readable by default on this host. Narrow on
+# creation so the gate's runtime-files-private class never has to chase it.
+try:
+    from autopoiesis.atomicio import ensure_private as _ensure_private
+except Exception:  # pragma: no cover - atomicio is a core module
+    _ensure_private = None
+
 DEFAULT_REGISTRY = Path("runtime") / "autopoiesis" / "preregistered"
 
 
@@ -183,6 +191,8 @@ def register(spec_path: Path, registry: Path | None = None) -> dict:
             raise ValueError("existing registration is corrupt: " + "; ".join(problems))
         return _payload
     registry.mkdir(parents=True, exist_ok=True)
+    if _ensure_private is not None:
+        _ensure_private(registry, mode=0o700)
     payload = {
         "registered_at": datetime.now(timezone.utc).isoformat(),
         "sha256": digest,
@@ -198,6 +208,9 @@ def register(spec_path: Path, registry: Path | None = None) -> dict:
         handle.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
         handle.flush()
         os.fsync(handle.fileno())
+    if _ensure_private is not None:
+        _ensure_private(target, mode=0o600)
+        _ensure_private(metadata, mode=0o600)
     return payload
 
 
