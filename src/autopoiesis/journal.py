@@ -329,7 +329,7 @@ class JsonlJournal:
                 continue
             try:
                 out.append(model.model_validate_json(stripped))
-            except Exception:  # noqa: BLE001 - any parse failure falls through to the tolerant reader
+            except Exception:
                 repaired = _read_tolerantly(model, stripped)
                 if repaired is not None:
                     out.append(repaired)
@@ -422,46 +422,55 @@ class JsonlJournal:
         # sits below it and reads the file directly, and its own docstring still names it as a
         # reader that concluded the agent had never run. A limit that can silently stop
         # limiting is worse than no limit, because the report says it is in force.
-        with self._read_lock(), contextlib.ExitStack() as stack:
-            paths = self.history_paths()
-            if not paths:
-                return 0
-            handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in paths]
-            for line in itertools.chain.from_iterable(handles):
-                if date_text not in line:
-                    continue
-                if _EVENT_MARKER in line:
-                    try:
-                        event = JournalEvent.model_validate_json(line)
-                    except Exception:
-                        self._note_drop(line)
-                        continue
-                    if (
-                        event.event_type == "ORDER_SUBMISSION_INTENT"
-                        and event.timestamp.astimezone(timezone.utc).date() == day
-                    ):
-                        client_order_id = event.payload.get("client_order_id")
-                        if isinstance(client_order_id, str) and client_order_id:
-                            intent_ids.add(client_order_id)
-                            attempts.add(client_order_id)
-                    continue
-                if _CYCLE_MARKER not in line:
-                    continue
+        # Today's records are at the end of the journal (append-only, in time order), so a tail
+        # read back to midnight UTC covers them across every generation. Reading all files the way
+        # this used to cost the whole journal on every cycle - 24s on the 61MB live journal, which
+        # was the largest single piece of the remainder `CycleRecord.timings` reported.
+        midnight = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+        with self._read_lock():
+            lines = self._window_lines(midnight)
+        if lines is None:
+            with self._read_lock(), contextlib.ExitStack() as stack:
+                paths = self.history_paths()
+                if not paths:
+                    return 0
+                handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in paths]
+                lines = list(itertools.chain.from_iterable(handles))
+        for line in lines:
+            if date_text not in line:
+                continue
+            if _EVENT_MARKER in line:
                 try:
-                    record = CycleRecord.model_validate_json(line)
+                    event = JournalEvent.model_validate_json(line)
                 except Exception:
                     self._note_drop(line)
                     continue
-                if record.snapshot.timestamp.date() != day:
-                    continue
-                if record.execution.status not in {"SUBMITTED", "ERROR", "SUBMISSION_UNKNOWN"}:
-                    continue
-                if record.decision.action == "HOLD":
-                    continue
-                client_order_id = record.execution.client_order_id
-                if client_order_id and client_order_id in intent_ids:
-                    continue
-                attempts.add(client_order_id or f"cycle:{record.cycle_id}")
+                if (
+                    event.event_type == "ORDER_SUBMISSION_INTENT"
+                    and event.timestamp.astimezone(timezone.utc).date() == day
+                ):
+                    client_order_id = event.payload.get("client_order_id")
+                    if isinstance(client_order_id, str) and client_order_id:
+                        intent_ids.add(client_order_id)
+                        attempts.add(client_order_id)
+                continue
+            if _CYCLE_MARKER not in line:
+                continue
+            try:
+                record = CycleRecord.model_validate_json(line)
+            except Exception:
+                self._note_drop(line)
+                continue
+            if record.snapshot.timestamp.date() != day:
+                continue
+            if record.execution.status not in {"SUBMITTED", "ERROR", "SUBMISSION_UNKNOWN"}:
+                continue
+            if record.decision.action == "HOLD":
+                continue
+            client_order_id = record.execution.client_order_id
+            if client_order_id and client_order_id in intent_ids:
+                continue
+            attempts.add(client_order_id or f"cycle:{record.cycle_id}")
         return len(attempts)
 
     def retained_window(self, *, known_since: datetime | None = None) -> RetainedWindow:

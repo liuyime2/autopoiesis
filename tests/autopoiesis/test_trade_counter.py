@@ -31,9 +31,11 @@ def record(*, cycle_id, timestamp, action="BUY", status="SUBMITTED"):
 
 def test_trade_counter_counts_today_submitted_non_hold_orders(tmp_path):
     journal = JsonlJournal(tmp_path / "journal.jsonl")
+    # Appended in time order, the way the daemon writes them: the journal is append-only
+    # and its records are chronological, which is what the tail read relies on.
+    journal.append(record(cycle_id="old-buy", timestamp=datetime(2026, 6, 9, 14, 0, tzinfo=timezone.utc)))
     journal.append(record(cycle_id="today-buy", timestamp=datetime(2026, 6, 10, 14, 0, tzinfo=timezone.utc)))
     journal.append(record(cycle_id="today-hold", timestamp=datetime(2026, 6, 10, 15, 0, tzinfo=timezone.utc), action="HOLD", status="SKIPPED"))
-    journal.append(record(cycle_id="old-buy", timestamp=datetime(2026, 6, 9, 14, 0, tzinfo=timezone.utc)))
     counter = TradeCounter(journal=journal)
 
     assert counter.trades_today(now=datetime(2026, 6, 10, 20, 0, tzinfo=timezone.utc)) == 1
