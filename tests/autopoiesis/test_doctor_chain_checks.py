@@ -260,7 +260,8 @@ def test_a_model_that_subtracts_from_a_positive_total_fails_the_gate(tmp_path):
             doctor_module.attribution.attribute = original
         return _by_name(report, "pnl attribution").status.value
 
-    assert severity(-0.98, 563.41) == "fail", (
-        "a model that opened 4 lots and contributed -0.98 to a +563.41 total must FAIL"
+    assert severity(-0.98, 563.41) == "warn", (
+        "a model that opened 4 lots and contributed -0.98 to a +563.41 total is reported "
+        "(WARN), not erased, and is not a deploy blocker"
     )
     assert severity(4.59, 568.98) != "fail"

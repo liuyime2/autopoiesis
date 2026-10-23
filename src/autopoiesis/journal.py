@@ -329,7 +329,7 @@ class JsonlJournal:
                 continue
             try:
                 out.append(model.model_validate_json(stripped))
-            except Exception:
+            except Exception:  # noqa: BLE001 - any parse failure falls through to the tolerant reader
                 repaired = _read_tolerantly(model, stripped)
                 if repaired is not None:
                     out.append(repaired)

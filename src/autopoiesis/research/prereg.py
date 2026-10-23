@@ -45,7 +45,7 @@ from pathlib import Path
 # creation so the gate's runtime-files-private class never has to chase it.
 try:
     from autopoiesis.atomicio import ensure_private as _ensure_private
-except Exception:  # pragma: no cover - atomicio is a core module
+except Exception:  # pragma: no cover - atomicio is a core module  # noqa: BLE001
     _ensure_private = None
 
 DEFAULT_REGISTRY = Path("runtime") / "autopoiesis" / "preregistered"

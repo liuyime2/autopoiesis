@@ -2021,7 +2021,7 @@ class AgentDaemon:
                 for spec in library.list():
                     if spec.enabled and spec.lifecycle not in {"PAUSED", "RETIRED"}:
                         served.update(str(symbol).upper() for symbol in (spec.symbols or ()))
-            except Exception:  # noqa: BLE001 - an unreadable library is a reason to treat nothing as served
+            except Exception:
                 # An unreadable library is a reason to treat nothing as served, not to guess: the
                 # rotation below then applies to everything, which shortens the round rather than
                 # lengthening it.
