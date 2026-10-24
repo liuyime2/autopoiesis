@@ -50,7 +50,7 @@ def _spec(
     lifecycle: str = "RETIRED",
     lifecycle_reason: str = "severe operational failure rate 1.00",
     readmissions: int = 0,
-    symbols: tuple[str, ...] = ("BIL",),
+    symbols: tuple[str, ...] = ("IEF",),
 ) -> StrategySpec:
     return StrategySpec(
         strategy_id=strategy_id,
@@ -86,7 +86,7 @@ def _spec(
 def _gate(library: StrategyLibrary, *, prices: dict[str, float] | None = None) -> StrategyAdmission:
     return StrategyAdmission(
         guardian=Guardian(
-            allowlist=frozenset({"BIL", "SPY", "TLT"}),
+            allowlist=frozenset({"IEF", "SPY", "TLT"}),
             max_position_value=25000.0,
             max_daily_loss=500.0,
             max_total_exposure=90000.0,
@@ -95,7 +95,7 @@ def _gate(library: StrategyLibrary, *, prices: dict[str, float] | None = None) -
             max_snapshot_age_seconds=900,
         ),
         strategy_library=library,
-        market_prices=prices or {"BIL": 91.505},
+        market_prices=prices or {"IEF": 91.505},
     )
 
 
@@ -284,7 +284,7 @@ def test_a_retired_unconditional_sell_is_not_readmitted(tmp_path):
     """
     unconditional = StrategySpec(
         strategy_id="fixed-size-bil-sell-002", name="BIL sell", kind="FIXED_SIZE",
-        symbols=("BIL",), parameters={"action": "SELL", "quantity": 1, "confidence": 0.5},
+        symbols=("IEF",), parameters={"action": "SELL", "quantity": 1, "confidence": 0.5},
         max_position_value=25000.0, enabled=True, lifecycle="RETIRED",
         lifecycle_reason="severe operational failure rate 1.00", probation_restarts=1,
         created_at=datetime(2026, 10, 4, tzinfo=timezone.utc), rationale="t",

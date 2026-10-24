@@ -111,6 +111,31 @@ def _unconditional_sell_reason(strategy: StrategySpec) -> str | None:
     )
 
 
+#: Money-market-like ETFs. Their price moves a few basis points a month, so a directional
+#: strategy on one is a hypothesis with no possible payoff: 7 of the 14 live TREND_FOLLOW
+#: strategies on 2026-10-24 sat on BIL, anchored 87-96 with a 1.5-3% band, and could only
+#: ever stay silent or fire on noise. Holding the instrument is the account holder's choice
+#: and stays manageable by the model; what the library no longer accepts is a *strategy* on it.
+CASH_EQUIVALENT_SYMBOLS = frozenset(
+    {"BIL", "SHV", "SGOV", "USFR", "TFLO", "BOXX", "ICSH", "MINT", "JPST", "GBIL"}
+)
+
+
+def _cash_equivalent_reason(strategy: StrategySpec) -> str | None:
+    """Refuse a trading strategy whose symbols are cash-equivalent ETFs, or None if it may."""
+    if strategy.kind == "HOLD_BASELINE":
+        return None
+    cash = sorted(CASH_EQUIVALENT_SYMBOLS & {symbol.upper() for symbol in strategy.symbols})
+    if not cash:
+        return None
+    return (
+        f"{', '.join(cash)} is a cash-equivalent ETF whose price barely moves, so a {strategy.kind} "
+        f"strategy on it cannot earn a return worth testing. Measured 2026-10-24: 7 of 14 live "
+        f"TREND_FOLLOW strategies were on BIL. Propose a hypothesis on an instrument whose price "
+        f"carries risk, from a family in signal_trials.jsonl."
+    )
+
+
 class StrategyAdmission:
     def __init__(
         self,
@@ -297,6 +322,14 @@ class StrategyAdmission:
             return StrategyAdmissionResult(
                 accepted=False,
                 reason=unconditional_reason,
+                strategy_id=strategy.strategy_id,
+            )
+
+        cash_reason = _cash_equivalent_reason(strategy)
+        if cash_reason is not None:
+            return StrategyAdmissionResult(
+                accepted=False,
+                reason=cash_reason,
                 strategy_id=strategy.strategy_id,
             )
 
