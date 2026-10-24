@@ -182,6 +182,23 @@ def _headline(report, agent: dict | None, *, covered: bool = False) -> tuple[str
     return f"NOT MEASURABLE: {reason}; {diagnostic}", EXIT_NOTHING_TO_MEASURE
 
 
+def _sleeve_section(config) -> dict | None:
+    """The core sleeve against holding its whole pool, from confirmed fills. None while it is off
+    or has not filled. Read-only: journal events and the prices the cycles recorded."""
+    if not getattr(config, "sleeve_enabled", False):
+        return None
+    from autopoiesis.fill_reconciler import confirmed_fill_events
+    from autopoiesis.journal import JsonlJournal
+    from autopoiesis.sleeve import NEW_YORK, sleeve_performance
+
+    journal = JsonlJournal(config.journal_path)
+    prices = {}
+    for record in journal.read_all():
+        if record.snapshot.symbol == config.sleeve_symbol:
+            prices[record.snapshot.timestamp.astimezone(NEW_YORK).date()] = record.snapshot.last_price
+    return sleeve_performance(confirmed_fill_events(journal.read_events()), prices, config.sleeve_pool)
+
+
 def _agent_level(config=None) -> dict | None:
     """Verified raw agent accounting; no inferred allocation or portfolio return.
 
@@ -411,6 +428,21 @@ def _run_prose(argv: list[str]) -> int:
             print(f"    {agent['comparison_reason']}")
         else:
             print(f"  portfolio comparison {status}: {agent['comparison_reason']}")
+        print()
+
+    sleeve = _sleeve_section(config)
+    payload["sleeve"] = sleeve
+    if sleeve is not None:
+        print("core sleeve vs holding its whole pool (confirmed fills; a risk product, not alpha)")
+        print("-" * 78)
+        print(
+            f"  {config.sleeve_symbol} pool ${sleeve['pool']:,.0f}, {sleeve['fills']} fill(s) over {sleeve['days']} day(s) "
+            f"since {sleeve['first_fill']}, on average {sleeve['average_deployed_fraction']:.0%} deployed"
+        )
+        print(
+            f"  PnL sleeve {sleeve['sleeve_pnl']:+,.2f} vs hold-the-pool {sleeve['hold_pool_pnl']:+,.2f}; "
+            f"max drawdown {sleeve['sleeve_max_drawdown_pct']:+.2f}% vs {sleeve['hold_pool_max_drawdown_pct']:+.2f}%"
+        )
         print()
 
     paired, _ = _pick(report.checks, "llm vs rule")

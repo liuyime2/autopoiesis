@@ -123,3 +123,27 @@ def test_the_loop_takes_the_sleeve_first_and_the_gate_admits_only_the_sleeve():
     assert record.decision.action in {"BUY", "HOLD"}
     assert "has not passed the screen" not in record.decision.rationale
     assert loop.accumulation_allowed("some-other-strategy") is False
+
+
+def test_performance_compares_the_sleeve_with_holding_the_whole_pool():
+    from datetime import date
+
+    from autopoiesis.models import JournalEvent
+    from autopoiesis.sleeve import sleeve_performance
+
+    def fill(day, action, qty, px, strategy=SLEEVE_STRATEGY_ID):
+        return JournalEvent(
+            event_id=f"e{day}{action}", event_type="ORDER_FILL_CONFIRMED", status="SUCCESS",
+            timestamp=datetime(2026, 10, day, 15, tzinfo=timezone.utc), strategy_id=strategy,
+            payload={"action": action, "filled_quantity": qty, "filled_avg_price": px, "symbol": "SPY"},
+        )
+
+    fills = [fill(26, "BUY", 20, 500.0), fill(27, "BUY", 5, 480.0, strategy="someone-else"), fill(28, "SELL", 10, 450.0)]
+    prices = {date(2026, 10, 26): 500.0, date(2026, 10, 27): 480.0, date(2026, 10, 28): 450.0}
+
+    result = sleeve_performance(fills, prices, pool=20_000.0)
+
+    assert result is not None and result["fills"] == 2
+    assert result["sleeve_pnl"] == -1000.0          # 10 sold at -50 each, 10 still held at -50 each
+    assert result["hold_pool_pnl"] == -2000.0       # the whole pool held from 500 to 450
+    assert sleeve_performance([], prices, 20_000.0) is None

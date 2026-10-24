@@ -18,13 +18,16 @@ order.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
+from datetime import date
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from autopoiesis.learning_evidence import capture_behavior
-from autopoiesis.models import DataSnapshot, TradeDecision
+from autopoiesis.models import DataSnapshot, JournalEvent, TradeDecision
 from autopoiesis.risk_judgment import vol_scaled_fraction
 
+NEW_YORK = ZoneInfo("America/New_York")
 SLEEVE_STRATEGY_ID = "core-sleeve"
 #: The ceiling the account holder authorised. Raising it is a code change they make, not a setting.
 SLEEVE_POOL_CAP = 20_000.0
@@ -103,3 +106,65 @@ class CoreSleeve:
             strategy_provenance=self.provenance,
             decision_source="policy_engine",
         )
+
+
+def sleeve_performance(
+    fills: Sequence[JournalEvent], daily_prices: Mapping[date, float], pool: float
+) -> dict[str, Any] | None:
+    """How the sleeve did against holding the whole pool, from broker-confirmed fills.
+
+    `fills` is `fill_reconciler.confirmed_fill_events` output; `daily_prices` the symbol's last
+    journalled price by New York date. The comparator is the pool bought in full at the price of
+    the first sleeve fill and held, so the difference between the two lines is the cost (or gain)
+    of sizing down. None until a sleeve fill exists. A day with no price is skipped, never filled in.
+    """
+    mine = []
+    for event in fills:
+        payload = event.payload
+        action = str(payload.get("action", payload.get("side", ""))).upper()
+        qty = payload.get("cumulative_filled_quantity", payload.get("filled_quantity"))
+        px = payload.get("cumulative_filled_avg_price", payload.get("filled_avg_price"))
+        if event.strategy_id != SLEEVE_STRATEGY_ID or action not in {"BUY", "SELL"}:
+            continue
+        if not isinstance(qty, int | float) or not isinstance(px, int | float) or qty <= 0 or px <= 0:
+            continue
+        mine.append((event.timestamp.astimezone(NEW_YORK).date(), (1 if action == "BUY" else -1) * float(qty), float(px)))
+    if not mine:
+        return None
+    mine.sort(key=lambda row: row[0])
+    first_day, _, first_px = mine[0]
+    days = sorted(d for d in daily_prices if d >= first_day)
+    shares = cash = 0.0
+    cash = pool
+    values: list[float] = []
+    held_values: list[float] = []
+    deployed: list[float] = []
+    cursor = 0
+    for day in days:
+        while cursor < len(mine) and mine[cursor][0] <= day:
+            _, signed, px = mine[cursor]
+            shares += signed
+            cash -= signed * px
+            cursor += 1
+        price = daily_prices[day]
+        values.append(cash + shares * price)
+        held_values.append(pool * price / first_px)
+        deployed.append(shares * price / pool)
+    if not values:
+        return None
+    return {
+        "first_fill": first_day.isoformat(), "days": len(values), "fills": len(mine),
+        "pool": pool, "sleeve_pnl": round(values[-1] - pool, 2),
+        "hold_pool_pnl": round(held_values[-1] - pool, 2),
+        "sleeve_max_drawdown_pct": round(_max_drawdown(values) * 100, 2),
+        "hold_pool_max_drawdown_pct": round(_max_drawdown(held_values) * 100, 2),
+        "average_deployed_fraction": round(sum(deployed) / len(deployed), 3),
+    }
+
+
+def _max_drawdown(values: Sequence[float]) -> float:
+    peak, worst = values[0], 0.0
+    for value in values:
+        peak = max(peak, value)
+        worst = min(worst, value / peak - 1)
+    return worst
