@@ -503,7 +503,9 @@ def _build_agent_daemon(
             if config.universe == "tradable" and config.attention_slots > 0
             else None
         ),
-        strategy_admission=StrategyAdmission(guardian=guardian, strategy_library=strategy_library),
+        strategy_admission=StrategyAdmission(
+            guardian=guardian, strategy_library=strategy_library, refused_kinds=config.refused_kinds,
+        ),
         broker_evidence_provider=BrokerEvidenceProvider(client=client),
         lifecycle_manager=StrategyLifecycleManager(),
         knowledge_admission=KnowledgeAdmission(knowledge_library=knowledge_library),

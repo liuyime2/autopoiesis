@@ -146,7 +146,11 @@ class StrategyAdmission:
         max_reference_price_deviation: float = 0.5,
         probation_selector: StrategySelector | None = None,
         max_probation_queue: int = PROBATION_CYCLES,
+        refused_kinds: Sequence[str] = (),
     ):
+        #: Kinds this deployment does not admit (config `refused_kinds`). Empty here so a bare
+        #: gate behaves as it always did; the wiring in cli.py passes the configured policy.
+        self.refused_kinds = frozenset(kind.upper() for kind in refused_kinds)
         self.guardian = guardian
         self.strategy_library = strategy_library
         self.market_prices = dict(market_prices or {})
@@ -322,6 +326,19 @@ class StrategyAdmission:
             return StrategyAdmissionResult(
                 accepted=False,
                 reason=unconditional_reason,
+                strategy_id=strategy.strategy_id,
+            )
+
+        if strategy.kind.upper() in self.refused_kinds:
+            return StrategyAdmissionResult(
+                accepted=False,
+                reason=(
+                    f"{strategy.kind} strategies are not admitted on this deployment "
+                    f"(AUTOPOIESIS_REFUSED_KINDS): its anchor is a price picked by hand, 36 of the 37 "
+                    f"strategies created since 2026-10-15 were this kind and 20 were retired, and signal_trials.jsonl holds no "
+                    f"price-level signal. Propose a RULE (relative signal) from a family the ledger "
+                    f"has not refuted."
+                ),
                 strategy_id=strategy.strategy_id,
             )
 

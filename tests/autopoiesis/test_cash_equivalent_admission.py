@@ -67,3 +67,21 @@ def test_admission_refuses_a_cash_equivalent_strategy(tmp_path):
 
     assert result.accepted is False
     assert "cash-equivalent" in result.reason
+
+
+def test_a_refused_kind_is_not_admitted_and_the_default_gate_admits_it(tmp_path):
+    from autopoiesis.config import AgentConfig
+
+    guardian = Guardian(
+        max_position_value=25_000.0, max_daily_loss=500.0, max_trades_per_day=100,
+        allowlist=frozenset({"SPY"}),
+    )
+    refusing = StrategyAdmission(
+        guardian=guardian, strategy_library=StrategyLibrary(tmp_path / "a"), refused_kinds=("TREND_FOLLOW",)
+    )
+    assert refusing.admit(_spec("SPY", kind="HOLD_BASELINE", strategy_id="hold-baseline-001")).accepted
+    result = refusing.admit(_spec("SPY"))
+    assert result.accepted is False and "not admitted on this deployment" in result.reason
+
+    assert AgentConfig.from_env({}).refused_kinds == ("TREND_FOLLOW",)
+    assert AgentConfig.from_env({"AUTOPOIESIS_REFUSED_KINDS": "none"}).refused_kinds == ()

@@ -83,6 +83,10 @@ class AgentConfig:
     attention_slots: int = 0
     #: The core volatility-targeted sleeve (see sleeve.py). Off unless both are set: the account
     #: holder names the symbol and a pool of at most `sleeve.SLEEVE_POOL_CAP` in the env file.
+    #: Strategy kinds admission refuses. Default TREND_FOLLOW: its anchor is a price the model picks
+    #: by hand, 36 of the 37 strategies created since 2026-10-15 were this kind and 20 of them were retired, and the signal ledger holds
+    #: no price-level signal. An empty list (`AUTOPOIESIS_REFUSED_KINDS=none`) admits every kind.
+    refused_kinds: tuple[str, ...] = ("TREND_FOLLOW",)
     sleeve_symbol: str = ""
     sleeve_pool: float = 0.0
     sleeve_target_vol_pct: float = 10.0
@@ -158,6 +162,7 @@ class AgentConfig:
             universe=_choice("AUTOPOIESIS_UNIVERSE", ("allowlist", "account", "tradable"), "allowlist", environ),
             min_price=_bounded_float("AUTOPOIESIS_MIN_PRICE", 5.0, 0.0, 10_000.0, environ),
             attention_slots=_bounded_int("AUTOPOIESIS_ATTENTION_SLOTS", 0, 0, 25, environ),
+            refused_kinds=_refused_kinds(source.get("AUTOPOIESIS_REFUSED_KINDS")),
             sleeve_symbol=source.get("AUTOPOIESIS_SLEEVE_SYMBOL", "").strip().upper(),
             sleeve_pool=_bounded_float("AUTOPOIESIS_SLEEVE_POOL", 0.0, 0.0, 20_000.0, environ),
             sleeve_target_vol_pct=_bounded_float("AUTOPOIESIS_SLEEVE_TARGET_VOL", 10.0, 1.0, 30.0, environ),
@@ -248,6 +253,12 @@ def env(
     source = os.environ if environ is None else environ
     found = source.get(name)
     return found if found is not None else default
+
+
+def _refused_kinds(raw: str | None) -> tuple[str, ...]:
+    if raw is None:
+        return ("TREND_FOLLOW",)
+    return tuple(item.strip().upper() for item in raw.split(",") if item.strip() and item.strip().lower() != "none")
 
 
 def _split_symbols(raw: str) -> tuple[str, ...]:
