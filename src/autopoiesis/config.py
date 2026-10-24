@@ -81,6 +81,11 @@ class AgentConfig:
     #: Extra symbols looked at each round beyond the configured and held ones, chosen from the
     #: broker's most-active list after quality filters. Zero (default) looks at none.
     attention_slots: int = 0
+    #: The core volatility-targeted sleeve (see sleeve.py). Off unless both are set: the account
+    #: holder names the symbol and a pool of at most `sleeve.SLEEVE_POOL_CAP` in the env file.
+    sleeve_symbol: str = ""
+    sleeve_pool: float = 0.0
+    sleeve_target_vol_pct: float = 10.0
     max_daily_cycles: int = 288
     #: How long one trading decision may take before the rule decides instead. The model
     #: thinks before it answers - 30-50s on SPY, 122s once on a symbol it had not seen - so
@@ -99,6 +104,10 @@ class AgentConfig:
     reflection_interval_seconds: int = 1800
     curriculum_interval_seconds: int = 3600
     profit_target_return_pct: float = 0.10
+
+    @property
+    def sleeve_enabled(self) -> bool:
+        return bool(self.sleeve_symbol) and self.sleeve_pool > 0
 
     @property
     def whole_account(self) -> bool:
@@ -149,6 +158,9 @@ class AgentConfig:
             universe=_choice("AUTOPOIESIS_UNIVERSE", ("allowlist", "account", "tradable"), "allowlist", environ),
             min_price=_bounded_float("AUTOPOIESIS_MIN_PRICE", 5.0, 0.0, 10_000.0, environ),
             attention_slots=_bounded_int("AUTOPOIESIS_ATTENTION_SLOTS", 0, 0, 25, environ),
+            sleeve_symbol=source.get("AUTOPOIESIS_SLEEVE_SYMBOL", "").strip().upper(),
+            sleeve_pool=_bounded_float("AUTOPOIESIS_SLEEVE_POOL", 0.0, 0.0, 20_000.0, environ),
+            sleeve_target_vol_pct=_bounded_float("AUTOPOIESIS_SLEEVE_TARGET_VOL", 10.0, 1.0, 30.0, environ),
             max_daily_cycles=_positive_int("AUTOPOIESIS_MAX_DAILY_CYCLES", 288, environ),
             llm_timeout_seconds=_positive_int("AUTOPOIESIS_LLM_TIMEOUT_SECONDS", 240, environ),
             heartbeat_path=Path(_env_required("AUTOPOIESIS_HEARTBEAT", "runtime/autopoiesis/heartbeat.json", environ)),

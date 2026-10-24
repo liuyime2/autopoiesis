@@ -17,12 +17,25 @@ ELIGIBILITY_VERSION = 1
 
 
 def capture(strategy: StrategySpec) -> StrategyProvenance:
-    behavior = {key: getattr(strategy, key) for key in (
-        "strategy_id", "kind", "symbols", "parameters", "max_position_value",
-    )}
+    return capture_behavior(
+        strategy.strategy_id, strategy.kind, strategy.symbols, strategy.parameters,
+        strategy.max_position_value,
+    )
+
+
+def capture_behavior(
+    strategy_id: str, kind: str, symbols: Iterable[str], parameters: Mapping[str, object],
+    max_position_value: float,
+) -> StrategyProvenance:
+    """Provenance for behaviour that is not a library strategy, such as the core sleeve."""
+    universe = tuple(symbols)
+    behavior = {
+        "strategy_id": strategy_id, "kind": kind, "symbols": universe,
+        "parameters": dict(parameters), "max_position_value": max_position_value,
+    }
     encoded = json.dumps(behavior, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return StrategyProvenance(
-        strategy_id=strategy.strategy_id, universe=strategy.symbols,
+        strategy_id=strategy_id, universe=universe,
         behavior_json=encoded, behavior_digest=hashlib.sha256(encoded.encode()).hexdigest(),
     )
 

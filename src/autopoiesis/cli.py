@@ -46,6 +46,7 @@ from autopoiesis.reflection_memory import ReflectionMemory
 from autopoiesis.risk_judgment import RiskJudgment
 from autopoiesis.scheduler import MarketScheduler
 from autopoiesis.shadow import ShadowExecutor, ShadowShorts
+from autopoiesis.sleeve import CoreSleeve
 from autopoiesis.strategy_admission import StrategyAdmission
 from autopoiesis.strategy_engine import StrategyLibrary, StrategyLifecycleManager
 from autopoiesis.trade_counter import TradeCounter
@@ -474,6 +475,11 @@ def _build_agent_daemon(
         trade_counter=TradeCounter(journal=journal),
         manage_account=config.whole_account,
     )
+    if config.sleeve_enabled:
+        loop.sleeve = CoreSleeve(
+            symbol=config.sleeve_symbol, pool=config.sleeve_pool,
+            target_vol_pct=config.sleeve_target_vol_pct, risk_block=risk_judgment.block,
+        )
     daemon = AgentDaemon(
         config=config,
         loop=loop,

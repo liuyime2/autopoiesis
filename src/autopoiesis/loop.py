@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from autopoiesis.fill_reconciler import FILL_EVENT, confirmed_fill_events
 from autopoiesis.models import CycleRecord, DecisionIntervention, JournalEvent, TradeDecision
+from autopoiesis.sleeve import CoreSleeve
 
 #: What the loop writes when the decision engine's output could not be used. A module constant
 #: rather than a literal at the one call site, because the daemon reads it to decide whether the
@@ -58,6 +59,9 @@ class TradingLoop:
         #: With the account holder's consent (`AUTOPOIESIS_MANAGE_ACCOUNT=true`) a SELL is
         #: bounded by the account's position rather than by the agent's own fills.
         self.manage_account = manage_account
+        #: The core sleeve, when the account holder has enabled it (`sleeve.CoreSleeve`). It is asked
+        #: first; None from it means the ordinary decision engine decides.
+        self.sleeve: CoreSleeve | None = None
 
     def _identical_order_already_in_flight(self, decision: TradeDecision) -> str | None:
         """A client_order_id of the client_order_id of a submission we never saw fill.
@@ -251,7 +255,10 @@ class TradingLoop:
         decision_started = time.monotonic()
         errors: list[str] = []
         try:
-            if hasattr(self.decision_engine, "decide_snapshot"):
+            sleeve_decision = self.sleeve.plan(snapshot) if self.sleeve is not None else None
+            if sleeve_decision is not None:
+                decision = sleeve_decision
+            elif hasattr(self.decision_engine, "decide_snapshot"):
                 decision = self.decision_engine.decide_snapshot(snapshot)
             else:
                 decision = self.decision_engine.decide(self._decision_context(snapshot))

@@ -331,6 +331,7 @@ that can submit an order:
 | manage the whole account | `AUTOPOIESIS_MANAGE_ACCOUNT` | `false` |
 | universe | `AUTOPOIESIS_UNIVERSE` | `allowlist`; `account` adds every held symbol; `tradable` adds any active US stock on a major exchange priced at least `AUTOPOIESIS_MIN_PRICE` ($5) |
 | extra symbols looked at per round | `AUTOPOIESIS_ATTENTION_SLOTS` | 0 (the broker's most-active liquid names, filtered) |
+| core volatility-targeted sleeve (symbol, pool ≤ $20,000, target vol %) | `AUTOPOIESIS_SLEEVE_SYMBOL`, `AUTOPOIESIS_SLEEVE_POOL`, `AUTOPOIESIS_SLEEVE_TARGET_VOL` | off (see `sleeve.py`; the account holder's one exception to the screen rule) |
 
 - **Paper only.** `config.is_paper_endpoint` is the single definition, and both the CLI and the
   executor go through it.
@@ -356,7 +357,7 @@ Report a vulnerability as described in [`SECURITY.md`](SECURITY.md).
 ## Project layout
 
 ```
-src/autopoiesis/          the package (import name autopoiesis). 49 modules, 4 external dependencies.
+src/autopoiesis/          the package (import name autopoiesis). 50 modules, 4 external dependencies.
   cli.py                the single entry point
   daemon.py             the trading loop and the maintenance loop
   loop.py               one cycle: snapshot -> decision -> guardian -> execute
@@ -367,10 +368,10 @@ src/autopoiesis/          the package (import name autopoiesis). 49 modules, 4 e
   counterfactual.py     scoring each decision against what the market did next
   curriculum.py         the agent proposing new strategies
   journal.py            append-only record; the source of truth
-  models.py             shared schema, imported by 26 modules
+  models.py             shared schema, imported by 27 modules
   research/             walk-forward backtests; production may not import it
 tools/                  the gate (verify.py), benchmark, daily report, probes, systemd templates
-tests/autopoiesis/       118 test files
+tests/autopoiesis/       119 test files
 examples/               the smallest runnable example, no broker needed
 configs/                paper.env.example: every environment variable with its default
 docs/                   ARCHITECTURE.md, evidence/, history/

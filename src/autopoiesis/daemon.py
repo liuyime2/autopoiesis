@@ -29,6 +29,7 @@ from autopoiesis.knowledge_admission import KnowledgeAdmission
 from autopoiesis.knowledge_library import lesson_effects
 from autopoiesis.learning_evidence import ELIGIBILITY_VERSION, capture, valid_provenance
 from autopoiesis.llm_decision import LLM_UNAVAILABLE_MARKER
+from autopoiesis.sleeve import SLEEVE_STRATEGY_ID
 
 #: How many candidates the model is offered when choosing the watchlist. Wider than the
 #: slots so the choice is a choice; bounded so the prompt stays small.
@@ -1710,6 +1711,10 @@ class AgentDaemon:
         """
         if not strategy_id:
             return False
+        if strategy_id == SLEEVE_STRATEGY_ID:
+            # The account holder's one exception (2026-10-24, see sleeve.py): it exists only while
+            # the sleeve is configured, and its size is capped inside CoreSleeve.
+            return getattr(self.loop, "sleeve", None) is not None
         return (getattr(self, "_screen_verdicts", None) or {}).get(strategy_id) == offline_validation.PASS_SCREENED
 
     def _retire_lessons_without_effect(self) -> None:
