@@ -2175,3 +2175,21 @@ def test_a_paused_strategy_is_not_reopened_forever(tmp_path):
         "a strategy that has been reopened MAX_PROBATION_RESTARTS times and is still unable to "
         "produce an outcome must stop occupying a probation slot"
     )
+
+
+def test_a_counted_error_leaves_its_cause_in_the_heartbeat(tmp_path):
+    """2026-10-24: `error_count` read 1 and nothing recorded which of four sources it was."""
+    cfg = config(tmp_path)
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop())
+    assert daemon.health.read() is None
+    daemon._heartbeat("RUNNING", "start")
+    assert daemon.health.read().last_error is None
+
+    daemon._count_error("broker clock", TimeoutError("connect timed out"))
+    daemon._heartbeat("BACKING_OFF", "later message that overwrites the status")
+
+    beat = daemon.health.read()
+    assert beat.error_count == 1
+    assert "broker clock: TimeoutError: connect timed out" in beat.last_error
+    daemon._heartbeat("RUNNING", "recovered")
+    assert "broker clock" in daemon.health.read().last_error, "the cause outlives the message"

@@ -1036,6 +1036,9 @@ class HeartbeatPayload(BaseModel):
     timestamp: datetime
     cycle_count: int = Field(ge=0)
     error_count: int = Field(ge=0)
+    #: The newest error that incremented `error_count`, with its time and source. None until one
+    #: happens, and on heartbeats written before the field existed.
+    last_error: str | None = None
     active_strategy_id: str | None = None
     last_cycle_id: str | None = None
     #: When the newest cycle in the journal completed, and how old it is as of this heartbeat.

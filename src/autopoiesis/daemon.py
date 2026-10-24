@@ -121,6 +121,10 @@ class DaemonAlreadyRunningError(RuntimeError):
 
 
 class AgentDaemon:
+    #: The newest counted error with its time and source (see `_count_error`). A class default so a
+    #: daemon assembled without `__init__` in a test still has one.
+    _last_error: str | None = None
+
     def __init__(
         self,
         *,
@@ -236,7 +240,7 @@ class AgentDaemon:
                     self._reset_daily_count_if_needed()
                     self._maintenance()
                 except Exception as exc:
-                    self.error_count += 1
+                    self._count_error("maintenance", exc)
                     # Journalled as well as heartbeaten. The heartbeat is overwritten within
                     # minutes, so this increment used to leave a counter with no recoverable
                     # cause - and that is what happened on 2026-10-19: `error_count` read 1 and
@@ -353,7 +357,7 @@ class AgentDaemon:
             self._record_broker(True)
         except Exception as exc:
             self._record_broker(False)
-            self.error_count += 1
+            self._count_error("broker clock", exc)
             self._clock_failures += 1
             delay = min(300, 15 * self._clock_failures)
             self._heartbeat(
@@ -388,7 +392,7 @@ class AgentDaemon:
                 self.last_cycle_id = record.cycle_id
             if self._stop_requested:
                 if record is None:
-                    self.error_count += 1
+                    self._count_error("cycle", f"no record for {symbol} at stop")
                 return
             if self.on_cycle_count is not None:
                 # Reported even when the cycle failed, so the number stays monotone and never
@@ -398,7 +402,7 @@ class AgentDaemon:
             if record is None:
                 # run_once already journaled CYCLE_FAILED; there is no snapshot
                 # to report on, so do not invent a last_cycle_id.
-                self.error_count += 1
+                self._count_error("cycle", f"broker data unavailable for {symbol}")
                 self._heartbeat("BACKING_OFF", f"broker data unavailable for {symbol}")
                 return
             if self._stop_requested:
@@ -426,7 +430,7 @@ class AgentDaemon:
             if not self._stop_requested:
                 self._heartbeat("RUNNING", f"completed cycle for {symbol}")
         except Exception as exc:
-            self.error_count += 1
+            self._count_error("cycle", exc)
             self._heartbeat("BACKING_OFF", f"cycle error for {symbol}: {exc}")
 
     def _request_stop(self, _signum, _frame) -> None:
@@ -2222,6 +2226,14 @@ class AgentDaemon:
             return latest, None
         return latest, max(0.0, (clock - latest).total_seconds())
 
+    def _count_error(self, where: str, cause: object) -> None:
+        """Count an error and keep what it was. The counter alone left `errors 1` on a heartbeat
+        with no recoverable cause (2026-10-24: three of the four sources wrote nothing anywhere)."""
+        self.error_count += 1
+        text = f"{type(cause).__name__}: {cause}" if isinstance(cause, BaseException) else str(cause)
+        stamp = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")  # wall clock: a diagnostic, not a decision
+        self._last_error = f"{stamp} {where}: {text}"[:300]
+
     def _heartbeat(self, status: DaemonStatus, message: str) -> None:
         last_at, last_age = self._journal_recency()
         payload = HeartbeatPayload(
@@ -2230,6 +2242,7 @@ class AgentDaemon:
             timestamp=self.now(),
             cycle_count=self.cycle_count,
             error_count=self.error_count,
+            last_error=self._last_error,
             last_cycle_id=self.last_cycle_id,
             last_cycle_at=last_at,
             last_cycle_age_seconds=last_age,
