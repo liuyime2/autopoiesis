@@ -1,0 +1,343 @@
+{
+ "meta": {
+  "symbol": "SPY",
+  "first": "1993-01-29",
+  "last": "2026-10-08",
+  "days": 8481,
+  "cost_bp": 5.0,
+  "band": 0.1,
+  "primary_target": 10.0
+ },
+ "cash0": {
+  "1993-2012": {
+   "buy_and_hold": {
+    "cagr_pct": 8.07,
+    "vol_pct": 19.66,
+    "sharpe": 0.493,
+    "max_dd_pct": -55.19,
+    "worst_year_pct": -36.79
+   },
+   "vt8": {
+    "cagr_pct": 4.95,
+    "vol_pct": 8.17,
+    "sharpe": 0.633,
+    "max_dd_pct": -25.01,
+    "worst_year_pct": -11.38,
+    "annual_turnover": 1.45
+   },
+   "vt10": {
+    "cagr_pct": 5.77,
+    "vol_pct": 9.86,
+    "sharpe": 0.618,
+    "max_dd_pct": -28.86,
+    "worst_year_pct": -14.75,
+    "annual_turnover": 1.38
+   },
+   "vt12": {
+    "cagr_pct": 6.14,
+    "vol_pct": 11.31,
+    "sharpe": 0.584,
+    "max_dd_pct": -35.62,
+    "worst_year_pct": -17.22,
+    "annual_turnover": 1.24
+   },
+   "vt15": {
+    "cagr_pct": 7.03,
+    "vol_pct": 13.29,
+    "sharpe": 0.578,
+    "max_dd_pct": -41.18,
+    "worst_year_pct": -20.74,
+    "annual_turnover": 1.03
+   }
+  },
+  "2013-2022": {
+   "buy_and_hold": {
+    "cagr_pct": 12.46,
+    "vol_pct": 17.39,
+    "sharpe": 0.763,
+    "max_dd_pct": -33.72,
+    "worst_year_pct": -18.18
+   },
+   "vt8": {
+    "cagr_pct": 6.82,
+    "vol_pct": 8.29,
+    "sharpe": 0.837,
+    "max_dd_pct": -11.74,
+    "worst_year_pct": -7.95,
+    "annual_turnover": 1.74
+   },
+   "vt10": {
+    "cagr_pct": 7.94,
+    "vol_pct": 9.86,
+    "sharpe": 0.825,
+    "max_dd_pct": -14.72,
+    "worst_year_pct": -10.28,
+    "annual_turnover": 1.84
+   },
+   "vt12": {
+    "cagr_pct": 9.4,
+    "vol_pct": 10.97,
+    "sharpe": 0.875,
+    "max_dd_pct": -16.38,
+    "worst_year_pct": -12.98,
+    "annual_turnover": 1.3
+   },
+   "vt15": {
+    "cagr_pct": 10.4,
+    "vol_pct": 12.12,
+    "sharpe": 0.877,
+    "max_dd_pct": -18.81,
+    "worst_year_pct": -14.59,
+    "annual_turnover": 0.75
+   }
+  },
+  "2023-": {
+   "buy_and_hold": {
+    "cagr_pct": 22.21,
+    "vol_pct": 14.89,
+    "sharpe": 1.421,
+    "max_dd_pct": -18.76,
+    "worst_year_pct": 14.38
+   },
+   "vt8": {
+    "cagr_pct": 10.17,
+    "vol_pct": 8.13,
+    "sharpe": 1.232,
+    "max_dd_pct": -9.2,
+    "worst_year_pct": 5.85,
+    "annual_turnover": 2.08
+   },
+   "vt10": {
+    "cagr_pct": 12.58,
+    "vol_pct": 10.01,
+    "sharpe": 1.234,
+    "max_dd_pct": -11.31,
+    "worst_year_pct": 7.03,
+    "annual_turnover": 2.31
+   },
+   "vt12": {
+    "cagr_pct": 16.02,
+    "vol_pct": 11.33,
+    "sharpe": 1.368,
+    "max_dd_pct": -12.69,
+    "worst_year_pct": 8.83,
+    "annual_turnover": 1.58
+   },
+   "vt15": {
+    "cagr_pct": 17.73,
+    "vol_pct": 12.27,
+    "sharpe": 1.392,
+    "max_dd_pct": -15.05,
+    "worst_year_pct": 9.31,
+    "annual_turnover": 0.67
+   }
+  },
+  "full": {
+   "buy_and_hold": {
+    "cagr_pct": 10.86,
+    "vol_pct": 18.52,
+    "sharpe": 0.65,
+    "max_dd_pct": -55.19,
+    "worst_year_pct": -36.79
+   },
+   "vt8": {
+    "cagr_pct": 6.08,
+    "vol_pct": 8.2,
+    "sharpe": 0.76,
+    "max_dd_pct": -25.01,
+    "worst_year_pct": -11.38,
+    "annual_turnover": 1.61
+   },
+   "vt10": {
+    "cagr_pct": 7.15,
+    "vol_pct": 9.88,
+    "sharpe": 0.749,
+    "max_dd_pct": -28.86,
+    "worst_year_pct": -14.75,
+    "annual_turnover": 1.62
+   },
+   "vt12": {
+    "cagr_pct": 8.17,
+    "vol_pct": 11.21,
+    "sharpe": 0.756,
+    "max_dd_pct": -35.62,
+    "worst_year_pct": -17.22,
+    "annual_turnover": 1.3
+   },
+   "vt15": {
+    "cagr_pct": 9.17,
+    "vol_pct": 12.84,
+    "sharpe": 0.748,
+    "max_dd_pct": -41.18,
+    "worst_year_pct": -20.74,
+    "annual_turnover": 0.91
+   }
+  }
+ },
+ "cash2": {
+  "1993-2012": {
+   "buy_and_hold": {
+    "cagr_pct": 8.07,
+    "vol_pct": 19.66,
+    "sharpe": 0.493,
+    "max_dd_pct": -55.19,
+    "worst_year_pct": -36.79
+   },
+   "vt8": {
+    "cagr_pct": 5.88,
+    "vol_pct": 8.17,
+    "sharpe": 0.74,
+    "max_dd_pct": -22.68,
+    "worst_year_pct": -10.2,
+    "annual_turnover": 1.45
+   },
+   "vt10": {
+    "cagr_pct": 6.48,
+    "vol_pct": 9.86,
+    "sharpe": 0.686,
+    "max_dd_pct": -27.28,
+    "worst_year_pct": -13.73,
+    "annual_turnover": 1.38
+   },
+   "vt12": {
+    "cagr_pct": 6.7,
+    "vol_pct": 11.31,
+    "sharpe": 0.63,
+    "max_dd_pct": -34.09,
+    "worst_year_pct": -16.37,
+    "annual_turnover": 1.24
+   },
+   "vt15": {
+    "cagr_pct": 7.38,
+    "vol_pct": 13.29,
+    "sharpe": 0.602,
+    "max_dd_pct": -40.09,
+    "worst_year_pct": -20.1,
+    "annual_turnover": 1.03
+   }
+  },
+  "2013-2022": {
+   "buy_and_hold": {
+    "cagr_pct": 12.46,
+    "vol_pct": 17.39,
+    "sharpe": 0.763,
+    "max_dd_pct": -33.72,
+    "worst_year_pct": -18.18
+   },
+   "vt8": {
+    "cagr_pct": 7.6,
+    "vol_pct": 8.29,
+    "sharpe": 0.924,
+    "max_dd_pct": -11.63,
+    "worst_year_pct": -6.79,
+    "annual_turnover": 1.74
+   },
+   "vt10": {
+    "cagr_pct": 8.49,
+    "vol_pct": 9.86,
+    "sharpe": 0.877,
+    "max_dd_pct": -14.63,
+    "worst_year_pct": -9.28,
+    "annual_turnover": 1.84
+   },
+   "vt12": {
+    "cagr_pct": 9.83,
+    "vol_pct": 10.97,
+    "sharpe": 0.91,
+    "max_dd_pct": -15.81,
+    "worst_year_pct": -12.15,
+    "annual_turnover": 1.3
+   },
+   "vt15": {
+    "cagr_pct": 10.71,
+    "vol_pct": 12.12,
+    "sharpe": 0.9,
+    "max_dd_pct": -18.42,
+    "worst_year_pct": -14.01,
+    "annual_turnover": 0.75
+   }
+  },
+  "2023-": {
+   "buy_and_hold": {
+    "cagr_pct": 22.21,
+    "vol_pct": 14.89,
+    "sharpe": 1.421,
+    "max_dd_pct": -18.76,
+    "worst_year_pct": 14.38
+   },
+   "vt8": {
+    "cagr_pct": 11.03,
+    "vol_pct": 8.13,
+    "sharpe": 1.327,
+    "max_dd_pct": -8.94,
+    "worst_year_pct": 6.8,
+    "annual_turnover": 2.08
+   },
+   "vt10": {
+    "cagr_pct": 13.14,
+    "vol_pct": 10.01,
+    "sharpe": 1.283,
+    "max_dd_pct": -11.13,
+    "worst_year_pct": 7.39,
+    "annual_turnover": 2.31
+   },
+   "vt12": {
+    "cagr_pct": 16.35,
+    "vol_pct": 11.33,
+    "sharpe": 1.393,
+    "max_dd_pct": -12.63,
+    "worst_year_pct": 9.0,
+    "annual_turnover": 1.58
+   },
+   "vt15": {
+    "cagr_pct": 17.94,
+    "vol_pct": 12.27,
+    "sharpe": 1.407,
+    "max_dd_pct": -15.02,
+    "worst_year_pct": 9.66,
+    "annual_turnover": 0.67
+   }
+  },
+  "full": {
+   "buy_and_hold": {
+    "cagr_pct": 10.86,
+    "vol_pct": 18.52,
+    "sharpe": 0.65,
+    "max_dd_pct": -55.19,
+    "worst_year_pct": -36.79
+   },
+   "vt8": {
+    "cagr_pct": 6.95,
+    "vol_pct": 8.2,
+    "sharpe": 0.861,
+    "max_dd_pct": -22.68,
+    "worst_year_pct": -10.2,
+    "annual_turnover": 1.61
+   },
+   "vt10": {
+    "cagr_pct": 7.8,
+    "vol_pct": 9.88,
+    "sharpe": 0.81,
+    "max_dd_pct": -27.28,
+    "worst_year_pct": -13.73,
+    "annual_turnover": 1.62
+   },
+   "vt12": {
+    "cagr_pct": 8.66,
+    "vol_pct": 11.21,
+    "sharpe": 0.797,
+    "max_dd_pct": -34.09,
+    "worst_year_pct": -16.37,
+    "annual_turnover": 1.3
+   },
+   "vt15": {
+    "cagr_pct": 9.49,
+    "vol_pct": 12.84,
+    "sharpe": 0.771,
+    "max_dd_pct": -40.09,
+    "worst_year_pct": -20.1,
+    "annual_turnover": 0.91
+   }
+  }
+ }
+}
