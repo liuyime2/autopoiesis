@@ -9,6 +9,7 @@ from typing import Any
 from autopoiesis import coerce
 from autopoiesis.atomicio import read_json, write_json_atomic
 from autopoiesis.models import STRATEGY_PARAMETER_SCHEMAS, CurriculumTask, ReflectionRecord, StrategySpec
+from autopoiesis.research.signal_test import ledger_summary
 
 CurriculumTransport = Callable[[dict[str, Any]], str]
 
@@ -60,8 +61,11 @@ class StructuredCurriculumAgent:
         breakout_threshold: int = 3,
         max_strategies_in_prompt: int = 40,
         max_parse_retries: int = 1,
+        research_ledger: Path | str | None = None,
     ):
         self.transport = transport
+        #: The signal ledger the prompt summarises, so a proposal can see what was already refuted.
+        self.research_ledger = Path(research_ledger) if research_ledger else None
         # Tracks consecutive EVALUATE fallbacks so a dead loop can be broken.
         # This used to be plain instance state, which meant every daemon restart
         # reset it to zero. Combined with run_forever.sh restarting on every
@@ -153,6 +157,8 @@ class StructuredCurriculumAgent:
                 _required_action(_capability_coverage(current_strategies, last_price, symbol))
             ),
             "recent_exploration_summary": _model_facing_summary(recent_exploration_summary),
+            # What 173 pre-registered signal tests found. Without it the curriculum proposed price
+            # anchors the ledger had no evidence for, about one every 2.5 hours.
             # What the model already proposed and was refused, with the reason.
             # The curriculum was blind to its own output: the exploration summary
             # described trading activity (HOLD counts, orders, prices) and never
@@ -270,6 +276,14 @@ class StructuredCurriculumAgent:
                 "Live trading instructions; paper-only.",
             ],
         }
+        ledger = ledger_summary(self.research_ledger) if self.research_ledger is not None else None
+        if ledger is not None:
+            # Only when a ledger exists, so a deployment without one claims nothing and pays nothing.
+            prompt_context["research_ledger"] = {
+                **ledger,
+                "reading": "refuted_examples repeat a refuted test if proposed again; survives are about "
+                "volatility (risk), not price direction. Prefer a relative RULE; cite the entry in rationale.",
+            }
         # The model's output is validated, not trusted. deepseek-r1:8b produces a
         # usable task some of the time and an unusable one otherwise - typically
         # a strategy_spec whose kind-conditional parameters are missing, because

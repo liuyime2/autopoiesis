@@ -300,3 +300,30 @@ def read_ledger(path: Path | None = None) -> list[dict[str, object]]:
     except OSError:
         pass
     return out
+
+
+def ledger_summary(path: Path | None = None, *, examples: int = 6) -> dict[str, object] | None:
+    """What the signal ledger has found so far, small enough to put in a prompt. None if empty.
+
+    The curriculum used to propose strategies without seeing this, so it kept proposing hypotheses
+    the ledger had already refuted (173 tests on 2026-10-24: 151 NOT_SIGNIFICANT, 6 SURVIVES, all
+    of them about volatility, none about price direction).
+    """
+    rows = read_ledger(path)
+    if not rows:
+        return None
+    counts: dict[str, int] = {}
+    for row in rows:
+        verdict = str(row.get("verdict"))
+        counts[verdict] = counts.get(verdict, 0) + 1
+
+    def names(verdict: str) -> list[str]:
+        return sorted({str(r.get("name")) for r in rows if r.get("verdict") == verdict})
+
+    return {
+        "tests": len(rows),
+        "verdicts": dict(sorted(counts.items())),
+        "survives": names("SURVIVES"),
+        "exploratory": names("EXPLORATORY")[:examples],
+        "refuted_examples": names("NOT_SIGNIFICANT")[:examples],
+    }

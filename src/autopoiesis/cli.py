@@ -494,6 +494,7 @@ def _build_agent_daemon(
             StructuredCurriculumAgent(
                 transport=_ollama_curriculum_transport(config, should_stop=lambda: daemon._stop_requested),
                 state_path=config.journal_path.parent / "curriculum_state.json",
+                research_ledger=config.journal_path.parent / "signal_trials.jsonl",
             )
             if config.curriculum_enabled
             else None

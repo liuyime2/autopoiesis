@@ -445,7 +445,9 @@ def test_curriculum_context_is_bounded_and_compact():
     # 10 detailed entries is what an 8B model follows; ids are cheap and are what
     # stops the model proposing a duplicate, so those are listed separately.
     assert len(huge["strategy_ids_in_use"]) == 40
-    assert len(json.dumps(realistic)) < 9000, "the live library is now 16 strategies"
+    # 9,000 -> 10,000 on 2026-10-24 to carry the signal-ledger summary (~600 chars). The failure this
+    # guards was deepseek-r1:8b at ~14kB; production runs qwen3.8:27b, and 10kB is still well short.
+    assert len(json.dumps(realistic)) < 10_000, "the live library is now 16 strategies"
 
     # The duplicated full-reflection blob must be gone.
     assert "evaluation" not in realistic
@@ -984,3 +986,34 @@ def test_a_percentage_threshold_actually_produces_an_admissible_strategy():
     # Re-validated through the model that admission uses.
     StrategySpec.model_validate(spec.model_dump())
     assert spec.parameters["threshold_pct"] == pytest.approx(0.015)
+
+
+def test_curriculum_prompt_carries_what_the_signal_ledger_found(tmp_path):
+    """The curriculum proposed price anchors the ledger had refuted because it never saw the ledger."""
+    ledger = tmp_path / "signal_trials.jsonl"
+    rows = [
+        {"name": "intraday:SPY:M1->f12", "verdict": "NOT_SIGNIFICANT"},
+        {"name": "intraday:SPY:M3->f12", "verdict": "NOT_SIGNIFICANT"},
+        {"name": "long:13etf:RV21->F21", "verdict": "SURVIVES"},
+        {"name": "long:13etf:RV21->F21", "verdict": "SURVIVES"},
+    ]
+    ledger.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    captured = {}
+
+    def transport(context):
+        captured.update(context)
+        return json.dumps({"task_id": "t", "task_type": "EVALUATE", "summary": "s", "parameters": {}, "rationale": "r"})
+
+    agent = StructuredCurriculumAgent(transport=transport, research_ledger=ledger)
+    agent.propose(reflection=make_reflection(), current_strategies=[make_spec()], guardian_max_position_value=1000)
+
+    seen = captured["research_ledger"]
+    assert seen["tests"] == 4 and seen["verdicts"] == {"NOT_SIGNIFICANT": 2, "SURVIVES": 2}
+    assert seen["survives"] == ["long:13etf:RV21->F21"], "one entry per hypothesis, however often it was re-run"
+    assert "repeat a refuted test" in seen["reading"]
+
+    captured.clear()
+    StructuredCurriculumAgent(transport=transport).propose(
+        reflection=make_reflection(), current_strategies=[make_spec()], guardian_max_position_value=1000
+    )
+    assert "research_ledger" not in captured, "no ledger configured means nothing is claimed"
