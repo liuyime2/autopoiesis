@@ -245,3 +245,47 @@ def test_a_window_that_excludes_everything_is_an_error_not_an_empty_search(modul
     report = module.check_tape([_Bar(datetime(2020, 1, 1, tzinfo=timezone.utc), 100.0)], spec)
     assert report.usable is False
     assert any("before the declared window" in problem for problem in report.problems)
+
+
+def _ledger(tmp_path):
+    import json
+
+    path = tmp_path / "signal_trials.jsonl"
+    rows = [
+        {"name": "long:13etf:RV21->F21", "verdict": "SURVIVES"},
+        {"name": "vix:blend->RV21:SPY", "verdict": "EXPLORATORY"},
+        {"name": "intraday:SPY:M1->f12", "verdict": "NOT_SIGNIFICANT"},
+    ]
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    return path
+
+
+def _spec(tmp_path, ref):
+    path = tmp_path / "s.spec"
+    path.write_text(SPEC + (f"ledger_ref: {ref}\n" if ref is not None else ""), encoding="utf-8")
+    return path
+
+
+def test_a_new_spec_must_cite_the_signal_ledger_when_one_is_configured(module, tmp_path):
+    """180 research trials, 0 PASS: most re-tested a family the signal ledger had already refuted."""
+    ledger, registry = _ledger(tmp_path), tmp_path / "reg"
+    with pytest.raises(SystemExit, match="ledger_ref"):
+        module.register(_spec(tmp_path, None), registry, ledger)
+    with pytest.raises(SystemExit, match="matches no test"):
+        module.register(_spec(tmp_path, "nope:"), registry, ledger)
+    with pytest.raises(SystemExit, match="refuted or inconclusive"):
+        module.register(_spec(tmp_path, "intraday:SPY"), registry, ledger)
+    assert module.register(_spec(tmp_path, "long:13etf:RV21"), registry, ledger)["sha256"]
+
+
+def test_an_exploratory_spec_can_declare_itself_and_no_ledger_means_no_gate(module, tmp_path):
+    ledger = _ledger(tmp_path)
+    assert module.register(_spec(tmp_path, "none"), tmp_path / "a", ledger)["sha256"]
+    assert module.register(_spec(tmp_path, None), tmp_path / "b")["sha256"], "no ledger configured, nothing claimed"
+
+
+def test_an_existing_registration_is_not_rejudged(module, tmp_path):
+    registry, ledger = tmp_path / "reg", _ledger(tmp_path)
+    spec = _spec(tmp_path, None)
+    module.register(spec, registry)  # registered before the gate existed
+    assert module.register(spec, registry, ledger)["sha256"], "verified as before, not refused retroactively"

@@ -173,12 +173,52 @@ def check_spec(spec: dict) -> list[str]:
     return problems
 
 
-def register(spec_path: Path, registry: Path | None = None) -> dict:
-    """Register immutable bytes and metadata; identical registration keeps its first time."""
+#: Ledger verdicts a new hypothesis may be built on. A refuted test (NOT_SIGNIFICANT) is the opposite
+#: of a reason to run another one.
+MOTIVATING_VERDICTS = frozenset({"SURVIVES", "EXPLORATORY"})
+
+
+def ledger_problems(spec: dict, ledger_rows: list[dict]) -> list[str]:
+    """Whether a new spec says what in the signal ledger motivates it.
+
+    2026-10-24: 180 research trials, 0 PASS, 122 INSUFFICIENT - most of them re-tests of a family the
+    signal ledger had already found nothing in. A spec now cites a ledger entry in `ledger_ref`
+    (a ledger test name, or a prefix of one) or says `ledger_ref: none` to declare itself
+    exploratory. Silence is what is refused; the declaration is what makes exploratory work countable.
+    """
+    ref = (spec.get("ledger_ref") or "").strip()
+    if not ref:
+        return ["spec has no ledger_ref: cite the signal-ledger test that motivates it, or write "
+                "`ledger_ref: none` to declare it exploratory"]
+    if ref.lower() == "none":
+        return []
+    matches = [r for r in ledger_rows if str(r.get("name", "")).startswith(ref)]
+    if not matches:
+        return [f"ledger_ref {ref!r} matches no test in the signal ledger"]
+    if not any(r.get("verdict") in MOTIVATING_VERDICTS for r in matches):
+        verdicts = sorted({str(r.get("verdict")) for r in matches})
+        return [f"ledger_ref {ref!r} matches only refuted or inconclusive tests ({', '.join(verdicts)}); "
+                "a hypothesis is not motivated by a test that found nothing"]
+    return []
+
+
+def register(spec_path: Path, registry: Path | None = None, ledger: Path | None = None) -> dict:
+    """Register immutable bytes and metadata; identical registration keeps its first time.
+
+    With `ledger` (the signal ledger's path) a new registration must also cite what motivates it. An
+    existing registration is verified as before and is not re-judged: this gate is for new claims.
+    """
     spec_path = Path(spec_path)
     frozen = spec_path.read_bytes()
     spec = load_spec_from_text(frozen.decode("utf-8"))
     problems = check_spec(spec)
+    registry_dir = registry_path(registry)
+    digest_now = hashlib.sha256(frozen).hexdigest()
+    is_new = not (registry_dir / f"{digest_now}.spec").exists()
+    if ledger is not None and is_new and not problems:
+        from autopoiesis.research.signal_test import read_ledger
+
+        problems = ledger_problems(spec, read_ledger(ledger))
     if problems:
         raise SystemExit("the spec cannot be registered:\n  " + "\n  ".join(problems))
     registry = registry_path(registry)
@@ -332,6 +372,10 @@ def main(argv: list[str] | None = None) -> int:
     reg = sub.add_parser("register", help="register a spec before the run")
     reg.add_argument("spec")
     reg.add_argument("--registry", default=None)
+    reg.add_argument(
+        "--ledger", default=None,
+        help="signal ledger to cite; default runtime/autopoiesis/signal_trials.jsonl when it exists",
+    )
 
     ver = sub.add_parser("verify", help="check a spec against its registration")
     ver.add_argument("spec")
@@ -342,7 +386,11 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.command == "register":
-        payload = register(Path(args.spec), Path(args.registry) if args.registry else None)
+        ledger = Path(args.ledger) if args.ledger else Path("runtime") / "autopoiesis" / "signal_trials.jsonl"
+        payload = register(
+            Path(args.spec), Path(args.registry) if args.registry else None,
+            ledger if ledger.exists() else None,
+        )
         print(f"registered {payload['sha256'][:16]}... from {payload['source']}")
         print(f"  hypothesis: {payload['fields'].get('hypothesis')}")
         print(f"  instrument: {payload['fields'].get('instrument')} over "

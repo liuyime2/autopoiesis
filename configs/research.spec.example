@@ -2,6 +2,9 @@
 # Review and freeze an external file before using it; scheduled runs never auto-register.
 hypothesis: the existing threshold grid yields positive mean fold return after costs
 family: threshold-grid-integrity-diagnostic
+# Cite the signal-ledger test that motivates a new hypothesis (a name or a prefix, e.g. long:13etf:RV21),
+# or declare it exploratory. A diagnostic of the pipeline itself is the latter.
+ledger_ref: none
 instrument: SPY
 interval: 5Min
 window_start_utc: 2026-04-10T13:30:00Z
