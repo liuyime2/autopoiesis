@@ -1,0 +1,22 @@
+{
+ "selection": [
+  "2006-07-17",
+  "2017-12-29",
+  2886
+ ],
+ "test": [
+  "2018-01-02",
+  "2026-09-09",
+  2183
+ ],
+ "slope_coefficient_selection": -0.8105,
+ "test_mse_without_slope": 0.15066,
+ "test_mse_with_slope": 0.14733,
+ "mean_improvement": 0.003332,
+ "ci95": [
+  -0.002616,
+  0.009557
+ ],
+ "relative_improvement_pct": 2.21,
+ "verdict": "NO_DETECTABLE_EFFECT"
+}

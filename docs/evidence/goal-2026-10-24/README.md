@@ -21,3 +21,16 @@ Reproduce: `PYTHONPATH=src python docs/evidence/goal-2026-10-24/vol_target_eval.
 Reading: it roughly halves the worst drawdown and lifts Sharpe over the long record, at the cost of
 return, and it lost on Sharpe in the 2023- bull run. It is a risk product, not alpha: it does not
 beat SPY on raw return in any period. Annual turnover about 1.6x of the pool.
+
+# VIX term structure on top of the production volatility forecast (2026-10-25)
+
+`vix_term_structure.py` -> `vix_term_structure.json`. One hypothesis stated before the run: adding
+`log(VIX3M/VIX)` to a regression of the next 21 days' realised SPY volatility on the production EWMA
+forecast and VIX lowers out-of-sample error. Fit 2006-07-17..2017-12-29 (2,886 days), scored on
+2018-01-02..2026-09-09 (2,183 days), read once; month-block bootstrap.
+
+Result: out-of-sample MSE of log-volatility 0.1507 -> 0.1473 (-2.2%), 95% interval for the
+improvement [-0.0026, +0.0096], which includes zero. **NO_DETECTABLE_EFFECT.** So the term structure is
+not worth a new daily data feed, and the "VIX term structure" item is closed as refuted rather than
+open. This is one hypothesis on one instrument; it is not in `signal_trials.jsonl` (that ledger is runtime
+state shared with the daemon), and this file is its trace.
