@@ -65,8 +65,11 @@ def test_other_symbols_a_closed_market_and_resting_orders_are_left_alone():
     assert sleeve.plan(_snapshot(orders=[resting])) is None
 
 
-def test_a_position_larger_than_the_pool_is_not_the_sleeves_to_size():
-    assert _sleeve(vol=40.0).plan(_snapshot(held=60)) is None  # $30,000 held against a $20,000 pool
+def test_a_position_that_has_grown_past_the_pool_is_still_sized_to_the_target():
+    """Replayed on real bars the first version went silent once gains took the holding past the pool."""
+    assert _sleeve(vol=40.0).plan(_snapshot(held=60)).quantity == 50  # $30,000 held, target 10 sh at 25%
+    trim = _sleeve(vol=10.0).plan(_snapshot(held=60))
+    assert (trim.action, trim.quantity) == ("SELL", 20), "back to the $20,000 ceiling"
 
 
 def test_the_pool_can_never_exceed_the_authorised_cap():

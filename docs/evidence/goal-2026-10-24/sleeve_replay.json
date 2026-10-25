@@ -1,0 +1,69 @@
+{
+ "bars": 131441,
+ "days_replayed": 695,
+ "first_fill_day": "2024-01-02",
+ "outcomes": {
+  "core-sleeve:BUY:REPLAYED": 30,
+  "engine:HOLD:SKIPPED": 643,
+  "core-sleeve:SELL:REPLAYED": 22
+ },
+ "trades": 52,
+ "first_trades": [
+  [
+   "2024-01-02",
+   "BUY",
+   40.0,
+   472.56
+  ],
+  [
+   "2024-02-02",
+   "SELL",
+   7.0,
+   490.42
+  ],
+  [
+   "2024-02-23",
+   "SELL",
+   5.0,
+   509.72
+  ],
+  [
+   "2024-02-29",
+   "BUY",
+   4.0,
+   508.64
+  ],
+  [
+   "2024-03-26",
+   "BUY",
+   4.0,
+   521.32
+  ]
+ ],
+ "last_trades": [
+  [
+   "2026-09-17",
+   "BUY",
+   3.0,
+   760.62
+  ],
+  [
+   "2026-09-22",
+   "SELL",
+   4.0,
+   774.08
+  ],
+  [
+   "2026-10-01",
+   "BUY",
+   3.0,
+   760.08
+  ]
+ ],
+ "sleeve_pnl": 5897.01,
+ "hold_pool_pnl": 12821.23,
+ "sleeve_max_drawdown_pct_of_account": -2.321,
+ "average_exposure_usd": 14886.0,
+ "max_exposure_usd": 20251.0,
+ "guardian_refusals": 0
+}

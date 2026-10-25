@@ -70,6 +70,12 @@ class CoreSleeve:
 
         None means "carry on with the ordinary decision", not HOLD: inside the band, or without a
         usable forecast, the sleeve stays out of the way.
+
+        The target is for the whole position in the symbol, whoever bought it: the account holder
+        delegated management of every position. The pool is a fixed-dollar ceiling, so a position
+        that has appreciated past it is brought back to `pool x fraction`. (A first version stood
+        down whenever the holding exceeded the pool; replayed on real 2024-2026 bars it stopped
+        derisking after the first gains, which is exactly when it is needed.)
         """
         if snapshot.symbol.upper() != self.symbol or not snapshot.market_open or snapshot.last_price <= 0:
             return None
@@ -84,9 +90,6 @@ class CoreSleeve:
         held = sum(p.quantity for p in snapshot.positions if p.symbol.upper() == self.symbol)
         held_shares = max(0, math.floor(held))
         price = snapshot.last_price
-        if held_shares * price > self.pool:
-            # More than the pool is the account holder's own position, not the sleeve's to size.
-            return None
         fraction = vol_scaled_fraction(float(vol), self.target_vol_pct)
         target_shares = int(self.pool * fraction // price)
         gap = (target_shares - held_shares) * price
