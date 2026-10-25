@@ -9,7 +9,6 @@ from typing import Any
 from autopoiesis import coerce
 from autopoiesis.atomicio import read_json, write_json_atomic
 from autopoiesis.models import STRATEGY_PARAMETER_SCHEMAS, CurriculumTask, ReflectionRecord, StrategySpec
-from autopoiesis.research.signal_test import ledger_summary
 
 CurriculumTransport = Callable[[dict[str, Any]], str]
 
@@ -955,3 +954,49 @@ def _capability_demand(attempts: list[str], context: Mapping[str, object]) -> di
             "will refuse it."
         ),
     }
+
+
+def ledger_summary(path: Path | str | None, *, examples: int = 6) -> dict[str, object] | None:
+    """What the signal ledger has found so far, small enough to put in a prompt. None if empty.
+
+    The curriculum used to propose strategies without seeing this, so it kept proposing hypotheses
+    the ledger had already refuted (173 tests on 2026-10-24: 151 NOT_SIGNIFICANT, 6 SURVIVES, all
+    of them about volatility, none about price direction).
+    """
+    rows = _read_ledger_rows(path)
+    if not rows:
+        return None
+    counts: dict[str, int] = {}
+    for row in rows:
+        verdict = str(row.get("verdict"))
+        counts[verdict] = counts.get(verdict, 0) + 1
+
+    def names(verdict: str) -> list[str]:
+        return sorted({str(r.get("name")) for r in rows if r.get("verdict") == verdict})
+
+    return {
+        "tests": len(rows),
+        "verdicts": dict(sorted(counts.items())),
+        "survives": names("SURVIVES"),
+        "exploratory": names("EXPLORATORY")[:examples],
+        "refuted_examples": names("NOT_SIGNIFICANT")[:examples],
+    }
+
+
+def _read_ledger_rows(path: Path | str | None) -> list[dict[str, object]]:
+    """The ledger's JSON lines, or nothing when it is absent. Read-only, and unreadable lines are skipped."""
+    rows: list[dict[str, object]] = []
+    if path is None:
+        return rows
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(row, dict):
+                    rows.append(row)
+    except OSError:
+        pass
+    return rows
