@@ -6,6 +6,43 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from autopoiesis.fill_reconciler import FILL_EVENT, confirmed_fill_events
+
+#: How much of the end of the journal to scan for new fills. Fills are rare (a few per day)
+#: and always at the end, so 256 KB is hundreds of cycles of headroom. A full read of the
+#: 26 MB journal to answer "did a fill happen since the last cycle" was 21s of the 24s
+#: remainder `CycleRecord.timings` reported on 2026-10-26.
+_FILL_TAIL_BYTES = 256 * 1024
+
+
+def _count_fill_events_in_tail(journal) -> int:
+    """How many ORDER_FILL_CONFIRMED events sit in the tail of the journal.
+
+    Fills are rare and always appended at the end, so a tail scan is enough to detect a new
+    one. Returns -1 when the journal cannot be read, so the caller recomputes rather than
+    reusing a stale cache.
+    """
+    path = getattr(journal, "path", None)
+    if path is None:
+        return -1
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return -1
+    budget = min(size, _FILL_TAIL_BYTES)
+    start = size - budget
+    try:
+        with path.open("rb") as handle:
+            handle.seek(start)
+            blob = handle.read(budget)
+    except OSError:
+        return -1
+    text = blob.decode("utf-8", errors="replace")
+    if start > 0:
+        # The first piece may be a torn line; drop it.
+        nl = text.find("\\n")
+        if nl >= 0:
+            text = text[nl + 1:]
+    return text.count('"event_type":"ORDER_FILL_CONFIRMED"')
 from autopoiesis.models import CycleRecord, DecisionIntervention, JournalEvent, TradeDecision
 from autopoiesis.sleeve import CoreSleeve
 
@@ -168,6 +205,14 @@ class TradingLoop:
         """
         if self.journal is None:
             return None
+        cache = getattr(self, "_agent_holding_cache", None)
+        if cache is None:
+            cache = {}
+            self._agent_holding_cache = cache
+        tail_count = _count_fill_events_in_tail(self.journal)
+        cached = cache.get(symbol)
+        if cached is not None and cached[0] == tail_count and tail_count >= 0:
+            return cached[1]
         try:
             events = [
                 event
@@ -199,7 +244,9 @@ class TradingLoop:
             # legitimate "the agent holds nothing".
             self._agent_holding_errors.append(f"{type(exc).__name__}: {exc}")
             return None
-        return quantity if quantity > 1e-9 else 0.0
+        result = quantity if quantity > 1e-9 else 0.0
+        cache[symbol] = (tail_count, result)
+        return result
 
     def _agent_short(self, symbol: str) -> float | None:
         """Shares of `symbol` the agent itself has shorted and not covered.
@@ -212,6 +259,14 @@ class TradingLoop:
         read = getattr(self.journal, "read_events", None)
         if read is None:
             return None
+        cache = getattr(self, "_agent_short_cache", None)
+        if cache is None:
+            cache = {}
+            self._agent_short_cache = cache
+        tail_count = _count_fill_events_in_tail(self.journal)
+        cached = cache.get(symbol)
+        if cached is not None and cached[0] == tail_count and tail_count >= 0:
+            return cached[1]
         try:
             events = sorted(
                 (
@@ -236,7 +291,9 @@ class TradingLoop:
         except (OSError, ValueError, TypeError, KeyError) as exc:
             self._agent_holding_errors.append(f"{type(exc).__name__}: {exc}")
             return None
-        return short if short > 1e-9 else 0.0
+        result = short if short > 1e-9 else 0.0
+        cache[symbol] = (tail_count, result)
+        return result
 
     def run_once(self, symbol: str) -> CycleRecord | None:
         cycle_id = str(uuid4())
