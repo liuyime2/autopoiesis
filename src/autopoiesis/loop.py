@@ -331,18 +331,31 @@ class TradingLoop:
         timings["decision_ms"] = round((time.monotonic() - decision_started) * 1000.0, 1)
         trades_today = 0
         if self.trade_counter is not None:
-            try:
-                trades_today = self.trade_counter.trades_today()
-            except Exception as exc:
-                errors.append(f"trade_counter_error: {exc}")
-                decision = TradeDecision(
-                    symbol=snapshot.symbol,
-                    action="HOLD",
-                    quantity=0,
-                    confidence=0.0,
-                    rationale="fail-closed HOLD after trade counter error",
-                    strategy_id=decision.strategy_id,
-                )
+            # `trades_today` reads the journal (~2.5s on the live file) and only changes
+            # when a submission is recorded. Cache it per day and invalidate after any
+            # SUBMITTED execution below, so the second...sixth symbol in a round does not
+            # pay for it again and a new submission is reflected on the next cycle.
+            today = self.now().astimezone(timezone.utc).date() if self.now else None
+            cache = getattr(self, "_trades_today_cache", None)
+            dirty = getattr(self, "_trades_today_dirty", True)
+            if cache is not None and cache.get("day") == today and not dirty:
+                trades_today = cache["value"]
+            else:
+                try:
+                    trades_today = self.trade_counter.trades_today()
+                except Exception as exc:
+                    errors.append(f"trade_counter_error: {exc}")
+                    decision = TradeDecision(
+                        symbol=snapshot.symbol,
+                        action="HOLD",
+                        quantity=0,
+                        confidence=0.0,
+                        rationale="fail-closed HOLD after trade counter error",
+                        strategy_id=decision.strategy_id,
+                    )
+                else:
+                    self._trades_today_cache = {"day": today, "value": trades_today}
+                    self._trades_today_dirty = False
         # Additions need a verdict; holds do not.
         #
         # The account holder's instruction, 2026-10-20: a strategy that has not passed the screen
@@ -445,6 +458,9 @@ class TradingLoop:
         execution = self.executor.execute(decision, guardian_result, cycle_id=cycle_id)
         timings["execution_ms"] = round((time.monotonic() - execution_started) * 1000.0, 1)
         timings["cycle_ms"] = round((time.monotonic() - started) * 1000.0, 1)
+        # A submission changes today's trade count; the cache above must not hide it.
+        if getattr(execution, "status", None) == "SUBMITTED":
+            self._trades_today_dirty = True
         record = CycleRecord(
             cycle_id=cycle_id,
             snapshot=snapshot,
