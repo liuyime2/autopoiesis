@@ -209,6 +209,8 @@ class TradingLoop:
         if cache is None:
             cache = {}
             self._agent_holding_cache = cache
+        if not getattr(self, "_holding_cache_prewarmed", False):
+            self._prewarm_holding_cache()
         tail_count = _count_fill_events_in_tail(self.journal)
         cached = cache.get(symbol)
         if cached is not None and cached[0] == tail_count and tail_count >= 0:
@@ -263,6 +265,11 @@ class TradingLoop:
         if cache is None:
             cache = {}
             self._agent_short_cache = cache
+        # Pre-warm on the first call: one full read populates the cache for every symbol
+        # that has fills, so the first round does not pay 17.8s per symbol. Measured
+        # 2026-10-28: 15 cycles had remainder > 10s, all first encounters of new symbols.
+        if not getattr(self, "_holding_cache_prewarmed", False):
+            self._prewarm_holding_cache()
         tail_count = _count_fill_events_in_tail(self.journal)
         cached = cache.get(symbol)
         if cached is not None and cached[0] == tail_count and tail_count >= 0:
@@ -294,6 +301,32 @@ class TradingLoop:
         result = short if short > 1e-9 else 0.0
         cache[symbol] = (tail_count, result)
         return result
+
+    def _prewarm_holding_cache(self) -> None:
+        """One full read populates the cache for every symbol that has fills.
+
+        Measured 2026-10-28: 15 cycles had remainder > 10s, all first encounters of new
+        symbols, each paying 17.8s for a full read. Pre-warming pays that cost once at
+        session start so the first round is as fast as the rest.
+        """
+        self._holding_cache_prewarmed = True
+        if self.journal is None:
+            return
+        try:
+            all_events = self.journal.read_events()
+        except Exception:
+            return
+        fills = confirmed_fill_events(all_events)
+        symbols = {str((e.payload or {}).get("symbol", "")).upper() for e in fills if (e.payload or {}).get("symbol")}
+        for symbol in symbols:
+            try:
+                self._agent_holding(symbol)
+            except Exception:
+                pass
+            try:
+                self._agent_short(symbol)
+            except Exception:
+                pass
 
     def run_once(self, symbol: str) -> CycleRecord | None:
         cycle_id = str(uuid4())
