@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -271,6 +271,61 @@ class NewsItem(BaseModel):
     created_at: datetime | None = None
     #: Truncated at a stated length when the headline is not enough; empty when the broker sent none.
     summary: str = ""
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        return value.strip().upper()
+
+
+class EarningsEvent(BaseModel):
+    """One upcoming or recent earnings announcement for a symbol.
+
+    Read from the broker's corporate-actions feed. ``None`` fields mean the broker did not
+    report that value, not that it is zero. An instrument with no earnings event in the
+    window is normal for non-equity instruments and is not an error.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    report_date: date | None = None
+    fiscal_period: str = ""
+    fiscal_year: int | None = None
+    eps_estimate: float | None = None
+    eps_actual: float | None = None
+    revenue_estimate: float | None = None
+    revenue_actual: float | None = None
+    time_of_day: str = ""  # "pre_market", "post_market", "during_market", ""
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        return value.strip().upper()
+
+
+class InformationSnapshot(BaseModel):
+    """What the information collector found about one symbol at one moment.
+
+    Read-only evidence for research trials and for the decision context. Nothing here places
+    an order or changes a position. The fields are the raw broker data plus derived risk
+    markers; the derivation is stated so it can be disagreed with.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    collected_at: datetime
+    earnings: tuple[EarningsEvent, ...] = ()
+    news: tuple[NewsItem, ...] = ()
+    #: Days until the next earnings report, or None when none is scheduled in the window.
+    days_to_earnings: int | None = None
+    #: Number of headlines in the last 24 hours.
+    news_count_24h: int = 0
+    #: Whether an earnings report falls within the next 5 trading days.
+    earnings_imminent: bool = False
+    #: Broker error, if any, so a missing value is explained rather than silent.
+    error: str | None = None
 
     @field_validator("symbol")
     @classmethod
