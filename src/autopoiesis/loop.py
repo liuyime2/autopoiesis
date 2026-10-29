@@ -314,18 +314,18 @@ class TradingLoop:
             return
         try:
             all_events = self.journal.read_events()
-        except Exception:
+        except Exception:  # noqa: BLE001 - pre-warm is best-effort
             return
         fills = confirmed_fill_events(all_events)
         symbols = {str((e.payload or {}).get("symbol", "")).upper() for e in fills if (e.payload or {}).get("symbol")}
         for symbol in symbols:
             try:
                 self._agent_holding(symbol)
-            except Exception:
+            except Exception:  # noqa: BLE001 - pre-warm is best-effort
                 pass
             try:
                 self._agent_short(symbol)
-            except Exception:
+            except Exception:  # noqa: BLE001 - pre-warm is best-effort
                 pass
 
     def run_once(self, symbol: str) -> CycleRecord | None:
