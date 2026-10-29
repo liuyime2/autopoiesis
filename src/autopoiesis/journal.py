@@ -327,6 +327,13 @@ class JsonlJournal:
                 continue
             if (_EVENT_MARKER in stripped) != want_events:
                 continue
+            if _CYCLE_MARKER in stripped and model is CycleRecord:
+                try:
+                    payload = json.loads(stripped)
+                    if isinstance(payload, dict) and payload.get("cycle_id") in self._invalidated_cycle_ids():
+                        continue
+                except (ValueError, TypeError):
+                    pass
             try:
                 out.append(model.model_validate_json(stripped))
             except Exception:
@@ -457,6 +464,12 @@ class JsonlJournal:
             if _CYCLE_MARKER not in line:
                 continue
             try:
+                _payload = json.loads(line)
+                if isinstance(_payload, dict) and _payload.get("cycle_id") in self._invalidated_cycle_ids():
+                    continue
+            except (ValueError, TypeError):
+                pass
+            try:
                 record = CycleRecord.model_validate_json(line)
             except Exception:
                 self._note_drop(line)
@@ -586,6 +599,31 @@ class JsonlJournal:
         archived = sorted(self.archive_dir.glob("*.jsonl"))
         return [p for p in archived if p.is_file()]
 
+    def _invalidated_cycle_ids(self) -> frozenset[str]:
+        """Cycle IDs that have been marked invalid and must not be read as evidence.
+
+        The journal is append-only, so a bad record cannot be deleted; it is marked here
+        instead. The file lives in the runtime directory (not the repository) so it follows
+        the data, and a missing file means nothing is invalidated - a fresh clone has no
+        bad records to skip.
+        """
+        cached = getattr(self, "_invalidated_cache", None)
+        if cached is not None:
+            return cached
+        path = self.path.parent / "invalidated_cycles.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            result: frozenset[str] = frozenset()
+        else:
+            entries = payload.get("invalidated", []) if isinstance(payload, dict) else []
+            result = frozenset(
+                str(entry.get("cycle_id")) for entry in entries
+                if isinstance(entry, dict) and entry.get("cycle_id")
+            )
+        self._invalidated_cache = result
+        return result
+
     def _scan(self, model, *, limit, keep=None):
         # Parsing is cached across calls, keyed by the files' own signatures.
         #
@@ -665,6 +703,16 @@ class JsonlJournal:
             if is_event != want_events:
                 # A well-formed record of the other kind. Not an error.
                 continue
+            # Drop records that have been marked invalid. The journal is append-only, so the
+            # original bytes stay on disk; only the read projection excludes them. A fresh
+            # clone with no invalidation file reads everything, which is correct.
+            if not is_event and model is CycleRecord:
+                try:
+                    payload = json.loads(stripped)
+                    if isinstance(payload, dict) and payload.get("cycle_id") in self._invalidated_cycle_ids():
+                        continue
+                except (ValueError, TypeError):
+                    pass
             try:
                 records.append(model.model_validate_json(stripped))
             except Exception:
