@@ -125,7 +125,8 @@ class AgentConfig:
         """Read the operator's environment. `environ` defaults to the process environment."""
         allowlist = _split_symbols(_env_required("AUTOPOIESIS_ALLOWLIST", "SPY,QQQ,AAPL,MSFT,NVDA", environ))
         symbols = _split_symbols(_env_required("AUTOPOIESIS_SYMBOLS", "SPY", environ))
-        hold_only = frozenset(s.upper() for s in _split_symbols(_env_required("AUTOPOIESIS_HOLD_ONLY_SYMBOLS", "", environ)))
+        hold_only_raw = _env_required("AUTOPOIESIS_HOLD_ONLY_SYMBOLS", "", environ).strip()
+        hold_only = frozenset(s.upper() for s in _split_symbols(hold_only_raw)) if hold_only_raw else frozenset()
         source = os.environ if environ is None else environ
         mode = _env_required("AUTOPOIESIS_MODE", "paper", environ).strip().lower()
         if mode == "live":
