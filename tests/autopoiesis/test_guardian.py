@@ -846,3 +846,31 @@ def test_an_agent_holding_is_computed_in_time_order_not_journal_order(tmp_path):
     loop._agent_holding_errors = []
 
     assert loop._agent_holding("SPY") == 5
+
+
+# --- hold-only assets: the account holder's instruction, machine-enforced ------
+
+
+def test_hold_only_asset_refuses_buy_and_sell():
+    guardian = Guardian(allowlist={"SPY", "TLT"}, max_position_value=1_000, max_daily_loss=500,
+                        hold_only={"TLT"})
+    snapshot = _snapshot("TLT", 100.0)
+    for action in ("BUY", "SELL"):
+        decision = TradeDecision(symbol="TLT", action=action, quantity=1, confidence=0.8, rationale="t")
+        result = guardian.review(decision, snapshot, mode="paper")
+        assert not result.approved, f"hold-only must refuse {action}"
+        assert "hold-only" in result.reason
+    # A non-hold-only asset is unaffected.
+    decision = TradeDecision(symbol="SPY", action="BUY", quantity=1, confidence=0.8, rationale="t")
+    result = guardian.review(decision, _snapshot("SPY", 100.0), mode="paper")
+    assert result.approved or "hold-only" not in result.reason
+
+
+def _snapshot(symbol, price):
+    from autopoiesis.models import AccountSnapshot, DataSnapshot
+    return DataSnapshot(
+        symbol=symbol, timestamp=datetime.now(timezone.utc), market_open=True,
+        last_price=price, source="alpaca",
+        account=AccountSnapshot(equity=100_000, cash=100_000, buying_power=100_000,
+                                portfolio_value=100_000, daily_loss=0),
+    )

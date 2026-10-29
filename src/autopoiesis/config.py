@@ -108,6 +108,7 @@ class AgentConfig:
     reflection_interval_seconds: int = 1800
     curriculum_interval_seconds: int = 3600
     profit_target_return_pct: float = 0.10
+    hold_only_symbols: frozenset[str] = frozenset()
 
     @property
     def sleeve_enabled(self) -> bool:
@@ -124,6 +125,7 @@ class AgentConfig:
         """Read the operator's environment. `environ` defaults to the process environment."""
         allowlist = _split_symbols(_env_required("AUTOPOIESIS_ALLOWLIST", "SPY,QQQ,AAPL,MSFT,NVDA", environ))
         symbols = _split_symbols(_env_required("AUTOPOIESIS_SYMBOLS", "SPY", environ))
+        hold_only = frozenset(s.upper() for s in _split_symbols(_env_required("AUTOPOIESIS_HOLD_ONLY_SYMBOLS", "", environ)))
         source = os.environ if environ is None else environ
         mode = _env_required("AUTOPOIESIS_MODE", "paper", environ).strip().lower()
         if mode == "live":
@@ -135,6 +137,7 @@ class AgentConfig:
             mode=mode,
             symbols=symbols,
             allowlist=frozenset(allowlist),
+            hold_only_symbols=hold_only,
             alpaca_api_key=source.get("ALPACA_API_KEY") or source.get("APCA_API_KEY_ID"),
             alpaca_secret_key=source.get("ALPACA_SECRET_KEY") or source.get("APCA_API_SECRET_KEY"),
             alpaca_base_url=source.get("ALPACA_BASE_URL")

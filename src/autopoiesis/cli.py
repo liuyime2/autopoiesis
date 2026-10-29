@@ -372,6 +372,7 @@ def _build_agent_daemon(
         universe=config.universe,
         tradable=data_gateway.tradable_symbols if config.universe == "tradable" else None,
         min_price=config.min_price,
+        hold_only=config.hold_only_symbols,
     )
     # Declared before the daemon so the provider can read the daemon's own cycle count. The
     # incumbent cadence is defined over cycles, and the only cycle count the selector could

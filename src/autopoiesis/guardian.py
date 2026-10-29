@@ -28,6 +28,7 @@ class Guardian:
         universe: str = "allowlist",
         tradable: Callable[[], frozenset[str] | None] | frozenset[str] | None = None,
         min_price: float = 5.0,
+        hold_only: set[str] | frozenset[str] | None = None,
     ):
         #: See config.AgentConfig.universe. `tradable` is the broker's set of active US equities on
         #: major exchanges (or a function returning it, refreshed daily by the gateway); when the
@@ -63,6 +64,10 @@ class Guardian:
         #: `off` refuses SHORT and COVER; `shadow` and `paper` let them be reviewed (shadow is
         #: enforced at the executor). See config.AgentConfig.shorts.
         self.shorts = shorts
+        #: Assets the account holder has instructed the agent not to trade. A hold-only
+        #: symbol may be held but never bought or sold by the agent. Enforced here, at
+        #: the last gate before execution, so no strategy or model can bypass it.
+        self.hold_only = frozenset(s.upper() for s in (hold_only or ()))
 
     def review(
         self,
@@ -79,6 +84,13 @@ class Guardian:
 
         if decision.symbol != snapshot.symbol:
             return GuardianResult(approved=False, reason="decision symbol does not match data snapshot")
+
+        if decision.symbol.upper() in self.hold_only and decision.action in {"BUY", "SELL", "SHORT", "COVER"}:
+            return GuardianResult(
+                approved=False,
+                reason=f"hold-only asset: {decision.symbol} is on the account holder's hold list, "
+                       f"so the agent may hold it but not trade it",
+            )
 
         outside = self._outside_mandate(decision, snapshot)
         if outside is not None:
