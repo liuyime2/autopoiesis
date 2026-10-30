@@ -112,7 +112,8 @@ class CoreSleeve:
 
 
 def sleeve_performance(
-    fills: Sequence[JournalEvent], daily_prices: Mapping[date, float], pool: float
+    fills: Sequence[JournalEvent], daily_prices: Mapping[date, float], pool: float,
+    *, initial_shares: float = 0.0, initial_cash: float | None = None,
 ) -> dict[str, Any] | None:
     """How the sleeve did against holding the whole pool, from broker-confirmed fills.
 
@@ -137,8 +138,14 @@ def sleeve_performance(
     mine.sort(key=lambda row: row[0])
     first_day, _, first_px = mine[0]
     days = sorted(d for d in daily_prices if d >= first_day)
-    shares = cash = 0.0
-    cash = pool
+    # The sleeve manages the whole position in its symbol, including any shares the
+    # account already held when the sleeve started. `initial_shares` and
+    # `initial_cash` let the caller state that inherited position explicitly instead
+    # of pretending the sleeve opened at zero. Default (0, pool) is the old sub-account
+    # behaviour and is retained only for callers that genuinely have no inherited
+    # position; new callers should pass the account's real book.
+    shares = float(initial_shares)
+    cash = pool if initial_cash is None else float(initial_cash)
     values: list[float] = []
     held_values: list[float] = []
     deployed: list[float] = []
