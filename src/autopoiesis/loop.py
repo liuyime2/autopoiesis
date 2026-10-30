@@ -44,7 +44,7 @@ def _count_fill_events_in_tail(journal) -> int:
             text = text[nl + 1:]
     return text.count('"event_type":"ORDER_FILL_CONFIRMED"')
 from autopoiesis.models import CycleRecord, DecisionIntervention, JournalEvent, TradeDecision
-from autopoiesis.sleeve import CoreSleeve
+from autopoiesis.sleeve import SLEEVE_STRATEGY_ID, CoreSleeve
 
 #: What the loop writes when the decision engine's output could not be used. A module constant
 #: rather than a literal at the one call site, because the daemon reads it to decide whether the
@@ -314,18 +314,18 @@ class TradingLoop:
             return
         try:
             all_events = self.journal.read_events()
-        except Exception:  # noqa: BLE001 - pre-warm is best-effort
+        except Exception:
             return
         fills = confirmed_fill_events(all_events)
         symbols = {str((e.payload or {}).get("symbol", "")).upper() for e in fills if (e.payload or {}).get("symbol")}
         for symbol in symbols:
             try:
                 self._agent_holding(symbol)
-            except Exception:  # noqa: BLE001 - pre-warm is best-effort
+            except Exception:
                 pass
             try:
                 self._agent_short(symbol)
-            except Exception:  # noqa: BLE001 - pre-warm is best-effort
+            except Exception:
                 pass
 
     def run_once(self, symbol: str) -> CycleRecord | None:
@@ -348,6 +348,21 @@ class TradingLoop:
             sleeve_decision = self.sleeve.plan(snapshot) if self.sleeve is not None else None
             if sleeve_decision is not None:
                 decision = sleeve_decision
+            elif self.sleeve is not None and snapshot.symbol.upper() == self.sleeve.symbol:
+                # The sleeve is the sole controller of its symbol. When it has nothing to say
+                # (inside the band, or no usable forecast) the normal decision engine must not
+                # trade the same position: that is the mutually-cancelling path the 2026-10-29
+                # review found, where the sleeve bought and a TREND_FOLLOW sold the same SPY.
+                decision = TradeDecision(
+                    symbol=snapshot.symbol,
+                    action="HOLD",
+                    quantity=0,
+                    confidence=0.0,
+                    rationale="core sleeve holds this symbol exclusively; no rebalance needed this cycle",
+                    strategy_id=SLEEVE_STRATEGY_ID,
+                    strategy_provenance=getattr(self.sleeve, "provenance", None),
+                    decision_source="policy_engine",
+                )
             elif hasattr(self.decision_engine, "decide_snapshot"):
                 decision = self.decision_engine.decide_snapshot(snapshot)
             else:
