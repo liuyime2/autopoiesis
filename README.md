@@ -357,7 +357,7 @@ Report a vulnerability as described in [`SECURITY.md`](SECURITY.md).
 ## Project layout
 
 ```
-src/autopoiesis/          the package (import name autopoiesis). 50 modules, 4 external dependencies.
+src/autopoiesis/          the package (import name autopoiesis). 51 modules, 4 external dependencies.
   cli.py                the single entry point
   daemon.py             the trading loop and the maintenance loop
   loop.py               one cycle: snapshot -> decision -> guardian -> execute
