@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
                 "AUTOPOIESIS_EVIDENCE_REFERENCE, and AUTOPOIESIS_ATTESTATION_REASON"
             )
         try:
-            JsonlJournal(config.journal_path, strict=True).attest_archive_baseline(
+            JsonlJournal(config.journal_path, strict=True, lock_timeout=60.0).attest_archive_baseline(
                 operator_id=operator_id,
                 evidence_reference=evidence_reference,
                 reason=reason,
@@ -354,7 +354,7 @@ def _build_agent_daemon(
     """Assemble the production pipeline without running or reconciling it."""
     if journal is not None and journal.path.resolve() != config.journal_path.resolve():
         raise ValueError("supplied journal path does not match agent configuration")
-    journal = journal if journal is not None else JsonlJournal(config.journal_path, strict=True)
+    journal = journal if journal is not None else JsonlJournal(config.journal_path, strict=True, lock_timeout=60.0)
     strategy_library = StrategyLibrary(config.strategy_dir)
     knowledge_library = KnowledgeLibrary(config.knowledge_dir)
     reflection_memory = ReflectionMemory(config.journal_path.parent / "reflection.json")
@@ -679,7 +679,7 @@ def _reconcile(config: AgentConfig) -> int:
         secret_key=config.alpaca_secret_key or "",
         base_url=config.alpaca_base_url,
     )
-    journal = JsonlJournal(config.journal_path, strict=True)
+    journal = JsonlJournal(config.journal_path, strict=True, lock_timeout=60.0)
     reconciler = OrderReconciler(client=client, journal=journal)
     report = reconciler.reconcile()
     print(json.dumps({
@@ -699,7 +699,7 @@ def _ingest_evidence(config: AgentConfig) -> int:
         return 1
     now = datetime.now(tz=timezone.utc)
     batch = BrokerEvidenceProvider(client=client).ingest(window_start=now - timedelta(days=30), window_end=now)
-    journal = JsonlJournal(config.journal_path, strict=True)
+    journal = JsonlJournal(config.journal_path, strict=True, lock_timeout=60.0)
     journal.append_event(
         JournalEvent(
             event_id=str(uuid4()),
@@ -725,7 +725,7 @@ def _ingest_owner_history(config: AgentConfig) -> int:
     client = _paper_client(config)
     if client is None:
         return 1
-    journal = JsonlJournal(config.journal_path, strict=True)
+    journal = JsonlJournal(config.journal_path, strict=True, lock_timeout=60.0)
     agent_orders = {r.execution.order_id for r in journal.read_all() if r.execution.order_id}
     agent_orders |= {
         str(e.payload.get("order_id")) for e in journal.read_events()
@@ -828,7 +828,7 @@ def _agent_open_lots(journal: JsonlJournal) -> dict[str, dict[str, object]]:
 
 
 def _evidence_report(config: AgentConfig) -> int:
-    journal = JsonlJournal(config.journal_path, strict=True)
+    journal = JsonlJournal(config.journal_path, strict=True, lock_timeout=60.0)
     batch = _latest_evidence_batch(journal)
     report = DeterministicEvaluator().evaluate(
         journal.read_all(), evidence=batch,
@@ -855,7 +855,7 @@ def _evidence_report(config: AgentConfig) -> int:
 
 
 def _verify_profit_target(config: AgentConfig) -> int:
-    journal = JsonlJournal(config.journal_path, strict=True)
+    journal = JsonlJournal(config.journal_path, strict=True, lock_timeout=60.0)
     batch = _latest_evidence_batch(journal)
     report = DeterministicEvaluator().evaluate(
         journal.read_all(), evidence=batch, seeded_fills=confirmed_fill_activities(journal),

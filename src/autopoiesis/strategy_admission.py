@@ -38,7 +38,17 @@ class StrategyAdmissionResult:
 #: `fixed-size-bil-sell-001` on 2026-10-13. That reason is a rate over refusals, and the
 #: staleness fix removed an entire class of refusal that was being charged into it. A
 #: recorded reason is only as durable as the attribution behind it.
-NON_EXPIRING_RETIREMENT_REASONS = ("broker-verified negative realized PnL",)
+#:
+#: `offline validation rejected its own recorded decisions` is the second. A screen rejection is a
+#: statement about decisions already recorded, and it stays true whatever is proposed afterwards.
+#: Measured 2026-10-31: `fixed-size-buy-tlt-001` was REJECT_POOR_DECISIONS on 2026-10-28 (14 right of
+#: 23, nine losing fills), retired, and re-admitted by this gate within minutes with its evidence
+#: reset to zero, after which it kept buying TLT. A rejection that one re-proposal can undo is not
+#: a rejection.
+NON_EXPIRING_RETIREMENT_REASONS = (
+    "broker-verified negative realized PnL",
+    "offline validation rejected its own recorded decisions",
+)
 
 #: How many times a retired strategy may be put back on PROBATION through this gate.
 #:

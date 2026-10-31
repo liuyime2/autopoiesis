@@ -103,3 +103,41 @@ def test_every_journal_the_cli_opens_on_the_production_path_is_strict():
     sites = re.findall(r"JsonlJournal\(config\.journal_path[^)]*\)", source)
     assert sites, "the cli no longer opens the journal this way; update this test with it"
     assert all("strict=True" in site for site in sites), [s for s in sites if "strict=True" not in s]
+
+
+def test_a_writer_waits_for_a_reader_for_as_long_as_the_journal_is_told_to(tmp_path):
+    """2026-10-30: a cycle's record was lost after a 10 s wait behind a reader (synthetic reproduction)."""
+    import threading
+    import time
+
+    from autopoiesis.atomicio import file_lock
+
+    path = tmp_path / "journal.jsonl"
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    held = threading.Event()
+
+    def reader():
+        with file_lock(lock_path, exclusive=False):
+            held.set()
+            time.sleep(0.6)
+
+    threading.Thread(target=reader).start()
+    held.wait()
+    with pytest.raises(TimeoutError):
+        JsonlJournal(path, lock_timeout=0.1).append(_record(quote_time=AFTER_QUOTE_TIME_ERA))
+
+    held.clear()
+    threading.Thread(target=reader).start()
+    held.wait()
+    JsonlJournal(path, lock_timeout=5.0).append(_record(quote_time=AFTER_QUOTE_TIME_ERA))
+    assert len(path.read_text().splitlines()) == 1
+
+
+def test_a_strategy_retired_by_the_screen_cannot_be_re_admitted_by_proposing_it_again(tmp_path):
+    from autopoiesis.strategy_admission import NON_EXPIRING_RETIREMENT_REASONS, StrategyAdmission
+
+    assert any(r.startswith("offline validation rejected") for r in NON_EXPIRING_RETIREMENT_REASONS)
+    reason = "offline validation rejected its own recorded decisions: 23 scored decision(s), 14 correct"
+    existing = type("S", (), {"readmissions": 0, "lifecycle_reason": reason})()
+    gate = StrategyAdmission.__new__(StrategyAdmission)
+    assert "re-admission refused" in gate._readmission_refusal(existing)

@@ -174,8 +174,14 @@ class JsonlJournal:
         lock: bool = True,
         archive_dir: Path | str | None = None,
         strict: bool = False,
+        lock_timeout: float = 10.0,
     ):
         self.path = Path(path)
+        #: How long a reader or writer waits for the journal lock before giving up. A writer that
+        #: gives up loses the cycle's record, so production waits longer than the default: on
+        #: 2026-10-30 at 14:32Z a cycle raised "could not acquire lock" after 10 s, two minutes after
+        #: `market-open-verify` began reading, and its record was never journalled.
+        self.lock_timeout = lock_timeout
         #: Refuse a cycle record that fails `unreal_reason`. Off by default so tests and tools that
         #: build their own records keep working; the production wiring turns it on.
         self.strict = strict
@@ -992,4 +998,6 @@ class JsonlJournal:
             from contextlib import nullcontext
 
             return nullcontext()
-        return file_lock(self.path.with_suffix(self.path.suffix + ".lock"), exclusive=exclusive)
+        return file_lock(
+            self.path.with_suffix(self.path.suffix + ".lock"), exclusive=exclusive, timeout=self.lock_timeout
+        )

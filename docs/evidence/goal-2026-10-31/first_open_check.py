@@ -57,12 +57,16 @@ def main() -> None:
         errors = sum(1 for r in todays if r.error)
         line("PASS" if (first.hour, first.minute) <= (9, 50) else "FAIL", "first cycle at the open", f"{first:%H:%M} NY, {len(todays)} cycles")
         line("PASS" if errors == 0 else "FAIL", "cycle errors", f"{errors} of {len(todays)}")
-        sleeve = [r for r in todays if r.decision.strategy_id == SLEEVE_STRATEGY_ID and r.decision.action != "HOLD"]
+        # Order behaviour is judged on the cycles that ran under this build only: a date from before
+        # the deployment would otherwise report the behaviour the build was installed to stop.
+        mine = [r for r in todays if started is None or r.snapshot.timestamp >= started[0]]
+        line("INFO", "cycles under this build", f"{len(mine)} of {len(todays)} on {day}")
+        sleeve = [r for r in mine if r.decision.strategy_id == SLEEVE_STRATEGY_ID and r.decision.action != "HOLD"]
         tally = collections.Counter(f"{r.decision.action}/{r.execution.status}" for r in sleeve)
         line("INFO", "core sleeve orders", f"{dict(tally)}" if sleeve else "none (inside its band; expected on a quiet day)")
-        spy_other = [r for r in todays if r.snapshot.symbol == "SPY" and r.decision.action != "HOLD" and r.decision.strategy_id != SLEEVE_STRATEGY_ID]
+        spy_other = [r for r in mine if r.snapshot.symbol == "SPY" and r.decision.action != "HOLD" and r.decision.strategy_id != SLEEVE_STRATEGY_ID]
         line("PASS" if not spy_other else "FAIL", "only the sleeve trades SPY", f"{len(spy_other)} other SPY order(s)")
-        tlt_buys = [r for r in todays if r.snapshot.symbol == "TLT" and r.decision.action == "BUY" and r.execution.status in {"SUBMITTED", "REPLAYED"}]
+        tlt_buys = [r for r in mine if r.snapshot.symbol == "TLT" and r.decision.action == "BUY" and r.execution.status in {"SUBMITTED", "REPLAYED"}]
         line("PASS" if not tlt_buys else "FAIL", "TLT is not being added to", f"{len(tlt_buys)} BUY(s): {sorted({r.decision.strategy_id for r in tlt_buys})}")
 
     strategies = [json.loads(p.read_text()) for p in (root / "strategies").glob("*.json")]
