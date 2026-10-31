@@ -1,0 +1,28 @@
+{
+ "simulation": true,
+ "days": 695,
+ "cycles_per_day": 5,
+ "pool_usd": 20000.0,
+ "A_rival_alone": {
+  "cycles_asked_of_the_rival": 3475,
+  "filled_trades_by_source": {
+   "rival-probe": 3475
+  },
+  "average_exposure_usd": 310.0,
+  "max_exposure_usd": 781.0,
+  "final_account_pnl_usd": 249.73
+ },
+ "B_sleeve_and_rival": {
+  "cycles_asked_of_the_rival": 0,
+  "filled_trades_by_source": {
+   "core-sleeve": 55
+  },
+  "average_exposure_usd": 14882.0,
+  "max_exposure_usd": 20308.0,
+  "final_account_pnl_usd": 5725.47
+ },
+ "checks": {
+  "only_the_sleeve_traded": true,
+  "exposure_never_above_pool_plus_one_share": true
+ }
+}
