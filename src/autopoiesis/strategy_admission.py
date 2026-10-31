@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from autopoiesis.guardian import Guardian
 from autopoiesis.models import StrategyResult, StrategySpec
+from autopoiesis.signal_ledger import read_rows, refuted_lookbacks
 from autopoiesis.strategy_engine import (
     PROBATION_CYCLES,
     StrategyLibrary,
@@ -147,7 +149,11 @@ class StrategyAdmission:
         probation_selector: StrategySelector | None = None,
         max_probation_queue: int = PROBATION_CYCLES,
         refused_kinds: Sequence[str] = (),
+        signal_ledger: Path | str | None = None,
     ):
+        #: The signal ledger a RULE is checked against (see `_refuted_rule_reason`). None keeps the
+        #: old behaviour, which is what every existing caller and test means.
+        self.signal_ledger = Path(signal_ledger) if signal_ledger is not None else None
         #: Kinds this deployment does not admit (config `refused_kinds`). Empty here so a bare
         #: gate behaves as it always did; the wiring in cli.py passes the configured policy.
         self.refused_kinds = frozenset(kind.upper() for kind in refused_kinds)
@@ -342,6 +348,14 @@ class StrategyAdmission:
                 strategy_id=strategy.strategy_id,
             )
 
+        ledger_reason = self._refuted_rule_reason(strategy)
+        if ledger_reason is not None:
+            return StrategyAdmissionResult(
+                accepted=False,
+                reason=ledger_reason,
+                strategy_id=strategy.strategy_id,
+            )
+
         cash_reason = _cash_equivalent_reason(strategy)
         if cash_reason is not None:
             return StrategyAdmissionResult(
@@ -386,6 +400,32 @@ class StrategyAdmission:
                 if retired is not None else "approved"
             ),
             strategy_id=strategy.strategy_id,
+        )
+
+    def _refuted_rule_reason(self, strategy: StrategySpec) -> str | None:
+        """Refuse a RULE that repeats an intraday test the signal ledger ran and found nothing in.
+
+        Measured 2026-10-31: 21 of the 23 strategies created since the curriculum was shown the
+        ledger "cited" it - they cited the volatility survivors (RV21->FRV21) to justify price
+        mean-reversion on 5-12 observation lookbacks, which the ledger tested at 1..48 bars on two
+        horizons, two-sided, and found nothing in. Asking the model not to is a prompt; this is the
+        rule. Lookbacks beyond the longest tested one stay open, and so does a rule the ledger has
+        evidence for.
+        """
+        if self.signal_ledger is None or strategy.kind != "RULE":
+            return None
+        refuted = refuted_lookbacks(read_rows(self.signal_ledger)).get(str(strategy.parameters.get("signal")))
+        if refuted is None:
+            return None
+        longest, entries = refuted
+        lookback = int(strategy.parameters.get("lookback", 0))
+        if lookback > longest:
+            return None
+        return (
+            f"{strategy.parameters.get('signal')} over {lookback} observations repeats a signal-ledger test "
+            f"that found nothing: lookbacks up to {longest} were tested on two horizons, two-sided, and none "
+            f"was significant (e.g. {', '.join(entries[:3])}). Propose a lookback above {longest} "
+            f"(the schema allows up to 78) or a hypothesis the ledger has not refuted."
         )
 
     def _readmission_refusal(self, existing: StrategySpec) -> str | None:

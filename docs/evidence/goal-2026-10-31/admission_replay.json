@@ -1,0 +1,263 @@
+{
+ "proposed_since": "2026-10-25T01:57:00+00:00",
+ "strategies": 23,
+ "rules": 18,
+ "rules_refused_by_the_ledger_rule": 18,
+ "refused_that_are_now_paused_or_retired": 10,
+ "rules_still_admitted": [],
+ "rows": [
+  {
+   "strategy_id": "fixed-size-buy-spy-002",
+   "kind": "FIXED_SIZE",
+   "symbols": [
+    "SPY"
+   ],
+   "signal": null,
+   "lookback": null,
+   "lifecycle_now": "PAUSED",
+   "refused": false
+  },
+  {
+   "strategy_id": "fixed-size-buy-tlt-001",
+   "kind": "FIXED_SIZE",
+   "symbols": [
+    "TLT"
+   ],
+   "signal": null,
+   "lookback": null,
+   "lifecycle_now": "PROBATION",
+   "refused": false
+  },
+  {
+   "strategy_id": "fixed-size-buy-tlt-002",
+   "kind": "FIXED_SIZE",
+   "symbols": [
+    "TLT"
+   ],
+   "signal": null,
+   "lookback": null,
+   "lifecycle_now": "PROBATION",
+   "refused": false
+  },
+  {
+   "strategy_id": "fixed-size-buy-xlb-001",
+   "kind": "FIXED_SIZE",
+   "symbols": [
+    "XLB"
+   ],
+   "signal": null,
+   "lookback": null,
+   "lifecycle_now": "ACTIVE",
+   "refused": false
+  },
+  {
+   "strategy_id": "fixed-size-buy-xlf-001",
+   "kind": "FIXED_SIZE",
+   "symbols": [
+    "XLF"
+   ],
+   "signal": null,
+   "lookback": null,
+   "lifecycle_now": "PAUSED",
+   "refused": false
+  },
+  {
+   "strategy_id": "rule-spy-momentum-001",
+   "kind": "RULE",
+   "symbols": [
+    "SPY"
+   ],
+   "signal": "return_over_n",
+   "lookback": 10,
+   "lifecycle_now": "RETIRED",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-spy-return-001",
+   "kind": "RULE",
+   "symbols": [
+    "SPY"
+   ],
+   "signal": "return_over_n",
+   "lookback": 5,
+   "lifecycle_now": "PROBATION",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-spy-sma-001",
+   "kind": "RULE",
+   "symbols": [
+    "SPY"
+   ],
+   "signal": "price_vs_sma",
+   "lookback": 5,
+   "lifecycle_now": "RETIRED",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-spy-sma-002",
+   "kind": "RULE",
+   "symbols": [
+    "SPY"
+   ],
+   "signal": "price_vs_sma",
+   "lookback": 6,
+   "lifecycle_now": "PROBATION",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-spy-sma-003",
+   "kind": "RULE",
+   "symbols": [
+    "SPY"
+   ],
+   "signal": "price_vs_sma",
+   "lookback": 21,
+   "lifecycle_now": "PROBATION",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-spy-sma-004",
+   "kind": "RULE",
+   "symbols": [
+    "SPY"
+   ],
+   "signal": "price_vs_sma",
+   "lookback": 21,
+   "lifecycle_now": "PROBATION",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-tlt-return-001",
+   "kind": "RULE",
+   "symbols": [
+    "TLT"
+   ],
+   "signal": "return_over_n",
+   "lookback": 5,
+   "lifecycle_now": "RETIRED",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-xlb-return-001",
+   "kind": "RULE",
+   "symbols": [
+    "XLB"
+   ],
+   "signal": "return_over_n",
+   "lookback": 6,
+   "lifecycle_now": "PROBATION",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-xlb-sma-001",
+   "kind": "RULE",
+   "symbols": [
+    "XLB"
+   ],
+   "signal": "price_vs_sma",
+   "lookback": 5,
+   "lifecycle_now": "PROBATION",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-xle-return-001",
+   "kind": "RULE",
+   "symbols": [
+    "XLE"
+   ],
+   "signal": "return_over_n",
+   "lookback": 5,
+   "lifecycle_now": "PROBATION",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-xle-return-002",
+   "kind": "RULE",
+   "symbols": [
+    "XLE"
+   ],
+   "signal": "return_over_n",
+   "lookback": 5,
+   "lifecycle_now": "PAUSED",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-xle-sma-001",
+   "kind": "RULE",
+   "symbols": [
+    "XLE"
+   ],
+   "signal": "price_vs_sma",
+   "lookback": 5,
+   "lifecycle_now": "PAUSED",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-xle-sma-002",
+   "kind": "RULE",
+   "symbols": [
+    "XLE"
+   ],
+   "signal": "price_vs_sma",
+   "lookback": 6,
+   "lifecycle_now": "PAUSED",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-xlf-momentum-001",
+   "kind": "RULE",
+   "symbols": [
+    "XLF"
+   ],
+   "signal": "return_over_n",
+   "lookback": 6,
+   "lifecycle_now": "PAUSED",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-xlf-return-001",
+   "kind": "RULE",
+   "symbols": [
+    "XLF"
+   ],
+   "signal": "return_over_n",
+   "lookback": 5,
+   "lifecycle_now": "PAUSED",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-xlf-sma-001",
+   "kind": "RULE",
+   "symbols": [
+    "XLF"
+   ],
+   "signal": "price_vs_sma",
+   "lookback": 5,
+   "lifecycle_now": "PROBATION",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-xlf-sma-002",
+   "kind": "RULE",
+   "symbols": [
+    "XLF"
+   ],
+   "signal": "price_vs_sma",
+   "lookback": 6,
+   "lifecycle_now": "PAUSED",
+   "refused": true
+  },
+  {
+   "strategy_id": "rule-xlf-sma-003",
+   "kind": "RULE",
+   "symbols": [
+    "XLF"
+   ],
+   "signal": "price_vs_sma",
+   "lookback": 6,
+   "lifecycle_now": "PAUSED",
+   "refused": true
+  }
+ ]
+}

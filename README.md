@@ -357,7 +357,7 @@ Report a vulnerability as described in [`SECURITY.md`](SECURITY.md).
 ## Project layout
 
 ```
-src/autopoiesis/          the package (import name autopoiesis). 51 modules, 4 external dependencies.
+src/autopoiesis/          the package (import name autopoiesis). 52 modules, 4 external dependencies.
   cli.py                the single entry point
   daemon.py             the trading loop and the maintenance loop
   loop.py               one cycle: snapshot -> decision -> guardian -> execute
@@ -371,7 +371,7 @@ src/autopoiesis/          the package (import name autopoiesis). 51 modules, 4 e
   models.py             shared schema, imported by 28 modules
   research/             walk-forward backtests; production may not import it
 tools/                  the gate (verify.py), benchmark, daily report, probes, systemd templates
-tests/autopoiesis/       121 test files
+tests/autopoiesis/       122 test files
 examples/               the smallest runnable example, no broker needed
 configs/                paper.env.example: every environment variable with its default
 docs/                   ARCHITECTURE.md, evidence/, history/

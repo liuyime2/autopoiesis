@@ -507,6 +507,7 @@ def _build_agent_daemon(
         ),
         strategy_admission=StrategyAdmission(
             guardian=guardian, strategy_library=strategy_library, refused_kinds=config.refused_kinds,
+            signal_ledger=config.journal_path.parent / "signal_trials.jsonl",
         ),
         broker_evidence_provider=BrokerEvidenceProvider(client=client),
         lifecycle_manager=StrategyLifecycleManager(),
