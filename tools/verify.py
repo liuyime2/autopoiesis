@@ -96,6 +96,9 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_probation_restart_budget.py": ("lifecycle-invariants", "selection-pressure-reaches-the-rules"),
     "test_retired_strategy_readmission.py": ("lifecycle-invariants", "unit-integration"),
     "test_cash_equivalent_admission.py": ("lifecycle-invariants", "unit-integration"),
+    "test_refuted_rule_admission.py": ("lifecycle-invariants", "unit-integration"),
+    "test_journal_rejects_unreal_records.py": ("data-integrity", "unit-integration"),
+    "test_equity_curve.py": ("pnl-accounting", "unit-integration"),
     "test_core_sleeve.py": ("risk-controls", "guardian-bypass-prevention", "unit-integration"),
     "test_staleness_not_strategy_fault.py": (
         "pnl-accounting", "lifecycle-invariants", "guardian-bypass-prevention",

@@ -92,3 +92,14 @@ def test_doctor_fails_on_an_unacknowledged_unreal_record_and_passes_once_it_is_m
     (tmp_path / "invalidated_cycles.json").write_text(json.dumps(
         {"invalidated": [{"cycle_id": "probe-0", "reason": "synthetic probe", "invalidated_at": "2026-10-31T00:00:00Z"}]}))
     assert verdict() == "ok"
+
+
+def test_every_journal_the_cli_opens_on_the_production_path_is_strict():
+    """A new call site that forgot `strict=True` would reopen the door the probe records came through."""
+    import re
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[2] / "src" / "autopoiesis" / "cli.py").read_text(encoding="utf-8")
+    sites = re.findall(r"JsonlJournal\(config\.journal_path[^)]*\)", source)
+    assert sites, "the cli no longer opens the journal this way; update this test with it"
+    assert all("strict=True" in site for site in sites), [s for s in sites if "strict=True" not in s]
