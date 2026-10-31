@@ -182,6 +182,34 @@ def _headline(report, agent: dict | None, *, covered: bool = False) -> tuple[str
     return f"NOT MEASURABLE: {reason}; {diagnostic}", EXIT_NOTHING_TO_MEASURE
 
 
+def _account_risk(config) -> dict | None:
+    """The whole account against SPY on daily marks (standard items 1 and 2) and the cohort length.
+
+    Read-only, from the journal and the deployment record. None when there are fewer than two days
+    that have both an account and a SPY mark.
+    """
+    from autopoiesis.equity_curve import (
+        COHORT_TARGET_DAYS,
+        cohort_days,
+        cohort_start,
+        compare_with_spy,
+        daily_marks,
+    )
+    from autopoiesis.journal import JsonlJournal
+
+    marks = daily_marks(JsonlJournal(config.journal_path).read_all())
+    comparison = compare_with_spy(marks)
+    if comparison is None:
+        return None
+    started = cohort_start(ROOT / "docs" / "evidence" / "deployments.jsonl")
+    comparison["cohort"] = (
+        None if started is None else
+        {"build": started[1], "since": started[0].isoformat(), "days": cohort_days(marks, started[0]),
+         "target_days": COHORT_TARGET_DAYS}
+    )
+    return comparison
+
+
 def _sleeve_section(config) -> dict | None:
     """The core sleeve against holding its whole pool, from confirmed fills. None while it is off
     or has not filled. Read-only: journal events and the prices the cycles recorded."""
@@ -442,6 +470,35 @@ def _run_prose(argv: list[str]) -> int:
         print(
             f"  PnL sleeve {sleeve['sleeve_pnl']:+,.2f} vs hold-the-pool {sleeve['hold_pool_pnl']:+,.2f}; "
             f"max drawdown {sleeve['sleeve_max_drawdown_pct']:+.2f}% vs {sleeve['hold_pool_max_drawdown_pct']:+.2f}%"
+        )
+        print()
+
+    account_risk = _account_risk(config)
+    payload["account_risk"] = account_risk
+    if account_risk is not None:
+        print("whole account against SPY on daily marks (AMPLIFICATION_STANDARD items 1-2)")
+        print("-" * 78)
+        a = account_risk
+
+        def figure(value, spec):
+            return "n/a" if value is None else format(value, spec)
+
+        print(
+            f"  {a['days']} day(s) {a['first']} .. {a['last']}: account {a['account_return_pct']:+.2f}% "
+            f"(Sharpe {figure(a['account_sharpe'], '.2f')}, max drawdown {a['account_max_drawdown_pct']:.2f}%) vs "
+            f"SPY {a['spy_return_pct']:+.2f}% (Sharpe {figure(a['spy_sharpe'], '.2f')}, max drawdown {a['spy_max_drawdown_pct']:.2f}%)"
+        )
+        cohort = a["cohort"]
+        if cohort is not None:
+            print(
+                f"  cohort: {cohort['days']} of {cohort['target_days']} trading days under build {cohort['build']} "
+                f"(installed {cohort['since'][:16]}); a change of source fingerprint restarts it"
+            )
+        verdicts = (a["risk_adjusted_not_below_spy"], a["drawdown_smaller_than_spy"])
+        print(
+            "  items 1-2: "
+            + ("NOT YET MEASURABLE - fewer than 60 days of marks; not rounded up" if None in verdicts
+               else "MET" if all(verdicts) else "NOT MET")
         )
         print()
 
