@@ -38,13 +38,15 @@ def test_collect_returns_a_snapshot_with_earnings_and_news():
     news = [{"headline": "AAPL beats", "source": "reuters", "created_at": "2026-10-29T10:00:00Z",
              "symbols": ["AAPL"], "summary": "strong quarter"}]
     collector = InformationCollector(client=_client(earnings=earnings, news=news))
-    snap = collector.collect("AAPL")
+    # A fixed clock: the fixture's dates are calendar dates, and against the wall clock this test
+    # passed on 2026-10-25 and failed from 2026-10-31 as "11 days away" became 5.
+    snap = collector.collect("AAPL", now=datetime(2026, 10, 29, 12, 0, tzinfo=timezone.utc))
     assert isinstance(snap, InformationSnapshot)
     assert snap.symbol == "AAPL"
     assert len(snap.earnings) == 1
     assert snap.earnings[0].report_date.isoformat() == "2026-11-05"
     assert snap.earnings[0].eps_estimate == 1.23
-    assert snap.earnings_imminent is False  # 11 days away
+    assert snap.earnings_imminent is False  # 7 days away at the fixed clock
     assert snap.days_to_earnings is not None and snap.days_to_earnings > 5
     assert len(snap.news) == 1
     assert snap.news[0].headline == "AAPL beats"
