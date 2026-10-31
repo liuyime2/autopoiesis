@@ -12,8 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from autopoiesis.information_collector import InformationCollector
 from autopoiesis.models import EarningsEvent, InformationSnapshot, NewsItem
+from autopoiesis.research.information_collector import InformationCollector
 
 
 def _client(earnings=None, news=None, fail_earnings=False, fail_news=False):

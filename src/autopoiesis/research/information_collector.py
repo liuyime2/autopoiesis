@@ -2,8 +2,10 @@
 
 This is the code half of the "new information sources" item in the 2026-10-20 review.
 It is read-only: it places no order, changes no position, and writes nothing to the
-journal. Its output is evidence for research trials and context for the decision
-engine, and it is stated as such in both places.
+journal. Its output is an input to research trials. It lives in the research package
+(moved there 2026-10-31): nothing in production calls it, and production may not import this
+package, so it is not a decision input until a trial shows it should be and it is rewritten for
+production.
 
 Why a separate module rather than more methods on `DataGateway`. The gateway is the
 broker-facing reader: it fetches bars, profiles, and headlines, and it caches per
