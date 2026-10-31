@@ -4,7 +4,10 @@ Supersedes goal-2026-10-24/monday_check.py (kept for history). Reads the heartbe
 strategy library and the deployment record; places and cancels nothing. Each line is PASS, FAIL or INFO
 with the figure it rests on.
 
-Usage: PYTHONPATH=src python first_open_check.py [--date YYYY-MM-DD]   (New York date; default today)
+Usage: PYTHONPATH=src python first_open_check.py [--date YYYY-MM-DD] [--since ISO-8601]
+  --date   New York date to judge; default today
+  --since  treat the build as installed at this instant instead of the recorded one. A negative control:
+           with a time before the old behaviour was stopped, the checks must FAIL on the old data.
 """
 from __future__ import annotations
 
@@ -35,6 +38,8 @@ def main() -> None:
     config = AgentConfig.from_env()
     root = config.journal_path.parent
     started = cohort_start(REPO / "docs" / "evidence" / "deployments.jsonl")
+    if "--since" in args and started is not None:
+        started = (datetime.fromisoformat(args[args.index("--since") + 1]), started[1])
 
     beat = json.loads((root / "heartbeat.json").read_text())
     age = (datetime.now(timezone.utc) - datetime.fromisoformat(beat["timestamp"].replace("Z", "+00:00"))).total_seconds()
