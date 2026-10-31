@@ -12,6 +12,7 @@ evidence that the agent works.
 """
 
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -319,7 +320,9 @@ def test_a_healthy_system_has_no_failures(config, monkeypatch):
     library = StrategyLibrary(config.strategy_dir)
     library.save(_spec("s1"))
     journal = JsonlJournal(config.journal_path, lock=False)
-    journal.append(_record("c1"))
+    # A uuid, as the loop writes: the doctor now fails a journal holding an id no real cycle could
+    # have had (`c1` is a synthetic id, and says so by not being one).
+    journal.append(_record(str(uuid.uuid4())))
     from autopoiesis.health import HealthMonitor
 
     HealthMonitor(config.heartbeat_path).write(

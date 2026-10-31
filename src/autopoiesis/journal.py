@@ -6,6 +6,7 @@ import itertools
 import json
 import os
 import re
+import uuid
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +35,41 @@ _TIMESTAMP_RE = re.compile(r'"timestamp"\s*:\s*"([^"]+)"')
 #: asked for something other than a window, not that the window is unusually busy.
 _TAIL_BLOCK_BYTES = 1 << 20
 _TAIL_LIMIT_BYTES = 8 << 20
+
+
+#: The first day every real snapshot carried `quote_time`. Measured over the whole journal on
+#: 2026-10-31: 2,060 real cycles before this date have none (the field did not exist), and from it
+#: on the only cycles without one are the six fabricated `probe` records.
+QUOTE_TIME_RECORDED_FROM = datetime(2026, 10, 12, tzinfo=timezone.utc)
+
+
+def unreal_reason(record: CycleRecord) -> str | None:
+    """Why a cycle record cannot have come from a real cycle, or None if it can.
+
+    Two structural facts, both true of every record the loop writes. The loop gives each cycle a
+    uuid4, and a snapshot labelled `alpaca` is built by the gateway, which always records the
+    quote's timestamp. On 2026-10-27 five records with ids `probe-0`..`probe-4`, SPY at exactly
+    600.00, rationale `x` and no quote time were written into the production journal by a script
+    measuring read speed; they were labelled `alpaca`, so they looked like data, and that day's
+    benchmark reported SPY -18.8%. A sixth, `probe` on 2026-10-23, had gone unnoticed. Reads now skip them (`invalidated_cycles.json`); this is the check
+    that stops the next one at the door. Replay, shadow and test sources carry their own labels and
+    are not judged by the `alpaca` rule.
+    """
+    try:
+        uuid.UUID(record.cycle_id)
+    except (ValueError, AttributeError, TypeError):
+        return f"cycle_id {record.cycle_id!r} is not a uuid, so the loop did not write it"
+    if (
+        record.snapshot.source == "alpaca"
+        and record.snapshot.quote_time is None
+        and record.snapshot.timestamp >= QUOTE_TIME_RECORDED_FROM
+    ):
+        return "snapshot labelled alpaca carries no quote time, which the gateway has always recorded since 2026-10-12"
+    return None
+
+
+class UnrealRecordError(ValueError):
+    """A strict journal was asked to record something no real cycle could have produced."""
 
 
 def _line_timestamp(raw: str) -> datetime | None:
@@ -137,8 +173,12 @@ class JsonlJournal:
         backups: int = 3,
         lock: bool = True,
         archive_dir: Path | str | None = None,
+        strict: bool = False,
     ):
         self.path = Path(path)
+        #: Refuse a cycle record that fails `unreal_reason`. Off by default so tests and tools that
+        #: build their own records keep working; the production wiring turns it on.
+        self.strict = strict
         self.max_bytes = max_bytes
         self.backups = backups
         self.use_lock = lock
@@ -255,6 +295,10 @@ class JsonlJournal:
         }
 
     def append(self, record: CycleRecord) -> None:
+        if self.strict:
+            reason = unreal_reason(record)
+            if reason is not None:
+                raise UnrealRecordError(f"refused to journal {record.cycle_id!r}: {reason}")
         self._append_json(record.model_dump_json())
 
     def append_event(self, event: JournalEvent) -> None:

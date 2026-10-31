@@ -43,7 +43,7 @@ from autopoiesis.evaluator import (
 )
 from autopoiesis.fill_reconciler import confirmed_fill_events
 from autopoiesis.health import HealthMonitor
-from autopoiesis.journal import JsonlJournal
+from autopoiesis.journal import JsonlJournal, unreal_reason
 from autopoiesis.knowledge_library import KnowledgeLibrary
 from autopoiesis.learning_evidence import model_departed_from_rule
 from autopoiesis.models import StrategyLifecycle, StrategySpec
@@ -1626,6 +1626,20 @@ def _check_journal(report: DoctorReport, config: AgentConfig) -> None:
         )
     else:
         report.add("journal", OK, detail)
+
+    # `read_all` has already dropped the cycles marked invalid, so what is left that fails the
+    # structural test is a fabricated record nobody has acknowledged: FAIL, not WARN, because
+    # evidence built on it (the benchmark, the screen, the counterfactual) is not evidence.
+    unreal = [(r.cycle_id, reason) for r in records if (reason := unreal_reason(r)) is not None]
+    if unreal:
+        report.add(
+            "journal real", FAIL,
+            f"{len(unreal)} cycle record(s) no real cycle could have produced and not marked invalid: "
+            f"{unreal[0][0]!r} ({unreal[0][1]})",
+            "add them to invalidated_cycles.json next to the journal; do not delete journal lines",
+        )
+    else:
+        report.add("journal real", OK, "every retained cycle record has a uuid id and, since 2026-10-12, a quote time")
 
     # State the window the journal actually covers. Rotation deletes the oldest
     # generation, so after it fires the file is a recent fragment rather than the record,
