@@ -21,9 +21,14 @@ effective trading days, with the same capital and the same costs as the baseline
 3. **No hard risk limit was ever touched.** Guardian refusal, daily loss cap, total
    exposure cap, stale-quote refusal, market-open check: zero breaches across the
    whole 60 days. A breach voids the cohort regardless of the other two.
-4. **The cohort is one policy version.** A change to the strategy set, the model, the
-   accumulation rule, the Guardian thresholds or the universe resets the counter. The
-   60 days must be contiguous under one version, or the run is not comparable.
+4. **The cohort is one policy version.** (Amended 2026-10-31, see below.) A change to the **code, the
+   configuration, the Guardian thresholds, the model, or the admission and accumulation rules** resets
+   the counter. The 60 days must be contiguous under one such version, or the run is not comparable.
+   **The set of strategies the system itself generates, tests, pauses and retires is not part of the
+   version**: that is the self-improvement being evaluated, and a standard that restarts every time it
+   moves can never be met. Version is read from the daemon's source fingerprint in
+   `docs/evidence/deployments.jsonl` (`make benchmark` prints the cohort length); a change to the
+   environment file is not detected by it and must be recorded by hand.
 5. **The benchmark window is the account's own window** (account opened 2025-10-21,
    12 months before the earliest recorded cycle), not a window chosen to flatter.
    Mixing windows to obtain a passing figure is the same defect as fabricating data.
@@ -54,7 +59,16 @@ Amplification is a separate, deliberate step with its own record: the capital
 increase, the date, the cohort it rests on, and the new policy version. It is not
 automatic, and it is not retroactive.
 
-## Status as of 2026-10-25
+## Amendment of item 4, 2026-10-31
+
+Written before any 60-day result exists. The original wording reset the counter on "a change to the strategy
+set". Between 2026-10-25 and 2026-10-30 the curriculum created 23 strategies and the lifecycle paused or
+retired 13, so under that wording the counter could never reach 60 for a system whose purpose is to
+evolve its own strategies; on the same days the deployed code changed four times, which is what actually
+restarts it. The amendment moves the reset from the first to the second, and says so here rather than
+reading the old wording more loosely.
+
+## Status as of 2026-10-25 (historical; `make benchmark` prints the live cohort count)
 
 - Effective trading days on the current policy cohort: 27 of 60.
 - Model vs rule evidence: 9 days of 20+ required.
@@ -62,5 +76,3 @@ automatic, and it is not retroactive.
 - Price-direction alpha: 0 SURVIVES in 180 trials.
 - Core sleeve: enabled, SPY, $20,000 cap, 10% vol target. It is a risk-reduction
   tool, not a return source, and it does not count toward this bar on its own.
-EOF
-echo written
