@@ -52,6 +52,20 @@ DEFAULT_MIN_SCORED_DECISIONS = 10
 #: a claim about which strategy is best.
 DEFAULT_MIN_GOOD_HOLD_RATIO = 0.5
 
+#: Scored *trades* a candidate needs before a pass may license it to add. A hold that is followed by
+#: a fall is "right", so a strategy that rarely acts can pass on holds alone (2026-10-31:
+#: `trend-follow-20260824-001`, 43 right holds, no trades). This is the smaller of the two guards; the
+#: one that mattered for the TLT accumulation is MIN_SCREEN_DAYS below.
+MIN_TRADE_EVIDENCE = 5
+
+#: Distinct trading days a pass must rest on. Decisions inside one day are not independent: they
+#: share that day's market, and the day-adjusted gate already removes the day's base rate but then
+#: counted every cycle as a separate observation. Measured 2026-10-31: `trend-follow-tlt-buy-001`
+#: passed with 86 scored decisions (72 right, se 0.048) that came from 125 cycles on **8** days, and
+#: then bought TLT 28 times in a week, 216 -> 249 shares. Ten days is the fewest that makes a
+#: day-level standard error mean something; below it the verdict is INCONCLUSIVE.
+MIN_SCREEN_DAYS = 10
+
 PASS_SCREENED = "PASS_SCREENED"
 REJECT_POOR_DECISIONS = "REJECT_POOR_DECISIONS"
 INCONCLUSIVE = "INCONCLUSIVE_INSUFFICIENT_EVIDENCE"
@@ -275,6 +289,31 @@ def validate(
     min_scored: int = DEFAULT_MIN_SCORED_DECISIONS,
     min_good_hold_ratio: float = DEFAULT_MIN_GOOD_HOLD_RATIO,
     day_up: dict[str, float] | None = None,
+    min_trades: int = MIN_TRADE_EVIDENCE,
+) -> OfflineValidationResult:
+    """`_screen`, then the rule that a pass must rest on scored trades as well as scored holds."""
+    result = _screen(
+        decisions, strategy_id=strategy_id, min_scored=min_scored,
+        min_good_hold_ratio=min_good_hold_ratio, day_up=day_up,
+    )
+    trades = result.good_trades + result.false_trades
+    if result.verdict == PASS_SCREENED and trades < min_trades:
+        result.verdict = INCONCLUSIVE
+        result.reason = (
+            f"{result.reason}; but only {trades} of the {result.scored} scored decisions were trades "
+            f"(a pass that may license adding needs {min_trades}): this is how good its holds were, "
+            f"not how good its buys would be"
+        )
+    return result
+
+
+def _screen(
+    decisions: Iterable[DecisionRecord],
+    *,
+    strategy_id: str,
+    min_scored: int = DEFAULT_MIN_SCORED_DECISIONS,
+    min_good_hold_ratio: float = DEFAULT_MIN_GOOD_HOLD_RATIO,
+    day_up: dict[str, float] | None = None,
 ) -> OfflineValidationResult:
     """Screen a candidate on the decisions it has actually produced.
 
@@ -397,18 +436,23 @@ def _day_adjusted_verdict(
     result: OfflineValidationResult,
     scored: list[DecisionRecord],
     day_up: dict[str, float],
+    min_days: int = MIN_SCREEN_DAYS,
 ) -> OfflineValidationResult:
     expectations = [_expected_correct(d.action, day_up[d.day or ""]) for d in scored]
     n = len(scored)
     expected = sum(expectations) / n
     margin = result.correct_outcome_ratio - expected
     se = (sum(p * (1.0 - p) for p in expectations) ** 0.5) / n
+    # How many days the scored decisions come from. The standard error above treats every cycle as
+    # an independent observation, which is right for a rejection (a bad run is safe to act on) and
+    # wrong for a pass (a pass licenses adding): cycles inside a day share a market.
+    days = len({d.day for d in scored})
     result.expected_ratio = round(expected, 6)
     result.day_margin = round(margin, 6)
     result.day_margin_se = round(se, 6)
     summary = (
         f"{result.correct_outcomes} of {result.scored} right against {expected * result.scored:.1f} "
-        f"expected from the days alone (margin {margin:+.3f}, se {se:.3f})"
+        f"expected from the days alone (margin {margin:+.3f}, se {se:.3f} over {days} day(s))"
     )
     if se == 0.0:
         # Every decision fell on days that went entirely one way, so the days decided every
@@ -418,6 +462,11 @@ def _day_adjusted_verdict(
     elif margin < -2.0 * se:
         result.verdict = REJECT_POOR_DECISIONS
         result.reason = f"{summary}: worse than its days by more than two standard errors"
+    elif margin >= 0 and days < min_days:
+        result.reason = (
+            f"{summary}: decisions on {days} day(s) are not {result.scored} independent observations, "
+            f"and a pass needs {min_days} days; neither a pass nor a rejection yet"
+        )
     elif margin >= 0:
         result.verdict = PASS_SCREENED
         result.reason = f"{summary}: no worse than its days; a screen, not a promotion"

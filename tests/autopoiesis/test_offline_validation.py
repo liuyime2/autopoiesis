@@ -80,12 +80,35 @@ def test_a_candidate_that_misses_most_alpha_is_rejected():
 
 
 def test_a_sound_candidate_screens_through_but_is_still_only_a_screen():
-    decisions = [_d(ov.GOOD_HOLD, -1.0, cycle=f"c{i}") for i in range(9)]
+    decisions = [_d(ov.GOOD_TRADE, 1.0, action="BUY", cycle=f"t{i}") for i in range(5)]
+    decisions += [_d(ov.GOOD_HOLD, -1.0, cycle=f"c{i}") for i in range(4)]
     decisions += [_d(ov.MISSED_ALPHA, 1.0, cycle="c9")]
     result = ov.validate(decisions, strategy_id="sound", min_scored=10)
 
     assert result.verdict == ov.PASS_SCREENED
     assert not result.rejected
+
+
+def test_a_pass_made_of_holds_alone_does_not_license_adding():
+    """2026-10-31: trend-follow-tlt-buy-001 passed on holds (52 of 63 right) and then bought TLT 28
+    times in a week. The screen had graded its holds; it had said nothing about its buys."""
+    decisions = [_d(ov.GOOD_HOLD, -1.0, cycle=f"c{i}") for i in range(9)]
+    decisions += [_d(ov.MISSED_ALPHA, 1.0, cycle="c9")]
+    result = ov.validate(decisions, strategy_id="holder", min_scored=10)
+
+    assert result.verdict == ov.INCONCLUSIVE
+    assert "how good its holds were" in result.reason and "0 of the 10 scored decisions were trades" in result.reason
+    # With the requirement switched off it is the old pass, so the change is the rule and nothing else.
+    assert ov.validate(decisions, strategy_id="holder", min_scored=10, min_trades=0).verdict == ov.PASS_SCREENED
+
+
+def test_four_scored_trades_are_not_enough_and_five_are():
+    def record(n_trades):
+        out = [_d(ov.GOOD_TRADE, 1.0, action="BUY", cycle=f"t{i}") for i in range(n_trades)]
+        return out + [_d(ov.GOOD_HOLD, -1.0, cycle=f"h{i}") for i in range(12 - n_trades)]
+
+    assert ov.validate(record(4), strategy_id="s", min_scored=10).verdict == ov.INCONCLUSIVE
+    assert ov.validate(record(5), strategy_id="s", min_scored=10).verdict == ov.PASS_SCREENED
 
 
 def test_the_screen_has_no_code_path_that_promotes():
@@ -348,8 +371,11 @@ def test_a_hold_only_strategy_faces_the_same_bar_as_one_that_trades():
     from_holding = ov.validate(holds, strategy_id="holder", min_scored=10)
     from_trading = ov.validate(trades, strategy_id="trader", min_scored=10)
 
+    # The same bar on the same ratio ...
     assert from_holding.correct_outcome_ratio == from_trading.correct_outcome_ratio
-    assert from_holding.verdict == from_trading.verdict == ov.PASS_SCREENED
+    # ... but only the one with scored trades can be passed on to add (see the test above).
+    assert from_trading.verdict == ov.PASS_SCREENED
+    assert from_holding.verdict == ov.INCONCLUSIVE
 
 
 def test_a_result_survives_the_journal_round_trip():
@@ -455,13 +481,30 @@ def test_a_decision_without_a_day_keeps_the_raw_gate():
     assert result.day_margin is None
 
 
-def test_one_day_is_enough_because_the_base_rate_is_every_strategy_s():
-    from autopoiesis.offline_validation import PASS_SCREENED, validate
+def test_one_day_gives_the_base_rate_but_not_a_pass():
+    """The base rate is every strategy's outcomes on the day, so one day is enough to compute it.
+    It is not enough to pass on: twelve cycles on one day are one observation of that day's market."""
+    from autopoiesis.offline_validation import INCONCLUSIVE, validate
 
     decisions = [_dr(i, "BUY", "GOOD_TRADE" if i % 2 else "FALSE_TRADE", "2026-10-02") for i in range(12)]
     result = validate(decisions, strategy_id="s", day_up={"2026-10-02": 0.4})
+    assert result.verdict == INCONCLUSIVE
+    assert result.day_margin > 0, "the margin is still measured"
+    assert "1 day(s)" in result.reason and "not 12 independent observations" in result.reason
+
+
+def test_the_same_decisions_spread_over_ten_days_can_pass():
+    """2026-10-31: trend-follow-tlt-buy-001 passed on 86 scored decisions from cycles on 8 days."""
+    from autopoiesis.offline_validation import PASS_SCREENED, validate
+
+    days = [f"2026-10-{d:02d}" for d in range(1, 11)]
+    decisions = [_dr(i, "BUY", "GOOD_TRADE" if i % 2 else "FALSE_TRADE", days[i % 10]) for i in range(20)]
+    result = validate(decisions, strategy_id="s", day_up=dict.fromkeys(days, 0.4))
     assert result.verdict == PASS_SCREENED
-    assert result.day_margin > 0
+
+    eight = days[:8]
+    on_eight = [_dr(i, "BUY", "GOOD_TRADE" if i % 2 else "FALSE_TRADE", eight[i % 8]) for i in range(20)]
+    assert validate(on_eight, strategy_id="s", day_up=dict.fromkeys(eight, 0.4)).verdict != PASS_SCREENED
 
 
 def test_days_that_decided_every_outcome_neither_pass_nor_reject():

@@ -1595,7 +1595,12 @@ def test_offline_screening_never_promotes_a_strategy(tmp_path):
     decisions_in = [
         type("D", (), {"cycle_id": f"c{i}", "action": "HOLD", "verdict": "GOOD_HOLD",
                        "net_return_pct": -1.0})()
-        for i in range(12)
+        for i in range(6)
+    ] + [
+        # Scored trades as well as scored holds: a pass now needs both (MIN_TRADE_EVIDENCE).
+        type("D", (), {"cycle_id": f"t{i}", "action": "BUY", "verdict": "GOOD_TRADE",
+                       "net_return_pct": 1.0})()
+        for i in range(6)
     ]
     result = offline_validation.validate(decisions_in, strategy_id="sound")
     assert result.verdict == offline_validation.PASS_SCREENED

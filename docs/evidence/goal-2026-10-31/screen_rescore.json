@@ -1,0 +1,137 @@
+{
+ "passing_now": 13,
+ "keep_the_pass": 0,
+ "rows": [
+  {
+   "strategy_id": "fixed-size-buy-xlb-001",
+   "scored": 21,
+   "trades": 21,
+   "days": 3,
+   "keeps_pass": false,
+   "why_not": [
+    "fewer than 10 days"
+   ]
+  },
+  {
+   "strategy_id": "rule-spy-sma-001",
+   "scored": 12,
+   "trades": 12,
+   "days": 1,
+   "keeps_pass": false,
+   "why_not": [
+    "fewer than 10 days"
+   ]
+  },
+  {
+   "strategy_id": "rule-tlt-return-001",
+   "scored": 13,
+   "trades": 13,
+   "days": 1,
+   "keeps_pass": false,
+   "why_not": [
+    "fewer than 10 days"
+   ]
+  },
+  {
+   "strategy_id": "rule-xle-return-001",
+   "scored": 13,
+   "trades": 13,
+   "days": 1,
+   "keeps_pass": false,
+   "why_not": [
+    "fewer than 10 days"
+   ]
+  },
+  {
+   "strategy_id": "rule-xle-return-002",
+   "scored": 13,
+   "trades": 12,
+   "days": 2,
+   "keeps_pass": false,
+   "why_not": [
+    "fewer than 10 days"
+   ]
+  },
+  {
+   "strategy_id": "rule-xlf-sma-001",
+   "scored": 14,
+   "trades": 13,
+   "days": 1,
+   "keeps_pass": false,
+   "why_not": [
+    "fewer than 10 days"
+   ]
+  },
+  {
+   "strategy_id": "trend-follow-20260804-001",
+   "scored": 16,
+   "trades": 16,
+   "days": 1,
+   "keeps_pass": false,
+   "why_not": [
+    "fewer than 10 days"
+   ]
+  },
+  {
+   "strategy_id": "trend-follow-20260824-001",
+   "scored": 43,
+   "trades": 0,
+   "days": 1,
+   "keeps_pass": false,
+   "why_not": [
+    "fewer than 10 days",
+    "fewer than 5 scored trades"
+   ]
+  },
+  {
+   "strategy_id": "trend-follow-spy-005",
+   "scored": 13,
+   "trades": 13,
+   "days": 1,
+   "keeps_pass": false,
+   "why_not": [
+    "fewer than 10 days"
+   ]
+  },
+  {
+   "strategy_id": "trend-follow-spy-007",
+   "scored": 17,
+   "trades": 17,
+   "days": 2,
+   "keeps_pass": false,
+   "why_not": [
+    "fewer than 10 days"
+   ]
+  },
+  {
+   "strategy_id": "trend-follow-tlt-buy-001",
+   "scored": 86,
+   "trades": 86,
+   "days": 8,
+   "keeps_pass": false,
+   "why_not": [
+    "fewer than 10 days"
+   ]
+  },
+  {
+   "strategy_id": "trend-follow-tlt-sell-010",
+   "scored": 14,
+   "trades": 14,
+   "days": 2,
+   "keeps_pass": false,
+   "why_not": [
+    "fewer than 10 days"
+   ]
+  },
+  {
+   "strategy_id": "trend-follow-xlb-001",
+   "scored": 83,
+   "trades": 83,
+   "days": 7,
+   "keeps_pass": false,
+   "why_not": [
+    "fewer than 10 days"
+   ]
+  }
+ ]
+}
