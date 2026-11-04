@@ -2828,7 +2828,7 @@ def check_shadow_stage_has_actually_run() -> Result:
     from autopoiesis.config import AgentConfig
     from autopoiesis.journal import JsonlJournal
 
-    journal = JsonlJournal(AgentConfig.from_env().journal_path)
+    journal = JsonlJournal(AgentConfig.from_env().journal_path, lock_timeout=60.0)
     generations = journal.history_paths()
     if not generations:
         return Result("shadow-stage-exercised", SKIP, "no journal to inspect")
@@ -2962,7 +2962,7 @@ def check_screen_is_direction_neutral(
             "screen-direction-neutral", SKIP,
             "no runtime/autopoiesis/journal.jsonl yet; nothing has been screened",
         )
-    journal = JsonlJournal(journal_path)
+    journal = JsonlJournal(journal_path, lock_timeout=60.0)
     events = journal.read_events("COUNTERFACTUAL_EVALUATED")
     screens: dict[str, dict] = {}
     for event in journal.read_events("OFFLINE_VALIDATION_COMPLETED"):

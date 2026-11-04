@@ -178,7 +178,7 @@ def run_doctor(config: AgentConfig, *, client=None, skip_broker: bool = False) -
     _check_daemon(report, config)
     _check_journal(report, config)
     _check_strategy_library(
-        report, config, JsonlJournal(config.journal_path) if config.journal_path.exists() else None
+        report, config, JsonlJournal(config.journal_path, lock_timeout=60.0) if config.journal_path.exists() else None
     )
     _check_knowledge(report, config)
     _check_proof(report, config)
@@ -1374,7 +1374,7 @@ def _now_iso() -> str:
 
 def _journal(config: AgentConfig) -> JsonlJournal | None:
     try:
-        return JsonlJournal(config.journal_path)
+        return JsonlJournal(config.journal_path, lock_timeout=60.0)
     except Exception:
         return None
 
@@ -1607,7 +1607,7 @@ def _check_daemon(report: DoctorReport, config: AgentConfig) -> None:
 
 
 def _check_journal(report: DoctorReport, config: AgentConfig) -> None:
-    journal = JsonlJournal(config.journal_path)
+    journal = JsonlJournal(config.journal_path, lock_timeout=60.0)
     stats = journal.stats()
     if not stats["exists"]:
         report.add("journal", WARN, "absent; no cycles recorded yet", "run one cycle: autopoiesis.cli --once")
@@ -1829,7 +1829,7 @@ def _check_proof(report: DoctorReport, config: AgentConfig) -> None:
     The three checks are always emitted, including when there is nothing to
     measure, so the report shape is stable and greppable.
     """
-    journal = JsonlJournal(config.journal_path)
+    journal = JsonlJournal(config.journal_path, lock_timeout=60.0)
     records = journal.read_all()
     if not records:
         report.add("end-to-end proof", WARN, "no cycles recorded; nothing proven yet", "run one: autopoiesis once")
