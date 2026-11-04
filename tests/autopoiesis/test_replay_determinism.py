@@ -177,9 +177,21 @@ def test_replaying_the_live_journal_reproduces_the_recorded_verdicts():
         # check could not run, and `--strict-markers` in pytest.ini keeps it visible.
         pytest.skip("no COUNTERFACTUAL_EVALUATED events recorded yet")
 
+    # Cycles that have been marked invalid (see journal._invalidated_cycle_ids) are
+    # excluded from both sides: they were scored against data that has since been
+    # corrected, so a mismatch on them is expected and not a determinism defect.
+    try:
+        with open("runtime/autopoiesis/invalidated_cycles.json", encoding="utf-8") as _f:
+            invalidated = set(json.load(_f).get("invalidated", []))
+        invalidated_ids = {str(e.get("cycle_id")) for e in invalidated if isinstance(e, dict)}
+    except (OSError, ValueError, TypeError):
+        invalidated_ids = set()
+
     recorded = {}
     for event in events:
         for row in event.payload.get("rows", []):
+            if row["cycle_id"] in invalidated_ids:
+                continue
             recorded[row["cycle_id"]] = (row["verdict"], row["net_return_pct"])
 
     records = JsonlJournal("runtime/autopoiesis/journal.jsonl").read_all()
