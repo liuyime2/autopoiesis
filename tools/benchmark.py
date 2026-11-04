@@ -217,14 +217,38 @@ def _sleeve_section(config) -> dict | None:
         return None
     from autopoiesis.fill_reconciler import confirmed_fill_events
     from autopoiesis.journal import JsonlJournal
-    from autopoiesis.sleeve import NEW_YORK, sleeve_performance
+    from autopoiesis.sleeve import NEW_YORK, SLEEVE_STRATEGY_ID, sleeve_performance
 
     journal = JsonlJournal(config.journal_path)
     prices = {}
     for record in journal.read_all():
         if record.snapshot.symbol == config.sleeve_symbol:
             prices[record.snapshot.timestamp.astimezone(NEW_YORK).date()] = record.snapshot.last_price
-    return sleeve_performance(confirmed_fill_events(journal.read_events()), prices, config.sleeve_pool)
+    fills = confirmed_fill_events(journal.read_events())
+    # The sleeve manages the whole position in its symbol, including any shares
+    # the account already held when it started. State that inherited book from the
+    # last SPY snapshot before the first sleeve fill instead of pretending the
+    # sleeve opened at zero. Falls back to the old sub-account behaviour when no
+    # such snapshot exists (a fresh account, or a sleeve that has not filled yet).
+    initial_shares = 0.0
+    first_fill_ts = None
+    for event in fills:
+        if event.strategy_id == SLEEVE_STRATEGY_ID and event.payload.get("symbol", "").upper() == config.sleeve_symbol.upper():
+            action = str(event.payload.get("side") or event.payload.get("action", "")).upper()
+            if action in {"BUY", "SELL"}:
+                first_fill_ts = event.timestamp
+                break
+    if first_fill_ts is not None:
+        for record in journal.read_all():
+            if record.snapshot.symbol != config.sleeve_symbol or record.snapshot.timestamp > first_fill_ts:
+                continue
+            for pos in record.snapshot.positions:
+                if pos.symbol.upper() == config.sleeve_symbol.upper():
+                    initial_shares = float(pos.quantity)
+    return sleeve_performance(
+        fills, prices, config.sleeve_pool,
+        initial_shares=initial_shares,
+    )
 
 
 def _agent_level(config=None) -> dict | None:

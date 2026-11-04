@@ -144,8 +144,17 @@ def sleeve_performance(
     # of pretending the sleeve opened at zero. Default (0, pool) is the old sub-account
     # behaviour and is retained only for callers that genuinely have no inherited
     # position; new callers should pass the account's real book.
+    #
+    # When only `initial_shares` is given, the inherited shares are assumed to have
+    # been bought out of the pool at the first sleeve fill's price, so the sleeve's
+    # starting value is exactly the pool. A caller that knows the cash actually
+    # allocated (for example, because the pool was larger than the inherited position)
+    # can override it with `initial_cash`.
     shares = float(initial_shares)
-    cash = pool if initial_cash is None else float(initial_cash)
+    if initial_cash is None:
+        cash = pool - shares * first_px
+    else:
+        cash = float(initial_cash)
     values: list[float] = []
     held_values: list[float] = []
     deployed: list[float] = []
