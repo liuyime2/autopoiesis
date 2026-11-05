@@ -1059,7 +1059,7 @@ class AgentDaemon:
         # delays the first cycle past the open; on 2026-11-04 the first cycle landed
         # at 09:36-09:40 instead of 09:31-09:34 for exactly this reason. Maintenance
         # is never urgent enough to gate the first trade of the day.
-        if self.daily_cycle_count == 0:
+        if getattr(self, "daily_cycle_count", 0) == 0:
             try:
                 if self._should_trade_now():
                     return
