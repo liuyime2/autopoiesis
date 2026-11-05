@@ -28,6 +28,7 @@ from autopoiesis.executor import AlpacaPaperExecutor
 from autopoiesis.fill_reconciler import FillReconciler
 from autopoiesis.guardian import Guardian
 from autopoiesis.health import HealthMonitor
+from autopoiesis.information import InformationProvider
 from autopoiesis.journal import JsonlJournal
 from autopoiesis.knowledge_admission import KnowledgeAdmission
 from autopoiesis.knowledge_library import KnowledgeLibrary
@@ -462,6 +463,7 @@ def _build_agent_daemon(
             else _instrument_block(profile)
         ),
         news_provider=lambda symbol: data_gateway.recent_news(symbol, limit=3),
+        information_provider=InformationProvider(config.journal_path.parent / "information").block,
         # ~300 five-minute cycles is a little over three trading days: enough for a 1-day
         # return and the regime's 78-bar window after repeated quotes are collapsed.
         market_history=lambda: journal.last_n(history_records),

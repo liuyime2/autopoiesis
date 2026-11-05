@@ -52,6 +52,32 @@ def _validate_curriculum_payload(payload: dict[str, Any], *, now: Callable[[], d
     return CurriculumTask.model_validate(payload)
 
 
+
+def _compact_coverage(strategies) -> list[str]:
+    """Compact "KIND SYMBOLS ACTIONS" line per non-retired strategy.
+
+    Replaces the last-40-id list, which hid the library's shape: the model could
+    not tell which (kind, symbol, action) triples already existed, so it
+    re-proposed duplicates (54% duplicate ids measured 10-31..11-04). One line
+    per strategy keeps the coverage visible and the context under the pin.
+    """
+    out = []
+    for spec in strategies:
+        if getattr(spec, "lifecycle", None) in {"RETIRED"}:
+            continue
+        symbols = ",".join(getattr(spec, "symbols", ()) or ())
+        if spec.kind == "TREND_FOLLOW":
+            actions = "BUY/SELL"
+        elif spec.kind == "RULE":
+            mapped = {str(spec.parameters.get(k, "")).upper() for k in ("when_above", "when_below")}
+            actions = "/".join(sorted(mapped & {"BUY", "SELL"})) or "?"
+        elif spec.kind == "HOLD_BASELINE":
+            actions = "HOLD"
+        else:
+            actions = str(spec.parameters.get("action", "?")).upper()
+        out.append(f"{spec.kind} {symbols} {actions} [{spec.lifecycle}]")
+    return out
+
 class StructuredCurriculumAgent:
     def __init__(
         self,
@@ -135,7 +161,7 @@ class StructuredCurriculumAgent:
             # have supplied a missing exit. The ids in use are stated so a fresh
             # one can be chosen; the count is stated too so the list's cap is not
             # mistaken for the library size.
-            "strategy_ids_in_use": [strategy.strategy_id for strategy in current_strategies][-40:],
+            "strategy_coverage": _compact_coverage(current_strategies),
             "strategy_id_must_not_be_one_of_the_above": True,
             # What the agent actually holds, and which actions the library can
             # currently express. The context previously described only the

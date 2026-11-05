@@ -151,10 +151,7 @@ def sleeve_performance(
     # allocated (for example, because the pool was larger than the inherited position)
     # can override it with `initial_cash`.
     shares = float(initial_shares)
-    if initial_cash is None:
-        cash = pool - shares * first_px
-    else:
-        cash = float(initial_cash)
+    cash = (pool - shares * first_px) if initial_cash is None else float(initial_cash)
     values: list[float] = []
     held_values: list[float] = []
     deployed: list[float] = []

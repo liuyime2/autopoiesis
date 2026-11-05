@@ -118,6 +118,8 @@ class OfflineValidationResult:
     day_margin: float | None = None
     #: Standard error of `day_margin` under "no skill", for the rejection threshold.
     day_margin_se: float | None = None
+    #: Cluster-robust standard error with days as clusters, for the pass threshold.
+    day_margin_se_clustered: float | None = None
     cycles: list[str] = field(default_factory=list)
 
     @property
@@ -157,6 +159,7 @@ class OfflineValidationResult:
             "expected_ratio": self.expected_ratio,
             "day_margin": self.day_margin,
             "day_margin_se": self.day_margin_se,
+            "day_margin_se_clustered": self.day_margin_se_clustered,
         }
 
     @classmethod
@@ -186,6 +189,7 @@ class OfflineValidationResult:
             expected_ratio=coerce.field_float(payload.get("expected_ratio"), f"{where}.expected_ratio"),
             day_margin=coerce.field_float(payload.get("day_margin"), f"{where}.day_margin"),
             day_margin_se=coerce.field_float(payload.get("day_margin_se"), f"{where}.day_margin_se"),
+            day_margin_se_clustered=coerce.field_float(payload.get("day_margin_se_clustered"), f"{where}.day_margin_se_clustered"),
         )
 
 
@@ -447,9 +451,28 @@ def _day_adjusted_verdict(
     # an independent observation, which is right for a rejection (a bad run is safe to act on) and
     # wrong for a pass (a pass licenses adding): cycles inside a day share a market.
     days = len({d.day for d in scored})
+    # Cluster-robust standard error with days as clusters: a zero-skill strategy can
+    # otherwise pass by trading many times on one good day. Each day contributes its
+    # own margin; the se is the standard deviation of those day-level margins.
+    by_day: dict[str, list[DecisionRecord]] = {}
+    for d in scored:
+        by_day.setdefault(d.day or "", []).append(d)
+    day_margins = []
+    for day, ds in by_day.items():
+        day_n = len(ds)
+        day_correct = sum(1 for x in ds if x.verdict in {GOOD_HOLD, GOOD_TRADE})
+        day_ratio = day_correct / day_n
+        day_expected = sum(_expected_correct(x.action, day_up[x.day or ""]) for x in ds) / day_n
+        day_margins.append(day_ratio - day_expected)
+    if len(day_margins) >= 2:
+        import statistics
+        se_clustered = statistics.stdev(day_margins) / (len(day_margins) ** 0.5)
+    else:
+        se_clustered = se
     result.expected_ratio = round(expected, 6)
     result.day_margin = round(margin, 6)
     result.day_margin_se = round(se, 6)
+    result.day_margin_se_clustered = round(se_clustered, 6)
     summary = (
         f"{result.correct_outcomes} of {result.scored} right against {expected * result.scored:.1f} "
         f"expected from the days alone (margin {margin:+.3f}, se {se:.3f} over {days} day(s))"
@@ -466,6 +489,11 @@ def _day_adjusted_verdict(
         result.reason = (
             f"{summary}: decisions on {days} day(s) are not {result.scored} independent observations, "
             f"and a pass needs {min_days} days; neither a pass nor a rejection yet"
+        )
+    elif margin >= 0 and (margin - 1.645 * se_clustered) <= 0:
+        result.reason = (
+            f"{summary}: margin {margin:+.3f} does not clear 1.645 * se_clustered "
+            f"{se_clustered:.3f}; not skill, just noise"
         )
     elif margin >= 0:
         result.verdict = PASS_SCREENED

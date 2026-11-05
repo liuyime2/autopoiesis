@@ -151,7 +151,8 @@ class DeterministicEvaluator:
             sid = record.decision.strategy_id
             if sid and cumulative_cycles is None:
                 raw_cycles[sid] = raw_cycles.get(sid, 0) + 1
-            if sid and cumulative_trade_attempts is None and record.decision.action in {"BUY", "SELL", "SHORT", "COVER"}:
+            _intended = record.intervention.original_action if record.intervention is not None else record.decision.action
+            if sid and cumulative_trade_attempts is None and _intended in {"BUY", "SELL", "SHORT", "COVER"}:
                 raw_attempts[sid] = raw_attempts.get(sid, 0) + 1
             reason = eligibility(record)
             if reason != "ELIGIBLE":
@@ -205,8 +206,9 @@ class DeterministicEvaluator:
             # resolved it, so fill accounting is real rather than zero.
             resolved_fill = _resolved_fill(record, fills)
             filled_quantity += resolved_fill
-            if record.decision.quantity > 0:
-                order_quantity += record.decision.quantity
+            _iqty = record.intervention.original_quantity if record.intervention is not None else record.decision.quantity
+            if _iqty > 0:
+                order_quantity += _iqty
 
             if record.snapshot.market_open:
                 market_open_cycles += 1
@@ -421,12 +423,16 @@ class _StrategyBucket:
         self.filled_quantity += (
             resolved_fill if resolved_fill is not None else record.execution.filled_quantity
         )
-        if record.decision.quantity > 0:
-            self.order_quantity += record.decision.quantity
+        _iqty = record.intervention.original_quantity if record.intervention is not None else record.decision.quantity
+        if _iqty > 0:
+            self.order_quantity += _iqty
 
         # An attempt is any cycle in which the strategy wanted to trade while
-        # the market was open, whether or not the order survived Guardian.
-        if record.decision.action in ("BUY", "SELL") and record.snapshot.market_open:
+        # the market was open, whether or not the order survived Guardian. The
+        # accumulation gate rewrites a BUY to a HOLD, so the *intended* action
+        # (intervention.original_action) is what counts, not the post-gate one.
+        _intended_action = record.intervention.original_action if record.intervention is not None else record.decision.action
+        if _intended_action in ("BUY", "SELL") and record.snapshot.market_open:
             self.trade_attempts += 1
 
         if record.execution.status == "SHADOWED":

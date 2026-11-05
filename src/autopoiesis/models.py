@@ -1195,6 +1195,10 @@ class TradeDecision(BaseModel):
     cycles, and these two fields make the ablation readable from the journal. None on cycles
     before the split existed."""
     lessons_withheld: tuple[str, ...] | None = None
+    #: Whether the information block was attached to this decision's context.
+    #: None on cycles before the information layer existed; True/False afterwards,
+    #: so the model's override value with and without it can be compared.
+    information_shown: bool | None = None
     override_reason: str | None = None
     """Why the model departed from `rule_action`, in its own words.
 

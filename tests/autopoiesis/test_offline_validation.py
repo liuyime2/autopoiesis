@@ -497,13 +497,16 @@ def test_the_same_decisions_spread_over_ten_days_can_pass():
     """2026-10-31: trend-follow-tlt-buy-001 passed on 86 scored decisions from cycles on 8 days."""
     from autopoiesis.offline_validation import PASS_SCREENED, validate
 
+    # Each day carries one good and one bad trade, so the day-level margin is
+    # stable and the clustered se is small. A pass must rest on consistent skill,
+    # not on alternating lucky and unlucky days.
     days = [f"2026-10-{d:02d}" for d in range(1, 11)]
-    decisions = [_dr(i, "BUY", "GOOD_TRADE" if i % 2 else "FALSE_TRADE", days[i % 10]) for i in range(20)]
+    decisions = [_dr(i, "BUY", "GOOD_TRADE" if i % 2 == 0 else "FALSE_TRADE", days[(i // 2) % 10]) for i in range(20)]
     result = validate(decisions, strategy_id="s", day_up=dict.fromkeys(days, 0.4))
     assert result.verdict == PASS_SCREENED
 
     eight = days[:8]
-    on_eight = [_dr(i, "BUY", "GOOD_TRADE" if i % 2 else "FALSE_TRADE", eight[i % 8]) for i in range(20)]
+    on_eight = [_dr(i, "BUY", "GOOD_TRADE" if i % 2 == 0 else "FALSE_TRADE", eight[(i // 2) % 8]) for i in range(20)]
     assert validate(on_eight, strategy_id="s", day_up=dict.fromkeys(eight, 0.4)).verdict != PASS_SCREENED
 
 

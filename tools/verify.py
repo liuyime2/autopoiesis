@@ -232,7 +232,6 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_guardian.py": ("guardian-bypass-prevention",),
     "test_guardian_shorts.py": ("guardian-bypass-prevention",),
     "test_health.py": ("unit-integration", "broker-reconciliation"),
-    "test_information_collector.py": ("unit-integration", "data-integrity"),
     "test_journal.py": ("data-integrity", "crash-recovery"),
     # The windowed read is the duplicate-order guard's only reader: if it answers a narrower
     # question than it was asked it says "nothing in flight" while an order is, which is the one

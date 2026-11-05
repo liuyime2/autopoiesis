@@ -356,6 +356,7 @@ class HybridDecisionEngine:
         risk_provider: Callable[[str], dict[str, Any] | None] | None = None,
         instrument_provider: Callable[[str], dict[str, Any] | None] | None = None,
         news_provider: Callable[[str], tuple[NewsItem, ...]] | None = None,
+        information_provider: Callable[[str], str | None] | None = None,
         #: Guardian's own ceiling, so the uncovered path can refuse to *pay* for a decision
         #: that will be refused anyway. None leaves the path exactly as it was.
         stale_after_seconds: int | None = None,
@@ -387,6 +388,12 @@ class HybridDecisionEngine:
         self.instrument_provider = instrument_provider
         #: `symbol -> headlines` (see data_gateway.recent_news). Context, labelled as context.
         self.news_provider = news_provider
+        #: `symbol -> information block` (see autopoiesis.information). Context, labelled
+        #: as context and a risk marker: near earnings, do not open a new position and
+        #: size down. Never a signal.
+        self.information_provider = information_provider
+        self.last_information_error: str | None = None
+        self._information_shown: bool = False
         self.last_instrument_error: str | None = None
         self.last_news_error: str | None = None
         #: The selected strategy's own decision for the snapshot `_context` last built.
@@ -471,6 +478,7 @@ class HybridDecisionEngine:
             "strategy_provenance": None,
             "hold_reason": decision.hold_reason or ("other" if not departure else None),
             "rationale": f"{NO_STRATEGY_MARKER}: {decision.rationale}",
+            "information_shown": self._information_shown,
         })
 
     def _quote_already_stale(self, snapshot: DataSnapshot) -> bool:
@@ -563,6 +571,7 @@ class HybridDecisionEngine:
             "decision_source": "llm",
             "lesson_ids": self._lesson_split[0],
             "lessons_withheld": self._lesson_split[1],
+            "information_shown": self._information_shown,
         }
         if rule is not None:
             update["rule_action"] = rule.action
@@ -592,9 +601,9 @@ class HybridDecisionEngine:
             "decision_source": "fallback_policy_engine",
             "strategy_id": self._selected_spec.strategy_id,
             "strategy_provenance": self._selected_provenance,
-            # The fallback is the rule, so the rule's action is the action taken.
             "rule_action": decision.action,
             "rationale": f"{decision.rationale} | {LLM_UNAVAILABLE_MARKER}{reason}",
+            "information_shown": self._information_shown,
         }
         note = self._fallback_exposure_note(decision)
         if note is not None:
@@ -816,6 +825,9 @@ class HybridDecisionEngine:
         news = self._news(snapshot.symbol)
         if news:
             context["news"] = news
+        information = self._information(snapshot.symbol)
+        if information is not None:
+            context["information"] = information
         return context
 
     def _instrument(self, symbol: str) -> dict[str, Any] | None:
@@ -844,6 +856,40 @@ class HybridDecisionEngine:
             }
             for item in items
         ]
+
+    def _information(self, symbol: str) -> str | None:
+        if self.information_provider is None:
+            self._information_shown = False
+            return None
+        try:
+            block = self.information_provider(symbol)
+        except Exception as exc:  # information is context; failing to read it is not a decision
+            self.last_information_error = f"{type(exc).__name__}: {exc}"
+            self._information_shown = False
+            return None
+        if not block:
+            self._information_shown = False
+            return None
+        # Shown on a deterministic subset of cycles (3 of 4 by default) so the
+        # model's override value with and without it can be compared. The share
+        # is configurable; 1.0 shows it always.
+        import hashlib
+        import os
+
+        try:
+            share = float(os.environ.get("AUTOPOIESIS_INFORMATION_SHARE", "0.75"))
+        except (TypeError, ValueError):
+            share = 0.75
+        share = max(0.0, min(1.0, share))
+        if share >= 1.0:
+            shown = True
+        elif share <= 0.0:
+            shown = False
+        else:
+            bucket = int(hashlib.sha256(symbol.encode()).hexdigest(), 16) % 4
+            shown = bucket < int(share * 4)
+        self._information_shown = shown
+        return block if shown else None
 
     def _risk(self, symbol: str) -> dict[str, Any] | None:
         if self.risk_provider is None:
