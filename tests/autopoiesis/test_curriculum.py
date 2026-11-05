@@ -442,9 +442,10 @@ def test_curriculum_context_is_bounded_and_compact():
     assert len(json.dumps(huge)) < 20000, "context must not grow without bound"
     assert len(huge["strategies"]) == 10, "the per-strategy list must be capped"
     assert huge["strategy_count_total"] == 500, "the true library size must still be stated"
-    # 10 detailed entries is what an 8B model follows; ids are cheap and are what
-    # stops the model proposing a duplicate, so those are listed separately.
-    assert len(huge["strategy_ids_in_use"]) == 40
+    # Coverage is capped so the context cannot grow with the library; the true size
+    # is stated separately as strategy_count_total.
+    assert len(huge["strategy_coverage"]) <= 61
+    assert huge["strategy_count_total"] == 500
     # 9,000 -> 10,000 on 2026-10-24 to carry the signal-ledger summary (~600 chars). The failure this
     # guards was deepseek-r1:8b at ~14kB; production runs qwen3.8:27b, and 10kB is still well short.
     assert len(json.dumps(realistic)) < 10_000, "the live library is now 16 strategies"
