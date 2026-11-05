@@ -478,7 +478,7 @@ class HybridDecisionEngine:
             "strategy_provenance": None,
             "hold_reason": decision.hold_reason or ("other" if not departure else None),
             "rationale": f"{NO_STRATEGY_MARKER}: {decision.rationale}",
-            "information_shown": self._information_shown,
+            "information_shown": self._information_shown if hasattr(self, "_information_shown") else False,
         })
 
     def _quote_already_stale(self, snapshot: DataSnapshot) -> bool:
@@ -571,7 +571,7 @@ class HybridDecisionEngine:
             "decision_source": "llm",
             "lesson_ids": self._lesson_split[0],
             "lessons_withheld": self._lesson_split[1],
-            "information_shown": self._information_shown,
+            "information_shown": self._information_shown if hasattr(self, "_information_shown") else False,
         }
         if rule is not None:
             update["rule_action"] = rule.action
@@ -603,7 +603,7 @@ class HybridDecisionEngine:
             "strategy_provenance": self._selected_provenance,
             "rule_action": decision.action,
             "rationale": f"{decision.rationale} | {LLM_UNAVAILABLE_MARKER}{reason}",
-            "information_shown": self._information_shown,
+            "information_shown": self._information_shown if hasattr(self, "_information_shown") else False,
         }
         note = self._fallback_exposure_note(decision)
         if note is not None:

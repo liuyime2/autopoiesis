@@ -368,7 +368,7 @@ src/autopoiesis/          the package (import name autopoiesis). 53 modules, 4 e
   counterfactual.py     scoring each decision against what the market did next
   curriculum.py         the agent proposing new strategies
   journal.py            append-only record; the source of truth
-  models.py             shared schema, imported by 29 modules
+  models.py             shared schema, imported by 28 modules
   research/             walk-forward backtests; production may not import it
 tools/                  the gate (verify.py), benchmark, daily report, probes, systemd templates
 tests/autopoiesis/       123 test files
