@@ -106,7 +106,7 @@ ignore = [
     # contextlib.suppress says the same thing in more characters.
     "SIM105",
     # `cli.py` imports inside functions so that `--help` and the cheap subcommands do not
-    # pay for the 26 modules the daemon path needs. E402 is the wrong rule for deferred
+    # pay for the 27 modules the daemon path needs. E402 is the wrong rule for deferred
     # imports that are the entire point of the module.
     "E402",
     # Single-letter loop and lambda names in `tools/verify.py` (`for l in lines`,

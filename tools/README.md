@@ -54,6 +54,15 @@ ruling carrying its ratio in the reason, the strategy no longer on `PROBATION`, 
 replayed ruling claiming broker-verified PnL. Run standalone it prints a JSON list of what
 failed. `make verify` calls it through `check_self_evolution_closes`.
 
+## Information refresh — `refresh_information.py`
+
+**`python tools/refresh_information.py SPY XLB`** (or `--from-account`) fetches per-symbol
+information from Yahoo (earnings date, consensus EPS, valuation, growth, margins, analyst
+target/recommendation) and Alpaca (dividends/ex-dates, news, options ATM implied volatility)
+and writes `runtime/autopoiesis/information/<SYMBOL>.json`. The trading loop reads these
+files through `autopoiesis.information.InformationProvider`; it never calls the network.
+Run on a timer (see `information-refresh.timer`) or by hand. Read-only.
+
 ## Keeping the VIX floor engaged
 
 **`refresh_vix.py`** merges `^VIX` and `^VIX3M` daily closes from Yahoo's public chart
