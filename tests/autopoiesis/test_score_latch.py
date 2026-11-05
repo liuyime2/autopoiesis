@@ -546,7 +546,10 @@ def test_real_recorded_journal_no_longer_elects_a_hold_only_strategy():
     assert metrics, "expected per-strategy metrics from the recorded journal"
 
     best = max(metrics.values(), key=lambda m: m.score)
-    hold_only = [m for m in metrics.values() if m.action_counts.get("HOLD", 0) == m.cycles]
+    # A strategy that only *ended* as HOLD may still have tried to trade: the
+    # accumulation gate rewrites a BUY to a HOLD, and W1 counts that intended
+    # action. "Hold-only" here means it never attempted a trade at all.
+    hold_only = [m for m in metrics.values() if m.trade_attempts == 0]
 
     for metric in hold_only:
         assert metric.score <= INACTION_FLOOR * (1.0 - PNL_BONUS) + 1e-9, (
