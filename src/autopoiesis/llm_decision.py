@@ -825,7 +825,7 @@ class HybridDecisionEngine:
         news = self._news(snapshot.symbol)
         if news:
             context["news"] = news
-        information = self._information(snapshot.symbol)
+        information = self._information(snapshot.symbol, key=snapshot.symbol + str(snapshot.timestamp))
         if information is not None:
             context["information"] = information
         return context
@@ -857,7 +857,7 @@ class HybridDecisionEngine:
             for item in items
         ]
 
-    def _information(self, symbol: str) -> str | None:
+    def _information(self, symbol: str, *, key: str | None = None) -> str | None:
         if self.information_provider is None:
             self._information_shown = False
             return None
@@ -886,7 +886,7 @@ class HybridDecisionEngine:
         elif share <= 0.0:
             shown = False
         else:
-            bucket = int(hashlib.sha256(symbol.encode()).hexdigest(), 16) % 4
+            bucket = int(hashlib.sha256((key or symbol).encode()).hexdigest(), 16) % 4
             shown = bucket < int(share * 4)
         self._information_shown = shown
         return block if shown else None
