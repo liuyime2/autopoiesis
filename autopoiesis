@@ -244,6 +244,7 @@ case "$cmd" in
     cp "$ROOT_DIR/tools/research.timer" "$unit_dir/quant-research.timer"
     render "$ROOT_DIR/tools/report.service.in"     "quant-report.service"
     cp "$ROOT_DIR/tools/report.timer" "$unit_dir/quant-report.timer"
+    cp "$ROOT_DIR/tools/information-refresh.timer" "$unit_dir/information-refresh.timer"
     render "$ROOT_DIR/tools/backup.service.in"     "quant-backup.service"
     cp "$ROOT_DIR/tools/backup.timer" "$unit_dir/quant-backup.timer"
     if ! systemd-analyze verify "$unit_dir/$SERVICE_NAME" "$unit_dir/ollama.service" \

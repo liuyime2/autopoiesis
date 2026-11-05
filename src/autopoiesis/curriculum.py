@@ -76,6 +76,10 @@ def _compact_coverage(strategies) -> list[str]:
         else:
             actions = str(spec.parameters.get("action", "?")).upper()
         out.append(f"{spec.kind} {symbols} {actions} [{spec.lifecycle}]")
+    # Cap so the context cannot grow without bound with the library. The full
+    # count is stated separately, so a capped list is not mistaken for the whole.
+    if len(out) > 60:
+        out = [*out[:60], f"... and {len(out) - 60} more"]
     return out
 
 class StructuredCurriculumAgent:
