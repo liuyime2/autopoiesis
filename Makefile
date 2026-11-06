@@ -342,6 +342,9 @@ classes-list: classes
 install-service:
 	@./autopoiesis install-service
 
+why:
+	@$(PY) tools/why.py $(if $(STRATEGY),STRATEGY=$(STRATEGY),)
+
 run:
 	@systemctl --user start autopoiesis.service
 

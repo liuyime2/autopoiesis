@@ -75,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--evidence-report", action="store_true", help="Report broker-backed PnL evidence from journal and latest ingest.")
     parser.add_argument("--verify-profit-target", action="store_true", help="Report the configured daily paper-profit target in percentage points; UNKNOWN until agent allocation and aligned equity are available.")
+    parser.add_argument("--version-summary", action="store_true", help="Print the code+config+model+prompt+schema version digest.")
     parser.add_argument("--max-cycles", type=int, default=None, help="Optional controlled daemon cycle limit for smoke tests.")
     parser.add_argument("--doctor", action="store_true", help="Check the whole system and exit non-zero on any fault.")
     parser.add_argument(
@@ -130,6 +131,11 @@ def main(argv: list[str] | None = None) -> int:
         return _evidence_report(config)
     if args.verify_profit_target:
         return _verify_profit_target(config)
+    if args.version_summary:
+        from autopoiesis.versioning import version_summary
+
+        print(json.dumps(version_summary(config), indent=2, sort_keys=True))
+        return 0
     if args.watchdog:
         return _watchdog(config)
 
@@ -510,6 +516,8 @@ def _build_agent_daemon(
         strategy_admission=StrategyAdmission(
             guardian=guardian, strategy_library=strategy_library, refused_kinds=config.refused_kinds,
             signal_ledger=config.journal_path.parent / "signal_trials.jsonl",
+            hold_only_symbols=list(config.hold_only_symbols),
+            core_sleeve_symbol=config.sleeve_symbol,
         ),
         broker_evidence_provider=BrokerEvidenceProvider(client=client),
         lifecycle_manager=StrategyLifecycleManager(),

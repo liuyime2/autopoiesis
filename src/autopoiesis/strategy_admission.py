@@ -160,6 +160,8 @@ class StrategyAdmission:
         max_probation_queue: int = PROBATION_CYCLES,
         refused_kinds: Sequence[str] = (),
         signal_ledger: Path | str | None = None,
+        hold_only_symbols: Sequence[str] = (),
+        core_sleeve_symbol: str = "",
     ):
         #: The signal ledger a RULE is checked against (see `_refuted_rule_reason`). None keeps the
         #: old behaviour, which is what every existing caller and test means.
@@ -167,6 +169,8 @@ class StrategyAdmission:
         #: Kinds this deployment does not admit (config `refused_kinds`). Empty here so a bare
         #: gate behaves as it always did; the wiring in cli.py passes the configured policy.
         self.refused_kinds = frozenset(kind.upper() for kind in refused_kinds)
+        self.hold_only_symbols = frozenset(s.upper() for s in hold_only_symbols)
+        self.core_sleeve_symbol = core_sleeve_symbol.upper()
         self.guardian = guardian
         self.strategy_library = strategy_library
         self.market_prices = dict(market_prices or {})
@@ -316,6 +320,23 @@ class StrategyAdmission:
                     accepted=False, reason=blocked, strategy_id=strategy.strategy_id,
                 )
             retired = existing
+
+        # Shared trading-permission check: the core sleeve and hold-only symbols are
+        # not admissible as strategies, because they are managed by other paths.
+        for sym in strategy.symbols:
+            su = sym.upper()
+            if su == self.core_sleeve_symbol and self.core_sleeve_symbol:
+                return StrategyAdmissionResult(
+                    accepted=False,
+                    reason=f"{su} is the core sleeve symbol and is managed by the sleeve, not by strategies",
+                    strategy_id=strategy.strategy_id,
+                )
+            if su in self.hold_only_symbols:
+                return StrategyAdmissionResult(
+                    accepted=False,
+                    reason=f"{su} is hold-only and may not be traded by strategies",
+                    strategy_id=strategy.strategy_id,
+                )
 
         backlog = self.probation_backlog(results)
         dormant = self.dormant_probation(results)

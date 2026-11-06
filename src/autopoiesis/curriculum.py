@@ -118,7 +118,6 @@ class StructuredCurriculumAgent:
         *,
         reflection: ReflectionRecord,
         current_strategies: list[StrategySpec],
-        target_daily_return_pct: float = 10.0,
         recent_exploration_summary: dict[str, object] | None = None,
         prior_rejections: Sequence[Mapping[str, object]] = (),
         guardian_max_position_value: float | None = None,
@@ -145,7 +144,6 @@ class StructuredCurriculumAgent:
         # needs is sent: current strategy identities and states, their measured
         # scores and action counts, the exploration summary, and the limits.
         prompt_context = {
-            "target_daily_return_pct": target_daily_return_pct,
             "safety": {
                 "paper_only": True,
                 "guardian_limits_mutable": False,
@@ -218,6 +216,7 @@ class StructuredCurriculumAgent:
                 "An exit must be able to decline to fire: a SELL with no market condition is refused. Use TREND_FOLLOW or RULE, never FIXED_SIZE, for an exit.",
                 "Do not force orders; Guardian, market-open checks, and paper executor remain authoritative.",
                 "Do not claim profitability or target achievement without broker evidence in the supplied context.",
+                "A proposal must state a testable mechanism, the expected risk/reward, the sample size needed, and how it will be executed. A daily return target is not an admissible objective.",
             ],
             # Stated explicitly rather than shown by example. The full
             # model_dump of every strategy used to serve as the de-facto schema,

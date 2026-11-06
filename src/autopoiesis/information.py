@@ -92,8 +92,13 @@ class InformationProvider:
             return None
         return data
 
-    def block(self, symbol: str) -> str | None:
-        """Render a bounded information block for `symbol`, or None when empty."""
+    def block(self, symbol: str, *, cutoff: datetime | None = None) -> str | None:
+        """Render a bounded information block for `symbol`, or None when empty.
+
+        `cutoff` enables point-in-time use: a field (or the whole cache) whose
+        `available_at` is after `cutoff` is dropped, so historical replay never
+        sees information that was not yet public.
+        """
         try:
             data = self._load(symbol)
         except Exception:
@@ -108,6 +113,19 @@ class InformationProvider:
             as_of = datetime.now(timezone.utc)
         if as_of.tzinfo is None:
             as_of = as_of.replace(tzinfo=timezone.utc)
+
+        # Point-in-time: if the whole cache was not yet available, drop it.
+        if cutoff is not None:
+            avail_raw = data.get("available_at")
+            if avail_raw is not None:
+                try:
+                    avail = datetime.fromisoformat(str(avail_raw).replace("Z", "+00:00"))
+                    if avail.tzinfo is None:
+                        avail = avail.replace(tzinfo=timezone.utc)
+                    if avail > cutoff:
+                        return None
+                except (ValueError, TypeError):
+                    pass
 
         # Freshness filter: drop fields older than their budget.
         fresh: dict[str, Any] = {}
@@ -125,6 +143,18 @@ class InformationProvider:
                     field_as_of = as_of
             else:
                 field_as_of = as_of
+            # Point-in-time: drop the field if it was not yet public.
+            if cutoff is not None:
+                favail = data.get(f"{key}_available_at", data.get("available_at"))
+                if favail is not None:
+                    try:
+                        fav = datetime.fromisoformat(str(favail).replace("Z", "+00:00"))
+                        if fav.tzinfo is None:
+                            fav = fav.replace(tzinfo=timezone.utc)
+                        if fav > cutoff:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
             age = _age_days(as_of, field_as_of)
             if age is not None and age > budget:
                 continue

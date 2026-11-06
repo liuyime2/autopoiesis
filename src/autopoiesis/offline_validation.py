@@ -94,6 +94,10 @@ class DecisionRecord:
     #: The trading day the decision was made on, ISO date. None for a row recorded before
     #: rows carried a decision time.
     day: str | None = None
+    #: True when the verdict came from the strategy's rule rather than an executed fill,
+    #: i.e. the model overrode it. Such verdicts are graded for correctness but are not
+    #: counted as executed fills (shadow vs. executed separation, step 1.5).
+    paired: bool = False
 
 
 @dataclass
@@ -234,12 +238,16 @@ def collect_decisions(
                 verdict=coerce.field_str(rule_verdict if paired else row.get("verdict"), "row.verdict"),
                 net_return_pct=coerce.field_float(row.get("net_return_pct"), "row.net_return_pct"),
                 day=str(decided_at)[:10] if decided_at else None,
+                paired=paired,
             )
     return [latest[key] for key in sorted(latest)]
 
 
 def day_direction(
-    counterfactual_events: Iterable[object], *, dead_band_pct: float = DEFAULT_DEAD_BAND_PCT
+    counterfactual_events: Iterable[object],
+    *,
+    dead_band_pct: float = DEFAULT_DEAD_BAND_PCT,
+    symbol: str | None = None,
 ) -> dict[str, float]:
     """Per trading day, the share of the market's 24-hour moves that rose.
 
@@ -263,6 +271,10 @@ def day_direction(
     for event in counterfactual_events:
         payload = coerce.field_dict(coerce.field_of(event, "payload"), "event.payload")
         for row in coerce.field_dict_tuple(payload.get("rows"), "payload.rows"):
+            if symbol is not None:
+                row_symbol = row.get("symbol")
+                if row_symbol is not None and str(row_symbol).upper() != str(symbol).upper():
+                    continue
             cycle_id = coerce.field_str(row.get("cycle_id"), "row.cycle_id")
             if not row_eligible(row):
                 latest.pop(cycle_id, None)
@@ -359,7 +371,7 @@ def _screen(
             result.missed_alpha += 1
         elif record.verdict == FALSE_TRADE:
             result.false_trades += 1
-        elif record.verdict == GOOD_TRADE:
+        elif record.verdict == GOOD_TRADE and not getattr(record, "paired", False):
             result.good_trades += 1
 
     nets = [d.net_return_pct for d in scored if d.net_return_pct is not None]

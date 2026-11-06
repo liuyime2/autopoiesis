@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh the autopoiesis per-symbol information cache
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+Environment=PATH=@ENVBIN@:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=@ENVFILE@
+ExecStart=@PYTHON@ @ROOT@/tools/refresh_information.py --from-account
+UMask=0077

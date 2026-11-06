@@ -705,8 +705,6 @@ class AgentDaemon:
             if _validation is not None
             else None
         )
-        # Once per pass, over every strategy's rows: the base rate each screen is read against.
-        day_up = offline_validation.day_direction(events)
         if self._stop_requested:
             return
         for spec in self.strategy_library.list():
@@ -714,6 +712,10 @@ class AgentDaemon:
                 break
             if spec.lifecycle in {"RETIRED"}:
                 continue
+            # Base rate per symbol: mixing symbols into one daily base is what made
+            # a TLT strategy's screen read against SPY's moves.
+            sym = spec.symbols[0] if spec.symbols else None
+            day_up = offline_validation.day_direction(events, symbol=sym)
             self._screen_candidate(
                 spec.strategy_id, _events=events, _latest_payloads=latest_payloads,
                 _day_up=day_up,
@@ -1013,6 +1015,46 @@ class AgentDaemon:
                     task_id=task.task_id,
                     payload={"accepted": result.accepted, "reason": result.reason},
                 )
+                if not result.accepted and task.task_type == "STRATEGY_SPEC" and task.strategy_spec is not None:
+                    # Admission rejected: retry once with the reason fed back as a
+                    # prior rejection, so the model can correct the specific defect.
+                    try:
+                        retry_rejections = [
+                            *list(prior_rejections),
+                            {"strategy_id": result.strategy_id, "rejected_because": result.reason},
+                        ]
+                        retry_task = self.curriculum_agent.propose(
+                            reflection=reflection,
+                            current_strategies=strategies,
+                            recent_exploration_summary=exploration_summary,
+                            prior_rejections=retry_rejections,
+                            guardian_max_position_value=self.config.max_position_value,
+                            open_positions=open_positions,
+                            last_price=last_price,
+                            symbol=symbol,
+                        )
+                        if retry_task.task_type == "STRATEGY_SPEC" and retry_task.strategy_spec is not None:
+                            self.strategy_admission.set_market_prices(self._last_known_prices())
+                            retry_result = self.strategy_admission.admit(
+                                retry_task.strategy_spec, self._strategy_results()
+                            )
+                            self._record_admission_transition(
+                                self._library_lifecycle(retry_task.strategy_spec.strategy_id), retry_result
+                            )
+                            self._append_event(
+                                "STRATEGY_ADMISSION_REVIEWED",
+                                status="ACCEPTED" if retry_result.accepted else "REJECTED",
+                                message=f"retry: {retry_result.reason}",
+                                strategy_id=retry_result.strategy_id,
+                                task_id=retry_task.task_id,
+                                payload={"accepted": retry_result.accepted, "reason": retry_result.reason, "retry": True},
+                            )
+                            if retry_result.accepted:
+                                task = retry_task
+                                result = retry_result
+                                strategy_id = retry_task.strategy_spec.strategy_id
+                    except (ConnectionError, TimeoutError, OSError):
+                        pass
                 if self._stop_requested:
                     return
                 # Offline validation runs on the candidate's *existing* recorded

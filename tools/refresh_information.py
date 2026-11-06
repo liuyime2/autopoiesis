@@ -144,15 +144,50 @@ def _fetch_alpaca(symbol: str, config) -> dict:
     except Exception:
         pass
 
-    # Options ATM implied volatility
+    # Options ATM implied volatility, ~30 days out.
     try:
-        raw = client.get(f"/options/snapshots/{symbol}", {"limit": 1})
+        from datetime import date, timedelta
+
+        today = date.today()
+        target = today + timedelta(days=30)
+        lo = target - timedelta(days=7)
+        hi = target + timedelta(days=7)
+        raw = client.get(
+            f"/options/snapshots/{symbol}",
+            {
+                "expiration_date_gte": lo.isoformat(),
+                "expiration_date_lte": hi.isoformat(),
+                "limit": 1000,
+            },
+        )
         snaps = (raw or {}).get("snapshots") if isinstance(raw, dict) else None
         if isinstance(snaps, dict) and snaps:
-            first = next(iter(snaps.values()))
-            greeks = first.get("greeks") if isinstance(first, dict) else None
-            iv = greeks.get("implied_volatility") if isinstance(greeks, dict) else None
-            if iv is not None:
+            # Pick the contract whose strike is closest to spot. Spot is taken from
+            # the first snapshot's underlying price if present, else from the
+            # contract with the smallest |strike - 1| heuristic is not used; we
+            # instead pick the snapshot carrying an IV and nearest strike to the
+            # median strike in the slice.
+            candidates = []
+            for key, snap in snaps.items():
+                if not isinstance(snap, dict):
+                    continue
+                iv = snap.get("impliedVolatility")
+                if iv is None:
+                    continue
+                # strike is encoded in the OCC symbol tail (last 8 chars = strike*1000)
+                strike = None
+                try:
+                    strike = int(key[-8:]) / 1000.0
+                except (ValueError, TypeError):
+                    strike = None
+                candidates.append((strike, iv))
+            if candidates:
+                # Prefer ATM: choose the strike closest to the median strike present.
+                strikes = [c[0] for c in candidates if c[0] is not None]
+                if strikes:
+                    median = sorted(strikes)[len(strikes) // 2]
+                    candidates.sort(key=lambda c: (abs((c[0] or median) - median),))
+                iv = candidates[0][1]
                 out["options_iv"] = round(float(iv), 4)
                 out["options_iv_as_of"] = _now()
     except Exception:
@@ -162,7 +197,8 @@ def _fetch_alpaca(symbol: str, config) -> dict:
 
 
 def refresh_one(symbol: str, config) -> dict:
-    data: dict = {"symbol": symbol.upper(), "as_of": _now()}
+    now = _now()
+    data: dict = {"symbol": symbol.upper(), "as_of": now, "available_at": now}
     data.update(_fetch_yahoo(symbol))
     data.update(_fetch_alpaca(symbol, config))
     # realized vol from the journal's EWMA forecast is not available here; leave
@@ -203,7 +239,13 @@ def main() -> int:
     for sym in symbols:
         data = refresh_one(sym, config)
         path = CACHE_DIR / f"{sym}.json"
-        path.write_text(json.dumps(data, indent=2, default=str) + "\n", encoding="utf-8")
+        sys.path.insert(0, str(ROOT / "src"))
+        try:
+            from autopoiesis.atomicio import write_text_atomic
+
+            write_text_atomic(path, json.dumps(data, indent=2, default=str) + "\n")
+        except Exception:
+            path.write_text(json.dumps(data, indent=2, default=str) + "\n", encoding="utf-8")
         print(f"{sym}: {len(data)} fields -> {path}")
 
     return 0

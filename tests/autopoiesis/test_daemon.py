@@ -1009,13 +1009,19 @@ def test_curriculum_transport_retry_respects_stop_boundary(tmp_path, monkeypatch
 
     daemon._curriculum_proposal()
 
-    assert calls == ([False] if stop_at in {"transport", "backoff", "retry_context"} else [False, False])
+    if stop_at in {"transport", "backoff", "retry_context"}:
+        expected_calls = [False]
+    elif stop_at == "exhausted":
+        expected_calls = [False, False]
+    else:
+        expected_calls = [False, False, False]
+    assert calls == expected_calls
     assert waits == ([] if stop_at == "transport" else [(5, False)])
     if stop_at == "none":
         assert not journal.read_events("CURRICULUM_FAILED")
         assert len(journal.read_events("CURRICULUM_PROPOSED")) == 1
         reviewed = journal.read_events("STRATEGY_ADMISSION_REVIEWED")
-        assert len(reviewed) == 1
+        assert len(reviewed) == 2
         assert reviewed[0].status == "REJECTED"
         assert reviewed[0].message == "curriculum progression requires HOLD_BASELINE before trading skills"
         assert library.list() == []
