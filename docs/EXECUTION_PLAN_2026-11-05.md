@@ -51,14 +51,14 @@
 | 2 | P0 | 准入按 allowlist，交易按 tradable，与“标的不设限”冲突 | 确认：`guardian.py:258`；11-05 有 5 次因此被拒 |
 | 3 | P0 | 反事实只评估 `config.symbols`，关注名单标的没有评分 | 确认：`daemon.py:763` |
 | 4 | P0 | `day_direction` 把所有标的混成一个每日基准 | 确认 |
-| 5 | P0 | 课程提示写着每天 10% 收益目标，配置是 0.10 | 确认：`curriculum.py:121` 默认 10.0，调用方没传 |
+| 5 | P0 | 课程提示写着每天 10% 收益目标，配置是 0.10 | 确认：`curriculum.py:121` 默认 10.0，调用方没传；目标值确实进入提示词（`curriculum.py:148` 的 `target_daily_return_pct`），daemon 两处调用（`daemon.py:935,958`）都没传配置值，所以提示词里落的是默认 10.0。修法按 1.7 删除该字段。 |
 | 6 | P0 | 重复下单防护靠 30 分钟窗口，窗口读取不加锁 | 确认：`IN_FLIGHT_WINDOW_MINUTES=30`，`_read_window` 无锁；需要持久化的订单状态 |
 | 7 | P1 | 策略库空：新策略落在核心仓独占的 SPY 上 | 确认（实测） |
 | 8 | P1 | 课程生成不懂准入规则，几乎全部白费 | 确认（10-31 起 4%，今天 5%） |
 | 9 | P1 | 规则的假设动作被算作 `good_trades`，与真实成交混在一起 | 确认：`collect_decisions` 用 `rule_verdict` |
 | 10 | P1 | PASS 用按日聚类的标准误，REJECT 不用；没有多重检验校正；W2 的蒙特卡洛结果未见 | 确认 |
 | 11 | P1 | `information-refresh` 只复制了 timer，没有 service，也没启用 | 确认：`autopoiesis:247`，`tools/` 里没有 service |
-| 12 | P1 | 期权 IV 取 `limit=1` 的第一个合约，读 `greeks.implied_volatility` | 确认，实测该合约无 IV，字段永远为空 |
+| 12 | P1 | 期权 IV 取 `limit=1` 的第一个合约，读 `greeks.implied_volatility` | 确认。实测 `limit=1` 返回的合约无 greeks/IV；真实字段是快照顶层的 `impliedVolatility`（camelCase），不是 `greeks.implied_volatility`。修法：按期限（~30 天）和行权价选 ATM 合约，读 `impliedVolatility`。 |
 | 13 | P1 | 信息只有 `as_of`，没有 `available_at`，不能用于历史回测 | 确认 |
 | 14 | P1 | 版本只看源码指纹，env、模型变更不会被识别 | 确认 |
 | 15 | P1 | `research/driver.py` 只搜 TREND_FOLLOW 阈值和买入持有 | 确认 |
