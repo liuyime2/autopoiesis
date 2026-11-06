@@ -21,8 +21,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from autopoiesis.config import AgentConfig
 from autopoiesis.broker_client import make_client
+from autopoiesis.config import AgentConfig
 
 
 def _load_env() -> None:
