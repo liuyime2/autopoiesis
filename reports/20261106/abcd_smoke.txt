@@ -1,0 +1,7 @@
+Arm A: bars=1579 fills=0 final_equity=100000.00 mdd=0.0000
+Arm B: bars=1579 fills=1080 final_equity=174076.59 mdd=0.2401
+Arm C: bars=1579 fills=1009 final_equity=205030.63 mdd=0.3071
+Arm D: bars=1579 fills=1009 final_equity=205030.63 mdd=0.3071
+note: D-C: mean_diff=0.000000 CI=[0.000000,0.000000]
+conclusion: INSUFFICIENT
+

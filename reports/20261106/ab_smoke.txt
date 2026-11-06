@@ -1,0 +1,5 @@
+bars: 1579
+Arm A: bars=1579 fills=0 final_equity=100000.00 mdd=0.0000
+Arm B: bars=1579 fills=1080 final_equity=174076.59 mdd=0.2401
+conclusion: INSUFFICIENT
+

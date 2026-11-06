@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 from .simulation.runner import ReplayResult, run_replay
+from .statistics import daily_returns, paired_block_bootstrap
 
 
 @dataclass
@@ -58,11 +59,24 @@ def run_experiment(
             llm_used = arm in llm_arms
             result = run_replay(bars=bars_list, decision_fn=decision_fn, llm_used=llm_used)
             report.arms.append(ArmResult(arm=arm, result=result, seed=seed))
-    # Conclusion placeholder: requires statistical comparison (bootstrap) not yet wired.
-    if len(report.arms) < 4:
+    # Statistical comparison: D minus C (primary), and B minus A.
+    by_arm: dict[str, ReplayResult] = {}
+    for ar in report.arms:
+        by_arm[ar.arm] = ar.result
+    if "D" in by_arm and "C" in by_arm:
+        ra = daily_returns(by_arm["C"].equity_curve)
+        rb = daily_returns(by_arm["D"].equity_curve)
+        boot = paired_block_bootstrap(ra, rb)
+        report.notes.append(f"D-C: mean_diff={boot['mean_diff']:.6f} CI=[{boot['ci_low']:.6f},{boot['ci_high']:.6f}]")
+        if boot["ci_low"] > 0:
+            report.conclusion = "PROVEN"
+        elif boot["ci_high"] < 0:
+            report.conclusion = "NOT PROVEN"
+        else:
+            report.conclusion = "INSUFFICIENT"
+    elif len(report.arms) < 4:
         report.conclusion = "INSUFFICIENT"
         report.notes.append("not all arms ran")
     else:
         report.conclusion = "INSUFFICIENT"
-        report.notes.append("statistical comparison (paired block bootstrap) pending")
     return report
