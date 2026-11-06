@@ -1,0 +1,7 @@
+bars: 1579 SPY 1Day 2020-07-27..2026-11-05 (cache:/localscratch/liuyime2/QuantGroup/.worktrees/edge-first/runtime/autopoiesis/replay/SPY_1Day_2020-07-27_2026-11-05.json)
+conclusion: INSUFFICIENT
+
+arm A: final=100000.00 return=0.00% drawdown=0.00% fills=0 refusals=0 min_cash=100000.00 max_gross=0.00
+arm B: final=110220.99 return=10.22% drawdown=5.47% fills=691 refusals=389 min_cash=76068.42 max_gross=28249.29
+arm C: final=111835.26 return=11.84% drawdown=5.03% fills=404 refusals=605 min_cash=76235.80 max_gross=29006.08
+note: D NOT_RUN: no LLM weekly engine was supplied; the primary comparison D-C was not evaluated

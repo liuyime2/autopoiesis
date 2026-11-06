@@ -16,3 +16,9 @@ Measured reasons they are invalid:
 
 The corrected path is specified in `docs/REPLAY_INTEGRITY_PLAN_2026-11-06.md`. These files
 may be deleted only after the corrected four-arm report exists.
+
+## Corrected run
+
+`reports/20261106/corrected/` is the first run on the production Guardian path (commit
+`b5dca29`). It is reproducible from `run_manifest.json`. It is **still not a G4 verdict**:
+D is `NOT_RUN` (no LLM weekly engine) and A is a cash baseline, not the core sleeve.

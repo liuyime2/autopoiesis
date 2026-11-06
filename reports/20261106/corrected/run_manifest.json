@@ -1,0 +1,48 @@
+{
+  "arms": {
+    "A": "hold",
+    "B": "fixed-sma20",
+    "C": "search-sma20-50",
+    "D": "NOT_RUN: no LLM weekly engine"
+  },
+  "code_commit": "b5dca29c772e9883c69a8420220c29d124676223",
+  "costs": {
+    "commission_pct": 0.005,
+    "slippage_pct": 0.001
+  },
+  "created_at_utc": "2026-11-06T23:58:05.781920+00:00",
+  "data": {
+    "bars": 1579,
+    "end": "2026-11-05",
+    "feed": "iex",
+    "interval": "1Day",
+    "sha256": "e93e077b701f1be48c19a659c53fa64f1ef9544a454c3de075e64bfd14b32d13",
+    "source": "cache:/localscratch/liuyime2/QuantGroup/.worktrees/edge-first/runtime/autopoiesis/replay/SPY_1Day_2020-07-27_2026-11-05.json",
+    "start": "2020-07-27",
+    "symbol": "SPY"
+  },
+  "risk": {
+    "allowlist": [
+      "AAPL",
+      "BIL",
+      "MSFT",
+      "NVDA",
+      "QQQ",
+      "SPY",
+      "TLT",
+      "XLB",
+      "XLE",
+      "XLF"
+    ],
+    "max_daily_loss": 500.0,
+    "max_position_value": 25000.0,
+    "max_total_exposure": 90000.0,
+    "max_trades_per_day": 100
+  },
+  "seeds": [
+    0
+  ],
+  "spec": "/localscratch/liuyime2/QuantGroup/.worktrees/edge-first/configs/experiment_4arm.spec",
+  "spec_sha256": "b78158cc83ba7ef7029b2dfa27d731347c7236737fc101ebc2b7ea56eeffbb40",
+  "starting_equity": 100000.0
+}

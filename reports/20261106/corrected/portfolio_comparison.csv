@@ -1,0 +1,4 @@
+arm,seed,bars,final_equity,return_pct,max_drawdown_pct,fills,refusals,min_cash,max_gross_exposure
+A,0,1579,100000.0,0.0,0.0,0,0,100000.0,0.0
+B,0,1579,110220.99,10.221,5.4715,691,389,76068.42,28249.29
+C,0,1579,111835.26,11.8353,5.027,404,605,76235.8,29006.08
