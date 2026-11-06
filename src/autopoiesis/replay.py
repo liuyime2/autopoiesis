@@ -106,11 +106,23 @@ class ReplayBar:
         }
 
 
-def fetch_bars(symbol: str, start: str, end: str, *, client, interval: str = "5Min") -> list[ReplayBar]:
+def fetch_bars(
+    symbol: str,
+    start: str,
+    end: str,
+    *,
+    client,
+    interval: str = "5Min",
+    feed: str | None = None,
+) -> list[ReplayBar]:
     """Real bars from the broker's historical endpoint.
 
     Deliberately the broker's own history rather than a generator: a replay over invented
     prices cannot tell you whether the system works, only that it runs.
+
+    `feed` is omitted by default because the historical endpoint rejected an unentitled
+    feed on this account; callers that know which feed they may query pass it explicitly
+    (`"iex"` for the free historical tier).
     """
     from alpaca_trade_api.rest import TimeFrame, TimeFrameUnit
 
@@ -123,7 +135,10 @@ def fetch_bars(symbol: str, start: str, end: str, *, client, interval: str = "5M
     if not digits or interval[len(digits):] not in units:
         raise ValueError(f"unsupported interval {interval!r}; want e.g. 5Min, 1Hour, 1Day")
     timeframe = TimeFrame(int(digits), units[interval[len(digits):]])
-    bars = client.get_bars(symbol, timeframe, start, end)
+    if feed is None:
+        bars = client.get_bars(symbol, timeframe, start, end)
+    else:
+        bars = client.get_bars(symbol, timeframe, start, end, feed=feed)
     frame = bars.df
     return [
         ReplayBar(
@@ -319,10 +334,24 @@ class ReplayExecutor:
     Returns `REPLAYED`, never `SUBMITTED`, and never an `order_id`.
     """
 
-    def __init__(self, *, gateway: ReplayDataGateway, book: ReplayBook, clock=None):
+    def __init__(
+        self,
+        *,
+        gateway: ReplayDataGateway,
+        book: ReplayBook,
+        clock=None,
+        slippage_pct: float = 0.0,
+        commission_pct: float = 0.0,
+    ):
+        if slippage_pct < 0 or commission_pct < 0:
+            raise ValueError("slippage_pct and commission_pct must be non-negative")
+        if slippage_pct + commission_pct >= 1:
+            raise ValueError("slippage_pct + commission_pct must be below 1")
         self.gateway = gateway
         self.book = book
         self.clock = clock or (lambda: gateway.current.timestamp)
+        self.slippage_pct = slippage_pct
+        self.commission_pct = commission_pct
 
     def execute(self, decision: TradeDecision, guardian_result, *, cycle_id: str) -> ExecutionResult:
         # The canonical call passes cycle_id by keyword and the real executor correlates the
@@ -346,17 +375,30 @@ class ReplayExecutor:
                 message="replay: hold",
             )
         price = self.gateway.next_open()
-        self.book.apply(decision.action, float(decision.quantity), price)
+        # Costs are folded into the effective fill price rather than charged as a separate
+        # cash entry: the book records one price per fill, and a second ledger would be a
+        # second accounting path that could disagree with it. Buy-side costs raise the
+        # price, sell-side costs lower it, so cash and PnL see the same number.
+        buy_side = decision.action in {"BUY", "COVER"}
+        direction = 1 if buy_side else -1
+        effective = price * (1 + direction * (self.slippage_pct + self.commission_pct))
+        self.book.apply(decision.action, float(decision.quantity), effective)
+        cost_note = ""
+        if self.slippage_pct or self.commission_pct:
+            cost_note = (
+                f" (next-bar open {price:.2f}; effective {effective:.2f} after "
+                f"{self.slippage_pct:.4%} slippage and {self.commission_pct:.4%} commission)"
+            )
         return ExecutionResult(
             status=REPLAYED,
             order_id=None,
             client_order_id=None,
             filled_quantity=float(decision.quantity),
-            filled_avg_price=price,
+            filled_avg_price=effective,
             filled_at=self.clock(),
             broker_status=REPLAYED,
             message=(
-                f"replay: {decision.action} {decision.quantity} filled at next-bar open "
-                f"{price:.2f}; not a broker fill and not trading evidence"
+                f"replay: {decision.action} {decision.quantity} filled at next-bar open"
+                f"{cost_note}; not a broker fill and not trading evidence"
             ),
         )
