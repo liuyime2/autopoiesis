@@ -101,6 +101,15 @@ def configure_alpaca_client(client: Any, *, sdk_version: str) -> Any:
     return client
 
 
+def make_client(config) -> Any:
+    """Build an Alpaca REST client from an AgentConfig."""
+    return create_alpaca_client(
+        key_id=config.alpaca_api_key or "",
+        secret_key=config.alpaca_secret_key or "",
+        base_url=config.alpaca_base_url,
+    )
+
+
 def create_alpaca_client(
     *,
     key_id: str,

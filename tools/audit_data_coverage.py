@@ -22,10 +22,14 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from autopoiesis.config import AgentConfig
+from autopoiesis.broker_client import make_client
 
 
 def _load_env() -> None:
     cfg_path = os.environ.get("AUTOPOIESIS_ENV_FILE")
+    if not cfg_path:
+        xdg = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
+        cfg_path = os.path.join(xdg, "autopoiesis", "env")
     if cfg_path and Path(cfg_path).exists():
         for line in Path(cfg_path).read_text().splitlines():
             line = line.strip()
@@ -34,25 +38,37 @@ def _load_env() -> None:
                 os.environ.setdefault(k, v)
 
 
+def _timeframe(timeframe: str):
+    from alpaca_trade_api.rest import TimeFrame, TimeFrameUnit
+
+    units = {"Min": TimeFrameUnit.Minute, "Hour": TimeFrameUnit.Hour, "Day": TimeFrameUnit.Day}
+    digits = ""
+    for char in timeframe:
+        if not char.isdigit():
+            break
+        digits += char
+    if not digits or timeframe[len(digits):] not in units:
+        raise ValueError(f"unsupported timeframe {timeframe}")
+    return TimeFrame(int(digits), units[timeframe[len(digits):]])
+
+
 def _earliest_bar(client, symbol: str, timeframe: str) -> dict:
-    """Find the earliest available bar by probing backwards in chunks."""
-    # Start from a generous early date and walk forward until data appears.
+    tf = _timeframe(timeframe)
     earliest = None
     count = 0
-    # Walk forward year by year to find first non-empty window.
+    import time as _time
+
     for year in range(2016, date.today().year + 1):
         try:
             start = date(year, 1, 1).isoformat()
             end = date(year, 12, 31).isoformat()
-            raw = client.get(
-                f"/stocks/{symbol}/bars",
-                {"timeframe": timeframe, "start": start, "end": end, "limit": 10000, "feed": "iex"},
-            )
-            bars = (raw or {}).get("bars") if isinstance(raw, dict) else None
-            if isinstance(bars, list) and bars:
+            bars = client.get_bars(symbol, tf, start, end, feed="iex")
+            frame = getattr(bars, "df", None)
+            if frame is not None and not frame.empty:
                 if earliest is None:
-                    earliest = bars[0].get("t")
-                count += len(bars)
+                    earliest = str(frame.index[0])
+                count += len(frame)
+            _time.sleep(0.5)
         except Exception as exc:
             return {"error": str(exc)}
     return {"earliest": earliest, "count": count}
@@ -73,9 +89,7 @@ def main() -> int:
         symbols = ["SPY", "QQQ", "IWM", "TLT", "GLD", "XLF", "XLE"]
 
     config = AgentConfig.from_env()
-    from autopoiesis.broker_client import BrokerClient
-
-    client = BrokerClient(config)
+    client = make_client(config)
 
     report = {"symbols": {}}
     for sym in symbols:
@@ -84,6 +98,8 @@ def main() -> int:
             "daily": _earliest_bar(client, su, "1Day"),
             "5min": _earliest_bar(client, su, "5Min"),
         }
+        import time as _time
+        _time.sleep(1)
         print(f"{su}: daily earliest={report['symbols'][su]['daily'].get('earliest')}")
 
     if args.out:
