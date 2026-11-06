@@ -68,6 +68,19 @@ evolve its own strategies; on the same days the deployed code changed four times
 restarts it. The amendment moves the reset from the first to the second, and says so here rather than
 reading the old wording more loosely.
 
+## Amendment of 2026-11-05 — 60 days no longer blocks development
+
+Written as part of `docs/EXECUTION_PLAN_2026-11-05.md` (step 0.6). The bar above is
+**retained in full** and still governs amplification, claiming profitability, and
+relaxing any limit. What changes is only its *gating* role:
+
+- Engineering and research work continues in the simulated environment regardless
+  of the 60-day count. Development is not frozen waiting for it.
+- The 60-day cohort, or equivalent independent evidence, is still required before
+  any of: increased capital, wider universe, longer horizon, or any public claim
+  of profitability. `make benchmark` continues to print the live cohort count.
+- The original text above is preserved verbatim; this amendment is additive.
+
 ## Status as of 2026-10-25 (historical; `make benchmark` prints the live cohort count)
 
 - Effective trading days on the current policy cohort: 27 of 60.

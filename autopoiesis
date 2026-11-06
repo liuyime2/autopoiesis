@@ -166,6 +166,11 @@ case "$cmd" in
   audit)           "$PYTHON_BIN" tools/audit_defects.py ;;
 
   install-service)
+    if [ "${AUTOPOIESIS_DEPLOY_VIA_RELEASE:-0}" != "1" ]; then
+      echo "FATAL: install-service may only run via the deploy entry point" >&2
+      echo "       (tools/deploy_release.py --install-service). Direct runs are refused." >&2
+      exit 2
+    fi
     # The systemd user manager resolves unit paths from ITS OWN start-time
     # environment, not this shell's. On this host it has no XDG_CONFIG_HOME, so
     # Detect that instead of silently

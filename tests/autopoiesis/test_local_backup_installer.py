@@ -33,6 +33,7 @@ def installer(tmp_path):
     env = os.environ.copy()
     env.update(
         PATH=str(commands) + os.pathsep + env["PATH"], AUTOPOIESIS_ENV_FILE="/dev/null",
+        AUTOPOIESIS_DEPLOY_VIA_RELEASE="1",
         AUTOPOIESIS_ENVBIN=str(interpreter), AUTOPOIESIS_UNIT_DIR=str(units),
         OLLAMA_BIN=str(commands / "ollama"), OLLAMA_MODELS=str(models),
         PYTHONPATH="synthetic-path-sentinel", SYNTHETIC_COMMAND_LOG=str(log),
