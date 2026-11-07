@@ -61,7 +61,7 @@ The difference is arm minus benchmark. Compare A with BENCH_20K (same 20k sleeve
 
 - It does not test D: no weekly LLM engine exists.
 - It is historical development evidence, not unseen data.
-- The 0.5% commission is a stress assumption. Lower costs would help the high-turnover arms, but the benchmarks already lead before costs.
+- The 0.50% commission is a stress assumption. Lower costs would help the high-turnover arms, but the benchmarks already lead before costs.
 - The arms are deterministic, so their seed variance is zero. Only the random control has seed variance, and only seed 0 was run.
 - `min_effect` is 0.0 because the registered spec did not declare one; a confirmatory spec must declare an economic floor before the run.
 
