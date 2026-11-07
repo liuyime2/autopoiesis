@@ -1,0 +1,28 @@
+{
+  "synthetic": true,
+  "seed": 20261107,
+  "n_days": 20,
+  "beta_concentration": 4.0,
+  "results": {
+    "skill=0.00": {
+      "runs": 2000,
+      "pass_current_bar": 0.022,
+      "pass_old_bar": 0.4955
+    },
+    "skill=0.05": {
+      "runs": 2000,
+      "pass_current_bar": 0.2475,
+      "pass_old_bar": 0.9055
+    },
+    "skill=0.10": {
+      "runs": 2000,
+      "pass_current_bar": 0.686,
+      "pass_old_bar": 0.996
+    },
+    "skill=0.15": {
+      "runs": 2000,
+      "pass_current_bar": 0.9465,
+      "pass_old_bar": 1.0
+    }
+  }
+}

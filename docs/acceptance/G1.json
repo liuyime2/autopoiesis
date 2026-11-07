@@ -2,17 +2,26 @@
   "gate": "G1",
   "status": "INSUFFICIENT",
   "checked_at": "2026-11-07",
-  "checked_at_commit": "cd2192d976c08d2f1b596e256556625a81f8550d",
-  "implementation_commit": "41886bb",
-  "checks": {
-    "implemented": "PASS",
-    "closing_evidence": "NOT_RUN"
+  "implementation_commits": ["41886bb", "8d5ba1b", "d0bddc3", "ac7ce32", "45b67c1"],
+  "items": {
+    "1.1_order_state_machine": {"status": "NOT_DONE", "why": "41886bb added journal.consistent_window but nothing called it; it was deleted. No persisted intent->submitted->terminal state machine exists beyond the existing write-ahead intent and in-flight window."},
+    "1.2_single_trading_permission": {"status": "PARTIAL", "why": "Admission refuses the sleeve symbol, hold-only symbols and anything outside admissible_strategy_symbols(config) (8d5ba1b, 5 tests). The Guardian allowlist and the daemon's round symbols are still separate lists."},
+    "1.3_symbol_registry_for_counterfactuals": {"status": "NOT_DONE", "why": "The counterfactual pass still scores config.symbols only. Mitigated, not fixed: admission now refuses strategies on unconfigured symbols, so no admitted strategy goes unscored. Attention-picked symbols are still unscored."},
+    "1.4_per_symbol_base_rate": {"status": "DONE", "why": "offline_validation.day_direction(symbol=...) in 41886bb."},
+    "1.5_shadow_vs_fills": {"status": "DONE", "why": "DecisionRecord.paired: a rule verdict the model overrode is graded but not counted as a fill."},
+    "1.6_robust_stats_and_mc": {"status": "PARTIAL", "why": "Clustered pass bar exists; the W2 Monte Carlo was never run until docs/evidence/goal-2026-11-07/screen_false_pass_mc.json (SYNTHETIC): zero-skill pass rate 2.2% under the current bar vs 49.6% under the old one, 2,000 runs. Batch false-discovery control across the library is not done."},
+    "1.7_no_daily_return_target_in_prompt": {"status": "DONE", "why": "Removed from the curriculum prompt. profit_target_return_pct remains only in the PROFIT_TARGET_CHECKED report payload, which no model reads."},
+    "1.8_curriculum_precheck_retry": {"status": "PARTIAL", "why": "One retry with the rejection reason (41886bb); admissible symbols and the rule-family budget are now stated or enforced (8d5ba1b, d0bddc3). No backoff after repeated refusals."},
+    "1.9_information_service": {"status": "PARTIAL", "why": "Service + timer files and installer wiring exist; 30-day ATM IV contract selection added. Not installed on the live host until the next deployment; per-source status and share-shown measurement not yet measured."},
+    "1.10_version_digest": {"status": "DONE", "why": "versioning.version_summary, cli --version-summary."},
+    "1.11_make_why": {"status": "DONE", "why": "tools/why.py."}
   },
-  "evidence": [
-    "41886bb implements 1.1, 1.2, 1.4, 1.5, 1.7, 1.8, 1.9, 1.10 and 1.11 in one commit; items 1.3 and 1.6 are partial by design (commit subject ends 'part 1').",
-    "Related targeted tests pass: core_sleeve, guardian, risk_judgment, replay, experiment, statistics, manifest, data_events."
-  ],
-  "blockers": [
-    "G1 closing evidence has not been run: make check, a fresh-clone full gate, a real journal replay diff, adversarial replay regression, CI, an R1 next-day run with 0 errors and 0 duplicate orders, and tools/first_open_check.py."
-  ]
+  "closing_evidence": {
+    "make_check": "NOT_RUN at this commit",
+    "fresh_clone_gate": "NOT_RUN",
+    "ci": "NOT_RUN (branch not pushed)",
+    "next_day_run": "NOT_RUN (not deployed)",
+    "first_open_check": "NOT_RUN"
+  },
+  "note": "The 2026-11-07 version of this file said 41886bb implemented nine items. Reading the diff showed 1.1 had no caller and 1.2/1.3 were not implemented; the statuses above replace that claim."
 }

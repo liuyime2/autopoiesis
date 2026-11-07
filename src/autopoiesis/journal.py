@@ -345,37 +345,6 @@ class JsonlJournal:
         )
         return events
 
-    def consistent_window(self, since: datetime) -> tuple[list[JournalEvent], list[CycleRecord]] | None:
-        """Read events and cycle records from one consistent snapshot of the window.
-
-        Step 1.1: the in-flight check must not see two different views of the
-        journal because an append landed between the two reads.
-        """
-        lines = self._window_lines(since)
-        if lines is None:
-            return None
-        events: list[JournalEvent] = []
-        records: list[CycleRecord] = []
-        for raw in lines:
-            stripped = raw.strip()
-            if not stripped:
-                continue
-            if _EVENT_MARKER in stripped:
-                try:
-                    events.append(JournalEvent.model_validate_json(stripped))
-                except Exception:
-                    repaired = _read_tolerantly(JournalEvent, stripped)
-                    if repaired is not None:
-                        events.append(repaired)
-            elif _CYCLE_MARKER in stripped:
-                try:
-                    records.append(CycleRecord.model_validate_json(stripped))
-                except Exception:
-                    repaired = _read_tolerantly(CycleRecord, stripped)
-                    if repaired is not None:
-                        records.append(repaired)
-        return events, records
-
     def _read_window(self, model, since: datetime) -> list | None:
         """The records of `model` at or after `since`, read from the end of the journal.
 
