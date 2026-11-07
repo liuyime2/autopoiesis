@@ -1,0 +1,23 @@
+{
+  "gate": "G3",
+  "status": "PASS",
+  "checked_at": "2026-11-07",
+  "checked_at_commit": "cd2192d976c08d2f1b596e256556625a81f8550d",
+  "checks": {
+    "3.1_simulator": "PASS",
+    "3.2_production_guardian": "PASS",
+    "3.3_next_point_fill_and_costs": "PASS",
+    "3.4_llm_replay": "NOT_RUN",
+    "3.5_leakage_mark": "NOT_RUN"
+  },
+  "evidence": [
+    "tools/run_experiment.py --offline: wall 13 seconds for 1579 bars (well under 'minutes'); rerun produced a byte-identical result.json and portfolio_comparison.csv",
+    "reports/20261106/v2/acceptance.json: min_cash 74635.51 (no leverage), max_gross_exposure 59990.70 below the 90000 total limit, costs_declared and next_open_fills true",
+    "src/autopoiesis/replay.py (ReplayBook/ReplayDataGateway/ReplayExecutor) with the production Guardian; research/simulation/ deleted per REPLAY_INTEGRITY_PLAN P0.1",
+    "tests: test_fill_uses_next_bar_open, test_last_bar_cannot_fill, test_buying_power_prevents_leverage, test_position_cap_refuses_excess, test_costs_are_folded_into_the_fill_price"
+  ],
+  "blockers": [
+    "3.4 is NOT_RUN because the v2 experiment has no LLM arm; determinism for fixed engines is proven by the byte-identical rerun, not by LLM replay.",
+    "3.5 is NOT_RUN because no historical LLM result is cited; if one is, it must carry MODEL_PRIOR_LEAKAGE_RISK."
+  ]
+}

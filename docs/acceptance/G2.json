@@ -1,0 +1,26 @@
+{
+  "gate": "G2",
+  "status": "INSUFFICIENT",
+  "checked_at": "2026-11-07",
+  "checked_at_commit": "cd2192d976c08d2f1b596e256556625a81f8550d",
+  "implementation_commit": "499252f",
+  "checks": {
+    "2.1_dataevent_contract": "PASS",
+    "2.2_point_in_time_join": "PASS",
+    "2.3_coverage_audit": "PASS",
+    "2.4_multisource": "NOT_RUN",
+    "2.5_universe_as_of": "PASS",
+    "2.6_starter_hash": "PASS",
+    "missing_not_zero": "INSUFFICIENT"
+  },
+  "evidence": [
+    "pytest tests/autopoiesis/test_data_events.py: 8 passed (payload hashing, UTC normalisation, future earnings, future revision, symbol filter, leakage assertion, universe inception)",
+    "Coverage measured 2026-11-06 (tools/audit_data_coverage.py): SPY daily from 2018-11-01 (1580 bars); QQQ/IWM/TLT/GLD/XLF/XLE from 2020-07-27; SPY 5-min from 2020-07-27 (132907 bars)",
+    "reports/20261106/v2/data_quality.json: 0 duplicate timestamps, 0 non-positive prices, 0 zero-volume bars, max calendar gap 4 days, weekday coverage 96.34% (holidays counted as uncovered)",
+    "tools/verify_run_manifest.py on reports/20261106/v2/run_manifest.json: OK (spec and dataset digests match, 1579 SPY bars 2020-07-27..2026-11-05)"
+  ],
+  "blockers": [
+    "2.4 multi-source data not integrated: Cboe VIX, FRED/ALFRED, SEC EDGAR disclosure times, Alpaca historical news, quotes, splits and dividends; no per-source quality report exists.",
+    "'Missing does not become zero' is proven only for the cached SPY tape, not for data-assembly gaps in sources that do not exist yet."
+  ]
+}

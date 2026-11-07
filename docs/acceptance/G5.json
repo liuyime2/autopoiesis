@@ -1,0 +1,16 @@
+{
+  "gate": "G5",
+  "status": "NOT_RUN",
+  "checked_at": "2026-11-07",
+  "checked_at_commit": "cd2192d976c08d2f1b596e256556625a81f8550d",
+  "checks": {
+    "5.1_forward_shadow": "NOT_RUN",
+    "5.2_paper_trading_candidate": "NOT_RUN",
+    "5.3_power_analysis": "NOT_RUN",
+    "5.4_forward_recheck": "NOT_RUN"
+  },
+  "evidence": [],
+  "blockers": [
+    "G5 requires a G4 PROVEN candidate. G4 is INSUFFICIENT and no arm beat the risk-matched buy-and-hold benchmark, so there is no candidate to promote to forward shadow or paper trading."
+  ]
+}
