@@ -1,0 +1,16 @@
+{
+  "bars": 1579,
+  "duplicate_timestamps": 0,
+  "first": "2020-07-27T04:00:00+00:00",
+  "gaps_over_4_calendar_days": [],
+  "interval": "1Day",
+  "last": "2026-11-05T05:00:00+00:00",
+  "max_gap_calendar_days": 4,
+  "nonpositive_prices": 0,
+  "note": "local check of the cached bars; weekday coverage counts exchange holidays as uncovered, so it is a lower bound, not a broker audit",
+  "sha256": "e93e077b701f1be48c19a659c53fa64f1ef9544a454c3de075e64bfd14b32d13",
+  "source": "cache:/localscratch/liuyime2/QuantGroup/.worktrees/edge-first/runtime/autopoiesis/replay/SPY_1Day_2020-07-27_2026-11-05.json",
+  "symbol": "SPY",
+  "weekday_coverage_pct": 96.3392,
+  "zero_volume_bars": 0
+}

@@ -1,0 +1,43 @@
+{
+  "arms_missing": [
+    "D"
+  ],
+  "arms_run": [
+    "A",
+    "B",
+    "C"
+  ],
+  "benchmarks": [
+    "BENCH_20K",
+    "BENCH_25K"
+  ],
+  "checks": {
+    "costs_declared": true,
+    "gross_exposure_within_total_limit": true,
+    "manifest_present": true,
+    "min_cash_nonnegative": true,
+    "next_open_fills": true
+  },
+  "conclusion": "INSUFFICIENT",
+  "controls": [
+    "N1_random",
+    "N2_reversed",
+    "N3_shuffled"
+  ],
+  "gate": "G4",
+  "measured": {
+    "max_gross_exposure": 59990.7,
+    "max_total_exposure": 90000.0,
+    "min_cash": 74635.51
+  },
+  "notes": [
+    "D NOT_RUN: no LLM weekly engine was supplied; the primary comparison D-C was not evaluated"
+  ],
+  "primary_comparison": {
+    "evaluated": false,
+    "left": "D",
+    "reason": "D NOT_RUN: no LLM weekly engine",
+    "right": "C"
+  },
+  "status": "INSUFFICIENT"
+}
