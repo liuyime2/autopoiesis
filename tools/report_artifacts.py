@@ -184,7 +184,13 @@ def _table_row(row: dict) -> str:
     )
 
 
-def _handoff(manifest: dict, result: dict, acceptance: dict, data_quality: dict) -> str:
+def _handoff(
+    manifest: dict,
+    result: dict,
+    acceptance: dict,
+    data_quality: dict,
+    seed_sweep: dict | None = None,
+) -> str:
     stats = result.get("statistics", {})
     lines = [
         "# Handoff — G4 v2 diagnostic",
@@ -263,6 +269,28 @@ def _handoff(manifest: dict, result: dict, acceptance: dict, data_quality: dict)
     if stats.get("pbo"):
         lines.append(f"- PBO (CSCV): {stats['pbo'].get('pbo')}")
 
+    if seed_sweep:
+        lines += [
+            "",
+            "## Seed sweep",
+            "",
+            "| trial | seeds | mean return | stdev | min | max |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+        for name in sorted(seed_sweep.get("trials", {})):
+            trial = seed_sweep["trials"][name]
+            lines.append(
+                f"| {name} | {len(trial['rows'])} | "
+                f"{trial['mean_return_pct']:.2f}% | {trial['stdev_return_pct']:.2f}% | "
+                f"{trial['min_return_pct']:.2f}% | {trial['max_return_pct']:.2f}% |"
+            )
+        lines += [
+            "",
+            "A deterministic arm must show identical returns across seeds. The "
+            "random and shuffled-history controls are the trials whose seed "
+            "changes the path; the table reports their distribution.",
+        ]
+
     lines += [
         "",
         "## What the evidence says",
@@ -284,8 +312,13 @@ def _handoff(manifest: dict, result: dict, acceptance: dict, data_quality: dict)
         f"- The {manifest['costs']['commission_pct']:.2%} commission is a stress "
         "assumption. Lower costs would help the high-turnover arms, but the "
         "benchmarks already lead before costs.",
-        "- The arms are deterministic, so their seed variance is zero. Only the "
-        "random control has seed variance, and only seed 0 was run.",
+        "- The arms are deterministic. The seed sweep confirms their returns do "
+        "not change with seed; the random and shuffled controls vary, and the "
+        "sweep reports that distribution rather than a confidence interval for "
+        "the arms."
+        if seed_sweep
+        else "- The arms are deterministic, so their seed variance is zero. Only "
+        "the random control has seed variance, and only seed 0 was run.",
         "- `min_effect` is 0.0 because the registered spec did not declare one; "
         "a confirmatory spec must declare an economic floor before the run.",
         "",
@@ -332,6 +365,8 @@ def main(argv: list[str] | None = None) -> int:
     manifest = _read_json(report_dir / "run_manifest.json")
     result = _read_json(report_dir / "result.json")
     acceptance = _read_json(report_dir / "acceptance.json")
+    seed_sweep_path = report_dir / "seed_sweep.json"
+    seed_sweep = _read_json(seed_sweep_path) if seed_sweep_path.exists() else None
 
     data_quality = _data_quality(manifest, Path(args.cache))
     (report_dir / "data_quality.json").write_text(
@@ -350,7 +385,7 @@ def main(argv: list[str] | None = None) -> int:
         encoding="utf-8",
     )
 
-    handoff = _handoff(manifest, result, acceptance, data_quality)
+    handoff = _handoff(manifest, result, acceptance, data_quality, seed_sweep)
     (report_dir / "handoff.md").write_text(handoff, encoding="utf-8")
 
     print(f"wrote data_quality.json, strategy_trials.jsonl ({len(trials)} rows), "

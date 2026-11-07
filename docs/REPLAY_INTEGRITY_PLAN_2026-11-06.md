@@ -185,6 +185,20 @@ report states which benchmark matches which arm. Verification: rerun
 `tools/run_experiment.py --offline --out reports/20261106/v2`, inspect
 `statistical_report.md`, and check that A's comparison uses the 20k benchmark.
 
+### P0.6c — Multi-seed sweep
+
+Baseline: the arms are deterministic, but the random and shuffled-history controls
+were only run at seed 0, and no seed distribution was reported. "Seed variance is
+zero" was an assertion about the arms, not a measurement of the controls.
+
+Fix: add `--seed-sweep N` to the runner. It runs every arm and control over seeds
+`0..N-1`, writes `seed_sweep.json` with per-seed rows and mean/stdev/min/max, and
+the handoff reports the table.
+
+Success: A/B/C return identical results across seeds; N1/N3 vary; the report shows
+the distribution. Verification: run the v2 experiment with `--seed-sweep 10` and
+inspect the handoff.
+
 ### P0.7 — Negative controls
 
 - Add random-direction, reversed-rule, shuffled-history, and future-injection controls.

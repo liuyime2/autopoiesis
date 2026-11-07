@@ -18,6 +18,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +32,7 @@ from autopoiesis.research.experiment import (
     ArmOutcome,
     BuyAndHoldEngine,
     CostModel,
+    Engine,
     ExperimentReport,
     RandomEngine,
     ReversedSmaEngine,
@@ -38,6 +40,7 @@ from autopoiesis.research.experiment import (
     ShuffledSmaEngine,
     SleeveEngine,
     SmaEngine,
+    run_arm,
     run_experiment,
 )
 from autopoiesis.research.manifest import dataset_fingerprint, sha256_file
@@ -261,6 +264,73 @@ def _statistical_markdown(report: ExperimentReport, stats: dict, manifest: dict)
     return "\n".join(lines) + "\n"
 
 
+def _seed_sweep(
+    *,
+    bars: list[ReplayBar],
+    engines: dict[str, Callable[[], Engine]],
+    controls: dict[str, Callable[[], Engine]],
+    seeds: list[int],
+    starting_equity: float,
+    symbol: str,
+    risk: RiskLimits,
+    costs: CostModel,
+) -> dict:
+    """Run every arm and control across seeds, including seed-aware controls.
+
+    The arms ignore the seed by construction; running them is how that claim is
+    checked rather than assumed. The random and shuffled controls take the seed
+    into their own generators, so their rows are the distribution that matters.
+    """
+    trials: dict[str, dict] = {}
+    for name in list(engines) + list(controls):
+        rows = []
+        for seed in seeds:
+            if name == "N1_random":
+                engine: Engine = RandomEngine(seed=seed, quantity=1, every=20)
+            elif name == "N3_shuffled":
+                engine = ShuffledSmaEngine(fast=20, band=0.01, seed=seed)
+            elif name in engines:
+                engine = engines[name]()
+            else:
+                engine = controls[name]()
+            outcome = run_arm(
+                arm=name,
+                bars=bars,
+                engine=engine,
+                seed=seed,
+                starting_equity=starting_equity,
+                symbol=symbol,
+                risk=risk,
+                costs=costs,
+            )
+            rows.append(
+                {
+                    "seed": seed,
+                    "final_equity": round(outcome.final_equity, 2),
+                    "return_pct": round(
+                        (outcome.final_equity / starting_equity - 1.0) * 100.0, 4
+                    ),
+                    "max_drawdown_pct": round(outcome.max_drawdown * 100.0, 4),
+                    "fills": len(outcome.fills),
+                }
+            )
+        returns = [row["return_pct"] for row in rows]
+        mean = sum(returns) / len(returns)
+        variance = (
+            sum((value - mean) ** 2 for value in returns) / (len(returns) - 1)
+            if len(returns) > 1
+            else 0.0
+        )
+        trials[name] = {
+            "rows": rows,
+            "mean_return_pct": round(mean, 4),
+            "stdev_return_pct": round(variance**0.5, 4),
+            "min_return_pct": min(returns),
+            "max_return_pct": max(returns),
+        }
+    return {"seeds": seeds, "trials": trials}
+
+
 def _acceptance(report: ExperimentReport, risk: RiskLimits) -> dict:
     all_outcomes = [outcome for outcomes in report.arms.values() for outcome in outcomes]
     all_outcomes.extend(report.benchmarks.values())
@@ -322,6 +392,12 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=0.0,
         help="minimum mean daily net-return difference required before PROVEN",
+    )
+    parser.add_argument(
+        "--seed-sweep",
+        type=int,
+        default=1,
+        help="run every arm and control over seeds 0..N-1 (default 1: seed 0 only)",
     )
     args = parser.parse_args(argv)
 
@@ -524,6 +600,21 @@ def main(argv: list[str] | None = None) -> int:
     for note in report.notes:
         lines.append(f"note: {note}")
     (out_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if args.seed_sweep > 1:
+        sweep = _seed_sweep(
+            bars=bars,
+            engines=engines,
+            controls=controls,
+            seeds=list(range(args.seed_sweep)),
+            starting_equity=100_000.0,
+            symbol=symbol,
+            risk=risk,
+            costs=costs,
+        )
+        (out_dir / "seed_sweep.json").write_text(
+            json.dumps(sweep, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        print(f"seed sweep: {args.seed_sweep} seeds")
     print("\n".join(lines))
     for row in stats["comparisons"]:
         print(
