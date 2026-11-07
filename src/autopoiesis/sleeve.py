@@ -29,6 +29,11 @@ from autopoiesis.risk_judgment import vol_scaled_fraction
 
 NEW_YORK = ZoneInfo("America/New_York")
 SLEEVE_STRATEGY_ID = "core-sleeve"
+#: The first trading day on which the sleeve was its symbol's sole controller (0878f7f, deployed
+#: in c41f646 on 2026-10-29 at 23:56 NY). Before it, other SPY strategies sold one share at a
+#: time and the sleeve bought three back: 10-26..10-29 hold 12 sleeve fills that measure that
+#: fight, not the sleeve. Reports of the sleeve's own performance start here.
+SLEEVE_EXCLUSIVE_SINCE = "2026-10-30"
 #: The ceiling the account holder authorised. Raising it is a code change they make, not a setting.
 SLEEVE_POOL_CAP = 20_000.0
 #: Risk statuses under which the forecast may size the position. SUSPENDED means the forecast has

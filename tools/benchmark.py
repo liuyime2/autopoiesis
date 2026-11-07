@@ -217,14 +217,20 @@ def _sleeve_section(config) -> dict | None:
         return None
     from autopoiesis.fill_reconciler import confirmed_fill_events
     from autopoiesis.journal import JsonlJournal
-    from autopoiesis.sleeve import NEW_YORK, SLEEVE_STRATEGY_ID, sleeve_performance
+    from autopoiesis.sleeve import NEW_YORK, SLEEVE_EXCLUSIVE_SINCE, SLEEVE_STRATEGY_ID, sleeve_performance
 
     journal = JsonlJournal(config.journal_path)
     prices = {}
     for record in journal.read_all():
         if record.snapshot.symbol == config.sleeve_symbol:
             prices[record.snapshot.timestamp.astimezone(NEW_YORK).date()] = record.snapshot.last_price
-    fills = confirmed_fill_events(journal.read_events())
+    from datetime import date
+
+    since = date.fromisoformat(SLEEVE_EXCLUSIVE_SINCE)
+    fills = [
+        event for event in confirmed_fill_events(journal.read_events())
+        if event.timestamp.astimezone(NEW_YORK).date() >= since
+    ]
     # The sleeve manages the whole position in its symbol, including any shares
     # the account already held when it started. State that inherited book from the
     # last SPY snapshot before the first sleeve fill instead of pretending the
@@ -245,10 +251,13 @@ def _sleeve_section(config) -> dict | None:
             for pos in record.snapshot.positions:
                 if pos.symbol.upper() == config.sleeve_symbol.upper():
                     initial_shares = float(pos.quantity)
-    return sleeve_performance(
+    result = sleeve_performance(
         fills, prices, config.sleeve_pool,
         initial_shares=initial_shares,
     )
+    if result is not None:
+        result["excluded_before"] = SLEEVE_EXCLUSIVE_SINCE
+    return result
 
 
 def _agent_level(config=None) -> dict | None:
@@ -489,7 +498,8 @@ def _run_prose(argv: list[str]) -> int:
         print("-" * 78)
         print(
             f"  {config.sleeve_symbol} pool ${sleeve['pool']:,.0f}, {sleeve['fills']} fill(s) over {sleeve['days']} day(s) "
-            f"since {sleeve['first_fill']}, on average {sleeve['average_deployed_fraction']:.0%} deployed"
+            f"since {sleeve['first_fill']} (fills before {sleeve['excluded_before']}, when other strategies also traded "
+            f"{config.sleeve_symbol}, are excluded), on average {sleeve['average_deployed_fraction']:.0%} deployed"
         )
         print(
             f"  PnL sleeve {sleeve['sleeve_pnl']:+,.2f} vs hold-the-pool {sleeve['hold_pool_pnl']:+,.2f}; "
