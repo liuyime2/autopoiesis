@@ -2050,12 +2050,22 @@ class AgentDaemon:
             except Exception as exc:
                 self._append_event("CYCLE_FAILED", status="FAILED", message=f"could not pick attention symbols: {exc}")
                 return symbols
+            # The first round of the day does not wait for the model. Measured 2026-11-06:
+            # ATTENTION_SELECTED and the first cycle both at 09:36:25 - the open's first
+            # round sat behind a multi-minute model call. It takes the broker's mechanical
+            # most-active list instead; the model chooses from the second round on.
+            first_round = getattr(self, "daily_cycle_count", 0) == 0
             choice = attention.select_attention(
                 candidates,
                 k=self.config.attention_slots,
-                transport=self.attention_transport,
+                transport=None if first_round else self.attention_transport,
                 context={"held": len(seen), "slots": self.config.attention_slots},
             )
+            if first_round and self.attention_transport is not None:
+                choice = attention.AttentionChoice(
+                    symbols=choice.symbols, reasons=choice.reasons, source=choice.source,
+                    note="first round of the day: model not asked",
+                )
             # Recorded every round, including when the model did not choose. The plan's
             # 24-hour evaluation compares chosen symbols against unchosen ones, and it
             # cannot do that from a record that only keeps the rounds the model won.

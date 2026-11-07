@@ -91,6 +91,8 @@ def _daemon(universe, slots=0, held=("TLT",), attention=("AAA",), fail_held=Fals
     d.loop = SimpleNamespace(data_gateway=gw)
     d.events = []
     d._append_event = lambda *a, **k: d.events.append(k.get("message"))  # type: ignore[method-assign]
+    # Mid-day: the first round of the day does not ask the model (tested below).
+    d.daily_cycle_count = 1
     return d
 
 
@@ -190,3 +192,25 @@ def test_a_model_that_does_not_answer_still_leaves_a_usable_watchlist():
     )
     assert events[0][1]["payload"]["source"] == "mechanical"
     assert "TimeoutError" in events[0][1]["payload"]["note"]
+
+
+def test_the_first_round_of_the_day_does_not_wait_for_the_model():
+    """Measured 2026-11-06: ATTENTION_SELECTED and the day's first cycle both at 09:36:25.
+    The open's first round sat behind the attention model call. It now takes the mechanical
+    list, says so, and the model is asked from the second round on."""
+    d = _daemon("tradable", slots=2, held=("TLT",), attention=("AAA", "BBB", "CCC"))
+
+    def must_not_be_called(prompt, schema):
+        raise AssertionError("the first round of the day must not call the attention model")
+
+    d.attention_transport = must_not_be_called
+    d.daily_cycle_count = 0
+    events = []
+    d._append_event = lambda event_type, **kwargs: events.append((event_type, kwargs))
+
+    symbols = d._round_symbols()
+
+    assert {"SPY", "QQQ", "TLT"} <= set(symbols)
+    payload = events[0][1]["payload"]
+    assert payload["source"] == "mechanical"
+    assert payload["note"] == "first round of the day: model not asked"
