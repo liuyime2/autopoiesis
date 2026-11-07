@@ -142,6 +142,18 @@ def _report_payload(report: ExperimentReport, starting_equity: float) -> dict:
             arm: [outcome.refusals for outcome in outcomes]
             for arm, outcomes in report.arms.items()
         },
+        "benchmark_fills": {
+            name: outcome.fills for name, outcome in report.benchmarks.items()
+        },
+        "control_fills": {
+            name: outcome.fills for name, outcome in report.controls.items()
+        },
+        "benchmark_refusals": {
+            name: outcome.refusals for name, outcome in report.benchmarks.items()
+        },
+        "control_refusals": {
+            name: outcome.refusals for name, outcome in report.controls.items()
+        },
     }
 
 
@@ -446,6 +458,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     payload = _report_payload(report, 100_000.0)
     stats = _statistics(report, n_trials=len(engines) + len(controls))
+    payload["statistics"] = stats
 
     (out_dir / "run_manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"

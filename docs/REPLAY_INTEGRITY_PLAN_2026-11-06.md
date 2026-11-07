@@ -109,6 +109,24 @@ A replay is valid only if all of these hold:
   differs.
 - Acceptance: a deliberately edited manifest fails verification.
 
+### P0.5a — Standard report artifacts
+
+Baseline: `reports/20261106/v2/` has the manifest, result, statistics, acceptance
+and CSV, but not the `data_quality.json`, `strategy_trials.jsonl`,
+`execution_trace.jsonl` and `handoff.md` that the execution plan requires.
+
+Fix: add `tools/report_artifacts.py`, which derives those four files from a finished
+run. Data quality is measured from the cached bars (duplicates, non-positive prices,
+zero-volume bars, calendar gaps); the trial ledger is one line per arm, benchmark and
+control; the execution trace is one line per fill and refusal; the handoff states the
+verdict, the evidence and the limits.
+
+Success: the four files exist, are deterministic across two runs, the handoff
+names the experiment commit and the data digest, and the reported maximum gap is
+the observed maximum (a normal 4-day weekend must not read as zero). Verification:
+run the tool twice and `cmp` the outputs; inspect `handoff.md` against
+`result.json`.
+
 ### P0.6 — Statistics
 
 - Aggregate seeds correctly (do not overwrite `by_arm` with the last seed).
