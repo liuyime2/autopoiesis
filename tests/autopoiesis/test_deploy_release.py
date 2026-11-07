@@ -58,7 +58,7 @@ def repo(tmp_path, monkeypatch):
 
 
 def test_a_release_lands_beside_the_main_checkout_with_the_runtime_linked(repo):
-    module, main, tree = repo
+    module, main, _tree = repo
     entry = module.deploy(approved_by="tester", now=SATURDAY)
 
     release = Path(entry["release_dir"])
