@@ -440,3 +440,27 @@ def test_admissible_strategy_symbols_removes_what_other_paths_own():
 
     assert admissible_strategy_symbols(live) == ("XLB", "XLE", "XLF")
     assert admissible_strategy_symbols(no_sleeve) == ("SPY", "XLB", "XLE", "XLF")
+
+
+def test_a_third_live_member_of_one_rule_family_is_refused(tmp_path):
+    """Seven SPY return_over_n rules differing only in lookback were one hypothesis."""
+    library, admission = _permission_fixture(tmp_path)
+    library.save(make_spec(strategy_id="probe", symbols=("XLB",)).model_copy(update={"lifecycle": "PROBATION"}))
+    assert admission.admit(_rule("xlb-rv60", "XLB", lookback=60)).accepted is True
+    assert admission.admit(_rule("xlb-rv66", "XLB", lookback=66)).accepted is True
+
+    third = admission.admit(_rule("xlb-rv72", "XLB", lookback=72))
+    other_symbol = admission.admit(_rule("xle-rv72", "XLE", lookback=72))
+
+    assert third.accepted is False
+    assert "xlb-rv60" in third.reason and "xlb-rv66" in third.reason
+    assert other_symbol.accepted is True
+
+
+def test_a_retired_member_does_not_hold_a_family_slot(tmp_path):
+    library, admission = _permission_fixture(tmp_path)
+    library.save(make_spec(strategy_id="probe", symbols=("XLB",)).model_copy(update={"lifecycle": "PROBATION"}))
+    for sid, lookback in (("old-1", 55), ("old-2", 58)):
+        library.save(_rule(sid, "XLB", lookback=lookback).model_copy(update={"lifecycle": "RETIRED"}))
+
+    assert admission.admit(_rule("xlb-rv60", "XLB", lookback=60)).accepted is True

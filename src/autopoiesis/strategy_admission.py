@@ -148,6 +148,26 @@ def _cash_equivalent_reason(strategy: StrategySpec) -> str | None:
     )
 
 
+#: Live (non-retired) RULE strategies one signal family may hold. Measured 2026-11-07: the
+#: library held seven SPY `return_over_n` BUY-above/SELL-below rules differing only in a
+#: lookback of 50-75 and a 0.3% threshold - one hypothesis counted seven times, which is how
+#: a screen run on each of them finds a "pass" by luck.
+RULE_FAMILY_LIMIT = 2
+
+
+def _rule_family(strategy: StrategySpec) -> tuple | None:
+    """(symbols, signal, when_above, when_below) for a RULE; None for every other kind."""
+    if strategy.kind != "RULE":
+        return None
+    params = strategy.parameters
+    return (
+        tuple(sorted(s.upper() for s in strategy.symbols)),
+        str(params.get("signal")),
+        str(params.get("when_above", "")).upper(),
+        str(params.get("when_below", "")).upper(),
+    )
+
+
 def admissible_strategy_symbols(config: object) -> tuple[str, ...]:
     """The symbols a trading strategy may be admitted on, in configured order.
 
@@ -615,7 +635,26 @@ class StrategyAdmission:
                 f"symbols, action, quantity and max_position_value. Propose a strategy "
                 f"that differs in one of those, or explain what problem it solves."
             )
+        family = self._rule_family_members(strategy, strategies)
+        if len(family) >= RULE_FAMILY_LIMIT:
+            return (
+                f"signal family {_rule_family(strategy)} already has {len(family)} live members "
+                f"({', '.join(family)}); another lookback or threshold of the same rule is the same "
+                f"hypothesis tested again, not a new one. Propose a different signal, direction or symbol."
+            )
         return None
+
+    def _rule_family_members(self, strategy: StrategySpec, strategies: list[StrategySpec]) -> list[str]:
+        mine = _rule_family(strategy)
+        if mine is None:
+            return []
+        return sorted(
+            existing.strategy_id
+            for existing in strategies
+            if existing.strategy_id != strategy.strategy_id
+            and existing.lifecycle != "RETIRED"
+            and _rule_family(existing) == mine
+        )
 
     def _is_small_fixed_size(self, strategy: StrategySpec) -> bool:
         action = str(strategy.parameters["action"]).upper()
