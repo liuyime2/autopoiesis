@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
@@ -21,19 +22,25 @@ def _hash_bytes(data: bytes) -> str:
 
 
 def _config_summary(config: AgentConfig | None) -> dict[str, Any]:
+    """Every scalar config field except credentials and paths to them.
+
+    The first version read `config.model_dump()`, which a dataclass does not have, so the
+    summary was always `{}` and the config digest was the hash of an empty object: a change
+    to the env file never changed the version digest (measured 2026-11-07).
+    """
     if config is None:
-        try:
-            config = AgentConfig.from_env()
-        except Exception:
-            return {}
-    # Exclude anything that looks like a credential or a path to one.
+        config = AgentConfig.from_env()
     secret_keys = {"api_key", "secret", "token", "password", "env_file"}
     out: dict[str, Any] = {}
-    for key, value in (config.model_dump() if hasattr(config, "model_dump") else {}).items():
+    for item in fields(config):
+        key = item.name
         if any(s in key.lower() for s in secret_keys):
             continue
+        value = getattr(config, key)
+        if isinstance(value, frozenset):
+            value = sorted(value)
         if isinstance(value, (str, int, float, bool, tuple, list)):
-            out[key] = value
+            out[key] = list(value) if isinstance(value, tuple) else value
     return out
 
 
@@ -47,33 +54,15 @@ def _prompt_digest() -> str:
 
 
 def _schema_digest() -> str:
-    try:
-        raw = json.dumps(STRATEGY_PARAMETER_SCHEMAS, sort_keys=True, default=str).encode()
-    except Exception:
-        return "unknown"
-    return _hash_bytes(raw)
+    return _hash_bytes(json.dumps(STRATEGY_PARAMETER_SCHEMAS, sort_keys=True, default=str).encode())
 
 
 def version_summary(config: AgentConfig | None = None) -> dict[str, Any]:
     cfg = _config_summary(config)
     cfg_blob = json.dumps(cfg, sort_keys=True, default=str).encode()
-    source_fp = "unknown"
-    try:
-        from autopoiesis.daemon import source_fingerprint
+    from autopoiesis.daemon import source_fingerprint
 
-        source_fp = source_fingerprint()
-    except Exception:
-        # Mirror without importing the package.
-        package_dir = Path(__file__).resolve().parent
-        digest = hashlib.sha256()
-        for path in sorted(package_dir.glob("*.py")):
-            digest.update(path.name.encode())
-            try:
-                digest.update(path.read_bytes())
-            except OSError:
-                continue
-        source_fp = digest.hexdigest()[:16]
-
+    source_fp = source_fingerprint()
     model = cfg.get("model", "")
     components = {
         "source_fingerprint": source_fp,
