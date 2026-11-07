@@ -127,6 +127,20 @@ the observed maximum (a normal 4-day weekend must not read as zero). Verificatio
 run the tool twice and `cmp` the outputs; inspect `handoff.md` against
 `result.json`.
 
+### P0.5b — Verify the manifest's spec and dataset links
+
+Baseline: `run_experiment.py` writes `spec_sha256` and `data.sha256` but nothing
+recomputes them; `prereg verify` checks only the spec against its registration. A
+manifest edited after the run would not be detected.
+
+Fix: move the dataset fingerprint into `research/manifest.py`, add
+`verify_manifest`, and a `tools/verify_run_manifest.py` CLI that recomputes both
+digests, checks bar count and bounds, and checks that the code commit exists. Add a
+tamper test that edits each digest and expects a failure.
+
+Success: the v2 manifest verifies; changing `data.sha256` or the spec bytes makes
+the CLI exit 1. Verification: run the CLI on v2, then on a tampered copy.
+
 ### P0.6 — Statistics
 
 - Aggregate seeds correctly (do not overwrite `by_arm` with the last seed).

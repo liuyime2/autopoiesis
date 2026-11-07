@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 import os
 import subprocess
@@ -41,6 +40,7 @@ from autopoiesis.research.experiment import (
     SmaEngine,
     run_experiment,
 )
+from autopoiesis.research.manifest import dataset_fingerprint, sha256_file
 from autopoiesis.research.statistics import (
     daily_returns,
     deflated_sharpe_ratio,
@@ -60,17 +60,6 @@ def _load_env() -> None:
             if line and not line.startswith("#") and "=" in line:
                 key, value = line.split("=", 1)
                 os.environ.setdefault(key, value)
-
-
-def _sha256_bytes(payload: bytes) -> str:
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _dataset_fingerprint(symbol: str, bars: list[ReplayBar]) -> str:
-    canonical = {"symbol": symbol.upper(), "bars": [bar.to_dict() for bar in bars]}
-    return _sha256_bytes(
-        json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    )
 
 
 def _code_commit() -> str:
@@ -416,7 +405,7 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     spec_path = Path(args.spec)
     spec_digest = (
-        _sha256_bytes(spec_path.read_bytes()) if spec_path.exists() else "missing"
+        sha256_file(spec_path) if spec_path.exists() else "missing"
     )
     manifest = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -430,7 +419,7 @@ def main(argv: list[str] | None = None) -> int:
             "interval": args.interval,
             "feed": args.feed,
             "bars": len(bars),
-            "sha256": _dataset_fingerprint(symbol, bars),
+            "sha256": dataset_fingerprint(symbol, bars),
             "source": data_source,
         },
         "seeds": [0],
