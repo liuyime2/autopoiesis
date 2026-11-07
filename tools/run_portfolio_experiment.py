@@ -22,16 +22,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from autopoiesis.replay import load_bars  # noqa: E402
-from autopoiesis.research.experiment import (  # noqa: E402
+from autopoiesis.replay import load_bars
+from autopoiesis.research.experiment import (
     BuyAndHoldEngine,
     CostModel,
     RiskLimits,
     SleeveEngine,
     run_arm,
 )
-from autopoiesis.research.manifest import dataset_fingerprint, sha256_file  # noqa: E402
-from autopoiesis.research.portfolio_experiment import (  # noqa: E402
+from autopoiesis.research.manifest import dataset_fingerprint, sha256_file
+from autopoiesis.research.portfolio_experiment import (
     CashEngine,
     MarkovTiming,
     Reversed,
@@ -47,7 +47,7 @@ from autopoiesis.research.portfolio_experiment import (  # noqa: E402
     signal_path,
     sum_curves,
 )
-from autopoiesis.research.statistics import (  # noqa: E402
+from autopoiesis.research.statistics import (
     daily_returns,
     deflated_sharpe_ratio,
     holm_adjust,
@@ -175,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
         }
         return sum_curves([core_book.equity_curve, *[books[s].equity_curve for s in SATELLITES]])
 
-    benchmarks = {"BENCH_POOL": bench({s: 0.98 for s in SATELLITES}, SLEEVE_POOL)}
+    benchmarks = {"BENCH_POOL": bench(dict.fromkeys(SATELLITES, 0.98), SLEEVE_POOL)}
     exposure: dict[str, dict] = {"core_SPY": _r(core_fraction, 4)}
     for name in ("A", "B", "C"):
         fr = {s: deployed_fraction(arms[name][s], bars[s], SATELLITE_POOL) for s in SATELLITES}

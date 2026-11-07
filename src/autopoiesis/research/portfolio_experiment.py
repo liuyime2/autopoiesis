@@ -201,6 +201,7 @@ class MarkovTiming:
         self.mean_run = max(self.mean_run, 1.0)
 
     def __call__(self, closes: Sequence[float]) -> bool:
+        del closes  # timing that ignores prices is the point of the control
         f = self.long_fraction
         if f <= 0.0:
             return False
