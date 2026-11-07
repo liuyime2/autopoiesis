@@ -60,6 +60,9 @@ The difference is arm minus benchmark. Compare A with BENCH_20K (same 20k sleeve
 ## What this does not prove
 
 - It does not test D: no weekly LLM engine exists.
+- C is a fixed SMA20/50 rule, not the non-LLM automatic search the G4 design calls for, and B and C are standalone SPY rules rather than core sleeve plus satellites. The questions 'value of automatic optimization' and 'core + rule' are not tested by this run.
+- The universe is one symbol (SPY). Cross-asset risk budgeting, VIX, FRED, EDGAR and news are not in this dataset.
+- No parameter is fitted in any arm, so purging and embargo have nothing to separate; they become required the moment a search arm is added.
 - It is historical development evidence, not unseen data.
 - The 1.00% commission is a stress assumption. Lower costs would help the high-turnover arms, but the benchmarks already lead before costs.
 - The arms are deterministic, so their seed variance is zero. Only the random control has seed variance, and only seed 0 was run.
@@ -69,7 +72,7 @@ The difference is arm minus benchmark. Compare A with BENCH_20K (same 20k sleeve
 
 1. Do not promote any arm to G5 on this evidence.
 2. Build the weekly LLM D arm with persisted request/response hashes, or pre-register a three-arm confirmatory experiment with a declared `min_effect` and a forward window.
-3. Fix the sizing mismatch before a new arm is added: B/C buy one share per signal and accumulate, while A targets a dollar pool. A fair comparison needs the same position-sizing rule across arms.
+3. Fix the arm composition before a new arm is added: B/C buy one share per signal and accumulate, while A targets a dollar pool, and none of the three is a core sleeve plus satellites on a multi-symbol universe. A fair comparison needs the same position-sizing rule across arms and the planned core-plus-satellite composition.
 4. Keep both benchmarks and the negative controls in every future report.
 
 ## Data quality
