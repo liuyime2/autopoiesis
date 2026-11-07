@@ -100,6 +100,13 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_journal_rejects_unreal_records.py": ("data-integrity", "unit-integration"),
     "test_equity_curve.py": ("pnl-accounting", "unit-integration"),
     "test_core_sleeve.py": ("risk-controls", "guardian-bypass-prevention", "unit-integration"),
+    # G2-G4 research files (2026-11-05/06), classified 2026-11-07 when the fresh-clone gate
+    # found them unassigned.
+    "test_data_events.py": ("unit-integration", "point-in-time-no-leakage"),
+    "test_experiment.py": ("unit-integration", "replay-determinism", "guardian-bypass-prevention"),
+    "test_manifest.py": ("unit-integration", "replay-determinism"),
+    "test_statistics.py": ("unit-integration",),
+    "test_versioning.py": ("unit-integration", "model-provenance"),
     "test_staleness_not_strategy_fault.py": (
         "pnl-accounting", "lifecycle-invariants", "guardian-bypass-prevention",
     ),

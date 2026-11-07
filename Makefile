@@ -502,7 +502,7 @@ evaluate:
 	fi
 reproduce:
 	@mkdir -p runtime/autopoiesis
-	@$(PY) tools/provenance.py > runtime/autopoiesis/reproduce.txt
+	@umask 077 && $(PY) tools/provenance.py > runtime/autopoiesis/reproduce.txt
 	@echo "wrote runtime/autopoiesis/reproduce.txt"
 	@sed -n '1,10p' runtime/autopoiesis/reproduce.txt
 

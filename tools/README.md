@@ -443,3 +443,19 @@ collector failures to its own status 2. Ordinary operator commands preserve the 
 process exit contract.
 Reinstall with a newly frozen fingerprint/cutoff after a source deployment. Installation
 and real broker/model observations are separate proofs from the labelled synthetic tests.
+
+## Deployment, identity and per-strategy explanations (2026-11-05 onwards)
+
+- **`deploy_release.py`** — the single deployment entry point: lock, market-hours refusal, one `releases/<sha>` worktree per commit, ledger entry, optional `--install-service`. See `docs/DEPLOYMENT_RUNBOOK.md`.
+- **`verify_runtime_identity.py`** — prints commit, working directory, pid, source fingerprint and model digest, so the installed build, the release directory and the ledger can be compared.
+- **`first_open_check.py`** — the read-only first-open checklist (heartbeat, errors, first cycle time, sleeve exclusivity, admissions).
+- **`why.py`** — `make why STRATEGY=<id>`: why a strategy was refused, why it cannot trade, what evidence it lacks.
+- **`information-refresh.service.in`** — the systemd unit for `refresh_information.py`, rendered by `./autopoiesis install-service` alongside `information-refresh.timer`.
+
+## Historical experiments (research only)
+
+- **`run_experiment.py`** — the G4 v2 single-symbol diagnostic (`configs/experiment_4arm_v2.spec`).
+- **`run_portfolio_experiment.py`** — the G4 v3 core-plus-satellite experiment (`configs/experiment_portfolio_v3.spec`), from cached real daily bars only.
+- **`report_artifacts.py`** — writes the standard report artefact set for an experiment run.
+- **`verify_run_manifest.py`** — re-checks a run manifest's spec and dataset digests against the files.
+- **`audit_data_coverage.py`** — reports which symbols and windows the historical endpoint actually returns.
