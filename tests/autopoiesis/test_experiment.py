@@ -14,9 +14,11 @@ import pytest
 from autopoiesis.models import TradeDecision
 from autopoiesis.replay import ReplayBar
 from autopoiesis.research.experiment import (
+    BuyAndHoldEngine,
     CostModel,
     HoldEngine,
     RiskLimits,
+    SleeveEngine,
     run_arm,
     run_experiment,
 )
@@ -154,3 +156,42 @@ def test_experiment_marks_d_not_run_and_keeps_every_seed() -> None:
     assert len(report.arms["A"]) == 2
     assert report.conclusion == "INSUFFICIENT"
     assert any("D NOT_RUN" in note for note in report.notes)
+
+
+def test_sleeve_arm_buys_after_its_forecast_is_ready() -> None:
+    series = bars(80, start=100.0, step=1.0)
+    outcome = run_arm(
+        arm="A",
+        bars=series,
+        engine=SleeveEngine(pool=20_000, target_vol_pct=10.0),
+        starting_equity=100_000,
+        risk=permissive(),
+    )
+    assert outcome.fills, "the core sleeve should rebalance once it has a forecast"
+    assert all(fill["action"] in {"BUY", "SELL"} for fill in outcome.fills)
+
+
+def test_buy_and_hold_benchmark_buys_once() -> None:
+    outcome = run_arm(
+        arm="BENCHMARK",
+        bars=bars(10),
+        engine=BuyAndHoldEngine(max_position_value=25_000),
+        starting_equity=100_000,
+        risk=permissive(),
+    )
+    assert len(outcome.fills) == 1
+    assert outcome.fills[0]["action"] == "BUY"
+
+
+def test_experiment_keeps_benchmark_and_controls_out_of_the_family() -> None:
+    report = run_experiment(
+        bars=bars(30),
+        engines={"A": HoldEngine},
+        seeds=(0,),
+        risk=permissive(),
+        benchmark=HoldEngine,
+        controls={"N1": HoldEngine},
+    )
+    assert report.benchmark is not None
+    assert set(report.controls) == {"N1"}
+    assert report.conclusion == "INSUFFICIENT"

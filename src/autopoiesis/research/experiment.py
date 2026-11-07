@@ -20,6 +20,7 @@ trading evidence.
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
@@ -27,6 +28,8 @@ from typing import Literal
 from autopoiesis.guardian import Guardian
 from autopoiesis.models import DataSnapshot, TradeDecision
 from autopoiesis.replay import ReplayBar, ReplayBook, ReplayDataGateway, ReplayExecutor
+from autopoiesis.risk_judgment import ewma_series
+from autopoiesis.sleeve import SLEEVE_POOL_CAP, SLEEVE_STRATEGY_ID, CoreSleeve
 
 from .statistics import daily_returns, paired_block_bootstrap
 
@@ -67,6 +70,8 @@ class ArmOutcome:
 @dataclass
 class ExperimentReport:
     arms: dict[str, list[ArmOutcome]] = field(default_factory=dict)
+    benchmark: ArmOutcome | None = None
+    controls: dict[str, ArmOutcome] = field(default_factory=dict)
     comparisons: list[dict] = field(default_factory=list)
     conclusion: str = "INSUFFICIENT"
     notes: list[str] = field(default_factory=list)
@@ -167,10 +172,226 @@ class HoldEngine:
         )
 
 
+@dataclass
+class SleeveEngine:
+    """Arm A: the production core sleeve, sized by a point-in-time volatility forecast.
+
+    The sleeve is reused rather than reimplemented. Its only injected dependency is
+    the risk block: the replay supplies an EWMA forecast computed from closes the
+    engine has already seen, so a day is never sized with a later day's volatility.
+    The live path uses `RiskJudgment`; that path reads a VIX cache whose last point
+    is today's, which would leak the future into every historical day.
+    """
+
+    pool: float = 20_000.0
+    target_vol_pct: float = 10.0
+    band: float = 0.10
+    symbol: str = "SPY"
+    min_closes: int = 30
+    _closes: list[float] = field(default_factory=list, init=False, repr=False)
+    _vol: float | None = field(default=None, init=False, repr=False)
+    _sleeve: CoreSleeve = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if not 0 < self.pool <= SLEEVE_POOL_CAP:
+            raise ValueError(f"sleeve pool must be in (0, {SLEEVE_POOL_CAP}], got {self.pool}")
+        if self.target_vol_pct <= 0:
+            raise ValueError("sleeve target volatility must be positive")
+        self._sleeve = CoreSleeve(
+            symbol=self.symbol,
+            pool=self.pool,
+            target_vol_pct=self.target_vol_pct,
+            risk_block=self._risk_block,
+            band=self.band,
+        )
+
+    def _risk_block(self, symbol: str) -> dict | None:
+        del symbol
+        if self._vol is None:
+            return None
+        # UNVERIFIED is usable for the sleeve and is the honest status for a
+        # forecast whose quality has not been graded on this replay.
+        return {"status": "UNVERIFIED", "forecast_vol_pct": self._vol}
+
+    def __call__(self, snapshot: DataSnapshot) -> TradeDecision:
+        self._closes.append(snapshot.last_price)
+        series = ewma_series(self._closes)
+        self._vol = series[-1] if series and len(self._closes) >= self.min_closes else None
+        decision = self._sleeve.plan(snapshot)
+        if decision is not None:
+            return decision
+        return TradeDecision(
+            symbol=snapshot.symbol,
+            action="HOLD",
+            quantity=0,
+            confidence=0.0,
+            rationale="core sleeve: inside the band, or the volatility forecast is not ready",
+            strategy_id=SLEEVE_STRATEGY_ID,
+        )
+
+
+@dataclass
+class BuyAndHoldEngine:
+    """Benchmark: buy SPY once at the same position limit, then hold.
+
+    Without this row a positive return reads as skill. The benchmark uses the same
+    Guardian and the same `max_position_value`, so the comparison is risk-budgeted
+    rather than a full-capital buy-and-hold that the mandate does not permit.
+    """
+
+    max_position_value: float = 25_000.0
+    quantity_cap: int | None = None
+    strategy_id: str = "buy-and-hold-spy"
+    _bought: bool = field(default=False, init=False)
+
+    def __call__(self, snapshot: DataSnapshot) -> TradeDecision:
+        held = sum(
+            position.quantity
+            for position in snapshot.positions
+            if position.symbol.upper() == snapshot.symbol.upper()
+        )
+        if held > 0 or self._bought:
+            return TradeDecision(
+                symbol=snapshot.symbol,
+                action="HOLD",
+                quantity=0,
+                confidence=0.0,
+                rationale="benchmark already invested",
+                strategy_id=self.strategy_id,
+            )
+        budget = min(self.max_position_value, snapshot.account.buying_power)
+        quantity = int(budget // snapshot.last_price)
+        if self.quantity_cap is not None:
+            quantity = min(quantity, self.quantity_cap)
+        if quantity <= 0:
+            return TradeDecision(
+                symbol=snapshot.symbol,
+                action="HOLD",
+                quantity=0,
+                confidence=0.0,
+                rationale="benchmark budget cannot buy one share",
+                strategy_id=self.strategy_id,
+            )
+        self._bought = True
+        return TradeDecision(
+            symbol=snapshot.symbol,
+            action="BUY",
+            quantity=quantity,
+            confidence=0.6,
+            rationale=f"benchmark buys {quantity} shares at the position limit and holds",
+            strategy_id=self.strategy_id,
+        )
+
+
+@dataclass
+class RandomEngine:
+    """Negative control: seeded random direction at a fixed cadence."""
+
+    seed: int = 0
+    quantity: int = 1
+    every: int = 20
+    strategy_id: str = "random-control"
+    _rng: random.Random = field(init=False, repr=False)
+    _calls: int = field(default=0, init=False)
+
+    def __post_init__(self) -> None:
+        self._rng = random.Random(self.seed)
+
+    def __call__(self, snapshot: DataSnapshot) -> TradeDecision:
+        self._calls += 1
+        action: Literal["BUY", "SELL", "HOLD"] = "HOLD"
+        if self._calls % self.every == 0:
+            action = "BUY" if self._rng.random() < 0.5 else "SELL"
+        return TradeDecision(
+            symbol=snapshot.symbol,
+            action=action,
+            quantity=self.quantity if action != "HOLD" else 0,
+            confidence=0.6 if action != "HOLD" else 0.0,
+            rationale=f"negative control: seeded random ({self.seed})",
+            strategy_id=self.strategy_id,
+        )
+
+
+@dataclass
+class ReversedSmaEngine:
+    """Negative control: the fixed rule's signals, inverted."""
+
+    inner: SmaEngine
+    strategy_id: str = "reversed-control"
+
+    def __call__(self, snapshot: DataSnapshot) -> TradeDecision:
+        decision = self.inner(snapshot)
+        if decision.action == "BUY":
+            return decision.model_copy(
+                update={
+                    "action": "SELL",
+                    "rationale": f"reversed control: {decision.rationale}",
+                }
+            )
+        if decision.action == "SELL":
+            return decision.model_copy(
+                update={
+                    "action": "BUY",
+                    "rationale": f"reversed control: {decision.rationale}",
+                }
+            )
+        return decision
+
+
+@dataclass
+class ShuffledSmaEngine:
+    """Negative control: the same SMA rule over a shuffled history.
+
+    If a rule's result survives destroying the order of its own inputs, the result
+    was not produced by the rule. The price used for the fill is still real; only
+    the history the signal reads is shuffled.
+    """
+
+    fast: int = 20
+    band: float = 0.01
+    seed: int = 0
+    quantity: int = 1
+    confidence: float = 0.6
+    strategy_id: str = "shuffled-control"
+    _prices: list[float] = field(default_factory=list, init=False, repr=False)
+    _rng: random.Random = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._rng = random.Random(self.seed)
+
+    def __call__(self, snapshot: DataSnapshot) -> TradeDecision:
+        self._prices.append(snapshot.last_price)
+        history = list(self._prices)
+        self._rng.shuffle(history)
+        if len(history) < self.fast:
+            return TradeDecision(
+                symbol=snapshot.symbol,
+                action="HOLD",
+                quantity=0,
+                confidence=0.0,
+                rationale="negative control: not enough history",
+                strategy_id=self.strategy_id,
+            )
+        sma = sum(history[-self.fast:]) / self.fast
+        action: Literal["BUY", "SELL", "HOLD"] = "HOLD"
+        if snapshot.last_price > sma * (1 + self.band):
+            action = "BUY"
+        elif snapshot.last_price < sma * (1 - self.band):
+            action = "SELL"
+        return TradeDecision(
+            symbol=snapshot.symbol,
+            action=action,
+            quantity=self.quantity if action != "HOLD" else 0,
+            confidence=self.confidence if action != "HOLD" else 0.0,
+            rationale=f"negative control: shuffled history ({self.seed})",
+            strategy_id=self.strategy_id,
+        )
+
+
 def default_engines() -> dict[str, Callable[[], Engine]]:
     """The three arms that can run without an LLM. D is deliberately absent."""
     return {
-        "A": HoldEngine,
+        "A": SleeveEngine,
         "B": lambda: SmaEngine(fast=20, band=0.01, strategy_id="fixed-sma20"),
         "C": lambda: SmaEngine(fast=20, slow=50, strategy_id="search-sma20-50"),
     }
@@ -302,26 +523,37 @@ def run_experiment(
     symbol: str = "SPY",
     risk: RiskLimits | None = None,
     costs: CostModel | None = None,
+    benchmark: Callable[[], Engine] | None = None,
+    controls: dict[str, Callable[[], Engine]] | None = None,
+    min_effect: float = 0.0,
 ) -> ExperimentReport:
-    """Run every supplied arm for every seed, then compare D-C, C-A and B-A."""
+    """Run every supplied arm for every seed, then compare D-C, C-A and B-A.
+
+    The benchmark and controls are reported beside the arms but are never part of
+    the pre-registered family, so they cannot turn a comparison into a pass.
+    """
     engines = engines if engines is not None else default_engines()
     report = ExperimentReport()
 
+    def run_one(arm: str, engine: Engine, seed: int) -> ArmOutcome:
+        return run_arm(
+            arm=arm,
+            bars=bars,
+            engine=engine,
+            seed=seed,
+            starting_equity=starting_equity,
+            symbol=symbol,
+            risk=risk,
+            costs=costs,
+        )
+
     for arm, factory in engines.items():
-        report.arms[arm] = []
-        for seed in seeds:
-            report.arms[arm].append(
-                run_arm(
-                    arm=arm,
-                    bars=bars,
-                    engine=factory(),
-                    seed=seed,
-                    starting_equity=starting_equity,
-                    symbol=symbol,
-                    risk=risk,
-                    costs=costs,
-                )
-            )
+        report.arms[arm] = [run_one(arm, factory(), seed) for seed in seeds]
+
+    if benchmark is not None:
+        report.benchmark = run_one("BENCHMARK", benchmark(), seeds[0] if seeds else 0)
+    for name, factory in (controls or {}).items():
+        report.controls[name] = run_one(name, factory(), seeds[0] if seeds else 0)
 
     for left, right in (("D", "C"), ("C", "A"), ("B", "A")):
         if left not in report.arms or right not in report.arms:
@@ -341,6 +573,8 @@ def run_experiment(
                     "mean_diff": boot["mean_diff"],
                     "ci_low": boot["ci_low"],
                     "ci_high": boot["ci_high"],
+                    "p_value": boot.get("p_value"),
+                    "p_two_sided": boot.get("p_two_sided"),
                     "n": boot["n"],
                 }
             )
@@ -352,7 +586,7 @@ def run_experiment(
             "was not evaluated"
         )
         report.conclusion = "INSUFFICIENT"
-    elif all(c["ci_low"] > 0 and c["mean_diff"] > 0 for c in primary):
+    elif all(c["ci_low"] > 0 and c["mean_diff"] >= min_effect for c in primary):
         report.conclusion = "PROVEN"
     elif all(c["ci_high"] < 0 for c in primary):
         report.conclusion = "NOT PROVEN"

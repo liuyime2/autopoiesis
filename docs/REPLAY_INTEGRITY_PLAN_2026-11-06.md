@@ -118,10 +118,35 @@ A replay is valid only if all of these hold:
 - Acceptance: a test with two synthetic seeds shows both are used; the Holm-adjusted
   p-values are monotone.
 
+### P0.6a — DSR scaling defect found in the v2 report
+
+Baseline: `reports/20261106/v2/statistical_report.md` reports DSR 0.0000 for A/B/C
+while their per-bar Sharpe is 0.039–0.045. The implementation compared a per-period
+Sharpe to the *unscaled* expected maximum (~1.30), so the statistic was always
+negative. This is a defect in the evidence, not a property of the strategies.
+
+Fix: `V[SR] = (1 - skew*SR + (kurt-1)/4*SR^2)/(T-1)`, then
+`SR0 = sqrt(V[SR]) * ((1-gamma)*z(1-1/N) + gamma*z(1-1/(N e)))`, with `SR0=0` for
+`N=1`; keep
+`DSR = Phi((SR - SR0)*sqrt(T-1)/sqrt(1 - skew*SR + (kurt-1)/4*SR^2))`.
+
+Success: a unit test with a hand-computed reference returns DSR > 0.99; the regenerated
+v2 report no longer reports 0 for every arm. Verification:
+`pytest tests/autopoiesis/test_statistics.py`, then rerun
+`tools/run_experiment.py --offline --out reports/20261106/v2` and inspect the report.
+
 ### P0.7 — Negative controls
 
-- Add random-direction, reversed-rule, shuffled-label, and future-injection controls.
-- Acceptance: each control is rejected or reports the expected failure mode.
+- Add random-direction, reversed-rule, shuffled-history, and future-injection controls.
+- The v2 run implements random, reversed and shuffled-history. Shuffled-label is not
+  meaningful for a rule that does not train on labels; shuffled-history is the
+  equivalent falsification. Future-injection is enforced by the harness tests
+  `test_fill_uses_next_bar_open` and `test_last_bar_cannot_fill`, not by a strategy run:
+  a strategy that could see the next bar would be a defect in `run_arm`, and the test
+  is the control for that defect.
+- Acceptance: each implemented control is reported beside the arms, never inside the
+  pre-registered family; the timing tests fail if a decision at bar `t` can fill at
+  bar `t`.
 
 ## 6. Re-run and acceptance
 
