@@ -1,0 +1,484 @@
+{
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "trials": {
+    "A": {
+      "max_return_pct": 8.6681,
+      "mean_return_pct": 8.6681,
+      "min_return_pct": 8.6681,
+      "rows": [
+        {
+          "fills": 95,
+          "final_equity": 108668.08,
+          "max_drawdown_pct": 2.6968,
+          "return_pct": 8.6681,
+          "seed": 0
+        },
+        {
+          "fills": 95,
+          "final_equity": 108668.08,
+          "max_drawdown_pct": 2.6968,
+          "return_pct": 8.6681,
+          "seed": 1
+        },
+        {
+          "fills": 95,
+          "final_equity": 108668.08,
+          "max_drawdown_pct": 2.6968,
+          "return_pct": 8.6681,
+          "seed": 2
+        },
+        {
+          "fills": 95,
+          "final_equity": 108668.08,
+          "max_drawdown_pct": 2.6968,
+          "return_pct": 8.6681,
+          "seed": 3
+        },
+        {
+          "fills": 95,
+          "final_equity": 108668.08,
+          "max_drawdown_pct": 2.6968,
+          "return_pct": 8.6681,
+          "seed": 4
+        },
+        {
+          "fills": 95,
+          "final_equity": 108668.08,
+          "max_drawdown_pct": 2.6968,
+          "return_pct": 8.6681,
+          "seed": 5
+        },
+        {
+          "fills": 95,
+          "final_equity": 108668.08,
+          "max_drawdown_pct": 2.6968,
+          "return_pct": 8.6681,
+          "seed": 6
+        },
+        {
+          "fills": 95,
+          "final_equity": 108668.08,
+          "max_drawdown_pct": 2.6968,
+          "return_pct": 8.6681,
+          "seed": 7
+        },
+        {
+          "fills": 95,
+          "final_equity": 108668.08,
+          "max_drawdown_pct": 2.6968,
+          "return_pct": 8.6681,
+          "seed": 8
+        },
+        {
+          "fills": 95,
+          "final_equity": 108668.08,
+          "max_drawdown_pct": 2.6968,
+          "return_pct": 8.6681,
+          "seed": 9
+        }
+      ],
+      "stdev_return_pct": 0.0
+    },
+    "B": {
+      "max_return_pct": 10.221,
+      "mean_return_pct": 10.221,
+      "min_return_pct": 10.221,
+      "rows": [
+        {
+          "fills": 691,
+          "final_equity": 110220.99,
+          "max_drawdown_pct": 5.4715,
+          "return_pct": 10.221,
+          "seed": 0
+        },
+        {
+          "fills": 691,
+          "final_equity": 110220.99,
+          "max_drawdown_pct": 5.4715,
+          "return_pct": 10.221,
+          "seed": 1
+        },
+        {
+          "fills": 691,
+          "final_equity": 110220.99,
+          "max_drawdown_pct": 5.4715,
+          "return_pct": 10.221,
+          "seed": 2
+        },
+        {
+          "fills": 691,
+          "final_equity": 110220.99,
+          "max_drawdown_pct": 5.4715,
+          "return_pct": 10.221,
+          "seed": 3
+        },
+        {
+          "fills": 691,
+          "final_equity": 110220.99,
+          "max_drawdown_pct": 5.4715,
+          "return_pct": 10.221,
+          "seed": 4
+        },
+        {
+          "fills": 691,
+          "final_equity": 110220.99,
+          "max_drawdown_pct": 5.4715,
+          "return_pct": 10.221,
+          "seed": 5
+        },
+        {
+          "fills": 691,
+          "final_equity": 110220.99,
+          "max_drawdown_pct": 5.4715,
+          "return_pct": 10.221,
+          "seed": 6
+        },
+        {
+          "fills": 691,
+          "final_equity": 110220.99,
+          "max_drawdown_pct": 5.4715,
+          "return_pct": 10.221,
+          "seed": 7
+        },
+        {
+          "fills": 691,
+          "final_equity": 110220.99,
+          "max_drawdown_pct": 5.4715,
+          "return_pct": 10.221,
+          "seed": 8
+        },
+        {
+          "fills": 691,
+          "final_equity": 110220.99,
+          "max_drawdown_pct": 5.4715,
+          "return_pct": 10.221,
+          "seed": 9
+        }
+      ],
+      "stdev_return_pct": 0.0
+    },
+    "C": {
+      "max_return_pct": 11.8353,
+      "mean_return_pct": 11.8353,
+      "min_return_pct": 11.8353,
+      "rows": [
+        {
+          "fills": 404,
+          "final_equity": 111835.26,
+          "max_drawdown_pct": 5.027,
+          "return_pct": 11.8353,
+          "seed": 0
+        },
+        {
+          "fills": 404,
+          "final_equity": 111835.26,
+          "max_drawdown_pct": 5.027,
+          "return_pct": 11.8353,
+          "seed": 1
+        },
+        {
+          "fills": 404,
+          "final_equity": 111835.26,
+          "max_drawdown_pct": 5.027,
+          "return_pct": 11.8353,
+          "seed": 2
+        },
+        {
+          "fills": 404,
+          "final_equity": 111835.26,
+          "max_drawdown_pct": 5.027,
+          "return_pct": 11.8353,
+          "seed": 3
+        },
+        {
+          "fills": 404,
+          "final_equity": 111835.26,
+          "max_drawdown_pct": 5.027,
+          "return_pct": 11.8353,
+          "seed": 4
+        },
+        {
+          "fills": 404,
+          "final_equity": 111835.26,
+          "max_drawdown_pct": 5.027,
+          "return_pct": 11.8353,
+          "seed": 5
+        },
+        {
+          "fills": 404,
+          "final_equity": 111835.26,
+          "max_drawdown_pct": 5.027,
+          "return_pct": 11.8353,
+          "seed": 6
+        },
+        {
+          "fills": 404,
+          "final_equity": 111835.26,
+          "max_drawdown_pct": 5.027,
+          "return_pct": 11.8353,
+          "seed": 7
+        },
+        {
+          "fills": 404,
+          "final_equity": 111835.26,
+          "max_drawdown_pct": 5.027,
+          "return_pct": 11.8353,
+          "seed": 8
+        },
+        {
+          "fills": 404,
+          "final_equity": 111835.26,
+          "max_drawdown_pct": 5.027,
+          "return_pct": 11.8353,
+          "seed": 9
+        }
+      ],
+      "stdev_return_pct": 0.0
+    },
+    "N1_random": {
+      "max_return_pct": 2.9504,
+      "mean_return_pct": 1.3953,
+      "min_return_pct": 0.018,
+      "rows": [
+        {
+          "fills": 63,
+          "final_equity": 100297.53,
+          "max_drawdown_pct": 0.3684,
+          "return_pct": 0.2975,
+          "seed": 0
+        },
+        {
+          "fills": 77,
+          "final_equity": 102950.45,
+          "max_drawdown_pct": 0.7653,
+          "return_pct": 2.9504,
+          "seed": 1
+        },
+        {
+          "fills": 62,
+          "final_equity": 100017.99,
+          "max_drawdown_pct": 0.4187,
+          "return_pct": 0.018,
+          "seed": 2
+        },
+        {
+          "fills": 62,
+          "final_equity": 100299.42,
+          "max_drawdown_pct": 0.1966,
+          "return_pct": 0.2994,
+          "seed": 3
+        },
+        {
+          "fills": 73,
+          "final_equity": 101469.34,
+          "max_drawdown_pct": 0.8914,
+          "return_pct": 1.4693,
+          "seed": 4
+        },
+        {
+          "fills": 69,
+          "final_equity": 101610.26,
+          "max_drawdown_pct": 1.0091,
+          "return_pct": 1.6103,
+          "seed": 5
+        },
+        {
+          "fills": 68,
+          "final_equity": 100864.86,
+          "max_drawdown_pct": 0.4175,
+          "return_pct": 0.8649,
+          "seed": 6
+        },
+        {
+          "fills": 78,
+          "final_equity": 102269.98,
+          "max_drawdown_pct": 1.1995,
+          "return_pct": 2.27,
+          "seed": 7
+        },
+        {
+          "fills": 78,
+          "final_equity": 101762.64,
+          "max_drawdown_pct": 1.1756,
+          "return_pct": 1.7626,
+          "seed": 8
+        },
+        {
+          "fills": 78,
+          "final_equity": 102410.6,
+          "max_drawdown_pct": 1.3462,
+          "return_pct": 2.4106,
+          "seed": 9
+        }
+      ],
+      "stdev_return_pct": 0.9992
+    },
+    "N2_reversed": {
+      "max_return_pct": 3.7072,
+      "mean_return_pct": 3.7072,
+      "min_return_pct": 3.7072,
+      "rows": [
+        {
+          "fills": 675,
+          "final_equity": 103707.18,
+          "max_drawdown_pct": 2.5291,
+          "return_pct": 3.7072,
+          "seed": 0
+        },
+        {
+          "fills": 675,
+          "final_equity": 103707.18,
+          "max_drawdown_pct": 2.5291,
+          "return_pct": 3.7072,
+          "seed": 1
+        },
+        {
+          "fills": 675,
+          "final_equity": 103707.18,
+          "max_drawdown_pct": 2.5291,
+          "return_pct": 3.7072,
+          "seed": 2
+        },
+        {
+          "fills": 675,
+          "final_equity": 103707.18,
+          "max_drawdown_pct": 2.5291,
+          "return_pct": 3.7072,
+          "seed": 3
+        },
+        {
+          "fills": 675,
+          "final_equity": 103707.18,
+          "max_drawdown_pct": 2.5291,
+          "return_pct": 3.7072,
+          "seed": 4
+        },
+        {
+          "fills": 675,
+          "final_equity": 103707.18,
+          "max_drawdown_pct": 2.5291,
+          "return_pct": 3.7072,
+          "seed": 5
+        },
+        {
+          "fills": 675,
+          "final_equity": 103707.18,
+          "max_drawdown_pct": 2.5291,
+          "return_pct": 3.7072,
+          "seed": 6
+        },
+        {
+          "fills": 675,
+          "final_equity": 103707.18,
+          "max_drawdown_pct": 2.5291,
+          "return_pct": 3.7072,
+          "seed": 7
+        },
+        {
+          "fills": 675,
+          "final_equity": 103707.18,
+          "max_drawdown_pct": 2.5291,
+          "return_pct": 3.7072,
+          "seed": 8
+        },
+        {
+          "fills": 675,
+          "final_equity": 103707.18,
+          "max_drawdown_pct": 2.5291,
+          "return_pct": 3.7072,
+          "seed": 9
+        }
+      ],
+      "stdev_return_pct": 0.0
+    },
+    "N3_shuffled": {
+      "max_return_pct": 18.3596,
+      "mean_return_pct": 17.8593,
+      "min_return_pct": 17.5296,
+      "rows": [
+        {
+          "fills": 289,
+          "final_equity": 117907.88,
+          "max_drawdown_pct": 7.7248,
+          "return_pct": 17.9079,
+          "seed": 0
+        },
+        {
+          "fills": 288,
+          "final_equity": 117818.69,
+          "max_drawdown_pct": 7.8823,
+          "return_pct": 17.8187,
+          "seed": 1
+        },
+        {
+          "fills": 303,
+          "final_equity": 117544.76,
+          "max_drawdown_pct": 8.19,
+          "return_pct": 17.5448,
+          "seed": 2
+        },
+        {
+          "fills": 299,
+          "final_equity": 117620.31,
+          "max_drawdown_pct": 8.0381,
+          "return_pct": 17.6203,
+          "seed": 3
+        },
+        {
+          "fills": 285,
+          "final_equity": 117853.99,
+          "max_drawdown_pct": 7.8302,
+          "return_pct": 17.854,
+          "seed": 4
+        },
+        {
+          "fills": 292,
+          "final_equity": 118001.18,
+          "max_drawdown_pct": 7.9882,
+          "return_pct": 18.0012,
+          "seed": 5
+        },
+        {
+          "fills": 292,
+          "final_equity": 118359.58,
+          "max_drawdown_pct": 7.692,
+          "return_pct": 18.3596,
+          "seed": 6
+        },
+        {
+          "fills": 297,
+          "final_equity": 117529.55,
+          "max_drawdown_pct": 8.1701,
+          "return_pct": 17.5296,
+          "seed": 7
+        },
+        {
+          "fills": 291,
+          "final_equity": 117856.64,
+          "max_drawdown_pct": 7.8055,
+          "return_pct": 17.8566,
+          "seed": 8
+        },
+        {
+          "fills": 292,
+          "final_equity": 118100.67,
+          "max_drawdown_pct": 7.9311,
+          "return_pct": 18.1007,
+          "seed": 9
+        }
+      ],
+      "stdev_return_pct": 0.2577
+    }
+  }
+}

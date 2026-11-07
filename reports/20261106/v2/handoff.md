@@ -6,7 +6,7 @@
 
 ## Run
 
-- Experiment code: `84b961fb2164fb09bfb037e1339e78a8abdcf72f`
+- Experiment code: `e065b6fb1d4ffa029de0dc756f7662d18596f608`
 - Spec: `/localscratch/liuyime2/QuantGroup/.worktrees/edge-first/configs/experiment_4arm_v2.spec` (SHA-256 `8d024b263d47be41b9e3e0d297fbffc1a473580511f5d7ba161f77cede61275f`)
 - Data: 1579 SPY 1Day bars, 2020-07-27..2026-11-05, SHA-256 `e93e077b701f1be48c19a659c53fa64f1ef9544a454c3de075e64bfd14b32d13`
 - Costs: commission 0.5000%, slippage 0.1000%
@@ -50,6 +50,19 @@ The difference is arm minus benchmark. Compare A with BENCH_20K (same 20k sleeve
 - C: Sharpe 0.0420 per bar, expected max under null 0.0331, DSR 0.6371
 - PBO (CSCV): 0.8809523809523809
 
+## Seed sweep
+
+| trial | seeds | mean return | stdev | min | max |
+|---|---:|---:|---:|---:|---:|
+| A | 10 | 8.67% | 0.00% | 8.67% | 8.67% |
+| B | 10 | 10.22% | 0.00% | 10.22% | 10.22% |
+| C | 10 | 11.84% | 0.00% | 11.84% | 11.84% |
+| N1_random | 10 | 1.40% | 1.00% | 0.02% | 2.95% |
+| N2_reversed | 10 | 3.71% | 0.00% | 3.71% | 3.71% |
+| N3_shuffled | 10 | 17.86% | 0.26% | 17.53% | 18.36% |
+
+A deterministic arm must show identical returns across seeds. The random and shuffled-history controls are the trials whose seed changes the path; the table reports their distribution.
+
 ## What the evidence says
 
 - All three arms underperform both buy-and-hold benchmarks in absolute return and in return per unit of max drawdown.
@@ -62,7 +75,7 @@ The difference is arm minus benchmark. Compare A with BENCH_20K (same 20k sleeve
 - It does not test D: no weekly LLM engine exists.
 - It is historical development evidence, not unseen data.
 - The 0.50% commission is a stress assumption. Lower costs would help the high-turnover arms, but the benchmarks already lead before costs.
-- The arms are deterministic, so their seed variance is zero. Only the random control has seed variance, and only seed 0 was run.
+- The arms are deterministic. The seed sweep confirms their returns do not change with seed; the random and shuffled controls vary, and the sweep reports that distribution rather than a confidence interval for the arms.
 - `min_effect` is 0.0 because the registered spec did not declare one; a confirmatory spec must declare an economic floor before the run.
 
 ## Next

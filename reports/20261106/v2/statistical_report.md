@@ -2,7 +2,7 @@
 
 Spec SHA-256: `8d024b263d47be41b9e3e0d297fbffc1a473580511f5d7ba161f77cede61275f`
 Data SHA-256: `e93e077b701f1be48c19a659c53fa64f1ef9544a454c3de075e64bfd14b32d13`
-Code commit: `84b961fb2164fb09bfb037e1339e78a8abdcf72f`
+Code commit: `e065b6fb1d4ffa029de0dc756f7662d18596f608`
 Bars: 1579 SPY 1Day 2020-07-27..2026-11-05
 Costs: commission 0.5000%, slippage 0.1000%
 Minimum effect for PROVEN: 0.00000000 per bar
