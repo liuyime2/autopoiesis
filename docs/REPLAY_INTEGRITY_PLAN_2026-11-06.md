@@ -135,6 +135,24 @@ v2 report no longer reports 0 for every arm. Verification:
 `pytest tests/autopoiesis/test_statistics.py`, then rerun
 `tools/run_experiment.py --offline --out reports/20261106/v2` and inspect the report.
 
+### P0.6b — The benchmark comparison must be risk-budgeted and tested
+
+Baseline: the v2 report compares final returns to one SPY buy-and-hold benchmark that
+enters at `max_position_value` (25k), while arm A's sleeve pool is 20k. The comparison
+has no confidence interval, so "the benchmark wins" is a point estimate, not a measured
+difference.
+
+Fix: run two benchmarks, 20k (matching A's sleeve pool) and 25k (matching B/C's position
+cap). Compute a paired block bootstrap for every arm against both benchmarks and report
+it as a secondary, descriptive comparison outside the pre-registered family. Report
+return per unit of max drawdown beside absolute return, because the benchmark takes more
+risk.
+
+Success: `result.json` carries both benchmark curves and the arm-vs-benchmark CIs; the
+report states which benchmark matches which arm. Verification: rerun
+`tools/run_experiment.py --offline --out reports/20261106/v2`, inspect
+`statistical_report.md`, and check that A's comparison uses the 20k benchmark.
+
 ### P0.7 — Negative controls
 
 - Add random-direction, reversed-rule, shuffled-history, and future-injection controls.

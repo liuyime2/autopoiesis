@@ -70,9 +70,10 @@ class ArmOutcome:
 @dataclass
 class ExperimentReport:
     arms: dict[str, list[ArmOutcome]] = field(default_factory=dict)
-    benchmark: ArmOutcome | None = None
+    benchmarks: dict[str, ArmOutcome] = field(default_factory=dict)
     controls: dict[str, ArmOutcome] = field(default_factory=dict)
     comparisons: list[dict] = field(default_factory=list)
+    benchmark_comparisons: list[dict] = field(default_factory=list)
     conclusion: str = "INSUFFICIENT"
     notes: list[str] = field(default_factory=list)
 
@@ -523,15 +524,18 @@ def run_experiment(
     symbol: str = "SPY",
     risk: RiskLimits | None = None,
     costs: CostModel | None = None,
-    benchmark: Callable[[], Engine] | None = None,
+    benchmarks: dict[str, Callable[[], Engine]] | None = None,
     controls: dict[str, Callable[[], Engine]] | None = None,
     min_effect: float = 0.0,
 ) -> ExperimentReport:
     """Run every supplied arm for every seed, then compare D-C, C-A and B-A.
 
-    The benchmark and controls are reported beside the arms but are never part of
-    the pre-registered family, so they cannot turn a comparison into a pass.
+    Benchmarks and controls are reported beside the arms but are never part of the
+    pre-registered family, so they cannot turn a comparison into a pass. Each arm is
+    also compared with each benchmark; those comparisons are descriptive and carry no
+    Holm adjustment.
     """
+
     engines = engines if engines is not None else default_engines()
     report = ExperimentReport()
 
@@ -550,8 +554,8 @@ def run_experiment(
     for arm, factory in engines.items():
         report.arms[arm] = [run_one(arm, factory(), seed) for seed in seeds]
 
-    if benchmark is not None:
-        report.benchmark = run_one("BENCHMARK", benchmark(), seeds[0] if seeds else 0)
+    for name, factory in (benchmarks or {}).items():
+        report.benchmarks[name] = run_one(name, factory(), seeds[0] if seeds else 0)
     for name, factory in (controls or {}).items():
         report.controls[name] = run_one(name, factory(), seeds[0] if seeds else 0)
 
@@ -578,6 +582,27 @@ def run_experiment(
                     "n": boot["n"],
                 }
             )
+
+    for arm, outcomes in report.arms.items():
+        for benchmark_name, benchmark_outcome in report.benchmarks.items():
+            benchmark_returns = daily_returns(benchmark_outcome.equity_curve)
+            for arm_run in outcomes:
+                boot = paired_block_bootstrap(
+                    benchmark_returns, daily_returns(arm_run.equity_curve)
+                )
+                report.benchmark_comparisons.append(
+                    {
+                        "arm": arm,
+                        "benchmark": benchmark_name,
+                        "seed": arm_run.seed,
+                        "mean_diff": boot["mean_diff"],
+                        "ci_low": boot["ci_low"],
+                        "ci_high": boot["ci_high"],
+                        "p_value": boot.get("p_value"),
+                        "p_two_sided": boot.get("p_two_sided"),
+                        "n": boot["n"],
+                    }
+                )
 
     primary = [c for c in report.comparisons if c["left"] == "D" and c["right"] == "C"]
     if not primary:

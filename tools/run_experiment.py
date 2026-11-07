@@ -115,21 +115,24 @@ def _report_payload(report: ExperimentReport, starting_equity: float) -> dict:
             arm: [_outcome_summary(outcome, starting_equity) for outcome in outcomes]
             for arm, outcomes in report.arms.items()
         },
-        "benchmark": (
-            _outcome_summary(report.benchmark, starting_equity)
-            if report.benchmark is not None
-            else None
-        ),
+        "benchmarks": {
+            name: _outcome_summary(outcome, starting_equity)
+            for name, outcome in report.benchmarks.items()
+        },
         "controls": {
             name: _outcome_summary(outcome, starting_equity)
             for name, outcome in report.controls.items()
         },
         "comparisons": report.comparisons,
+        "benchmark_comparisons": report.benchmark_comparisons,
         "conclusion": report.conclusion,
         "notes": report.notes,
         "equity_curves": {
             arm: [outcome.equity_curve for outcome in outcomes]
             for arm, outcomes in report.arms.items()
+        },
+        "benchmark_equity_curves": {
+            name: outcome.equity_curve for name, outcome in report.benchmarks.items()
         },
         "fills": {
             arm: [outcome.fills for outcome in outcomes]
@@ -171,7 +174,12 @@ def _statistics(
         daily_returns(outcomes[0].equity_curve) for outcomes in report.arms.values()
     ]
     pbo = probability_of_backtest_overfitting(return_series, n_splits=10)
-    return {"comparisons": comparisons, "dsr": dsr, "pbo": pbo}
+    return {
+        "comparisons": comparisons,
+        "benchmark_comparisons": report.benchmark_comparisons,
+        "dsr": dsr,
+        "pbo": pbo,
+    }
 
 
 def _statistical_markdown(report: ExperimentReport, stats: dict, manifest: dict) -> str:
@@ -187,32 +195,57 @@ def _statistical_markdown(report: ExperimentReport, stats: dict, manifest: dict)
         f"slippage {manifest['costs']['slippage_pct']:.4%}",
         f"Minimum effect for PROVEN: {manifest.get('min_effect', 0.0):.8f} per bar",
         "",
-        "## Arms",
+        "## Arms and benchmarks",
         "",
-        "| arm | final equity | return | max drawdown | fills | min cash | max gross |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| arm | role | final equity | return | max drawdown | return/DD | fills | min cash | max gross |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
+
+    def table_row(row: dict, role: str) -> str:
+        drawdown = row["max_drawdown_pct"]
+        ratio = row["return_pct"] / drawdown if drawdown > 0 else 0.0
+        return (
+            f"| {row['arm']} | {role} | {row['final_equity']:.2f} | "
+            f"{row['return_pct']:.2f}% | {drawdown:.2f}% | {ratio:.2f} | "
+            f"{row['fills']} | {row['min_cash']:.2f} | {row['max_gross_exposure']:.2f} |"
+        )
+
     for arm in sorted(manifest["arms"]):
         for row in manifest["arms"][arm]:
-            lines.append(
-                f"| {row['arm']} | {row['final_equity']:.2f} | {row['return_pct']:.2f}% | "
-                f"{row['max_drawdown_pct']:.2f}% | {row['fills']} | {row['min_cash']:.2f} | "
-                f"{row['max_gross_exposure']:.2f} |"
-            )
-    if manifest.get("benchmark"):
-        row = manifest["benchmark"]
-        lines.append(
-            f"| {row['arm']} | {row['final_equity']:.2f} | {row['return_pct']:.2f}% | "
-            f"{row['max_drawdown_pct']:.2f}% | {row['fills']} | {row['min_cash']:.2f} | "
-            f"{row['max_gross_exposure']:.2f} |"
-        )
-    lines += ["", "## Comparisons", ""]
+            lines.append(table_row(row, "arm"))
+    for name in sorted(manifest.get("benchmarks", {})):
+        lines.append(table_row(manifest["benchmarks"][name], "benchmark"))
+
+    lines += ["", "## Controls", ""]
+    lines += [
+        "| arm | role | final equity | return | max drawdown | return/DD | fills | min cash | max gross |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for name in sorted(manifest.get("controls", {})):
+        lines.append(table_row(manifest["controls"][name], "control"))
+
+    lines += ["", "## Primary comparisons (pre-registered family)", ""]
     for row in stats["comparisons"]:
         lines.append(
             f"- {row['left']} - {row['right']}: mean daily diff {row['mean_diff']:.8f}, "
             f"95% CI [{row['ci_low']:.8f}, {row['ci_high']:.8f}], "
             f"bootstrap p(one-sided)={row.get('p_value')}, "
             f"p(two-sided)={row.get('p_two_sided')}, Holm p={row.get('p_holm')}"
+        )
+    lines += [
+        "",
+        "## Arm vs benchmark (descriptive, not Holm-adjusted)",
+        "",
+        "The difference is arm minus benchmark; a negative value means the arm "
+        "underperformed. Compare A with BENCH_20K (same 20k sleeve pool) and B/C "
+        "with BENCH_25K (same position cap).",
+        "",
+    ]
+    for row in stats["benchmark_comparisons"]:
+        lines.append(
+            f"- {row['arm']} - {row['benchmark']}: mean daily diff "
+            f"{row['mean_diff']:.8f}, 95% CI [{row['ci_low']:.8f}, "
+            f"{row['ci_high']:.8f}], p(two-sided)={row.get('p_two_sided')}"
         )
     lines += ["", "## Overfitting diagnostics", ""]
     for arm, value in stats["dsr"].items():
@@ -229,8 +262,7 @@ def _statistical_markdown(report: ExperimentReport, stats: dict, manifest: dict)
 
 def _acceptance(report: ExperimentReport, risk: RiskLimits) -> dict:
     all_outcomes = [outcome for outcomes in report.arms.values() for outcome in outcomes]
-    if report.benchmark is not None:
-        all_outcomes.append(report.benchmark)
+    all_outcomes.extend(report.benchmarks.values())
     all_outcomes.extend(report.controls.values())
     min_cash = min((outcome.min_cash for outcome in all_outcomes), default=0.0)
     max_gross = max((outcome.max_gross_exposure for outcome in all_outcomes), default=0.0)
@@ -255,7 +287,7 @@ def _acceptance(report: ExperimentReport, risk: RiskLimits) -> dict:
         },
         "arms_run": sorted(report.arms),
         "arms_missing": ["D"],
-        "benchmark": "buy_and_hold_spy_at_max_position_value",
+        "benchmarks": sorted(report.benchmarks),
         "controls": sorted(report.controls),
         "checks": checks,
         "measured": {
@@ -339,8 +371,13 @@ def main(argv: list[str] | None = None) -> int:
         "B": lambda: SmaEngine(fast=20, band=0.01, strategy_id="fixed-sma20"),
         "C": lambda: SmaEngine(fast=20, slow=50, strategy_id="search-sma20-50"),
     }
-    def benchmark() -> BuyAndHoldEngine:
+    def benchmark_20k() -> BuyAndHoldEngine:
+        return BuyAndHoldEngine(max_position_value=config.sleeve_pool)
+
+    def benchmark_25k() -> BuyAndHoldEngine:
         return BuyAndHoldEngine(max_position_value=risk.max_position_value)
+
+    benchmarks = {"BENCH_20K": benchmark_20k, "BENCH_25K": benchmark_25k}
 
     controls = {
         "N1_random": lambda: RandomEngine(seed=0, quantity=1, every=20),
@@ -358,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
         symbol=symbol,
         risk=risk,
         costs=costs,
-        benchmark=benchmark,
+        benchmarks=benchmarks,
         controls=controls,
         min_effect=args.min_effect,
     )
@@ -401,7 +438,10 @@ def main(argv: list[str] | None = None) -> int:
             "C": "sma20_50",
             "D": "NOT_RUN: no LLM weekly engine",
         },
-        "benchmark": "buy_and_hold_spy_at_max_position_value",
+        "benchmarks": {
+            "BENCH_20K": "buy_and_hold_spy_at_20000",
+            "BENCH_25K": "buy_and_hold_spy_at_max_position_value",
+        },
         "controls": sorted(controls),
     }
     payload = _report_payload(report, 100_000.0)
@@ -414,8 +454,16 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     (out_dir / "statistical_report.md").write_text(
-        _statistical_markdown(report, stats, {**manifest, "arms": payload["arms"],
-                                             "benchmark": payload["benchmark"]}),
+        _statistical_markdown(
+            report,
+            stats,
+            {
+                **manifest,
+                "arms": payload["arms"],
+                "benchmarks": payload["benchmarks"],
+                "controls": payload["controls"],
+            },
+        ),
         encoding="utf-8",
     )
     (out_dir / "acceptance.json").write_text(
@@ -443,8 +491,8 @@ def main(argv: list[str] | None = None) -> int:
         for arm in payload["arms"]:
             for row in payload["arms"][arm]:
                 writer.writerow(row)
-        if payload["benchmark"]:
-            writer.writerow(payload["benchmark"])
+        for row in payload["benchmarks"].values():
+            writer.writerow(row)
         for row in payload["controls"].values():
             writer.writerow(row)
 
@@ -461,10 +509,9 @@ def main(argv: list[str] | None = None) -> int:
                 f"fills={row['fills']} refusals={row['refusals']} "
                 f"min_cash={row['min_cash']:.2f} max_gross={row['max_gross_exposure']:.2f}"
             )
-    if payload["benchmark"]:
-        row = payload["benchmark"]
+    for name, row in sorted(payload["benchmarks"].items()):
         lines.append(
-            f"benchmark {row['arm']}: final={row['final_equity']:.2f} "
+            f"benchmark {name}: final={row['final_equity']:.2f} "
             f"return={row['return_pct']:.2f}% drawdown={row['max_drawdown_pct']:.2f}%"
         )
     for name, row in sorted(payload["controls"].items()):
@@ -483,6 +530,13 @@ def main(argv: list[str] | None = None) -> int:
             f"p1={row.get('p_value')} p2={row.get('p_two_sided')} holm={row.get('p_holm')}"
         )
     print(f"PBO: {stats['pbo']['pbo']}")
+    for row in stats["benchmark_comparisons"]:
+        print(
+            f"arm-vs-benchmark {row['arm']}-{row['benchmark']}: "
+            f"mean={row['mean_diff']:.8f} "
+            f"CI=[{row['ci_low']:.8f},{row['ci_high']:.8f}] "
+            f"p2={row.get('p_two_sided')}"
+        )
     return 0
 
 

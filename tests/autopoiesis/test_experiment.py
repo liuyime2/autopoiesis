@@ -189,9 +189,12 @@ def test_experiment_keeps_benchmark_and_controls_out_of_the_family() -> None:
         engines={"A": HoldEngine},
         seeds=(0,),
         risk=permissive(),
-        benchmark=HoldEngine,
+        benchmarks={"BENCH": HoldEngine},
         controls={"N1": HoldEngine},
     )
-    assert report.benchmark is not None
+    assert set(report.benchmarks) == {"BENCH"}
     assert set(report.controls) == {"N1"}
+    assert len(report.benchmark_comparisons) == 1
+    assert report.benchmark_comparisons[0]["arm"] == "A"
+    assert report.benchmark_comparisons[0]["benchmark"] == "BENCH"
     assert report.conclusion == "INSUFFICIENT"
