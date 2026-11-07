@@ -464,3 +464,22 @@ def test_a_retired_member_does_not_hold_a_family_slot(tmp_path):
         library.save(_rule(sid, "XLB", lookback=lookback).model_copy(update={"lifecycle": "RETIRED"}))
 
     assert admission.admit(_rule("xlb-rv60", "XLB", lookback=60)).accepted is True
+
+
+def test_dormancy_is_judged_at_each_candidates_own_price(tmp_path):
+    """A TREND_FOLLOW anchored near XLB's price must not be judged at SPY's."""
+    library = StrategyLibrary(tmp_path / "strategies")
+    guardian = Guardian(allowlist={"SPY", "XLB"}, max_position_value=1_000, max_daily_loss=500)
+    admission = StrategyAdmission(guardian=guardian, strategy_library=library)
+    xlb = make_spec(strategy_id="tf-xlb", symbols=("XLB",), kind="TREND_FOLLOW", reference_price=52.0)
+    library.save(xlb.model_copy(update={"lifecycle": "PROBATION"}))
+
+    admission.set_market_prices({"SPY": 737.0, "XLB": 52.1})
+    at_own_price = (admission.probation_backlog(), admission.dormant_probation())
+    admission.set_market_prices({"SPY": 737.0})
+    without_its_price = (admission.probation_backlog(), admission.dormant_probation())
+
+    # 52.1 is inside XLB's +-2% band around 52.0: dormant at its own price. At SPY's 737 it
+    # would have been counted as servable (a BUY far above the band).
+    assert at_own_price == (0, 1)
+    assert without_its_price == (1, 0)

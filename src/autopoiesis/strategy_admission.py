@@ -265,13 +265,15 @@ class StrategyAdmission:
         counting too many.
         """
         by_id = {result.strategy_id: result for result in results or []}
-        price = next(iter(self.market_prices.values()), None)
         selector = self.probation_selector
         return sum(
             1
             for strategy in self.strategy_library.list()
             if selector._needs_probation(strategy, by_id.get(strategy.strategy_id))
-            and (price is None or selector._declared_actions(strategy, price))
+            and (
+                (price := self._price_of(strategy)) is None
+                or selector._declared_actions(strategy, price)
+            )
         )
 
     def dormant_probation(self, results: Sequence[StrategyResult] | None = None) -> int:
@@ -282,16 +284,27 @@ class StrategyAdmission:
         of 8 has no way to tell whether the difference is a bug or the dormancy above.
         """
         by_id = {result.strategy_id: result for result in results or []}
-        price = next(iter(self.market_prices.values()), None)
-        if price is None:
-            return 0
         selector = self.probation_selector
         return sum(
             1
             for strategy in self.strategy_library.list()
             if selector._needs_probation(strategy, by_id.get(strategy.strategy_id))
+            and (price := self._price_of(strategy)) is not None
             and not selector._declared_actions(strategy, price)
         )
+
+    def _price_of(self, strategy: StrategySpec) -> float | None:
+        """The market price of the strategy's own (first) symbol, or None if not on hand.
+
+        Both counts used the first price in `market_prices` for every candidate, so an
+        XLB candidate was judged servable or dormant at SPY's price. Harmless while every
+        candidate was SPY; wrong as soon as one is not.
+        """
+        for symbol in strategy.symbols:
+            price = self.market_prices.get(symbol.upper())
+            if price is not None:
+                return price
+        return None
 
     def _capacity_rejection_reason(
         self, backlog: int, dormant: int = 0, total: int | None = None
