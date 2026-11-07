@@ -29,9 +29,33 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
-LOCK_FILE = ROOT / "runtime" / "deploy.lock"
-RELEASES_DIR = ROOT / "releases"
-DEPLOYMENTS_LEDGER = ROOT / "docs" / "evidence" / "deployments.jsonl"
+
+
+def _main_root(tree: Path) -> Path:
+    """The repository's main checkout, also when this tool runs from a linked worktree.
+
+    Releases and the shared runtime live beside the main checkout (`releases/<sha>`,
+    `runtime/`). Resolving them from this file's own tree put them inside whichever
+    worktree the tool was run from.
+    """
+    proc = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        cwd=tree, capture_output=True, text=True, timeout=30,
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return tree
+    return Path(proc.stdout.strip()).parent
+
+
+MAIN_ROOT = _main_root(ROOT)
+LOCK_FILE = MAIN_ROOT / "runtime" / "deploy.lock"
+RELEASES_DIR = MAIN_ROOT / "releases"
+#: This tool's own action log. Not `deployments.jsonl`: that ledger holds full-gate records
+#: written by `record_deployment.py`, and its readers (`equity_curve.cohort_start`, the
+#: deploy-gate-record class) require each row's `fingerprint`, which this entry does not have.
+DEPLOYMENTS_LEDGER = ROOT / "docs" / "evidence" / "release-actions.jsonl"
+#: The full-gate ledger, read (never written here) for the commit a rollback returns to.
+GATE_LEDGER = ROOT / "docs" / "evidence" / "deployments.jsonl"
 ET = ZoneInfo("America/New_York")
 
 MARKET_OPEN = time(9, 30)
@@ -74,10 +98,10 @@ def market_is_open(now: datetime | None = None) -> bool:
 
 
 def _last_deployed_commit() -> str | None:
-    if not DEPLOYMENTS_LEDGER.exists():
+    if not GATE_LEDGER.exists():
         return None
     last = None
-    for line in DEPLOYMENTS_LEDGER.read_text(encoding="utf-8").splitlines():
+    for line in GATE_LEDGER.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
@@ -167,18 +191,14 @@ def deploy(
             raise SystemExit(f"git worktree add failed: {proc.stderr.strip()}")
 
         # Make the release tree read-only (code only; .git file stays usable).
-        for path in release_dir.rglob("*"):
-            try:
-                if path.is_file() or path.is_symlink():
-                    path.chmod(0o444)
-                elif path.is_dir():
-                    path.chmod(0o555)
-            except OSError:
-                pass
-        try:
-            release_dir.chmod(0o555)
-        except OSError:
-            pass
+        # The daemon resolves `runtime/...` relative to its working directory, the release.
+        runtime_link = release_dir / "runtime"
+        if not runtime_link.exists():
+            runtime_link.symlink_to(os.path.relpath(MAIN_ROOT / "runtime", release_dir))
+        # No chmod. Marking the tree 0444 removed the executable bit from ./autopoiesis (so
+        # --install-service could not run it) and made the full gate unable to append its own
+        # record. A release that a later `git checkout` moved is caught by identity instead:
+        # the running fingerprint is compared with the ledger by `make verify`.
 
         entry = {
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),

@@ -26,10 +26,18 @@ python3 tools/deploy_release.py --approved-by <name>
 What it does:
 - takes an exclusive lock on `runtime/deploy.lock` (a second deploy is refused);
 - refuses if the market is open (override only with `--emergency REASON`);
-- creates `releases/<short-sha>/` as a detached git worktree for the commit;
-- marks that tree read-only;
-- appends an entry to `docs/evidence/deployments.jsonl` with commit, fingerprint,
-  approved_by, rollback_to, emergency, and source fingerprint.
+- creates `releases/<short-sha>/` beside the **main checkout** (also when run from a
+  linked worktree) as a detached git worktree for the commit, and links its `runtime`
+  to the shared `runtime/`;
+- appends an entry to `docs/evidence/release-actions.jsonl` (commit, approved_by,
+  rollback_to, emergency, source fingerprint). The full-gate ledger
+  `docs/evidence/deployments.jsonl` is written only by `make record-deployment`,
+  run inside the new release directory; append its new line to the branch's ledger.
+
+Corrected 2026-11-07, before the tool's first real use: it put releases inside the
+invoking worktree, did not link `runtime/`, wrote rows without `fingerprint` into the
+gate ledger (which `equity_curve.cohort_start` reads by that key), and chmod-ed the tree
+0444, which removed `./autopoiesis`'s executable bit and blocked the gate's own record.
 
 Optional: `--install-service` installs the systemd units from the release tree.
 Optional: `--dry-run` prints the plan without changing anything.
