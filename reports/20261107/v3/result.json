@@ -1,0 +1,350 @@
+{
+  "D": "NOT_RUN (account holder's decision 2026-11-07)",
+  "capital": 50000.0,
+  "conclusion": "NOT_PROVEN",
+  "costs": {
+    "commission_pct": 0.0,
+    "slippage_pct": 0.0003
+  },
+  "data": {
+    "GLD": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "9bfb9dce2a9ad7c293612d27274eeabb3bf6fb76b25def89ffb36e3e045cdec6"
+    },
+    "IWM": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "9c1b05579beb889794f7ec5186a7572b35416be1f6efb4a17f503e7e501c52fe"
+    },
+    "QQQ": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "57b8ab566bb9a51a63135a9bf0ca0fb31626c6935ea481facd16df35242f7f93"
+    },
+    "SPY": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "148c090224033bbde4024833500b2f315784fdaddc0ef8b5f73f5a3eac8ec3ed"
+    },
+    "TLT": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "a62cd1a69308266ec6cd51fd30353fca7e41cc76ce04ee661c1a00238bef1977"
+    },
+    "XLE": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "16d1f418ffbff71a411e90dcc98ba723319e605da6976ec9aea18cef8499e00d"
+    },
+    "XLF": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "08ab7d8cc192431879c6627ddeee8bca812a050498b8881716bfd0a18244af92"
+    }
+  },
+  "descriptive": [
+    {
+      "ci_high": -4.83e-06,
+      "ci_low": -0.00030215,
+      "mean_diff": -0.00015063,
+      "n": 1579,
+      "n_boot": 2000,
+      "p_two_sided": 0.044,
+      "p_value": 0.978,
+      "pair": "B-BENCH_EXPOSURE_B"
+    },
+    {
+      "ci_high": -5.254e-05,
+      "ci_low": -0.00030837,
+      "mean_diff": -0.00017977,
+      "n": 1579,
+      "n_boot": 2000,
+      "p_two_sided": 0.006,
+      "p_value": 0.997,
+      "pair": "C-BENCH_EXPOSURE_C"
+    },
+    {
+      "ci_high": 2.32e-06,
+      "ci_low": -0.0001585,
+      "mean_diff": -7.614e-05,
+      "n": 1579,
+      "n_boot": 2000,
+      "p_two_sided": 0.061,
+      "p_value": 0.9695,
+      "pair": "A-BENCH_EXPOSURE_A"
+    },
+    {
+      "ci_high": 7.697e-05,
+      "ci_low": -0.00012893,
+      "mean_diff": -1.868e-05,
+      "n": 1579,
+      "n_boot": 2000,
+      "p_two_sided": 0.707,
+      "p_value": 0.6465,
+      "pair": "B-N1_random_timing_B"
+    },
+    {
+      "ci_high": 2.49e-05,
+      "ci_low": -0.00018966,
+      "mean_diff": -8.671e-05,
+      "n": 1579,
+      "n_boot": 2000,
+      "p_two_sided": 0.136,
+      "p_value": 0.932,
+      "pair": "C-N1_random_timing_C"
+    },
+    {
+      "ci_high": 9.656e-05,
+      "ci_low": -0.00020986,
+      "mean_diff": -5.551e-05,
+      "n": 1579,
+      "n_boot": 2000,
+      "p_two_sided": 0.521,
+      "p_value": 0.7395,
+      "pair": "B-N2_reversed_B"
+    },
+    {
+      "ci_high": 2.328e-05,
+      "ci_low": -0.00016636,
+      "mean_diff": -6.934e-05,
+      "n": 1579,
+      "n_boot": 2000,
+      "p_two_sided": 0.161,
+      "p_value": 0.9195,
+      "pair": "B-N3_shuffled_B_drift"
+    }
+  ],
+  "exposure": {
+    "A": {
+      "GLD": 0.0,
+      "IWM": 0.0,
+      "QQQ": 0.0,
+      "TLT": 0.0,
+      "XLE": 0.0,
+      "XLF": 0.0
+    },
+    "B": {
+      "GLD": 0.499,
+      "IWM": 0.5498,
+      "QQQ": 0.5815,
+      "TLT": 0.3256,
+      "XLE": 0.54,
+      "XLF": 0.6097
+    },
+    "C": {
+      "GLD": 0.4092,
+      "IWM": 0.3639,
+      "QQQ": 0.5281,
+      "TLT": 0.1851,
+      "XLE": 0.2667,
+      "XLF": 0.3551
+    },
+    "core_SPY": 0.6802
+  },
+  "fills": {
+    "A": 95,
+    "B": 674,
+    "C": 640
+  },
+  "guardian_refusal_reasons": {
+    "A": {
+      "daily loss limit reached": 3,
+      "last bar cannot fill: no next open exists": 1
+    },
+    "B": {
+      "daily loss limit reached": 3,
+      "last bar cannot fill: no next open exists": 1
+    },
+    "C": {
+      "daily loss limit reached": 3,
+      "last bar cannot fill: no next open exists": 1
+    }
+  },
+  "guardian_refusals": {
+    "A": 4,
+    "B": 4,
+    "C": 4
+  },
+  "invariants": {
+    "A": {
+      "cash_never_negative": true,
+      "daily_loss_limit": 500.0,
+      "gross_limit": 90000.0,
+      "gross_within_limit": true,
+      "min_sub_book_cash": 3686.48,
+      "sum_of_peak_gross_exposure": 20898.71,
+      "worst_day_pnl": -671.68,
+      "worst_day_within_limit": false
+    },
+    "B": {
+      "cash_never_negative": true,
+      "daily_loss_limit": 500.0,
+      "gross_limit": 90000.0,
+      "gross_within_limit": true,
+      "min_sub_book_cash": 14.12,
+      "sum_of_peak_gross_exposure": 53031.29,
+      "worst_day_pnl": -2547.83,
+      "worst_day_within_limit": false
+    },
+    "C": {
+      "cash_never_negative": false,
+      "daily_loss_limit": 500.0,
+      "gross_limit": 90000.0,
+      "gross_within_limit": true,
+      "min_sub_book_cash": -73.79,
+      "sum_of_peak_gross_exposure": 52342.67,
+      "worst_day_pnl": -1788.41,
+      "worst_day_within_limit": false
+    }
+  },
+  "primary": [
+    {
+      "ci_high": 0.00018891,
+      "ci_low": -6.053e-05,
+      "holm_p": 0.462,
+      "mean_diff": 6.113e-05,
+      "meets_min_effect": true,
+      "n": 1579,
+      "n_boot": 2000,
+      "p_two_sided": 0.314,
+      "p_value": 0.157,
+      "pair": "B-A",
+      "verdict": "NOT_PROVEN"
+    },
+    {
+      "ci_high": 3.761e-05,
+      "ci_low": -0.00016763,
+      "holm_p": 0.462,
+      "mean_diff": -6.473e-05,
+      "meets_min_effect": false,
+      "n": 1579,
+      "n_boot": 2000,
+      "p_two_sided": 0.231,
+      "p_value": 0.8845,
+      "pair": "C-B",
+      "verdict": "NOT_PROVEN"
+    }
+  ],
+  "random_timing_seeds_beaten_of_10": {
+    "B": 0,
+    "C": 0
+  },
+  "rows": {
+    "A": {
+      "final": 60105.08,
+      "max_drawdown_pct": 5.08,
+      "return_over_dd": 3.978,
+      "return_pct": 20.21
+    },
+    "B": {
+      "final": 65539.21,
+      "max_drawdown_pct": 7.734,
+      "return_over_dd": 4.018,
+      "return_pct": 31.078
+    },
+    "BENCH_EXPOSURE_A": {
+      "final": 67334.8,
+      "max_drawdown_pct": 9.01,
+      "return_over_dd": 3.848,
+      "return_pct": 34.67
+    },
+    "BENCH_EXPOSURE_B": {
+      "final": 81557.21,
+      "max_drawdown_pct": 13.555,
+      "return_over_dd": 4.656,
+      "return_pct": 63.114
+    },
+    "BENCH_EXPOSURE_C": {
+      "final": 77742.47,
+      "max_drawdown_pct": 12.772,
+      "return_over_dd": 4.344,
+      "return_pct": 55.485
+    },
+    "BENCH_POOL": {
+      "final": 98865.05,
+      "max_drawdown_pct": 19.673,
+      "return_over_dd": 4.968,
+      "return_pct": 97.73
+    },
+    "C": {
+      "final": 59287.7,
+      "max_drawdown_pct": 8.262,
+      "return_over_dd": 2.248,
+      "return_pct": 18.575
+    },
+    "N1_random_timing_B": {
+      "final": 67378.02,
+      "max_drawdown_pct": 11.21,
+      "return_over_dd": 3.1,
+      "return_pct": 34.756
+    },
+    "N1_random_timing_C": {
+      "final": 68026.71,
+      "max_drawdown_pct": 9.122,
+      "return_over_dd": 3.952,
+      "return_pct": 36.053
+    },
+    "N2_reversed_B": {
+      "final": 71402.27,
+      "max_drawdown_pct": 12.048,
+      "return_over_dd": 3.553,
+      "return_pct": 42.805
+    },
+    "N3_shuffled_B_drift": {
+      "final": 72873.08,
+      "max_drawdown_pct": 9.785,
+      "return_over_dd": 4.675,
+      "return_pct": 45.746
+    }
+  },
+  "search": {
+    "dsr_C": {
+      "dsr": 0.25164748,
+      "expected_max_sharpe": 0.04663634,
+      "n": 1579,
+      "n_trials": 17,
+      "sharpe": 0.02956152
+    },
+    "n_configs": 17,
+    "pbo": {
+      "n_strategies": 17,
+      "pbo": 0.7420634920634921,
+      "splits": 252
+    }
+  },
+  "seed_sweep_final_equity": {
+    "N1_random_timing_B": [
+      67378.02,
+      73498.47,
+      73836.23,
+      76466.7,
+      66249.48,
+      73459.3,
+      68891.54,
+      71839.66,
+      68351.17,
+      68073.91
+    ],
+    "N1_random_timing_C": [
+      68026.71,
+      69032.16,
+      59601.48,
+      62359.64,
+      68066.51,
+      69100.97,
+      71218.11,
+      72173.51,
+      65364.86,
+      68722.9
+    ]
+  },
+  "spec_sha256": "59417df000044f3eab361566cc4871fe88e02b3a00b014f79d11041322ddb58f"
+}

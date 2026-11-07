@@ -1,0 +1,58 @@
+{
+  "argv": [
+    "--out",
+    "reports/20261107/v3-stress-2x",
+    "--cache-dir",
+    "/localscratch/liuyime2/QuantGroup/runtime/autopoiesis/replay",
+    "--slippage",
+    "0.0006"
+  ],
+  "code_commit": "4825f694b7ac2180b36730b466b08da93401ef6f",
+  "data": {
+    "GLD": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "9bfb9dce2a9ad7c293612d27274eeabb3bf6fb76b25def89ffb36e3e045cdec6"
+    },
+    "IWM": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "9c1b05579beb889794f7ec5186a7572b35416be1f6efb4a17f503e7e501c52fe"
+    },
+    "QQQ": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "57b8ab566bb9a51a63135a9bf0ca0fb31626c6935ea481facd16df35242f7f93"
+    },
+    "SPY": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "148c090224033bbde4024833500b2f315784fdaddc0ef8b5f73f5a3eac8ec3ed"
+    },
+    "TLT": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "a62cd1a69308266ec6cd51fd30353fca7e41cc76ce04ee661c1a00238bef1977"
+    },
+    "XLE": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "16d1f418ffbff71a411e90dcc98ba723319e605da6976ec9aea18cef8499e00d"
+    },
+    "XLF": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "08ab7d8cc192431879c6627ddeee8bca812a050498b8881716bfd0a18244af92"
+    }
+  },
+  "result_sha256": "90269514ec8616eac060d402dcd8802200dd8ad7a679750d120f23d26b8a7973",
+  "spec": "configs/experiment_portfolio_v3.spec",
+  "spec_sha256": "59417df000044f3eab361566cc4871fe88e02b3a00b014f79d11041322ddb58f"
+}
