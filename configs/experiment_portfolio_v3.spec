@@ -12,7 +12,7 @@ window_start_utc: 2020-07-27T00:00:00Z
 window_end_utc: 2026-11-07T00:00:00Z
 capital: sleeve pool 20000 (SPY, 10% target vol, band 10%); 5000 per satellite; 50000 total
 books: one sub-book per symbol through the production Guardian and next-open replay executor; curves summed; account limits (gross <= 90000, cash >= 0, daily loss <= 500) checked on the sum and reported
-sizing: satellites are long/flat; long = floor(0.98 * pool / price) shares; rebalance only when |target - held| >= max(1, 10% of target); identical for every arm and control
+sizing: satellites are long/flat; long = floor(0.98 * min(pool, sub-book equity) / price) shares; rebalance only when |target - held| >= max(1, 10% of target); identical for every arm and control
 arm_A: core sleeve only; satellites hold cash
 arm_B: A + per satellite: long when close > SMA20 * 1.01, flat when close < SMA20 * 0.99, else unchanged
 arm_C: A + per satellite walk-forward selection over 17 configs {SMA band fast 10/20/50/100/200 x band 0/1%; SMA cross 10/50, 20/100, 50/200; momentum 20/60/126/252 > 0}; train 504 bars, refit every 126, embargo 5 bars (labels end 5 bars before the refit), score = in-sample Sharpe net of 3 bps per switch; flat before the first fit
@@ -26,3 +26,4 @@ benchmarks: BENCH_POOL (every symbol bought and held at its full pool); BENCH_EX
 controls: N1 random timing at the arm's own per-symbol long fraction and mean holding length (10 seeds, the primary timing control); N2 B's signal reversed; N3 B's rule on a shuffled close history (a drift control, not a timing control)
 diagnostics: DSR for C with n_trials 17; PBO (CSCV, 10 splits) over the 17 configs; seed sweep; 2x-cost stress; byte-identical rerun
 notes: historical development evidence, not unseen data (2020-2026 has been looked at); the only unseen test is forward data
+amendment_2026-11-07: sizing changed from floor(0.98 * pool / price) to floor(0.98 * min(pool, sub-book equity) / price) before the registered run. A smoke run of the uncommitted runner showed the pool-based rule refusing 890 of XLE's buys for insufficient buying power after the first loss (2 fills in six years), so it measured the refusal, not the rule. That smoke run's statistics were seen (B-A and C-B not significant; B and C behind their exposure benchmarks); a second smoke after the fix was checked only for refusals, fills and exposure. Everything else in this spec is unchanged.
