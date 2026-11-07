@@ -1,22 +1,26 @@
 {
   "gate": "G4",
-  "status": "INSUFFICIENT",
+  "status": "NOT_PROVEN",
   "checked_at": "2026-11-07",
-  "checked_at_commit": "cd2192d976c08d2f1b596e256556625a81f8550d",
-  "spec": "configs/experiment_4arm_v2.spec",
-  "report": "reports/20261106/v2/acceptance.json",
+  "checked_at_commit": "4825f694b7ac2180b36730b466b08da93401ef6f",
+  "spec": "configs/experiment_portfolio_v3.spec",
+  "report": "reports/20261107/v3/result.json",
   "checks": {
-    "three_arm_diagnostic": "PASS",
-    "four_arm_verdict": "INSUFFICIENT"
+    "registered_before_run": "PASS (spec be12f6b; sizing amendment recorded before the registered run)",
+    "reproducible": "PASS (byte-identical rerun, result sha256 e501b96dc414d9ef19b7b42fece4e8e21c47c5c8bda64aaa6a609c8f108375ae)",
+    "cost_stress_2x": "PASS (conclusion unchanged)",
+    "three_arm_verdict": "NOT_PROVEN",
+    "D": "NOT_RUN (account holder's decision 2026-11-07)"
   },
   "evidence": [
-    "A core sleeve +8.67% (DD 2.70%), B SMA20 +10.22% (5.47%), C SMA20/50 +11.84% (5.03%); BENCH_20K +24.94% (6.76%), BENCH_25K +31.49% (8.35%); shuffled-history control +17.91% (reports/20261106/v2/statistical_report.md)",
-    "C-A and B-A do not survive Holm (p=0.556); PBO 0.881; DSR 0.59-0.67; all six arm-vs-benchmark CIs are negative (descriptive, not Holm-adjusted); 2x-cost stress leaves the conclusion unchanged",
-    "10-seed sweep: A/B/C and the reversed control have 0.00% stdev across seeds; the random control spans 0.02%..2.95% (mean 1.40%); the shuffled-history control spans 17.53%..18.36% (mean 17.86%)"
+    "B-A Holm p 0.462, C-B Holm p 0.462 (paired block bootstrap, 2000 resamples)",
+    "B and C below buy-and-hold at their own exposure (p 0.044, 0.006, descriptive) and below all 10 random-timing seeds",
+    "PBO 0.742 over 17 configs; DSR(C) 0.252",
+    "docs/evidence/g4-v3-results-2026-11-07.md"
   ],
-  "blockers": [
-    "D is NOT_RUN: no weekly LLM engine with persisted request/response hashes; the primary comparison D-C is unevaluated.",
-    "C is a fixed SMA20/50 rule, not the non-LLM automatic search the G4 design calls for; B/C are standalone SPY rules, not core sleeve plus satellites.",
-    "Single-symbol universe (SPY); min_effect=0.0 because no economic floor was pre-registered."
-  ]
+  "invariant_findings": [
+    "C sub-book cash reached -73.79 (next-open gap after close-sized order)",
+    "summed mark-to-market daily loss exceeds 500 on several days; the Guardian limit blocks new orders, not open-position loss"
+  ],
+  "supersedes": "reports/20261106/v2 (INSUFFICIENT; design flaws listed in docs/evidence/g4-v2-results-2026-11-07.md)"
 }
