@@ -48,7 +48,7 @@ from autopoiesis.risk_judgment import RiskJudgment
 from autopoiesis.scheduler import MarketScheduler
 from autopoiesis.shadow import ShadowExecutor, ShadowShorts
 from autopoiesis.sleeve import CoreSleeve
-from autopoiesis.strategy_admission import StrategyAdmission
+from autopoiesis.strategy_admission import StrategyAdmission, admissible_strategy_symbols
 from autopoiesis.strategy_engine import StrategyLibrary, StrategyLifecycleManager
 from autopoiesis.trade_counter import TradeCounter
 
@@ -517,7 +517,8 @@ def _build_agent_daemon(
             guardian=guardian, strategy_library=strategy_library, refused_kinds=config.refused_kinds,
             signal_ledger=config.journal_path.parent / "signal_trials.jsonl",
             hold_only_symbols=list(config.hold_only_symbols),
-            core_sleeve_symbol=config.sleeve_symbol,
+            core_sleeve_symbol=config.sleeve_symbol if config.sleeve_enabled else "",
+            admissible_symbols=admissible_strategy_symbols(config),
         ),
         broker_evidence_provider=BrokerEvidenceProvider(client=client),
         lifecycle_manager=StrategyLifecycleManager(),

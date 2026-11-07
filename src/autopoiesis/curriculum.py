@@ -124,6 +124,7 @@ class StructuredCurriculumAgent:
         open_positions: Sequence[Mapping[str, object]] = (),
         last_price: float | None = None,
         symbol: str = "SPY",
+        admissible_symbols: Sequence[str] = (),
     ) -> CurriculumTask:
         if self.transport is None:
             return self._fallback_task(
@@ -164,6 +165,10 @@ class StructuredCurriculumAgent:
             # one can be chosen; the count is stated too so the list's cap is not
             # mistaken for the library size.
             "strategy_coverage": _compact_coverage(current_strategies),
+            # Stated, because the worked example used to say ["SPY"] and the model copied it:
+            # since 2026-11-05 every accepted proposal was a SPY rule, and SPY belongs to the
+            # core sleeve, so none could ever trade. Admission refuses any other symbol.
+            "admissible_symbols": list(admissible_symbols),
             "strategy_id_must_not_be_one_of_the_above": True,
             # What the agent actually holds, and which actions the library can
             # currently express. The context previously described only the
@@ -242,7 +247,7 @@ class StructuredCurriculumAgent:
                     "strategy_id": "a unique id not already present in strategies[].strategy_id",
                     "name": "human readable label",
                     "kind": "one of HOLD_BASELINE, FIXED_SIZE, TREND_FOLLOW, RULE",
-                    "symbols": "array of symbols, e.g. [\"SPY\"]",
+                    "symbols": "array of symbols, each one of admissible_symbols when that list is non-empty",
                     "parameters": "must match supported_strategy_schemas[kind] exactly",
                     "max_position_value": "a number at or below guardian_max_position_value",
                     "created_at": "ISO-8601 UTC timestamp, the current time",
@@ -258,7 +263,7 @@ class StructuredCurriculumAgent:
                     "strategy_id": "fixed-size-probe-0001",
                     "name": "Fixed Size Probe",
                     "kind": "FIXED_SIZE",
-                    "symbols": ["SPY"],
+                    "symbols": list(admissible_symbols[:1]) or [symbol],
                     "parameters": {"action": "BUY", "quantity": 1, "confidence": 0.6},
                     "max_position_value": guardian_max_position_value or 5000.0,
                     "enabled": True,
@@ -725,7 +730,7 @@ def generate_curriculum_task_json(*, call, prompt_context: dict, spec_hint: str 
         spec = _json_load(call(
             f"Return the strategy_spec for kind {spec_hint}. Every field is required. "
             f"{_FIELD_GUIDE.get(spec_hint, '')}"
-            f"Use only the symbols present in the context. {prompt_context_text(prompt_context)}",
+            f"Use only the symbols present in the context, and only symbols in admissible_symbols when that list is non-empty. {prompt_context_text(prompt_context)}",
             strategy_spec_schema(spec_hint),
         ))
         task = {
@@ -764,7 +769,7 @@ def generate_curriculum_task_json(*, call, prompt_context: dict, spec_hint: str 
             if isinstance(required, str) and required and kind == "FIXED_SIZE"
             else ""
         )
-        + f"Use only the symbols present in the context. {prompt_context_text(prompt_context)}",
+        + f"Use only the symbols present in the context, and only symbols in admissible_symbols when that list is non-empty. {prompt_context_text(prompt_context)}",
         strategy_spec_schema(kind),
     ))
     return json.dumps({

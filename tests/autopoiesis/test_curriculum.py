@@ -1018,3 +1018,34 @@ def test_curriculum_prompt_carries_what_the_signal_ledger_found(tmp_path):
         reflection=make_reflection(), current_strategies=[make_spec()], guardian_max_position_value=1000
     )
     assert "research_ledger" not in captured, "no ledger configured means nothing is claimed"
+
+
+def test_the_context_names_the_admissible_symbols_and_the_example_uses_one():
+    """2026-11-07: the worked example said ["SPY"], every accepted proposal since 11-05 was a
+    SPY rule, and SPY is the core sleeve's - none could trade. The set admission accepts is
+    stated, and the example is built on it rather than on a hard-coded symbol."""
+    from datetime import datetime, timezone
+
+    from autopoiesis.models import ReflectionRecord
+
+    reflection = ReflectionRecord(
+        generated_at=datetime.now(tz=timezone.utc), window_cycles=10,
+        submitted_orders=0, rejected_orders=0, error_count=0,
+        guardian_rejections={}, summary="s", strategy_scores={},
+    )
+    captured = {}
+
+    def transport(ctx):
+        captured["ctx"] = ctx
+        return (
+            '{"task_id":"t","task_type":"EVALUATE","summary":"s","strategy_spec":null,'
+            '"parameters":{},"rationale":"r"}'
+        )
+
+    StructuredCurriculumAgent(transport=transport).propose(
+        reflection=reflection, current_strategies=[], admissible_symbols=("XLB", "XLE", "XLF"),
+    )
+
+    assert captured["ctx"]["admissible_symbols"] == ["XLB", "XLE", "XLF"]
+    assert captured["ctx"]["worked_example"]["strategy_spec"]["symbols"] == ["XLB"]
+    assert "SPY" not in captured["ctx"]["strategy_spec_fields"]["field_notes"]["symbols"]

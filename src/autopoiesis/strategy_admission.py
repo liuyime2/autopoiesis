@@ -148,6 +148,28 @@ def _cash_equivalent_reason(strategy: StrategySpec) -> str | None:
     )
 
 
+def admissible_strategy_symbols(config: object) -> tuple[str, ...]:
+    """The symbols a trading strategy may be admitted on, in configured order.
+
+    Configured symbols the Guardian allows, minus the ones other paths own: the core
+    sleeve's symbol (when the sleeve is on), the account holder's hold-only symbols, and
+    cash-equivalent ETFs. Configured, because the counterfactual pass scores only
+    `config.symbols`; a strategy on any other symbol could be admitted and never graded.
+    Measured 2026-11-07: the curriculum was never told this set, and all 9 PROBATION
+    strategies were SPY rules the sleeve prevents from trading.
+    """
+    allow = {str(s).upper() for s in getattr(config, "allowlist", ())}
+    owned = {str(s).upper() for s in getattr(config, "hold_only_symbols", ())} | set(CASH_EQUIVALENT_SYMBOLS)
+    if getattr(config, "sleeve_enabled", False):
+        owned.add(str(getattr(config, "sleeve_symbol", "")).upper())
+    out: list[str] = []
+    for symbol in getattr(config, "symbols", ()):
+        su = str(symbol).upper()
+        if su in allow and su not in owned and su not in out:
+            out.append(su)
+    return tuple(out)
+
+
 class StrategyAdmission:
     def __init__(
         self,
@@ -162,6 +184,7 @@ class StrategyAdmission:
         signal_ledger: Path | str | None = None,
         hold_only_symbols: Sequence[str] = (),
         core_sleeve_symbol: str = "",
+        admissible_symbols: Sequence[str] | None = None,
     ):
         #: The signal ledger a RULE is checked against (see `_refuted_rule_reason`). None keeps the
         #: old behaviour, which is what every existing caller and test means.
@@ -171,6 +194,11 @@ class StrategyAdmission:
         self.refused_kinds = frozenset(kind.upper() for kind in refused_kinds)
         self.hold_only_symbols = frozenset(s.upper() for s in hold_only_symbols)
         self.core_sleeve_symbol = core_sleeve_symbol.upper()
+        #: None admits any symbol the other checks pass (every bare test); the wiring in
+        #: cli.py passes `admissible_strategy_symbols(config)`.
+        self.admissible_symbols = (
+            None if admissible_symbols is None else tuple(s.upper() for s in admissible_symbols)
+        )
         self.guardian = guardian
         self.strategy_library = strategy_library
         self.market_prices = dict(market_prices or {})
@@ -322,21 +350,14 @@ class StrategyAdmission:
             retired = existing
 
         # Shared trading-permission check: the core sleeve and hold-only symbols are
-        # not admissible as strategies, because they are managed by other paths.
-        for sym in strategy.symbols:
-            su = sym.upper()
-            if su == self.core_sleeve_symbol and self.core_sleeve_symbol:
-                return StrategyAdmissionResult(
-                    accepted=False,
-                    reason=f"{su} is the core sleeve symbol and is managed by the sleeve, not by strategies",
-                    strategy_id=strategy.strategy_id,
-                )
-            if su in self.hold_only_symbols:
-                return StrategyAdmissionResult(
-                    accepted=False,
-                    reason=f"{su} is hold-only and may not be traded by strategies",
-                    strategy_id=strategy.strategy_id,
-                )
+        # not admissible as strategies, because they are managed by other paths. A
+        # HOLD_BASELINE never trades, so it is exempt (a fresh library's first admission
+        # is a baseline, and the fallback proposes it on the first configured symbol).
+        symbol_reason = None if strategy.kind == "HOLD_BASELINE" else self._symbol_permission_reason(strategy)
+        if symbol_reason is not None:
+            return StrategyAdmissionResult(
+                accepted=False, reason=symbol_reason, strategy_id=strategy.strategy_id,
+            )
 
         backlog = self.probation_backlog(results)
         dormant = self.dormant_probation(results)
@@ -432,6 +453,22 @@ class StrategyAdmission:
             ),
             strategy_id=strategy.strategy_id,
         )
+
+    def _symbol_permission_reason(self, strategy: StrategySpec) -> str | None:
+        for sym in strategy.symbols:
+            su = sym.upper()
+            if su == self.core_sleeve_symbol and self.core_sleeve_symbol:
+                return f"{su} is the core sleeve symbol and is managed by the sleeve, not by strategies"
+            if su in self.hold_only_symbols:
+                return f"{su} is hold-only and may not be traded by strategies"
+            if self.admissible_symbols is not None and su not in self.admissible_symbols:
+                allowed = ", ".join(self.admissible_symbols) or "none"
+                return (
+                    f"{su} is not an admissible strategy symbol on this deployment; admissible: {allowed}. "
+                    f"Only configured symbols are scored, and the sleeve, hold-only and cash-equivalent "
+                    f"symbols are owned by other paths."
+                )
+        return None
 
     def _refuted_rule_reason(self, strategy: StrategySpec) -> str | None:
         """Refuse a RULE that repeats an intraday test the signal ledger ran and found nothing in.

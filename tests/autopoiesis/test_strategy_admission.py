@@ -364,3 +364,79 @@ def test_the_capacity_refusal_names_both_the_queued_and_the_dormant_counts(tmp_p
     assert str(backlog + dormant) in reason.replace(" further", f" ({dormant}) further"), (
         "the total must be recoverable from the message"
     )
+
+
+def _rule(strategy_id, symbol, *, lookback=60, signal="return_over_n"):
+    return StrategySpec(
+        strategy_id=strategy_id, name="Rule", kind="RULE", symbols=(symbol,),
+        parameters={
+            "signal": signal, "lookback": lookback, "threshold_pct": 0.003,
+            "when_above": "BUY", "when_below": "SELL", "quantity": 1, "confidence": 0.8,
+        },
+        max_position_value=500, enabled=True,
+        created_at=datetime(2026, 11, 7, 12, 0, tzinfo=timezone.utc), rationale="test",
+    )
+
+
+def _permission_fixture(tmp_path, **kwargs):
+    library = StrategyLibrary(tmp_path / "strategies")
+    guardian = Guardian(
+        allowlist={"SPY", "TLT", "XLB", "XLE", "QQQ"}, max_position_value=1_000, max_daily_loss=500,
+    )
+    admission = StrategyAdmission(guardian=guardian, strategy_library=library, **kwargs)
+    admit_baseline(library, admission)
+    return library, admission
+
+
+def test_the_sleeve_symbol_and_hold_only_symbols_are_refused_and_others_admitted(tmp_path):
+    _, admission = _permission_fixture(tmp_path, core_sleeve_symbol="SPY", hold_only_symbols=["TLT"])
+
+    spy = admission.admit(make_spec(strategy_id="spy", symbols=("SPY",)))
+    tlt = admission.admit(make_spec(strategy_id="tlt", symbols=("TLT",)))
+    xlb = admission.admit(make_spec(strategy_id="xlb", symbols=("XLB",)))
+
+    assert spy.accepted is False and "core sleeve" in spy.reason
+    assert tlt.accepted is False and "hold-only" in tlt.reason
+    assert xlb.accepted is True
+
+
+def test_spy_is_admissible_when_no_sleeve_owns_it(tmp_path):
+    _, admission = _permission_fixture(tmp_path, core_sleeve_symbol="")
+
+    assert admission.admit(make_spec(strategy_id="spy", symbols=("SPY",))).accepted is True
+
+
+def test_a_symbol_outside_the_admissible_set_is_refused_with_the_set_named(tmp_path):
+    _, admission = _permission_fixture(tmp_path, admissible_symbols=["XLB", "XLE"])
+
+    qqq = admission.admit(make_spec(strategy_id="qqq", symbols=("QQQ",)))
+
+    assert qqq.accepted is False
+    assert "XLB, XLE" in qqq.reason
+
+
+def test_a_hold_baseline_is_exempt_from_symbol_ownership(tmp_path):
+    """A baseline never trades, and a fresh library's first admission is one, on SPY."""
+    library = StrategyLibrary(tmp_path / "strategies")
+    guardian = Guardian(allowlist={"SPY"}, max_position_value=1_000, max_daily_loss=500)
+    admission = StrategyAdmission(
+        guardian=guardian, strategy_library=library, core_sleeve_symbol="SPY", admissible_symbols=[],
+    )
+
+    admit_baseline(library, admission)
+
+
+def test_admissible_strategy_symbols_removes_what_other_paths_own():
+    from types import SimpleNamespace
+
+    from autopoiesis.strategy_admission import admissible_strategy_symbols
+
+    live = SimpleNamespace(
+        symbols=("SPY", "BIL", "TLT", "XLB", "XLE", "XLF"),
+        allowlist=frozenset({"SPY", "BIL", "TLT", "XLB", "XLE", "XLF", "QQQ"}),
+        hold_only_symbols=frozenset({"TLT"}), sleeve_symbol="SPY", sleeve_enabled=True,
+    )
+    no_sleeve = SimpleNamespace(**{**vars(live), "sleeve_enabled": False})
+
+    assert admissible_strategy_symbols(live) == ("XLB", "XLE", "XLF")
+    assert admissible_strategy_symbols(no_sleeve) == ("SPY", "XLB", "XLE", "XLF")

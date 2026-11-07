@@ -848,13 +848,26 @@ class AgentDaemon:
             },
         )
 
+    def _admissible_symbols(self) -> tuple[str, ...]:
+        """The symbols admission will accept a trading strategy on (empty: unrestricted)."""
+        return tuple(getattr(self.strategy_admission, "admissible_symbols", None) or ())
+
     def _last_market(self) -> tuple[float | None, str]:
-        """The most recent real broker price, for evaluating executable capability."""
+        """The most recent real broker price, for evaluating executable capability.
+
+        When admission restricts symbols, the price is the newest one for an admissible
+        symbol: capability evaluated at the sleeve's SPY price described a library the
+        curriculum was not allowed to add to (2026-11-07: 9 of 9 probation strategies SPY).
+        """
+        admissible = self._admissible_symbols()
+        fallback = admissible[0] if admissible else (self.config.symbols[0] if self.config.symbols else "SPY")
         if self.journal is None:
-            return None, (self.config.symbols[0] if self.config.symbols else "SPY")
+            return None, fallback
         for record in reversed(self.journal.read_all()):
+            if admissible and record.snapshot.symbol.upper() not in admissible:
+                continue
             return record.snapshot.last_price, record.snapshot.symbol
-        return None, (self.config.symbols[0] if self.config.symbols else "SPY")
+        return None, fallback
 
     def _open_book(self) -> list[dict[str, object]]:
         """Positions from the latest recorded real snapshot, for curriculum context.
@@ -943,6 +956,7 @@ class AgentDaemon:
                     open_positions=open_positions,
                     last_price=last_price,
                     symbol=symbol,
+                    admissible_symbols=self._admissible_symbols(),
                 )
             except (ConnectionError, TimeoutError, OSError):
                 # Keep the actual transport failure, but never start another
@@ -966,6 +980,7 @@ class AgentDaemon:
                     open_positions=open_positions,
                     last_price=last_price,
                     symbol=symbol,
+                    admissible_symbols=self._admissible_symbols(),
                 )
             strategy_id = task.strategy_spec.strategy_id if task.strategy_spec is not None else None
             # A fallback task is a hard-coded constant, not model output. It is
@@ -1032,6 +1047,7 @@ class AgentDaemon:
                             open_positions=open_positions,
                             last_price=last_price,
                             symbol=symbol,
+                            admissible_symbols=self._admissible_symbols(),
                         )
                         if retry_task.task_type == "STRATEGY_SPEC" and retry_task.strategy_spec is not None:
                             self.strategy_admission.set_market_prices(self._last_known_prices())
