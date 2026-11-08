@@ -2,19 +2,61 @@
   "gate": "G1",
   "status": "INSUFFICIENT",
   "checked_at": "2026-11-07",
-  "implementation_commits": ["41886bb", "8d5ba1b", "d0bddc3", "ac7ce32", "45b67c1"],
+  "implementation_commits": [
+    "41886bb",
+    "8d5ba1b",
+    "d0bddc3",
+    "ac7ce32",
+    "45b67c1",
+    "939ad5b",
+    "ef7399e",
+    "61b2154"
+  ],
   "items": {
-    "1.1_order_state_machine": {"status": "NOT_DONE", "why": "41886bb added journal.consistent_window but nothing called it; it was deleted. No persisted intent->submitted->terminal state machine exists beyond the existing write-ahead intent and in-flight window."},
-    "1.2_single_trading_permission": {"status": "PARTIAL", "why": "Admission refuses the sleeve symbol, hold-only symbols and anything outside admissible_strategy_symbols(config) (8d5ba1b, 5 tests). The Guardian allowlist and the daemon's round symbols are still separate lists."},
-    "1.3_symbol_registry_for_counterfactuals": {"status": "NOT_DONE", "why": "The counterfactual pass still scores config.symbols only. Mitigated, not fixed: admission now refuses strategies on unconfigured symbols, so no admitted strategy goes unscored. Attention-picked symbols are still unscored."},
-    "1.4_per_symbol_base_rate": {"status": "DONE", "why": "offline_validation.day_direction(symbol=...) in 41886bb."},
-    "1.5_shadow_vs_fills": {"status": "DONE", "why": "DecisionRecord.paired: a rule verdict the model overrode is graded but not counted as a fill."},
-    "1.6_robust_stats_and_mc": {"status": "PARTIAL", "why": "Clustered pass bar exists; the W2 Monte Carlo was never run until docs/evidence/goal-2026-11-07/screen_false_pass_mc.json (SYNTHETIC): zero-skill pass rate 2.2% under the current bar vs 49.6% under the old one, 2,000 runs. Batch false-discovery control across the library is not done."},
-    "1.7_no_daily_return_target_in_prompt": {"status": "DONE", "why": "Removed from the curriculum prompt. profit_target_return_pct remains only in the PROFIT_TARGET_CHECKED report payload, which no model reads."},
-    "1.8_curriculum_precheck_retry": {"status": "PARTIAL", "why": "One retry with the rejection reason (41886bb); admissible symbols and the rule-family budget are now stated or enforced (8d5ba1b, d0bddc3). No backoff after repeated refusals."},
-    "1.9_information_service": {"status": "PARTIAL", "why": "Service + timer files and installer wiring exist; 30-day ATM IV contract selection added. Not installed on the live host until the next deployment; per-source status and share-shown measurement not yet measured."},
-    "1.10_version_digest": {"status": "DONE", "why": "versioning.version_summary, cli --version-summary."},
-    "1.11_make_why": {"status": "DONE", "why": "tools/why.py."}
+    "1.1_order_state_machine": {
+      "status": "DONE (pre-existing; proved 2026-11-07)",
+      "why": "The write-ahead intent -> acknowledged/unknown state machine, the full-journal fail-closed projection (submission_state.py), the executor's refusal while anything is unresolved and the reconciler's lookup by client order id all predate 11-05. The earlier entry here ('NOT_DONE') was wrong: it was based on journal.consistent_window, which was dead code unrelated to this mechanism. tests/autopoiesis/test_order_idempotency.py (8 tests, SYNTHETIC broker, production executor/projection/reconciler) covers: crash after intent across a restart, submit raising, wrong identity in the response, a truncated journal line, recovery by client order id, an unknown the broker cannot find, and a market closed at submit time. Negative control: disabling the executor's unresolved check fails 4 of them. Residual: the loop's 30-minute _identical_order_already_in_flight is a second, weaker guard and is not covered by this file."
+    },
+    "1.2_single_trading_permission": {
+      "status": "DONE",
+      "why": "Admission refuses the sleeve symbol, hold-only symbols, cash ETFs and anything outside the Guardian allowlist (admissible_strategy_symbols). The Guardian's own allowlist remains the single source for what can trade, so the two agree by construction."
+    },
+    "1.3_symbol_registry_for_counterfactuals": {
+      "status": "PARTIAL",
+      "why": "The scoring pass covers configured, served (live strategies) and held symbols (939ad5b); on the real journal that adds 335 rows at no cost. Attention-only picks that no strategy serves are still unscored (sporadic, mostly GAP)."
+    },
+    "1.4_per_symbol_base_rate": {
+      "status": "DONE",
+      "why": "offline_validation.day_direction(symbol=...) in 41886bb."
+    },
+    "1.5_shadow_vs_fills": {
+      "status": "DONE",
+      "why": "DecisionRecord.paired: a rule verdict the model overrode is graded but not counted as a fill."
+    },
+    "1.6_robust_stats_and_mc": {
+      "status": "PARTIAL",
+      "why": "Clustered pass bar exists; the W2 Monte Carlo was never run until docs/evidence/goal-2026-11-07/screen_false_pass_mc.json (SYNTHETIC): zero-skill pass rate 2.2% under the current bar vs 49.6% under the old one, 2,000 runs. Batch false-discovery control across the library is not done."
+    },
+    "1.7_no_daily_return_target_in_prompt": {
+      "status": "DONE",
+      "why": "Removed from the curriculum prompt. profit_target_return_pct remains only in the PROFIT_TARGET_CHECKED report payload, which no model reads."
+    },
+    "1.8_curriculum_precheck_retry": {
+      "status": "PARTIAL",
+      "why": "One retry with the rejection reason (41886bb); admissible symbols and the rule-family budget are now stated or enforced (8d5ba1b, d0bddc3). No backoff after repeated refusals."
+    },
+    "1.9_information_service": {
+      "status": "PARTIAL",
+      "why": "The timer now parses and runs (efc0ec9). The refresh uses the data API (ef7399e): real run into scratch gave NVDA earnings 2026-11-17, analyst target, 4 dividends, IV 0.538; ETFs get dividends and IV, Yahoo is empty for funds. Per-source ok/empty/error is recorded. Freshness is judged at decision time (61b2154). Not measured yet: the shown/withheld share and the live timer's first run."
+    },
+    "1.10_version_digest": {
+      "status": "DONE",
+      "why": "versioning.version_summary, cli --version-summary."
+    },
+    "1.11_make_why": {
+      "status": "DONE",
+      "why": "tools/why.py."
+    }
   },
   "closing_evidence": {
     "make_check": "NOT_RUN at this commit",
