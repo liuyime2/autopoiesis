@@ -4,7 +4,7 @@ Description=Refresh the autopoiesis per-symbol information cache
 [Timer]
 # Four times a day, New York time. The cache feeds the decision context, so it must
 # be fresh enough to carry an earnings date or a news headline from the same day.
-OnCalendar=*-*-* 06:00,10:00,14:00,18:00 America/New_York
+OnCalendar=*-*-* 06,10,14,18:00:00 America/New_York
 Persistent=true
 AccuracySec=5min
 
