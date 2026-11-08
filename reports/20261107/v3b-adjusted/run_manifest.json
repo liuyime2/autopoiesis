@@ -1,0 +1,65 @@
+{
+  "argv": [
+    "--out",
+    "reports/20261107/v3b-adjusted",
+    "--spec",
+    "configs/experiment_portfolio_v3.spec",
+    "--satellites",
+    "QQQ,IWM,TLT,GLD,XLF,XLE",
+    "--universe-label",
+    "research-only-posthoc-adjusted",
+    "--cache-dir",
+    "/localscratch/liuyime2/QuantGroup/runtime/autopoiesis/replay",
+    "--cache-name",
+    "{symbol}_1Day_adjall_2020-07-27_2026-11-06.json",
+    "--strict"
+  ],
+  "code_commit": "6f5acfdd4c7b1bcde7dae87ddf069e52a9c77373",
+  "data": {
+    "GLD": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "9bfb9dce2a9ad7c293612d27274eeabb3bf6fb76b25def89ffb36e3e045cdec6"
+    },
+    "IWM": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "ec686da68a860f54589aa11e26f4c2af726d29fe07fb86f4ffd73a0894ba9d5e"
+    },
+    "QQQ": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "b9008438e77448e47a3f51fe4e8879ca3af4af9294ae0ae580b531fd04e9a14e"
+    },
+    "SPY": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "62dc92e7cd955e9af63b118dcb1348f8c2001a21fba2c25c7e63b15bd048c9b3"
+    },
+    "TLT": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "7e34247713e9a4ed24efbaf0d106f601c772cc6c16cbdab67b4f801537b49d63"
+    },
+    "XLE": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "a3d352a29bf4f059011cb39cd8252830adce10831633bf49fba7311cd6f16275"
+    },
+    "XLF": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "2b1f94599b22271a9d86591076f64c48cdf2ba17d3309bcf5f62cf2b923a2d61"
+    }
+  },
+  "result_sha256": "1af2976dbd6d69325a2455998f727d1ae0483019e1dad58e3065cab997f2beba",
+  "spec": "configs/experiment_portfolio_v3.spec",
+  "spec_sha256": "59417df000044f3eab361566cc4871fe88e02b3a00b014f79d11041322ddb58f"
+}

@@ -2,25 +2,28 @@
   "gate": "G4",
   "status": "NOT_PROVEN",
   "checked_at": "2026-11-07",
-  "checked_at_commit": "4825f694b7ac2180b36730b466b08da93401ef6f",
-  "spec": "configs/experiment_portfolio_v3.spec",
-  "report": "reports/20261107/v3/result.json",
+  "checked_at_commit": "see reports/20261107/v4/run_manifest.json",
+  "spec": "configs/experiment_portfolio_v4.spec",
+  "report": "reports/20261107/v4/result.json",
   "checks": {
-    "registered_before_run": "PASS (spec be12f6b; sizing amendment recorded before the registered run)",
-    "reproducible": "PASS (byte-identical rerun, result sha256 e501b96dc414d9ef19b7b42fece4e8e21c47c5c8bda64aaa6a609c8f108375ae)",
+    "registered_before_run": "PASS (v4 spec fbad49a)",
+    "reproducible": "PASS (byte-identical rerun, result sha256 376bd9cc6434dbff...)",
     "cost_stress_2x": "PASS (conclusion unchanged)",
+    "production_permitted_universe": "PASS (XLB, XLE, XLF, QQQ, NVDA, MSFT, AAPL; TLT, IWM, GLD excluded)",
+    "total_return_bars": "PASS (adjustment=all; no split jumps, largest move 24.3% NVDA 2023-05-25)",
     "three_arm_verdict": "NOT_PROVEN",
     "D": "NOT_RUN (account holder's decision 2026-11-07)"
   },
   "evidence": [
-    "B-A Holm p 0.462, C-B Holm p 0.462 (paired block bootstrap, 2000 resamples)",
-    "B and C below buy-and-hold at their own exposure (p 0.044, 0.006, descriptive) and below all 10 random-timing seeds",
-    "PBO 0.742 over 17 configs; DSR(C) 0.252",
-    "docs/evidence/g4-v3-results-2026-11-07.md"
+    "B-A +0.0199%/day, CI [+0.0026%, +0.0380%], Holm p 0.054, CI lower below the 1%/yr floor -> NOT_PROVEN (narrowly); C-B Holm p 0.46",
+    "B finishes at +62% against +185% for buy-and-hold at its own exposure and below all 10 random-timing seeds: the edge over A is exposure, not timing",
+    "PBO 0.53, DSR(C) 0.68; lag-1 autocorrelation of the differences 0.01-0.02 (bootstrap in its calibrated regime)",
+    "docs/evidence/g4-v4-results-2026-11-07.md"
   ],
   "invariant_findings": [
-    "C sub-book cash reached -73.79 (next-open gap after close-sized order)",
-    "summed mark-to-market daily loss exceeds 500 on several days; the Guardian limit blocks new orders, not open-position loss"
+    "sub-book cash reached -52.11 (B) and -43.93 (C): a close-sized order filling at a higher next open",
+    "summed mark-to-market daily loss -1,666 (B), -1,822 (C); the Guardian $500 limit blocks new orders, not open-position loss"
   ],
-  "supersedes": "reports/20261106/v2 (INSUFFICIENT; design flaws listed in docs/evidence/g4-v2-results-2026-11-07.md)"
+  "supersedes": "reports/20261107/v3 (raw bars + TLT/IWM/GLD satellites: unreliable, see the correction in docs/evidence/g4-v3-results-2026-11-07.md) and reports/20261106/v2",
+  "posthoc_robustness": "reports/20261107/v3b-adjusted: v3 design on adjusted bars, not registered"
 }
