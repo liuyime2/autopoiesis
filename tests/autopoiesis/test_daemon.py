@@ -2204,3 +2204,41 @@ def test_a_counted_error_leaves_its_cause_in_the_heartbeat(tmp_path):
     assert "broker clock: TimeoutError: connect timed out" in beat.last_error
     daemon._heartbeat("RUNNING", "recovered")
     assert "broker clock" in daemon.health.read().last_error, "the cause outlives the message"
+
+
+def test_scoring_covers_a_symbol_only_a_strategy_serves(tmp_path, monkeypatch):
+    """A strategy on a symbol outside config.symbols produced decisions no pass ever scored, so it
+    could never leave probation. The scoring set is configured + served + held."""
+    daemon, _journal = _screening_daemon(tmp_path)
+    daemon.strategy_library.save(
+        StrategySpec(
+            strategy_id="qqq-served", name="q", kind="FIXED_SIZE", symbols=("QQQ",),
+            parameters={"action": "BUY", "quantity": 1, "confidence": 0.7},
+            max_position_value=1000, enabled=True, lifecycle="PROBATION",
+            created_at=datetime.now(tz=timezone.utc), rationale="test",
+        )
+    )
+    daemon.strategy_library.save(
+        StrategySpec(
+            strategy_id="msft-paused", name="m", kind="FIXED_SIZE", symbols=("MSFT",),
+            parameters={"action": "BUY", "quantity": 1, "confidence": 0.7},
+            max_position_value=1000, enabled=True, lifecycle="PAUSED",
+            created_at=datetime.now(tz=timezone.utc), rationale="test",
+        )
+    )
+    seen = {}
+    from autopoiesis import counterfactual as cf
+
+    real = cf.evaluate_symbols
+
+    def spy(records, *, symbols, **kwargs):
+        seen["symbols"] = list(symbols)
+        return real(records, symbols=symbols, **kwargs)
+
+    monkeypatch.setattr(cf, "evaluate_symbols", spy)
+    daemon._record_counterfactuals(_events=[])
+
+    assert "QQQ" in seen["symbols"], "a served, unconfigured symbol must be scored"
+    assert "MSFT" not in seen["symbols"], "a paused strategy serves nothing"
+    assert set(daemon.config.symbols) <= set(seen["symbols"])
+    assert len(seen["symbols"]) == len(set(seen["symbols"]))

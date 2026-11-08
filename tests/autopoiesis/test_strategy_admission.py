@@ -433,13 +433,15 @@ def test_admissible_strategy_symbols_removes_what_other_paths_own():
 
     live = SimpleNamespace(
         symbols=("SPY", "BIL", "TLT", "XLB", "XLE", "XLF"),
-        allowlist=frozenset({"SPY", "BIL", "TLT", "XLB", "XLE", "XLF", "QQQ"}),
+        allowlist=frozenset({"SPY", "BIL", "TLT", "XLB", "XLE", "XLF", "QQQ", "NVDA"}),
         hold_only_symbols=frozenset({"TLT"}), sleeve_symbol="SPY", sleeve_enabled=True,
     )
     no_sleeve = SimpleNamespace(**{**vars(live), "sleeve_enabled": False})
 
-    assert admissible_strategy_symbols(live) == ("XLB", "XLE", "XLF")
-    assert admissible_strategy_symbols(no_sleeve) == ("SPY", "XLB", "XLE", "XLF")
+    # Configured symbols first (in order), then the rest of the allowlist; sleeve, hold-only and
+    # cash ETFs are never in it.
+    assert admissible_strategy_symbols(live) == ("XLB", "XLE", "XLF", "NVDA", "QQQ")
+    assert admissible_strategy_symbols(no_sleeve) == ("SPY", "XLB", "XLE", "XLF", "NVDA", "QQQ")
 
 
 def test_a_third_live_member_of_one_rule_family_is_refused(tmp_path):

@@ -762,7 +762,10 @@ class AgentDaemon:
         if self.journal is None:
             return
         try:
+            # Configured, served and held: a strategy on a symbol outside the config used to
+            # produce decisions that no pass ever scored, so it could never leave probation.
             symbols = list(self.config.symbols)
+            symbols += [s for s in self._served_symbols() + self._held_symbols_last() if s not in symbols]
             report = counterfactual.evaluate_symbols(
                 self.journal.read_all(),
                 symbols=symbols,
@@ -2016,12 +2019,49 @@ class AgentDaemon:
             return True
         return (self.now() - last_at).total_seconds() >= interval_seconds
 
+    def _held_symbols_last(self) -> list[str]:
+        """Symbols the account held at the newest recorded snapshot (from the journal, no broker call)."""
+        if self.journal is None:
+            return []
+        try:
+            records = self.journal.last_n(1)
+        except (OSError, ValueError, RuntimeError):
+            return []
+        if not records:
+            return []
+        return sorted({p.symbol.upper() for p in records[-1].snapshot.positions if p.quantity})
+
+    def _served_symbols(self) -> list[str]:
+        """Symbols of enabled strategies that are neither paused nor retired, in library order.
+
+        An unreadable library serves nothing: the round then falls back to the configured symbols.
+        """
+        library = getattr(self, "strategy_library", None)
+        if library is None:
+            return []
+        out: list[str] = []
+        try:
+            for spec in library.list():
+                if spec.enabled and spec.lifecycle not in {"PAUSED", "RETIRED"}:
+                    for symbol in spec.symbols or ():
+                        key = str(symbol).upper()
+                        if key not in out:
+                            out.append(key)
+        except (OSError, ValueError, TypeError, AttributeError, KeyError) as exc:
+            self._append_event("CYCLE_FAILED", status="FAILED", message=f"could not read served symbols: {exc}")
+            return []
+        return out
+
     def _round_symbols(self) -> list[str]:
         """The symbols this round looks at: the configured ones, then (under a universe wider than
         the allowlist) everything the account holds, then up to `attention_slots` of the broker's
         most-active liquid names. Any failure to ask the broker falls back to what is configured,
         so a data problem narrows the round rather than stopping it."""
         symbols = list(self.config.symbols)
+        # A symbol a live strategy serves is decided every round whether or not it is configured.
+        # Otherwise a strategy admitted on (say) QQQ is never asked about QQQ unless the attention
+        # model happens to pick it, and can never produce evidence.
+        symbols += [s for s in self._served_symbols() if s not in symbols]
         if self.config.universe == "allowlist":
             return symbols
         gateway: Any = getattr(self.loop, "data_gateway", None)

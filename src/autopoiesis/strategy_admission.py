@@ -169,23 +169,25 @@ def _rule_family(strategy: StrategySpec) -> tuple | None:
 
 
 def admissible_strategy_symbols(config: object) -> tuple[str, ...]:
-    """The symbols a trading strategy may be admitted on, in configured order.
+    """The symbols a trading strategy may be admitted on: the Guardian's allowlist, minus the
+    ones other paths own - the core sleeve's symbol (when the sleeve is on), the account holder's
+    hold-only symbols, and cash-equivalent ETFs. Configured symbols come first, in order.
 
-    Configured symbols the Guardian allows, minus the ones other paths own: the core
-    sleeve's symbol (when the sleeve is on), the account holder's hold-only symbols, and
-    cash-equivalent ETFs. Configured, because the counterfactual pass scores only
-    `config.symbols`; a strategy on any other symbol could be admitted and never graded.
-    Measured 2026-11-07: the curriculum was never told this set, and all 9 PROBATION
-    strategies were SPY rules the sleeve prevents from trading.
+    Not limited to the configured symbols: the daemon decides and scores every symbol a live
+    strategy serves (`_served_symbols`), so a strategy on an allowlisted but unconfigured symbol
+    is graded like any other. (11-07 morning this was restricted to the configured set, because
+    those symbols were the only ones scored; that restriction contradicted the account holder's
+    "no restriction on instruments" and is gone.)
     """
-    allow = {str(s).upper() for s in getattr(config, "allowlist", ())}
+    allow = [str(s).upper() for s in sorted(getattr(config, "allowlist", ()))]
     owned = {str(s).upper() for s in getattr(config, "hold_only_symbols", ())} | set(CASH_EQUIVALENT_SYMBOLS)
     if getattr(config, "sleeve_enabled", False):
         owned.add(str(getattr(config, "sleeve_symbol", "")).upper())
+    configured = [str(s).upper() for s in getattr(config, "symbols", ())]
+    ordered = [s for s in configured if s in allow] + [s for s in allow if s not in configured]
     out: list[str] = []
-    for symbol in getattr(config, "symbols", ()):
-        su = str(symbol).upper()
-        if su in allow and su not in owned and su not in out:
+    for su in ordered:
+        if su not in owned and su not in out:
             out.append(su)
     return tuple(out)
 
@@ -498,8 +500,8 @@ class StrategyAdmission:
                 allowed = ", ".join(self.admissible_symbols) or "none"
                 return (
                     f"{su} is not an admissible strategy symbol on this deployment; admissible: {allowed}. "
-                    f"Only configured symbols are scored, and the sleeve, hold-only and cash-equivalent "
-                    f"symbols are owned by other paths."
+                    f"The sleeve, hold-only and cash-equivalent symbols are owned by other paths, and a "
+                    f"symbol outside the Guardian allowlist cannot trade."
                 )
         return None
 

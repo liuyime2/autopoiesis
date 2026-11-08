@@ -214,3 +214,25 @@ def test_the_first_round_of_the_day_does_not_wait_for_the_model():
     payload = events[0][1]["payload"]
     assert payload["source"] == "mechanical"
     assert payload["note"] == "first round of the day: model not asked"
+
+
+def test_a_symbol_served_by_a_live_strategy_is_decided_every_round_even_if_unconfigured():
+    """Without this a strategy admitted on QQQ is only ever asked about QQQ if the attention model
+    happens to pick it, and can never produce evidence."""
+    d = _daemon("tradable", 4, held=(), attention=("AAA",), served=("SPY", "QQQ", "NVDA"))
+    d.config = SimpleNamespace(symbols=("SPY",), universe="tradable", attention_slots=4, min_price=5.0)
+    d.strategy_library = SimpleNamespace(list=lambda: [
+        SimpleNamespace(strategy_id="s-nvda", symbols=("NVDA",), enabled=True, lifecycle="PROBATION"),
+        SimpleNamespace(strategy_id="s-qqq", symbols=("QQQ",), enabled=True, lifecycle="ACTIVE"),
+        SimpleNamespace(strategy_id="s-old", symbols=("MSFT",), enabled=True, lifecycle="PAUSED"),
+        SimpleNamespace(strategy_id="s-off", symbols=("AAPL",), enabled=False, lifecycle="ACTIVE"),
+    ])
+    for cycle in range(3):
+        d.cycle_count = cycle
+        decided = d._round_symbols()
+        # Served symbols are priority (decided every round); SPY is configured but unserved here,
+        # so it rotates with the discovery slot.
+        assert {"NVDA", "QQQ"} == set(decided[:2]), decided
+        assert "MSFT" not in decided and "AAPL" not in decided, decided
+    d.config = SimpleNamespace(symbols=("SPY",), universe="allowlist", attention_slots=0, min_price=5.0)
+    assert d._round_symbols() == ["SPY", "NVDA", "QQQ"], "the allowlist universe includes them too"
