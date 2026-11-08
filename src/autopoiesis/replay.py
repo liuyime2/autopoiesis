@@ -114,6 +114,7 @@ def fetch_bars(
     client,
     interval: str = "5Min",
     feed: str | None = None,
+    adjustment: str | None = None,
 ) -> list[ReplayBar]:
     """Real bars from the broker's historical endpoint.
 
@@ -123,6 +124,13 @@ def fetch_bars(
     `feed` is omitted by default because the historical endpoint rejected an unentitled
     feed on this account; callers that know which feed they may query pass it explicitly
     (`"iex"` for the free historical tier).
+
+    `adjustment` is likewise omitted by default, which the broker reads as `raw`: **splits are
+    then in the series as price jumps**. Measured 2026-11-07: XLE and XLB fell 50.2% on
+    2025-12-05 (a 2-for-1 split), NVDA 89.9% on 2024-06-10 (10-for-1) and AAPL 74.1% on 2020-08-31
+    (4-for-1). A simulated book that holds shares through such a day books a loss that never
+    happened. A multi-year simulation passes `"all"` (split and dividend adjusted, i.e. total
+    return) or `"split"`; the cache name must say which.
     """
     from alpaca_trade_api.rest import TimeFrame, TimeFrameUnit
 
@@ -135,10 +143,12 @@ def fetch_bars(
     if not digits or interval[len(digits):] not in units:
         raise ValueError(f"unsupported interval {interval!r}; want e.g. 5Min, 1Hour, 1Day")
     timeframe = TimeFrame(int(digits), units[interval[len(digits):]])
-    if feed is None:
-        bars = client.get_bars(symbol, timeframe, start, end)
-    else:
-        bars = client.get_bars(symbol, timeframe, start, end, feed=feed)
+    extra: dict[str, str] = {}
+    if feed is not None:
+        extra["feed"] = feed
+    if adjustment is not None:
+        extra["adjustment"] = adjustment
+    bars = client.get_bars(symbol, timeframe, start, end, **extra)
     frame = bars.df
     return [
         ReplayBar(
