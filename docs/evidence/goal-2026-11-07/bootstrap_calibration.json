@@ -1,0 +1,23 @@
+{
+  "synthetic": true,
+  "runs": 400,
+  "n_boot": 300,
+  "n": 1579,
+  "false_positive_rate_at_0.05": {
+    "rho=0.0": {
+      "block=5": 0.055,
+      "block=10": 0.035,
+      "block=20": 0.06
+    },
+    "rho=0.2": {
+      "block=5": 0.055,
+      "block=10": 0.08,
+      "block=20": 0.045
+    },
+    "rho=0.5": {
+      "block=5": 0.0925,
+      "block=10": 0.1,
+      "block=20": 0.09
+    }
+  }
+}
