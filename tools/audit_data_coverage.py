@@ -21,6 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+from autopoiesis.atomicio import write_text_atomic
 from autopoiesis.broker_client import make_client
 from autopoiesis.config import AgentConfig
 
@@ -105,7 +106,8 @@ def main() -> int:
     if args.out:
         out_path = Path(args.out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(report, indent=2, default=str) + "\n")
+        # Private and atomic like every other runtime file (it was 0644; the gate failed on it).
+        write_text_atomic(out_path, json.dumps(report, indent=2, default=str) + "\n")
         print(f"wrote {out_path}")
     else:
         print(json.dumps(report, indent=2, default=str))

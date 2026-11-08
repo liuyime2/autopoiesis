@@ -167,7 +167,7 @@ def deploy(
         }
 
     LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    lock_fd = os.open(str(LOCK_FILE), os.O_RDWR | os.O_CREAT, 0o644)
+    lock_fd = os.open(str(LOCK_FILE), os.O_RDWR | os.O_CREAT, 0o600)
     try:
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
