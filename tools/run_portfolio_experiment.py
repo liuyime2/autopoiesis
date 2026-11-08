@@ -78,17 +78,28 @@ def _r(x: float, n: int = 8) -> float:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global SATELLITES, CAPITAL
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", required=True)
     parser.add_argument("--cache-dir", default=str(CACHE))
     parser.add_argument("--slippage", type=float, default=0.0003)
     parser.add_argument("--spec", default=str(ROOT / "configs" / "experiment_portfolio_v3.spec"))
+    parser.add_argument("--satellites", default=",".join(SATELLITES), help="comma-separated satellite symbols")
+    parser.add_argument("--cache-name", default=DEFAULT_CACHE_NAME, help="bar cache file name with a {symbol} placeholder")
+    parser.add_argument(
+        "--strict", action="store_true",
+        help="v4 rules: PROVEN also needs the CI lower bound above min_effect; report autocorrelation and block sensitivity",
+    )
+    parser.add_argument("--universe-label", default="", help="written to result.json when --strict (e.g. production-permitted)")
     args = parser.parse_args(argv)
+
+    SATELLITES = tuple(s.strip().upper() for s in args.satellites.split(",") if s.strip())
+    CAPITAL = SLEEVE_POOL + SATELLITE_POOL * len(SATELLITES)
 
     bars = {}
     data = {}
     for symbol in (CORE, *SATELLITES):
-        path = Path(args.cache_dir) / DEFAULT_CACHE_NAME.format(symbol=symbol)
+        path = Path(args.cache_dir) / args.cache_name.format(symbol=symbol)
         if not path.exists():
             raise SystemExit(f"missing cached bars: {path} (fetch them first; this runner never calls a broker)")
         bars[symbol] = load_bars(path)
@@ -195,6 +206,18 @@ def main(argv: list[str] | None = None) -> int:
         p["holm_p"] = _r(h)
         p["meets_min_effect"] = p["mean_diff"] >= MIN_EFFECT_DAILY
         p["verdict"] = "PROVEN" if (h < 0.05 and p["meets_min_effect"]) else "NOT_PROVEN"
+        if args.strict:
+            b_name, a_name = p["pair"].split("-")
+            diff = [rets[b_name][i] - rets[a_name][i] for i in range(min(len(rets[a_name]), len(rets[b_name])))]
+            mean = sum(diff) / len(diff)
+            var = sum((x - mean) ** 2 for x in diff)
+            p["lag1_autocorr"] = _r(sum((diff[i] - mean) * (diff[i - 1] - mean) for i in range(1, len(diff))) / var if var else 0.0)
+            p["p_two_sided_by_block"] = {
+                str(bs): _r(paired_block_bootstrap(rets[a_name], rets[b_name], block_size=bs, n_boot=2000, seed=0)["p_two_sided"])
+                for bs in (5, 10, 20)
+            }
+            p["ci_lower_meets_min_effect"] = p["ci_low"] >= MIN_EFFECT_DAILY
+            p["verdict"] = "PROVEN" if (h < 0.05 and p["meets_min_effect"] and p["ci_lower_meets_min_effect"]) else "NOT_PROVEN"
     descriptive = [
         compare("BENCH_EXPOSURE_B", "B"), compare("BENCH_EXPOSURE_C", "C"), compare("BENCH_EXPOSURE_A", "A"),
         compare("N1_random_timing_B", "B"), compare("N1_random_timing_C", "C"),
@@ -252,6 +275,7 @@ def main(argv: list[str] | None = None) -> int:
         "search": {"n_configs": len(grid), "pbo": pbo, "dsr_C": {k: (_r(v) if isinstance(v, float) else v) for k, v in dsr_c.items()}},
         "invariants": invariants,
         "D": "NOT_RUN (account holder's decision 2026-11-07)",
+        **({"universe": args.universe_label or "unlabelled", "satellites": list(SATELLITES), "bar_cache": args.cache_name} if args.strict else {}),
         "conclusion": "PROVEN" if any(p["verdict"] == "PROVEN" for p in primary) else "NOT_PROVEN",
     }
 
