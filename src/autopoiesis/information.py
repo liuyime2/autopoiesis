@@ -66,6 +66,17 @@ def _parse_date(value: Any) -> date | None:
     return None
 
 
+def _parse_timestamp(value: Any) -> datetime | None:
+    """An aware datetime from an ISO string, or None when absent or unreadable."""
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
 def _age_days(as_of: datetime | None, field_as_of: datetime | None) -> int | None:
     if as_of is None or field_as_of is None:
         return None
@@ -122,18 +133,13 @@ class InformationProvider:
         if reference.tzinfo is None:
             reference = reference.replace(tzinfo=timezone.utc)
 
-        # Point-in-time: if the whole cache was not yet available, drop it.
+        # Point-in-time: the whole cache must have been available at the cutoff. Fail closed: a
+        # missing or unreadable `available_at` cannot prove that, so the cache is dropped. (It used
+        # to be `except ...: pass`, which let such a file into a historical replay.)
         if cutoff is not None:
-            avail_raw = data.get("available_at")
-            if avail_raw is not None:
-                try:
-                    avail = datetime.fromisoformat(str(avail_raw).replace("Z", "+00:00"))
-                    if avail.tzinfo is None:
-                        avail = avail.replace(tzinfo=timezone.utc)
-                    if avail > cutoff:
-                        return None
-                except (ValueError, TypeError):
-                    pass
+            avail = _parse_timestamp(data.get("available_at"))
+            if avail is None or avail > cutoff:
+                return None
 
         # Freshness filter: drop fields older than their budget.
         fresh: dict[str, Any] = {}
@@ -151,18 +157,11 @@ class InformationProvider:
                     field_as_of = as_of
             else:
                 field_as_of = as_of
-            # Point-in-time: drop the field if it was not yet public.
+            # Point-in-time: drop the field unless it was provably public by the cutoff.
             if cutoff is not None:
-                favail = data.get(f"{key}_available_at", data.get("available_at"))
-                if favail is not None:
-                    try:
-                        fav = datetime.fromisoformat(str(favail).replace("Z", "+00:00"))
-                        if fav.tzinfo is None:
-                            fav = fav.replace(tzinfo=timezone.utc)
-                        if fav > cutoff:
-                            continue
-                    except (ValueError, TypeError):
-                        pass
+                fav = _parse_timestamp(data.get(f"{key}_available_at", data.get("available_at")))
+                if fav is None or fav > cutoff:
+                    continue
             # A field observed after the decision time did not exist at that time.
             if cutoff is not None and field_as_of is not None and field_as_of > reference:
                 continue

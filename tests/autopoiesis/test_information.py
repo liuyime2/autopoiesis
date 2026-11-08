@@ -156,3 +156,24 @@ def test_a_field_observed_after_the_cutoff_is_hidden(tmp_path):
         "options_iv": 0.3, "options_iv_as_of": _iso(-1, now=now),
     })
     assert InformationProvider(tmp_path).block("XLE", cutoff=now) is None
+
+
+def test_a_replay_cutoff_fails_closed_on_missing_or_unreadable_availability(tmp_path):
+    """With a cutoff, availability must be provable. A missing or malformed `available_at` used to
+    be skipped (`except: pass`), which let such a file into a historical replay."""
+    now = datetime(2026, 11, 9, 14, 0, tzinfo=timezone.utc)
+    stamp = _iso(0.1, now=now)
+    body = {"as_of": stamp, "options_iv": 0.3, "options_iv_as_of": stamp}
+    provider = InformationProvider(tmp_path)
+
+    _write(tmp_path, "AAA", body)                                    # no available_at at all
+    _write(tmp_path, "BBB", {**body, "available_at": "not-a-time"})  # unreadable
+    _write(tmp_path, "CCC", {**body, "available_at": stamp})         # provable
+    _write(tmp_path, "DDD", {**body, "available_at": stamp, "options_iv_available_at": "garbage"})
+
+    assert provider.block("AAA", cutoff=now) is None
+    assert provider.block("BBB", cutoff=now) is None
+    assert provider.block("CCC", cutoff=now) is not None
+    assert provider.block("DDD", cutoff=now) is None, "a field with unreadable availability is dropped"
+    # Live use (no cutoff) is unchanged: availability is only a replay constraint.
+    assert provider.block("AAA") is not None and provider.block("BBB") is not None
