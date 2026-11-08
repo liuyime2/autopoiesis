@@ -102,3 +102,57 @@ def test_block_cap(tmp_path):
     provider = InformationProvider(tmp_path)
     block = provider.block("SPY")
     assert block is None or len(block) <= BLOCK_CAP
+
+
+def _iso(days_ago: float, *, now: datetime) -> str:
+    from datetime import timedelta
+
+    return (now - timedelta(days=days_ago)).isoformat()
+
+
+def test_a_month_old_cache_is_stale_at_the_decision_time(tmp_path):
+    """Age used to be measured cache-against-cache (as_of vs the field's own as_of, both written
+    at refresh), so a month-old file read as zero days old."""
+    now = datetime(2026, 11, 9, 14, 0, tzinfo=timezone.utc)
+    written = _iso(30, now=now)
+    _write(tmp_path, "XLE", {
+        "as_of": written, "available_at": written,
+        "valuation": {"pe": 15.4}, "valuation_as_of": written,
+        "options_iv": 0.32, "options_iv_as_of": written,
+    })
+    provider = InformationProvider(tmp_path)
+    assert provider.block("XLE", cutoff=now) is None
+
+
+def test_a_fresh_field_survives_next_to_a_stale_one(tmp_path):
+    now = datetime(2026, 11, 9, 14, 0, tzinfo=timezone.utc)
+    _write(tmp_path, "NVDA", {
+        "as_of": _iso(0.1, now=now), "available_at": _iso(0.1, now=now),
+        "valuation": {"pe": 23.6}, "valuation_as_of": _iso(20, now=now),     # budget 7 days: dropped
+        "options_iv": 0.54, "options_iv_as_of": _iso(0.1, now=now),          # budget 2 days: kept
+    })
+    block = InformationProvider(tmp_path).block("NVDA", cutoff=now)
+    assert block is not None and "iv=0.54" in block and "valuation" not in block
+
+
+def test_the_earnings_countdown_follows_the_decision_date_not_the_cache_date(tmp_path):
+    written = datetime(2026, 11, 12, 14, 0, tzinfo=timezone.utc)
+    _write(tmp_path, "NVDA", {
+        "as_of": written.isoformat(), "available_at": written.isoformat(),
+        "earnings_date": "2026-11-17", "earnings_date_as_of": written.isoformat(),
+    })
+    provider = InformationProvider(tmp_path)
+    # Written 12 Nov: the date is 5 days away from the cache's point of view (imminent <= 5).
+    # Decided on 14 Nov it is 3 days away; decided on 11 Nov it is 6 days away. The cutoff rules.
+    assert "IMMINENT" in provider.block("NVDA", cutoff=datetime(2026, 11, 14, 14, 0, tzinfo=timezone.utc))
+    after = provider.block("NVDA", cutoff=datetime(2026, 11, 18, 14, 0, tzinfo=timezone.utc))
+    assert after is None or "IMMINENT" not in after, "after the date it is no longer imminent"
+
+
+def test_a_field_observed_after_the_cutoff_is_hidden(tmp_path):
+    now = datetime(2026, 11, 9, 14, 0, tzinfo=timezone.utc)
+    _write(tmp_path, "XLE", {
+        "as_of": _iso(-1, now=now), "available_at": _iso(-1, now=now),
+        "options_iv": 0.3, "options_iv_as_of": _iso(-1, now=now),
+    })
+    assert InformationProvider(tmp_path).block("XLE", cutoff=now) is None

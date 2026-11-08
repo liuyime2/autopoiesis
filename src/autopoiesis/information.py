@@ -114,6 +114,14 @@ class InformationProvider:
         if as_of.tzinfo is None:
             as_of = as_of.replace(tzinfo=timezone.utc)
 
+        # The reference time is the decision's, never the cache's own. Age used to be
+        # `as_of - field_as_of`, both written at refresh time, so a month-old file read as
+        # zero days old and nothing was ever dropped; the earnings countdown had the same
+        # flaw (measured 2026-11-07 on the code of 41886bb).
+        reference = cutoff if cutoff is not None else datetime.now(timezone.utc)
+        if reference.tzinfo is None:
+            reference = reference.replace(tzinfo=timezone.utc)
+
         # Point-in-time: if the whole cache was not yet available, drop it.
         if cutoff is not None:
             avail_raw = data.get("available_at")
@@ -155,14 +163,17 @@ class InformationProvider:
                             continue
                     except (ValueError, TypeError):
                         pass
-            age = _age_days(as_of, field_as_of)
+            # A field observed after the decision time did not exist at that time.
+            if cutoff is not None and field_as_of is not None and field_as_of > reference:
+                continue
+            age = _age_days(reference, field_as_of)
             if age is not None and age > budget:
                 continue
             fresh[key] = data[key]
 
         # Derive convenience fields.
         earnings_date = _parse_date(fresh.get("earnings_date"))
-        today = as_of.date()
+        today = reference.date()
         if earnings_date is not None:
             fresh["earnings_in_days"] = (earnings_date - today).days
             fresh["earnings_imminent"] = 0 <= (earnings_date - today).days <= EARNINGS_IMMINENT_DAYS
