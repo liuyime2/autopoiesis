@@ -56,12 +56,18 @@ failed. `make verify` calls it through `check_self_evolution_closes`.
 
 ## Information refresh — `refresh_information.py`
 
-**`python tools/refresh_information.py SPY XLB`** (or `--from-account`) fetches per-symbol
-information from Yahoo (earnings date, consensus EPS, valuation, growth, margins, analyst
-target/recommendation) and Alpaca (dividends/ex-dates, news, options ATM implied volatility)
-and writes `runtime/autopoiesis/information/<SYMBOL>.json`. The trading loop reads these
-files through `autopoiesis.information.InformationProvider`; it never calls the network.
-Run on a timer (see `information-refresh.timer`) or by hand. Read-only.
+**`python tools/refresh_information.py SPY XLB`** (or `--from-account`: holdings, configured
+and sleeve symbols, symbols served by live strategies, the last attention picks) fetches
+per-symbol information from Yahoo (earnings date, consensus EPS, valuation, growth, margins,
+analyst target/recommendation) and the Alpaca **data** API (cash dividends/ex-dates, and ~30-day
+at-the-money call implied volatility from the indicative options snapshots), and writes
+`runtime/autopoiesis/information/<SYMBOL>.json`. News is not cached: the loop reads it live.
+
+Each source records `ok`, `empty` or `error` (with the reason) under `sources`; a failing source
+never stops the others and is never silent. Yahoo answers 404 for funds, which is `empty`.
+`--cache-dir DIR` writes elsewhere and leaves the runtime untouched. The trading loop reads these
+files through `autopoiesis.information.InformationProvider`; it never calls the network. Run on
+a timer (see `information-refresh.timer`) or by hand. Read-only.
 
 ## Keeping the VIX floor engaged
 

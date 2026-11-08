@@ -109,6 +109,7 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_versioning.py": ("unit-integration", "model-provenance"),
     "test_deploy_release.py": ("unit-integration", "crash-recovery"),
     "test_timer_calendars.py": ("unit-integration", "crash-recovery"),
+    "test_refresh_information.py": ("unit-integration", "data-integrity"),
     "test_portfolio_experiment.py": ("unit-integration", "point-in-time-no-leakage", "replay-determinism"),
     "test_staleness_not_strategy_fault.py": (
         "pnl-accounting", "lifecycle-invariants", "guardian-bypass-prevention",
