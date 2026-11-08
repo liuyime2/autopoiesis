@@ -16,6 +16,7 @@ import math
 import random
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import Literal
 
 from autopoiesis.models import DataSnapshot, TradeDecision
 
@@ -148,7 +149,7 @@ class WalkForwardSignal:
     step: int = 126
     embargo: int = 5
     cost: float = 0.0003
-    _active: object | None = field(default=None, init=False, repr=False)
+    _active: Signal | None = field(default=None, init=False, repr=False)
     _next_fit: int = field(default=0, init=False, repr=False)
     choices: list[tuple[int, str]] = field(default_factory=list, init=False)
 
@@ -166,7 +167,7 @@ class WalkForwardSignal:
 
     def _fit(self, closes: Sequence[float], t: int) -> None:
         visible = list(closes[: t - self.embargo + 1])
-        best, best_score = None, -math.inf
+        best, best_score = self.grid[0], -math.inf
         for config in self.grid:
             path = signal_path(config.fresh, visible)
             score = _sharpe(held_returns(path, visible, self.cost)[-self.train:])
@@ -275,7 +276,9 @@ class TargetEngine:
             return self._decision(snapshot, "BUY", int(gap), f"long: {held} -> {target}")
         return self._decision(snapshot, "SELL", int(-gap), f"{'long' if long else 'flat'}: {held} -> {target}")
 
-    def _decision(self, snapshot: DataSnapshot, action: str, qty: int, why: str) -> TradeDecision:
+    def _decision(
+        self, snapshot: DataSnapshot, action: Literal["BUY", "SELL", "HOLD"], qty: int, why: str
+    ) -> TradeDecision:
         return TradeDecision(
             symbol=snapshot.symbol, action=action, quantity=qty,
             confidence=0.6 if action != "HOLD" else 0.0, rationale=why, strategy_id=self.strategy_id,
