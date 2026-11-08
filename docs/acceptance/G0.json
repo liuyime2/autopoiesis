@@ -1,29 +1,30 @@
 {
   "gate": "G0",
-  "status": "INSUFFICIENT",
+  "status": "PARTIAL",
   "checked_at": "2026-11-07",
   "checked_at_commit": "cd2192d976c08d2f1b596e256556625a81f8550d",
-  "deployed_commit": "dfc170f",
+  "deployed_commit": "efc0ec9 (source fingerprint 05d1776bfa381c70; main/goal at f137deb)",
   "branch_commit": "cd2192d",
   "checks": {
-    "0.1_runtime_identity": "INSUFFICIENT",
-    "0.2_unique_deploy": "INSUFFICIENT",
-    "0.3_market_hours_refusal": "INSUFFICIENT",
-    "0.4_install_service_guard": "INSUFFICIENT",
-    "0.5_recovery_drill": "NOT_RUN",
+    "0.1_runtime_identity": "PASS (heartbeat fingerprint 05d1776b == deployments.jsonl record for efc0ec9; daemon unit WorkingDirectory is releases/efc0ec917087)",
+    "0.2_unique_deploy": "PASS (flock refuses a second deploy and a second deploy of the same commit; tests/autopoiesis/test_deploy_release.py; used for real twice on 11-07)",
+    "0.3_market_hours_refusal": "INSUFFICIENT (refuses on weekdays 09:30-16:00 NY and was tested; there is no exchange holiday or early-close calendar, and AUTOPOIESIS_MARKET_OPEN overrides it)",
+    "0.4_install_service_guard": "PASS (install-service is refused unless run by deploy_release.py; the first real use failed on a bad timer calendar and said so)",
+    "0.5_recovery_drill": "PASS (journal_snapshot drill and restore of the newest hourly backup into scratch: byte-identical, figures identical; docs/evidence/goal-2026-11-07/README.md)",
     "0.6_amplification_revised": "PASS",
-    "0.7_merge_and_retire": "NOT_RUN"
+    "0.7_merge_and_retire": "PASS for the merge (main == the deployed branch, CI green on 3.10/3.11/3.12 for efc0ec9); the two codex/* worktrees are merged and not yet removed",
+    "full_gate_on_the_deployed_build": "PASS (make record-deployment: 59 classes, 58 passed, the one red being deploy-gate-record, the bootstrap case; make verify afterwards: 59/59)",
+    "first_open_under_the_new_build": "NOT_RUN (scheduled for Mon 2026-11-09 10:00 NY, first-open-check-20261109.timer)"
   },
   "evidence": [
-    "pytest tests/autopoiesis/test_deployment_record.py tests/autopoiesis/test_local_backup_installer.py tests/autopoiesis/test_runtime_integrity.py: 32 passed",
-    "tools/verify_runtime_identity.py: JSON with commit/cwd/pid/source_fingerprint/model_digest (worktree identity, not the daemon's)",
-    "tools/check_runtime_integrity.py: OK (6482 cycles, 33048 events, 155 strategies; 862 pre-fix cycles excused under MISMATCH_FIX_UTC)",
-    "make doctor: exit 0, ok true, 0 failures, 9 warnings (warnings include champion=NONE: no broker-verified positive realized PnL yet)",
-    "docs/evidence/deployments.jsonl: deployed commit dfc170f (2026-11-05); the branch is not deployed"
+    "tools/deploy_release.py ran for real on 2026-11-07 (docs/evidence/release-actions.jsonl): 424d88367071 (install-service failed on the timer calendar) then efc0ec917087 (installed, daemon restarted 19:15 EST, 0 errors)",
+    "make verify on the live build: classes 59 passed 59 failed 0",
+    "docs/evidence/deployments.jsonl: efc0ec9 / 05d1776bfa381c70, gate 59/58/1 (deploy-gate-record only)"
   ],
   "blockers": [
-    "Branch not deployed: the live daemon still runs dfc170f, so the G0 protection is implemented and tested but not live.",
-    "0.5 local backup recovery drill in an isolated directory has not been performed.",
-    "0.1-0.4 are verified only as code and tests, not against the live daemon's heartbeat and deployment record."
-  ]
+    "The first-open check for the new build has not run (Mon 11-09 10:00 NY).",
+    "Deployment identity: --approved-by is a free string, not a verified identity; enforcing a single deployer needs an OS-permission or protected-CI decision by the account holder.",
+    "No exchange holiday / early-close calendar in the market-hours refusal."
+  ],
+  "note": "The previous version of this file (cd2192d) said the branch was not deployed and the recovery drill not run; both have since happened."
 }
