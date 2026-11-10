@@ -2343,3 +2343,46 @@ def test_a_non_duplicate_rejection_is_still_retried_after_a_heartbeat(tmp_path):
     assert calls.count("propose") >= 2, calls
     first, second = [i for i, c in enumerate(calls) if c == "propose"][:2]
     assert "heartbeat:maintenance: curriculum proposal reviewed" in calls[first + 1:second], calls
+
+
+def _no_exploration_daemon(tmp_path, *, strategy_id):
+    cfg = config(tmp_path, interval=0)
+    journal = JsonlJournal(cfg.journal_path)
+    knowledge_library = KnowledgeLibrary(tmp_path / "knowledge")
+    daemon = AgentDaemon(
+        config=cfg, loop=FakeLoop(journal=journal, strategy_id=strategy_id),
+        sleep=lambda seconds: None, journal=journal,
+        knowledge_admission=KnowledgeAdmission(knowledge_library=knowledge_library),
+    )
+    return daemon, journal, knowledge_library
+
+
+def _held_round(cycle_id, symbol):
+    """SYNTHETIC: a HOLD round for a held symbol that no strategy decided (no provenance)."""
+    return FakeLoop().run_once(symbol).model_copy(update={"cycle_id": cycle_id})
+
+
+def test_a_no_exploration_lesson_cites_only_cycles_a_strategy_decided(tmp_path):
+    """Live 2026-11-10: held BIL/TLT rounds in the window rejected 17 of 17 lessons."""
+    daemon, journal, library = _no_exploration_daemon(tmp_path, strategy_id="hold-strategy")
+    daemon.loop.run_once("SPY")
+    journal.append(_held_round("held-tlt", "TLT"))
+    library.verify_journal_sources(journal.read_all())
+
+    summary = daemon._recent_exploration_summary()
+    assert summary["no_exploration"] and "held-tlt" in summary["cycle_ids"]
+    daemon._record_no_exploration_lesson(summary)
+
+    proposed = journal.read_events("KNOWLEDGE_ARTIFACT_PROPOSED")[-1]
+    assert proposed.payload["source_refs"] == ["cycle-1"]
+    assert journal.read_events("KNOWLEDGE_ARTIFACT_ADMISSION_REVIEWED")[-1].status == "ACCEPTED"
+
+
+def test_a_window_with_no_strategy_decision_proposes_no_lesson(tmp_path):
+    daemon, journal, library = _no_exploration_daemon(tmp_path, strategy_id=None)
+    journal.append(_held_round("held-tlt", "TLT"))
+    library.verify_journal_sources(journal.read_all())
+    summary = daemon._recent_exploration_summary()
+    assert summary["no_exploration"]
+    daemon._record_no_exploration_lesson(summary)
+    assert journal.read_events("KNOWLEDGE_ARTIFACT_PROPOSED") == []

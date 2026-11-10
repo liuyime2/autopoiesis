@@ -27,7 +27,7 @@ from autopoiesis.health import HealthMonitor
 from autopoiesis.journal import JsonlJournal
 from autopoiesis.knowledge_admission import KnowledgeAdmission
 from autopoiesis.knowledge_library import lesson_effects
-from autopoiesis.learning_evidence import ELIGIBILITY_VERSION, capture, valid_provenance
+from autopoiesis.learning_evidence import ELIGIBILITY_VERSION, capture, eligible, valid_provenance
 from autopoiesis.llm_decision import LLM_UNAVAILABLE_MARKER
 from autopoiesis.sleeve import SLEEVE_STRATEGY_ID
 
@@ -1666,7 +1666,9 @@ class AgentDaemon:
     def _record_no_exploration_lesson(self, summary: dict[str, object]) -> None:
         if self.knowledge_admission is None or not summary.get("no_exploration"):
             return
-        cycle_ids = coerce.field_str_tuple(summary.get("cycle_ids"), "summary.cycle_ids")
+        cycle_ids = self._eligible_cycle_ids(
+            coerce.field_str_tuple(summary.get("cycle_ids"), "summary.cycle_ids")
+        )
         if not cycle_ids:
             return
         subtype, answer = self._diagnose_no_exploration(summary)
@@ -1698,6 +1700,20 @@ class AgentDaemon:
             message=result.reason,
             payload={"accepted": result.accepted, "reason": result.reason, "artifact_id": result.artifact_id},
         )
+
+    def _eligible_cycle_ids(self, cycle_ids: tuple[str, ...]) -> tuple[str, ...]:
+        """The cited cycles a journal lesson may rest on: those with a strategy's provenance.
+
+        The window is every round, including HOLD rounds for held or attention symbols that no
+        strategy decided. Admission fails a lesson closed on any such citation, correctly, so
+        citing the whole window rejected 17 of 17 lessons from 2026-11-09 to 11-10 (28 of the
+        last one's 50 cycles were held BIL/TLT and attention rounds with no provenance).
+        """
+        if self.journal is None or not cycle_ids:
+            return ()
+        wanted = set(cycle_ids)
+        records = {r.cycle_id: r for r in self.journal.last_n(max(len(cycle_ids), self.config.reflection_window)) if r.cycle_id in wanted}
+        return tuple(c for c in cycle_ids if c in records and eligible(records[c]))
 
     @staticmethod
     def _diagnose_no_exploration(summary: dict[str, object]) -> tuple[str, str]:
