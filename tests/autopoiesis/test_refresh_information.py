@@ -115,3 +115,56 @@ def test_no_blanket_except_is_left():
 
     text = (TOOLS / "refresh_information.py").read_text(encoding="utf-8")
     assert not re.search(r"^\s*except\s*(Exception\b|BaseException\b)?\s*(as \w+)?\s*:", text, flags=re.M)
+
+
+class _CurlStyleHTTPError(OSError):
+    """SYNTHETIC stand-in for curl_cffi's HTTPError: status in `.response.status_code`, `.code` 0."""
+
+    def __init__(self, status):
+        super().__init__(f"HTTP Error {status}: ")
+        self.code = 0
+        self.response = type("R", (), {"status_code": status})()
+
+
+def _ticker(info, calendar_exc):
+    import types
+
+    class Fake:
+        def __init__(self, symbol):
+            self.info = info
+
+        @property
+        def calendar(self):
+            raise calendar_exc
+
+    return types.SimpleNamespace(Ticker=Fake)
+
+
+def test_an_etf_calendar_404_keeps_the_valuation_and_is_not_an_error(monkeypatch):
+    """Measured 2026-11-10: info answers for XLE/SPY/TLT, only the calendar 404s (curl_cffi)."""
+    info = {"trailingPE": 15.47, "priceToBook": 1.19, "quoteType": "ETF"}  # SYNTHETIC values
+    monkeypatch.setitem(sys.modules, "yfinance", _ticker(info, _CurlStyleHTTPError(404)))
+    fields, status = ri.fetch_yahoo("XLE")
+    assert status["status"] == "ok"
+    assert fields["valuation"] == {"pe": 15.47, "price_to_book": 1.19}
+    assert "earnings_date" not in fields
+
+
+def test_a_calendar_failure_that_is_not_a_404_is_still_an_error(monkeypatch):
+    monkeypatch.setitem(sys.modules, "yfinance", _ticker({"trailingPE": 1.0}, _CurlStyleHTTPError(500)))
+    assert ri.fetch_yahoo("XLE")[1]["status"] == "error"
+
+
+def test_a_curl_style_404_on_info_is_empty(monkeypatch):
+    import types
+
+    class Fake:
+        def __init__(self, symbol):
+            pass
+
+        @property
+        def info(self):
+            raise _CurlStyleHTTPError(404)
+
+    monkeypatch.setitem(sys.modules, "yfinance", types.SimpleNamespace(Ticker=Fake))
+    assert ri.fetch_yahoo("XLE")[1]["status"] == "empty"

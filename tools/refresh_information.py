@@ -28,7 +28,6 @@ import argparse
 import json
 import os
 import sys
-import urllib.error
 from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -60,22 +59,46 @@ def _status(status: str, detail: str = "") -> dict:
 
 
 # ----------------------------------------------------------------------------------- sources
+def _http_status(exc: BaseException) -> int | None:
+    """The HTTP status of a failed request, whatever client raised it.
+
+    yfinance 0.2.58 fetches through curl_cffi, whose HTTPError carries the status in
+    `response.status_code` and has `.code == 0`; `urllib.error.HTTPError` carries it in `.code`.
+    Matching only the urllib class labelled every ETF's calendar 404 an error (2026-11-10).
+    """
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int) and status:
+        return status
+    code = getattr(exc, "code", None)
+    return code if isinstance(code, int) and code else None
+
+
 def fetch_yahoo(symbol: str) -> tuple[dict, dict]:
-    """(fields, status) from yfinance. Fields carry their own `<key>_as_of`."""
+    """(fields, status) from yfinance. Fields carry their own `<key>_as_of`.
+
+    `info` and `calendar` are separate requests and fail separately. Measured 2026-11-10: for
+    XLE, SPY and TLT `info` answers (104-107 fields, trailing P/E and P/B among them) and only
+    `calendar` answers 404, because a fund has no earnings calendar. One shared `try` threw the
+    valuation away with the calendar.
+    """
     try:
         import yfinance as yf
 
         ticker = yf.Ticker(symbol)
         info = ticker.info or {}
-        calendar = ticker.calendar
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            # Yahoo has no company summary for funds: measured 2026-11-07, SPY, TLT and XLE all
-            # answer 404. That is "nothing to say", not a failing source.
-            return {}, _status("empty", "yahoo has no company data for this symbol (HTTP 404; typical of an ETF)")
-        return {}, _status("error", f"HTTPError: HTTP {exc.code}")
     except SOURCE_ERRORS as exc:
-        return {}, _status("error", f"{type(exc).__name__}: {exc}")
+        status = _http_status(exc)
+        if status == 404:
+            return {}, _status("empty", "yahoo has no company data for this symbol (HTTP 404)")
+        label = f"HTTP {status}" if status else str(exc)
+        return {}, _status("error", f"{type(exc).__name__}: {label}")
+    try:
+        calendar = ticker.calendar
+    except SOURCE_ERRORS as exc:
+        if _http_status(exc) != 404:
+            return {}, _status("error", f"{type(exc).__name__} on calendar: {exc}")
+        calendar = None  # no earnings calendar: an ETF, not a failure
 
     out: dict = {}
     now = _now()
