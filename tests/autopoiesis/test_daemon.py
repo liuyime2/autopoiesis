@@ -849,9 +849,12 @@ def test_daemon_records_curriculum_failure(tmp_path):
         ("market", 0, 0),
         ("proposal", 1, 0),
         ("proposal_audit", 1, 0),
-        ("prices", 1, 0),
-        ("set_prices", 1, 0),
-        ("results", 1, 0),
+        # Prices and results are first read by the probation-capacity check, which runs
+        # before the model call so a full queue costs no call (2026-11-10); a stop there
+        # therefore precedes the proposal.
+        ("prices", 0, 0),
+        ("set_prices", 0, 0),
+        ("results", 0, 0),
         ("admission", 1, 1),
         ("admission_audit", 1, 1),
     ],
@@ -2386,3 +2389,37 @@ def test_a_window_with_no_strategy_decision_proposes_no_lesson(tmp_path):
     assert summary["no_exploration"]
     daemon._record_no_exploration_lesson(summary)
     assert journal.read_events("KNOWLEDGE_ARTIFACT_PROPOSED") == []
+
+
+class _CountingCurriculum:
+    """SYNTHETIC: counts model calls; proposes a fresh baseline each time."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def propose(self, **kwargs):
+        self.calls += 1
+        return CurriculumTask(
+            task_id=f"t{self.calls}", task_type="STRATEGY_SPEC", summary="x",
+            strategy_spec=_probe_spec(f"fresh-{self.calls}"), rationale="test",
+        )
+
+
+def test_no_model_call_while_the_probation_queue_is_full(tmp_path):
+    """Live 2026-11-10 11:41Z: a full curriculum call ended in the capacity refusal."""
+    curriculum = _CountingCurriculum()
+    daemon, journal, _, _ = make_daemon_with_learning(tmp_path, curriculum_agent=curriculum)
+    daemon.strategy_admission.max_probation_queue = 0  # SYNTHETIC: the cap is already reached
+    daemon.run(max_cycles=1)
+    assert curriculum.calls == 0
+    skipped = [e for e in journal.read_events() if e.event_type == "CURRICULUM_SKIPPED"]
+    assert skipped and "cap" in skipped[0].message
+    assert not [e for e in journal.read_events() if e.event_type == "CURRICULUM_PROPOSED"]
+
+
+def test_the_curriculum_is_called_while_there_is_room(tmp_path):
+    curriculum = _CountingCurriculum()
+    daemon, journal, _, _ = make_daemon_with_learning(tmp_path, curriculum_agent=curriculum)
+    daemon.run(max_cycles=1)
+    assert curriculum.calls >= 1
+    assert not [e for e in journal.read_events() if e.event_type == "CURRICULUM_SKIPPED"]

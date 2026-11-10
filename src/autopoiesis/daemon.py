@@ -962,6 +962,8 @@ class AgentDaemon:
             if self._stop_requested:
                 return
             self._record_no_exploration_lesson(exploration_summary)
+            if self._probation_full():
+                return
             # Retry once on transport/connection errors — the LLM endpoint
             # (Ollama) can transiently time out under load. A single retry with
             # a 5-second backstop is sufficient; anything worse should surface
@@ -1700,6 +1702,20 @@ class AgentDaemon:
             message=result.reason,
             payload={"accepted": result.accepted, "reason": result.reason, "artifact_id": result.artifact_id},
         )
+
+    def _probation_full(self) -> bool:
+        """Record a skipped proposal and say so when admission would refuse any candidate.
+
+        The gate is unchanged and still refuses on its own; this only saves the model call.
+        """
+        if self.strategy_admission is None:
+            return False
+        self.strategy_admission.set_market_prices(self._last_known_prices())
+        reason = self.strategy_admission.capacity_reason(self._strategy_results())
+        if reason is None:
+            return False
+        self._append_event("CURRICULUM_SKIPPED", status="SKIPPED", message=reason, payload={"reason": reason})
+        return True
 
     def _eligible_cycle_ids(self, cycle_ids: tuple[str, ...]) -> tuple[str, ...]:
         """The cited cycles a journal lesson may rest on: those with a strategy's provenance.

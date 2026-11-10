@@ -308,6 +308,17 @@ class StrategyAdmission:
                 return price
         return None
 
+    def capacity_reason(self, results: Sequence[StrategyResult] | None = None) -> str | None:
+        """Why no candidate can be admitted now, whatever it is; None while there is room.
+
+        Public so the daemon can ask *before* spending a model call on a proposal this
+        refusal would meet: measured 2026-11-10 11:41Z, a full curriculum call (7-10 GPU
+        minutes) ended in exactly this refusal.
+        """
+        backlog = self.probation_backlog(results)
+        dormant = self.dormant_probation(results)
+        return self._capacity_rejection_reason(backlog, dormant=dormant, total=backlog + dormant)
+
     def _capacity_rejection_reason(
         self, backlog: int, dormant: int = 0, total: int | None = None
     ) -> str | None:
@@ -394,11 +405,7 @@ class StrategyAdmission:
                 accepted=False, reason=symbol_reason, strategy_id=strategy.strategy_id,
             )
 
-        backlog = self.probation_backlog(results)
-        dormant = self.dormant_probation(results)
-        capacity_reason = self._capacity_rejection_reason(
-            backlog, dormant=dormant, total=backlog + dormant
-        )
+        capacity_reason = self.capacity_reason(results)
         if capacity_reason is not None:
             return StrategyAdmissionResult(
                 accepted=False,
