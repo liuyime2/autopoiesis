@@ -169,7 +169,10 @@ class StructuredCurriculumAgent:
             # since 2026-11-05 every accepted proposal was a SPY rule, and SPY belongs to the
             # core sleeve, so none could ever trade. Admission refuses any other symbol.
             "admissible_symbols": list(admissible_symbols),
-            "strategy_id_must_not_be_one_of_the_above": True,
+            # The library's ids are not listed (only its coverage), so the model cannot avoid
+            # them; the daemon renames a clashing id before admission (2026-11-09: 51 of 60
+            # rejections were id clashes). Behaviour, not name, is what admission judges.
+            "strategy_id_note": "any short descriptive id; the system makes it unique",
             # What the agent actually holds, and which actions the library can
             # currently express. The context previously described only the
             # strategies, so the engine could not see that the book carried 23
@@ -244,7 +247,7 @@ class StructuredCurriculumAgent:
                 ],
                 "optional": ["parameters", "enabled", "lifecycle"],
                 "field_notes": {
-                    "strategy_id": "a unique id not already present in strategies[].strategy_id",
+                    "strategy_id": "a short descriptive id; the system makes it unique",
                     "name": "human readable label",
                     "kind": "one of HOLD_BASELINE, FIXED_SIZE, TREND_FOLLOW, RULE",
                     "symbols": "array of symbols, each one of admissible_symbols when that list is non-empty",

@@ -64,6 +64,7 @@ from autopoiesis.models import (
     JournalEventType,
     KnowledgeArtifact,
     StrategyResult,
+    StrategySpec,
 )
 from autopoiesis.reflection_memory import ReflectionMemory
 from autopoiesis.strategy_admission import StrategyAdmission
@@ -851,6 +852,27 @@ class AgentDaemon:
             },
         )
 
+    def _unique_strategy_spec(self, spec: StrategySpec) -> tuple[StrategySpec, str | None]:
+        """The spec with an id no live strategy holds, and the id it replaced (None if unchanged).
+
+        The model is never shown the library's ids (the coverage list is KIND SYMBOLS ACTIONS), so
+        it cannot avoid them: 51 of 60 rejections between 11-07 and 11-09 were "strategy_id already
+        exists", 24 of them on a retry that repeated the same id. An id is a name, not a behaviour;
+        admission should judge the behaviour. A RETIRED id is left alone, because that is the
+        re-admission path and its own rules decide.
+        """
+        library = self.strategy_library
+        if library is None or not library.exists(spec.strategy_id):
+            return spec, None
+        existing = library.try_load(spec.strategy_id)
+        if existing is not None and existing.lifecycle == "RETIRED":
+            return spec, None
+        for n in range(2, 1000):
+            candidate = f"{spec.strategy_id}-v{n}"
+            if not library.exists(candidate):
+                return spec.model_copy(update={"strategy_id": candidate}), spec.strategy_id
+        return spec, None
+
     def _admissible_symbols(self) -> tuple[str, ...]:
         """The symbols admission will accept a trading strategy on (empty: unrestricted)."""
         return tuple(getattr(self.strategy_admission, "admissible_symbols", None) or ())
@@ -1008,6 +1030,9 @@ class AgentDaemon:
                     "rationale": task.rationale,
                     "parameters": task.parameters,
                     "strategy_id": strategy_id,
+                    # The whole proposed spec, so a later change to admission can be replayed on
+                    # what was actually proposed (11-09: the events carried only the id).
+                    "strategy_spec": task.strategy_spec.model_dump(mode="json") if task.strategy_spec is not None else None,
                     "recent_exploration_summary": exploration_summary,
                 },
             )
@@ -1020,10 +1045,11 @@ class AgentDaemon:
                 strategy_results = self._strategy_results()
                 if self._stop_requested:
                     return
-                before = self._library_lifecycle(task.strategy_spec.strategy_id)
-                result = self.strategy_admission.admit(
-                    task.strategy_spec, strategy_results
-                )
+                spec, renamed_from = self._unique_strategy_spec(task.strategy_spec)
+                task = task.model_copy(update={"strategy_spec": spec})
+                strategy_id = spec.strategy_id
+                before = self._library_lifecycle(spec.strategy_id)
+                result = self.strategy_admission.admit(spec, strategy_results)
                 self._record_admission_transition(before, result)
                 self._append_event(
                     "STRATEGY_ADMISSION_REVIEWED",
@@ -1031,9 +1057,20 @@ class AgentDaemon:
                     message=result.reason,
                     strategy_id=result.strategy_id,
                     task_id=task.task_id,
-                    payload={"accepted": result.accepted, "reason": result.reason},
+                    payload={"accepted": result.accepted, "reason": result.reason, "renamed_from": renamed_from},
                 )
-                if not result.accepted and task.task_type == "STRATEGY_SPEC" and task.strategy_spec is not None:
+                # The proposal took one model call (7-10 minutes measured); a retry is a second.
+                # Without a heartbeat between them the watchdog saw ~17 minutes of silence on
+                # 2026-11-09 01:04 EST and restarted a healthy daemon (threshold 900 s).
+                self._heartbeat("RUNNING", "maintenance: curriculum proposal reviewed")
+                # A duplicate is not a defect the model can correct from the reason: of 24 retries
+                # after "strategy_id already exists" (11-07..11-09), 24 repeated the same strategy.
+                # Each retry is another 7-10 minute model call, so duplicates are not retried.
+                duplicate = ("already exists" in result.reason) or ("behaviourally identical" in result.reason)
+                if (
+                    not result.accepted and not duplicate
+                    and task.task_type == "STRATEGY_SPEC" and task.strategy_spec is not None
+                ):
                     # Admission rejected: retry once with the reason fed back as a
                     # prior rejection, so the model can correct the specific defect.
                     try:
@@ -1053,25 +1090,27 @@ class AgentDaemon:
                             admissible_symbols=self._admissible_symbols(),
                         )
                         if retry_task.task_type == "STRATEGY_SPEC" and retry_task.strategy_spec is not None:
+                            retry_spec, retry_renamed = self._unique_strategy_spec(retry_task.strategy_spec)
+                            retry_task = retry_task.model_copy(update={"strategy_spec": retry_spec})
                             self.strategy_admission.set_market_prices(self._last_known_prices())
-                            retry_result = self.strategy_admission.admit(
-                                retry_task.strategy_spec, self._strategy_results()
-                            )
-                            self._record_admission_transition(
-                                self._library_lifecycle(retry_task.strategy_spec.strategy_id), retry_result
-                            )
+                            retry_before = self._library_lifecycle(retry_spec.strategy_id)
+                            retry_result = self.strategy_admission.admit(retry_spec, self._strategy_results())
+                            self._record_admission_transition(retry_before, retry_result)
                             self._append_event(
                                 "STRATEGY_ADMISSION_REVIEWED",
                                 status="ACCEPTED" if retry_result.accepted else "REJECTED",
                                 message=f"retry: {retry_result.reason}",
                                 strategy_id=retry_result.strategy_id,
                                 task_id=retry_task.task_id,
-                                payload={"accepted": retry_result.accepted, "reason": retry_result.reason, "retry": True},
+                                payload={
+                                    "accepted": retry_result.accepted, "reason": retry_result.reason,
+                                    "retry": True, "renamed_from": retry_renamed,
+                                },
                             )
                             if retry_result.accepted:
                                 task = retry_task
                                 result = retry_result
-                                strategy_id = retry_task.strategy_spec.strategy_id
+                                strategy_id = retry_spec.strategy_id
                     except (ConnectionError, TimeoutError, OSError):
                         pass
                 if self._stop_requested:

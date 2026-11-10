@@ -2242,3 +2242,104 @@ def test_scoring_covers_a_symbol_only_a_strategy_serves(tmp_path, monkeypatch):
     assert "MSFT" not in seen["symbols"], "a paused strategy serves nothing"
     assert set(daemon.config.symbols) <= set(seen["symbols"])
     assert len(seen["symbols"]) == len(set(seen["symbols"]))
+
+
+def _probe_spec(strategy_id, *, action="BUY", lifecycle=None):
+    from autopoiesis.models import StrategySpec
+
+    spec = StrategySpec(
+        strategy_id=strategy_id, name=strategy_id, kind="FIXED_SIZE", symbols=("SPY",),
+        parameters={"action": action, "quantity": 1, "confidence": 0.7},
+        max_position_value=100, created_at=datetime.now(tz=timezone.utc), rationale="test",
+    )
+    return spec if lifecycle is None else spec.model_copy(update={"lifecycle": lifecycle})
+
+
+def test_a_clashing_live_id_is_renamed_and_a_retired_one_is_left_for_readmission(tmp_path):
+    """2026-11-07..09: 51 of 60 admission rejections were "strategy_id already exists"; the model is
+    never shown the ids, so it cannot avoid them. The daemon makes the id unique instead."""
+    daemon, _, _, library = make_daemon_with_learning(tmp_path)
+    library.save(_probe_spec("probe", lifecycle="PROBATION"))
+    library.save(_probe_spec("probe-v2", lifecycle="ACTIVE"))
+    library.save(_probe_spec("old", lifecycle="RETIRED"))
+
+    renamed, original = daemon._unique_strategy_spec(_probe_spec("probe"))
+    assert (renamed.strategy_id, original) == ("probe-v3", "probe")
+    same, none = daemon._unique_strategy_spec(_probe_spec("old"))
+    assert (same.strategy_id, none) == ("old", None), "a retired id is the re-admission path"
+    fresh, none = daemon._unique_strategy_spec(_probe_spec("brand-new"))
+    assert (fresh.strategy_id, none) == ("brand-new", None)
+
+
+def test_a_renamed_duplicate_is_still_refused_for_its_behaviour_and_the_heartbeat_moves_between_calls(tmp_path):
+    from autopoiesis.models import CurriculumTask
+
+    calls = []
+
+    class SameIdCurriculum:
+        """SYNTHETIC: always proposes the id that already exists, with the same behaviour."""
+
+        def propose(self, **kwargs):
+            calls.append("propose")
+            return CurriculumTask(
+                task_id=f"t{len(calls)}", task_type="STRATEGY_SPEC", summary="same id again",
+                strategy_spec=_probe_spec("probe"), rationale="test",
+            )
+
+    daemon, journal, _, library = make_daemon_with_learning(tmp_path, curriculum_agent=SameIdCurriculum())
+    library.save(_probe_spec("hold-baseline", lifecycle="BASELINE").model_copy(update={"kind": "HOLD_BASELINE", "parameters": {}}))
+    library.save(_probe_spec("probe", lifecycle="PROBATION"))
+    real_heartbeat = daemon._heartbeat
+
+    def heartbeat(status, message):
+        calls.append(f"heartbeat:{message}")
+        return real_heartbeat(status, message)
+
+    daemon._heartbeat = heartbeat
+    daemon.run(max_cycles=1)
+
+    reviews = [e for e in journal.read_events() if e.event_type == "STRATEGY_ADMISSION_REVIEWED"]
+    assert reviews, "the proposal must reach admission"
+    first = reviews[0]
+    assert first.payload["renamed_from"] == "probe" and first.strategy_id.startswith("probe-v")
+    assert "already exists" not in first.message and "behaviourally identical" in first.message
+    i = calls.index("propose")
+    assert "heartbeat:maintenance: curriculum proposal reviewed" in calls[i + 1:], calls
+    # A duplicate is not retried. (A run may hold more than one maintenance pass, so count the
+    # retries on the record, not the calls.)
+    assert not any(e.payload.get("retry") for e in reviews), [e.message for e in reviews]
+    assert len(reviews) == calls.count("propose"), "one review per proposal, no second call for a duplicate"
+    proposed = next(e for e in journal.read_events() if e.event_type == "CURRICULUM_PROPOSED")
+    assert proposed.payload["strategy_spec"]["strategy_id"] == "probe", "the proposed spec is journalled whole"
+
+
+def test_a_non_duplicate_rejection_is_still_retried_after_a_heartbeat(tmp_path):
+    from autopoiesis.models import CurriculumTask, StrategySpec
+
+    calls = []
+
+    class OffMandate:
+        """SYNTHETIC: proposes a symbol outside the allowlist, then a valid one."""
+
+        def propose(self, **kwargs):
+            calls.append("propose")
+            symbol = "TSLA" if len(calls) == 1 else "SPY"
+            return CurriculumTask(
+                task_id=f"t{len(calls)}", task_type="STRATEGY_SPEC", summary="x",
+                strategy_spec=StrategySpec(
+                    strategy_id=f"fixed-{symbol.lower()}", name="x", kind="FIXED_SIZE", symbols=(symbol,),
+                    parameters={"action": "BUY", "quantity": 1, "confidence": 0.7}, max_position_value=100,
+                    created_at=datetime.now(tz=timezone.utc), rationale="t",
+                ),
+                rationale="t",
+            )
+
+    daemon, _journal, _, library = make_daemon_with_learning(tmp_path, curriculum_agent=OffMandate())
+    library.save(_probe_spec("hold-baseline", lifecycle="BASELINE").model_copy(update={"kind": "HOLD_BASELINE", "parameters": {}}))
+    real_heartbeat = daemon._heartbeat
+    daemon._heartbeat = lambda status, message: (calls.append(f"heartbeat:{message}"), real_heartbeat(status, message))[1]
+    daemon.run(max_cycles=1)
+
+    assert calls.count("propose") >= 2, calls
+    first, second = [i for i, c in enumerate(calls) if c == "propose"][:2]
+    assert "heartbeat:maintenance: curriculum proposal reviewed" in calls[first + 1:second], calls
