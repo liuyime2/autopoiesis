@@ -2,7 +2,7 @@ import os
 import signal
 import time
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from synthetic_evidence import synthetic_spec
@@ -2423,3 +2423,73 @@ def test_the_curriculum_is_called_while_there_is_room(tmp_path):
     daemon.run(max_cycles=1)
     assert curriculum.calls >= 1
     assert not [e for e in journal.read_events() if e.event_type == "CURRICULUM_SKIPPED"]
+
+
+class _OpeningScheduler:
+    """Synthetic clock: market closed, the next open `until_open` seconds away."""
+
+    def __init__(self, until_open: int):
+        self.until_open = until_open
+
+    def should_trade_now(self):
+        return False
+
+    def seconds_until_next_open(self, default: int) -> int:
+        return self.until_open
+
+
+def _maintenance_stage_calls(tmp_path, monkeypatch, scheduler) -> list[str]:
+    cfg = config(tmp_path)
+    daemon = AgentDaemon(config=cfg, loop=FakeLoop(), scheduler=scheduler,
+                         reflection_memory=ReflectionMemory(tmp_path / "reflection.json"),
+                         curriculum_agent=CapturingCurriculum())
+    daemon.journal = None
+    calls: list[str] = []
+    monkeypatch.setattr(daemon, "_resolve_unresolved_submissions", lambda: 0)
+    monkeypatch.setattr(daemon, "_resolve_pending_fills", lambda: 0)
+    monkeypatch.setattr(daemon, "_latest_evidence_batch", lambda: None)
+    monkeypatch.setattr(daemon, "_ingest_broker_evidence", lambda: None)
+    monkeypatch.setattr(daemon, "_reflect", lambda **kwargs: calls.append("reflection"))
+    monkeypatch.setattr(daemon, "_curriculum_proposal", lambda: calls.append("curriculum"))
+    monkeypatch.setattr(daemon, "_manage_strategy_lifecycle", lambda **kwargs: calls.append("lifecycle"))
+    daemon._maintenance()
+    return calls
+
+
+def test_reflection_and_curriculum_wait_when_the_open_is_near(tmp_path, monkeypatch):
+    """Measured 2026-11-10: a pass that began at 09:28 NY ran reflection (6 min) and two curriculum
+    model calls (8 min each), and the first round of the day ran at 09:51. Inside the lead window
+    the two slow stages wait; the rest of the pass still runs."""
+    calls = _maintenance_stage_calls(tmp_path, monkeypatch, _OpeningScheduler(until_open=600))
+    assert calls == ["lifecycle"]
+
+
+def test_reflection_and_curriculum_run_when_the_open_is_far(tmp_path, monkeypatch):
+    calls = _maintenance_stage_calls(tmp_path, monkeypatch, _OpeningScheduler(until_open=5 * 3600))
+    assert calls == ["reflection", "curriculum", "lifecycle"]
+
+
+def test_a_scheduler_without_next_open_keeps_the_old_order(tmp_path, monkeypatch):
+    calls = _maintenance_stage_calls(tmp_path, monkeypatch, FakeScheduler(False))
+    assert calls == ["reflection", "curriculum", "lifecycle"]
+
+
+def test_an_unreadable_clock_keeps_the_old_order(tmp_path, monkeypatch):
+    from autopoiesis.scheduler import MarketScheduler
+
+    def unreadable():
+        raise ConnectionError("synthetic: broker clock unreachable")
+
+    calls = _maintenance_stage_calls(tmp_path, monkeypatch, MarketScheduler(clock_provider=unreadable))
+    assert calls == ["reflection", "curriculum", "lifecycle"]
+
+
+def test_a_real_clock_near_the_open_defers_the_slow_stages(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from autopoiesis.scheduler import MarketScheduler
+
+    soon = datetime.now(tz=timezone.utc) + timedelta(minutes=2)
+    clock = SimpleNamespace(is_open=False, next_open=soon.isoformat(), next_close=None)
+    calls = _maintenance_stage_calls(tmp_path, monkeypatch, MarketScheduler(clock_provider=lambda: clock))
+    assert calls == ["lifecycle"]

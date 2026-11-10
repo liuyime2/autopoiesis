@@ -81,6 +81,13 @@ PAUSED_REVIEW_DAYS = 3
 #: Long scheduler/backoff waits check the stop flag at least this often.
 COOPERATIVE_WAIT_POLL_SECONDS = 1.0
 
+#: Inside this many seconds before the open, maintenance does not start reflection or curriculum.
+#: Measured 2026-11-10: a pass that began at 09:28 NY ran reflection (6 min) and two curriculum
+#: model calls (8 min each), so the first round of the day ran at 09:51. The worst case is about
+#: 22 minutes; 30 leaves room. Both stages are interval-due, so they run on the first pass after
+#: the first round: they are deferred, never skipped.
+OPEN_PRIORITY_LEAD_S = 1800
+
 
 def source_fingerprint() -> str:
     """A short digest of the `autopoiesis` package as it is on disk right now.
@@ -1265,12 +1272,18 @@ class AgentDaemon:
                 *validation_events,
                 *self._appended_since(mark, "OFFLINE_VALIDATION_COMPLETED"),
             ]
-        if self.reflection_memory is not None and self._due(self.last_reflection_at, self.config.reflection_interval_seconds):
+        # The open is near: the slow stages wait until the first round has run. The guard at the
+        # top of this method covers a pass that starts after the open; this covers one that starts
+        # just before it, which is what happened on 2026-11-10.
+        open_near = self._open_is_near()
+        if open_near:
+            self._heartbeat("RUNNING", "maintenance: reflection and curriculum deferred for the open")
+        if not open_near and self.reflection_memory is not None and self._due(self.last_reflection_at, self.config.reflection_interval_seconds):
             self._reflect(evidence=evidence)
             stage("reflection")
             if self._stop_requested:
                 return
-        if self.curriculum_agent is not None and self.reflection_memory is not None and self._due(self.last_curriculum_at, self.config.curriculum_interval_seconds):
+        if not open_near and self.curriculum_agent is not None and self.reflection_memory is not None and self._due(self.last_curriculum_at, self.config.curriculum_interval_seconds):
             self._curriculum_proposal()
             stage("curriculum")
             if self._stop_requested:
@@ -2084,6 +2097,19 @@ class AgentDaemon:
             f"queue has room, and the lifecycle rules would not pause it again",
             update={"probation_restarts": reopened.probation_restarts},
         )]
+
+    def _open_is_near(self) -> bool:
+        """Is the next open within `OPEN_PRIORITY_LEAD_S`? A scheduling priority, not a gate.
+
+        A scheduler that cannot say answers False, which is the order maintenance had before this
+        existed. `MarketScheduler` already turns an unreadable clock into the default passed here
+        (one second past the window), so a broker outage also answers False.
+        """
+        scheduler = getattr(self, "scheduler", None)
+        if scheduler is None or not hasattr(scheduler, "seconds_until_next_open"):
+            return False
+        until = scheduler.seconds_until_next_open(OPEN_PRIORITY_LEAD_S + 1)
+        return 0 < until <= OPEN_PRIORITY_LEAD_S
 
     def _due(self, last_at: datetime | None, interval_seconds: int) -> bool:
         if last_at is None:
