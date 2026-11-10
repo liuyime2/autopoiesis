@@ -705,3 +705,33 @@ def test_rotation_manifest_write_failure_leaves_history_fail_closed(tmp_path, mo
     status = journal.archive_manifest_status()
     assert status["valid"] is False
     assert "unmanifested" in status["reason"]
+
+
+def test_a_snapshot_journal_parses_once_even_while_the_file_grows(tmp_path):
+    """Doctor, 2026-11-10: four journals and live appends meant 14 parses and a 180 s timeout."""
+    path = tmp_path / "journal.jsonl"
+    writer = JsonlJournal(path)
+    writer.append(make_record("cycle-1"))
+    snapshot = JsonlJournal(path, lock=False, snapshot=True)
+    calls = []
+    original = CycleRecord.model_validate_json
+
+    assert [r.cycle_id for r in snapshot.read_all()] == ["cycle-1"]
+    writer.append(make_record("cycle-2"))  # the daemon appends mid-report
+    CycleRecord.model_validate_json = lambda raw, *a, **k: calls.append(raw) or original(raw, *a, **k)  # type: ignore[method-assign]
+    try:
+        again = snapshot.read_all()
+    finally:
+        CycleRecord.model_validate_json = original  # type: ignore[method-assign]
+    assert [r.cycle_id for r in again] == ["cycle-1"]
+    assert calls == []
+
+
+def test_a_live_journal_still_sees_appends(tmp_path):
+    path = tmp_path / "journal.jsonl"
+    writer = JsonlJournal(path)
+    writer.append(make_record("cycle-1"))
+    reader = JsonlJournal(path, lock=False)
+    assert len(reader.read_all()) == 1
+    writer.append(make_record("cycle-2"))
+    assert [r.cycle_id for r in reader.read_all()] == ["cycle-1", "cycle-2"]

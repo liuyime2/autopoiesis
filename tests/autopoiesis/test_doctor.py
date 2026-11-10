@@ -597,3 +597,20 @@ def test_coverage_is_green_when_every_configured_symbol_is_served(config):
     library.save(_spec("a"))
     report = run_doctor(config, skip_broker=True)
     assert _check(report, "universe coverage").status is Status.OK
+
+
+def test_doctor_builds_one_journal_for_every_check(config, monkeypatch):
+    """Measured 2026-11-10: four journals, 14 parses, 146-183 s against a 180 s wrapper limit."""
+    import autopoiesis.doctor as doctor
+
+    JsonlJournal(config.journal_path).append(_record("c1"))
+    built = []
+    real = doctor.JsonlJournal
+
+    def counting(*args, **kwargs):
+        built.append(kwargs.get("snapshot", False))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(doctor, "JsonlJournal", counting)
+    run_doctor(config, skip_broker=True)
+    assert built == [True]

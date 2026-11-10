@@ -175,8 +175,15 @@ class JsonlJournal:
         archive_dir: Path | str | None = None,
         strict: bool = False,
         lock_timeout: float = 10.0,
+        snapshot: bool = False,
     ):
         self.path = Path(path)
+        #: Read the journal once and answer every later read from that parse, even when the
+        #: files have grown since. For a point-in-time report such as `doctor`: measured
+        #: 2026-11-10, doctor built four journals and the daemon's appends invalidated each
+        #: one's cache, so it parsed the journal 14 times (117 of 160 s) and exceeded the
+        #: wrapper's 180 s limit. A snapshot also makes every check see the same journal.
+        self.snapshot = snapshot
         #: How long a reader or writer waits for the journal lock before giving up. A writer that
         #: gives up loses the cycle's record, so production waits longer than the default: on
         #: 2026-10-30 at 14:32Z a cycle raised "could not acquire lock" after 10 s, two minutes after
@@ -713,7 +720,7 @@ class JsonlJournal:
         """Every record of `model` across all generations, parsed once per file signature."""
         signature = self._signature()
         cached = self._parse_cache.get(model)
-        if cached is not None and cached[0] == signature:
+        if cached is not None and (self.snapshot or cached[0] == signature):
             return cached[1], cached[2]
 
         records: list = []

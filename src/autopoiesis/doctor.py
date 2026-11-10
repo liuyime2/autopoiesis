@@ -176,13 +176,13 @@ def run_doctor(config: AgentConfig, *, client=None, skip_broker: bool = False) -
     _check_risk_forecast(report, config, client, skip_broker)
     _check_ollama(report, config)
     _check_daemon(report, config)
-    _check_journal(report, config)
-    _check_strategy_library(
-        report, config, JsonlJournal(config.journal_path, lock_timeout=60.0, lock=False) if config.journal_path.exists() else None
-    )
+    # One point-in-time journal for every check: see `JsonlJournal.snapshot`.
+    journal = _journal(config, snapshot=True)
+    _check_journal(report, config, journal)
+    _check_strategy_library(report, config, journal if config.journal_path.exists() else None)
     _check_knowledge(report, config)
-    _check_proof(report, config)
-    _check_governance(report, config)
+    _check_proof(report, config, journal)
+    _check_governance(report, config, journal)
     return report
 
 
@@ -201,8 +201,10 @@ def run_doctor(config: AgentConfig, *, client=None, skip_broker: bool = False) -
 RISK_BASELINE_PATH = "risk_baseline.json"
 
 
-def _check_governance(report: DoctorReport, config: AgentConfig) -> None:
-    journal = _journal(config)
+def _check_governance(
+    report: DoctorReport, config: AgentConfig, journal: JsonlJournal | None = None
+) -> None:
+    journal = journal if journal is not None else _journal(config)
     records = _records(journal) if journal is not None else []
 
     # 1. No order may exist without Guardian approving it. `executor.execute`
@@ -1372,9 +1374,9 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _journal(config: AgentConfig) -> JsonlJournal | None:
+def _journal(config: AgentConfig, *, snapshot: bool = False) -> JsonlJournal | None:
     try:
-        return JsonlJournal(config.journal_path, lock_timeout=60.0, lock=False)
+        return JsonlJournal(config.journal_path, lock_timeout=60.0, lock=False, snapshot=snapshot)
     except Exception:
         return None
 
@@ -1606,8 +1608,10 @@ def _check_daemon(report: DoctorReport, config: AgentConfig) -> None:
     )
 
 
-def _check_journal(report: DoctorReport, config: AgentConfig) -> None:
-    journal = JsonlJournal(config.journal_path, lock_timeout=60.0, lock=False)
+def _check_journal(
+    report: DoctorReport, config: AgentConfig, journal: JsonlJournal | None = None
+) -> None:
+    journal = journal if journal is not None else JsonlJournal(config.journal_path, lock_timeout=60.0, lock=False)
     stats = journal.stats()
     if not stats["exists"]:
         report.add("journal", WARN, "absent; no cycles recorded yet", "run one cycle: autopoiesis.cli --once")
@@ -1823,13 +1827,15 @@ def _check_knowledge(report: DoctorReport, config: AgentConfig) -> None:
     )
 
 
-def _check_proof(report: DoctorReport, config: AgentConfig) -> None:
+def _check_proof(
+    report: DoctorReport, config: AgentConfig, journal: JsonlJournal | None = None
+) -> None:
     """The only success criterion. Cycle counts are not evidence.
 
     The three checks are always emitted, including when there is nothing to
     measure, so the report shape is stable and greppable.
     """
-    journal = JsonlJournal(config.journal_path, lock_timeout=60.0, lock=False)
+    journal = journal if journal is not None else JsonlJournal(config.journal_path, lock_timeout=60.0, lock=False)
     records = journal.read_all()
     if not records:
         report.add("end-to-end proof", WARN, "no cycles recorded; nothing proven yet", "run one: autopoiesis once")
