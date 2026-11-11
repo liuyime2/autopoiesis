@@ -29,6 +29,7 @@ class Guardian:
         tradable: Callable[[], frozenset[str] | None] | frozenset[str] | None = None,
         min_price: float = 5.0,
         hold_only: set[str] | frozenset[str] | None = None,
+        sleeve_strategy_id: str | None = None,
     ):
         #: See config.AgentConfig.universe. `tradable` is the broker's set of active US equities on
         #: major exchanges (or a function returning it, refreshed daily by the gateway); when the
@@ -68,6 +69,9 @@ class Guardian:
         #: symbol may be held but never bought or sold by the agent. Enforced here, at
         #: the last gate before execution, so no strategy or model can bypass it.
         self.hold_only = frozenset(s.upper() for s in (hold_only or ()))
+        #: Orders from this strategy keep the daily-loss refusal in full; see `_reduces_agent_holding`.
+        #: Passed in rather than imported from `sleeve`, which would make the Guardian depend on it.
+        self.sleeve_strategy_id = sleeve_strategy_id
 
     def review(
         self,
@@ -107,7 +111,9 @@ class Guardian:
         # a risk REJECTION rather than a hold - misleading in the audit trail,
         # even though the reason is in SYSTEM_REJECTION_REASONS and so was never
         # charged against the strategy.
-        if snapshot.account.daily_loss >= self.max_daily_loss:
+        if snapshot.account.daily_loss >= self.max_daily_loss and not self._reduces_agent_holding(
+            decision, agent_position_quantity, agent_short_quantity
+        ):
             return GuardianResult(approved=False, reason="daily loss limit reached")
 
         if not snapshot.account.day_start_equity_known:
@@ -253,6 +259,35 @@ class Guardian:
                 )
 
         return GuardianResult(approved=True, reason="approved")
+
+    def _reduces_agent_holding(
+        self,
+        decision: TradeDecision,
+        agent_position_quantity: float | None,
+        agent_short_quantity: float | None,
+    ) -> bool:
+        """At the daily-loss limit, may this order go on to the remaining checks?
+
+        The limit used to refuse every non-HOLD, so on the one day a position was losing the agent
+        could not sell it. `daily_loss` is whole-account equity against the day's start, so a held
+        position's mark-to-market already counts toward the limit; the limit stopped new orders
+        and nothing else. Reducing what the agent itself holds is the one order that cannot add
+        exposure, so it is let through to every other gate unchanged: market open, staleness,
+        confidence, trades per day, hold-only, and the checks that the quantity is within the
+        agent's own holding. BUY and SHORT stay refused.
+
+        The core sleeve is a deliberate risk product and keeps today's refusal, so the limit does
+        not start trading it. This makes nothing sell by itself; it only stops blocking the exit.
+        """
+        if self.sleeve_strategy_id is not None and decision.strategy_id == self.sleeve_strategy_id:
+            return False
+        if decision.action == "SELL":
+            held = agent_position_quantity
+        elif decision.action == "COVER":
+            held = agent_short_quantity
+        else:
+            return False
+        return held is not None and 0 < decision.quantity <= held
 
     def review_strategy(self, strategy: StrategySpec) -> GuardianResult:
         if not set(strategy.symbols).issubset(self.allowlist):

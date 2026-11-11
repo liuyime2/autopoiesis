@@ -341,6 +341,12 @@ that can submit an order:
   Widening changes which symbols pass and nothing else: paper only, market open, a fresh
   snapshot, the position and exposure caps (the exposure cap then measures the whole account),
   daily loss, trades per day and confidence all still apply.
+- **At the daily-loss limit the agent may reduce, never add.** Once `daily_loss` (whole-account equity
+  against the day's start, so held positions' mark-to-market counts) reaches the limit, BUY and SHORT are
+  refused as before, and a SELL or COVER that is within the agent's own holding is let through to every
+  other check (market open, fresh snapshot, confidence, trades per day, hold-only). The core sleeve keeps
+  the full refusal. It removes a block on exiting; it does not sell anything by itself and does not cap a
+  held position's loss.
 - **By default the agent only sells what it bought.** A SELL is bounded by the agent's own
   confirmed fills, not by what the account holds. An account holder who wants the agent to
   manage every position sets `AUTOPOIESIS_MANAGE_ACCOUNT=true`, and a SELL is then bounded by the

@@ -47,7 +47,7 @@ from autopoiesis.reflection_memory import ReflectionMemory
 from autopoiesis.risk_judgment import RiskJudgment
 from autopoiesis.scheduler import MarketScheduler
 from autopoiesis.shadow import ShadowExecutor, ShadowShorts
-from autopoiesis.sleeve import CoreSleeve
+from autopoiesis.sleeve import SLEEVE_STRATEGY_ID, CoreSleeve
 from autopoiesis.strategy_admission import StrategyAdmission, admissible_strategy_symbols
 from autopoiesis.strategy_engine import StrategyLibrary, StrategyLifecycleManager
 from autopoiesis.trade_counter import TradeCounter
@@ -380,6 +380,7 @@ def _build_agent_daemon(
         tradable=data_gateway.tradable_symbols if config.universe == "tradable" else None,
         min_price=config.min_price,
         hold_only=config.hold_only_symbols,
+        sleeve_strategy_id=SLEEVE_STRATEGY_ID,
     )
     # Declared before the daemon so the provider can read the daemon's own cycle count. The
     # incumbent cadence is defined over cycles, and the only cycle count the selector could

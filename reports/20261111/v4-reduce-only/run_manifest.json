@@ -1,0 +1,71 @@
+{
+  "argv": [
+    "--out",
+    "/tmp/claude-29424/-localscratch-liuyime2-QuantGroup/ce02d983-4cd9-40f7-a5d9-e90fb819c880/scratchpad/g4v4-w4b",
+    "--spec",
+    "configs/experiment_portfolio_v4.spec",
+    "--satellites",
+    "XLB,XLE,XLF,QQQ,NVDA,MSFT,AAPL",
+    "--universe-label",
+    "production-permitted",
+    "--cache-dir",
+    "/localscratch/liuyime2/QuantGroup/runtime/autopoiesis/replay",
+    "--cache-name",
+    "{symbol}_1Day_adjall_2020-07-27_2026-11-06.json",
+    "--strict"
+  ],
+  "code_commit": "0031bfaab503026878b619716b2f3bcde9420977",
+  "data": {
+    "AAPL": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "34f7d2f9ce03bfc88b064aa3172979ce796560e82961666293f0fb0e96cf816d"
+    },
+    "MSFT": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "0a1ef5acb015476a2fa995123f1e6fa67a40b780f8783c48020225a94f8f4627"
+    },
+    "NVDA": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "1cf98ef8cb3a86fd106ff8d99ee7d44bee5cd4737319d9068814ce832b2d0b40"
+    },
+    "QQQ": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "b9008438e77448e47a3f51fe4e8879ca3af4af9294ae0ae580b531fd04e9a14e"
+    },
+    "SPY": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "62dc92e7cd955e9af63b118dcb1348f8c2001a21fba2c25c7e63b15bd048c9b3"
+    },
+    "XLB": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "2e534151ddef6b0e22b19b38c1362c8ec6563ea8d49e7c40573bd9a7217b11da"
+    },
+    "XLE": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "a3d352a29bf4f059011cb39cd8252830adce10831633bf49fba7311cd6f16275"
+    },
+    "XLF": {
+      "bars": 1580,
+      "first": "2020-07-27",
+      "last": "2026-11-06",
+      "sha256": "2b1f94599b22271a9d86591076f64c48cdf2ba17d3309bcf5f62cf2b923a2d61"
+    }
+  },
+  "result_sha256": "ad9f9e908cc82c1e0a5dd66cbc0c6a4cfe4da8322b844c331b84a4b06801ee61",
+  "spec": "configs/experiment_portfolio_v4.spec",
+  "spec_sha256": "1542efbf8203d986de119d3cf9d58841e1c2d693150ed1aaa6ffbafb6055cf34"
+}

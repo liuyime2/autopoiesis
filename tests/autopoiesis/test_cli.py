@@ -1442,3 +1442,12 @@ def test_readiness_synthetic_health_checks_pid_from_same_payload(tmp_path, monke
         fixture.tool._health(fixture.cfg, "a" * 16, fixture.now)
     assert refused.value.code == "DAEMON_NOT_LIVE"
     assert len(reads) == 1
+
+
+def test_the_production_guardian_knows_the_core_sleeve(tmp_path):
+    """The loss-limit exemption for the sleeve only holds if the built Guardian is told its id."""
+    from autopoiesis import cli
+    from autopoiesis.sleeve import SLEEVE_STRATEGY_ID
+
+    daemon = cli._build_agent_daemon(_synthetic_entry_config(tmp_path), _SyntheticClosedBroker())
+    assert daemon.loop.guardian.sleeve_strategy_id == SLEEVE_STRATEGY_ID == "core-sleeve"
