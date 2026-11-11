@@ -39,7 +39,16 @@ invoking worktree, did not link `runtime/`, wrote rows without `fingerprint` int
 gate ledger (which `equity_curve.cohort_start` reads by that key), and chmod-ed the tree
 0444, which removed `./autopoiesis`'s executable bit and blocked the gate's own record.
 
-Optional: `--install-service` installs the systemd units from the release tree.
+Optional: `--install-service` installs the systemd units from the release tree: the daemon's units
+(`./autopoiesis install-service`) and then the readiness and VIX timers (`make install-readiness-timers`,
+with this release's fingerprint and the deploy time as the cutoff). The second step was missing until
+2026-11-11, and `market-preflight`, `market-open-verify` and `vix-refresh` ran from an October release,
+the readiness pair failing every day with `SOURCE_MISMATCH`. The gate's `units-where-systemd-looks` class
+now fails if any installed unit runs from a release other than the daemon's.
+
+Run the gate as `PATH=<env>/bin:$PATH make record-deployment NOTE=...`. Do not put `PY=...` or any other
+variable on the `make` command line: make passes it to the tests' own child `make` calls (`tests/conftest.py`
+now removes `MAKEFLAGS` for that reason).
 Optional: `--dry-run` prints the plan without changing anything.
 
 ## Verify after deploy
