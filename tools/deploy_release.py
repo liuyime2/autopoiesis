@@ -226,6 +226,30 @@ def deploy(
             if proc.returncode != 0:
                 raise SystemExit(f"install-service failed: {proc.stderr.strip()}")
             entry["install_service"] = "ok"
+            # `install-service` installs the daemon's units and nothing else. The readiness
+            # timers (market-preflight, market-open-verify) and vix-refresh have their own
+            # installer, which no deploy ever called: measured 2026-11-11, all three were still
+            # running from an October release and the two readiness units asserted its
+            # fingerprint, so each failed every day with SOURCE_MISMATCH. The expected
+            # fingerprint is the operator's to supply, and this deploy is the one that knows it.
+            #
+            # No MAKEFLAGS: a make variable carried into a child make is how a test wrote real
+            # backups into the live runtime on 2026-11-10.
+            readiness_env = {k: v for k, v in env.items() if k not in {"MAKEFLAGS", "MAKEOVERRIDES"}}
+            readiness_env.update(
+                EXPECTED_FINGERPRINT=entry["source_fingerprint"],
+                DEPLOYMENT_AFTER=entry["timestamp"],
+                READINESS_PYTHON=sys.executable,
+            )
+            proc = _sp.run(
+                ["make", "--no-print-directory", "-C", str(release_dir), "install-readiness-timers"],
+                cwd=str(release_dir), env=readiness_env, capture_output=True, text=True, timeout=300,
+            )
+            if proc.returncode != 0:
+                raise SystemExit(
+                    f"install-readiness-timers failed: {(proc.stderr or proc.stdout).strip()}"
+                )
+            entry["install_readiness"] = "ok"
         return entry
     finally:
         try:

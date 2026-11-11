@@ -2669,6 +2669,25 @@ def check_the_installed_build_has_a_full_gate_record() -> Result:
     )
 
 
+def units_pinned_to_other_releases(units: dict[str, str]) -> list[str]:
+    """Installed units that run from a release other than the one the daemon runs from.
+
+    Measured 2026-11-11: `market-preflight`, `market-open-verify` and `vix-refresh` ran from an
+    October release and the two readiness units asserted its fingerprint, so both failed every day
+    with SOURCE_MISMATCH and the readiness reports had stopped on 10-30. Every deploy in between
+    went through, because nothing compared a unit's release to the live one. The live release is
+    the one `autopoiesis.service` runs from; with no such unit there is nothing to compare to.
+    """
+    live = re.search(r"releases/([0-9a-f]+)", units.get("autopoiesis.service", ""))
+    if live is None:
+        return []
+    return [
+        f"{name} runs from releases/{other}, the daemon runs from releases/{live.group(1)}"
+        for name, text in sorted(units.items())
+        for other in sorted(set(re.findall(r"releases/([0-9a-f]+)", text)) - {live.group(1)})
+    ]
+
+
 def check_units_are_where_systemd_looks() -> Result:
     """A --user unit is only reboot-persistent if it lives where the manager reads.
 
@@ -2758,12 +2777,18 @@ def check_units_are_where_systemd_looks() -> Result:
                 )
                 break
 
+    unit_dir = _durable_unit_dir()
+    if unit_dir is not None:
+        problems += units_pinned_to_other_releases(
+            {unit.name: unit.read_text() for unit in sorted(Path(unit_dir).glob("*.service"))}
+        )
+
     return Result(
         "units-where-systemd-looks",
         FAIL if problems else PASS,
         "; ".join(problems[:4]) if problems else
         "every --user unit loads from a durable path, is enabled without a tmpfs link, "
-        "and its ExecStart exists",
+        "its ExecStart exists, and every unit runs from the daemon's release",
     )
 
 
