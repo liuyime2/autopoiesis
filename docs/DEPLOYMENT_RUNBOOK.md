@@ -96,3 +96,10 @@ only into a scratch directory; `journal-restore` refuses the live runtime dir.
 - No deploy during market hours without an emergency reason.
 - No second deployer.
 - No weakening of the gate to make a deploy pass.
+
+## Branch policy (2026-11-11)
+
+`main` is the trunk and GitHub's default branch. `goal/edge-first` is the working branch and is kept identical
+to `main` after every deploy (`git push origin goal/edge-first:main` is a fast-forward). Other work is a
+short-lived branch off `main`. Releases are checkouts of commits on `main` under `releases/`; only the live
+one and its rollback target are kept. The tips of branches that were folded in are kept as `archive/*` tags.
