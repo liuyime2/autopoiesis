@@ -38,7 +38,14 @@ def installer(tmp_path):
         OLLAMA_BIN=str(commands / "ollama"), OLLAMA_MODELS=str(models),
         PYTHONPATH="synthetic-path-sentinel", SYNTHETIC_COMMAND_LOG=str(log),
         SYNTHETIC_CHILD_ENV=str(child_env),
+        # The Makefile defaults these to `runtime/...`, and in a release checkout `runtime` is a
+        # symlink to the live runtime. On 2026-11-10 a make variable carried in through MAKEFLAGS
+        # bypassed the stub interpreter and this test wrote real 0755 backups of the live journal.
+        # With both pointed at an empty temporary tree, a bypassed stub has nothing real to reach.
+        JOURNAL_RUNTIME=str(tmp_path / "runtime"), BACKUP_ROOT=str(tmp_path / "backups"),
     )
+    for name in ("MAKEFLAGS", "MAKEOVERRIDES", "MFLAGS"):
+        env.pop(name, None)
     return env, units, log, child_env
 
 
@@ -128,3 +135,17 @@ exit 0
                             env=env, capture_output=True, text=True, timeout=10)
     assert result.returncode != 0
     assert (run_units / "quant-backup.timer").exists()
+
+
+def test_the_backup_test_cannot_reach_the_live_runtime(installer, tmp_path):
+    env, _, _, _ = installer
+    assert Path(env["JOURNAL_RUNTIME"]).is_relative_to(tmp_path)
+    assert Path(env["BACKUP_ROOT"]).is_relative_to(tmp_path)
+    assert not any(name in env for name in ("MAKEFLAGS", "MAKEOVERRIDES", "MFLAGS"))
+
+
+def test_make_flags_do_not_reach_a_test_s_child_processes():
+    """The conftest fixture removes them. Under `make verify` they are set (at least the print
+    flags), and under `make record-deployment PY=...` they carry the override that broke two gate
+    runs on 2026-11-10."""
+    assert not any(name in os.environ for name in ("MAKEFLAGS", "MAKEOVERRIDES", "MFLAGS"))
