@@ -874,3 +874,82 @@ def _snapshot(symbol, price):
         account=AccountSnapshot(equity=100_000, cash=100_000, buying_power=100_000,
                                 portfolio_value=100_000, daily_loss=0),
     )
+
+
+# --- At the daily-loss limit the agent may reduce what it holds, never add -----------------------
+#
+# Measured 2026-11-11: the limit refused every non-HOLD, so on the one day a position was losing the
+# agent could not sell it. `daily_loss` is whole-account equity against day-start equity, so a held
+# position's mark-to-market already counts; nothing closed anything. The live record has no such
+# case (6 refusals, all 2026-09-28, 4 HOLD and 2 BUY, 0 SELL), so this is a trap removed, not a loss
+# observed. Everything that gates an order other than the limit itself is unchanged.
+
+def _breached_with_a_holding(quantity=10):
+    held = (PositionSnapshot(symbol="SPY", quantity=quantity, market_value=quantity * 100),)
+    return snapshot(daily_loss=600, positions=held)
+
+
+def _sell(quantity, strategy_id=None, confidence=0.9):
+    return TradeDecision(symbol="SPY", action="SELL", quantity=quantity, confidence=confidence,
+                         rationale="exit", strategy_id=strategy_id)
+
+
+def test_at_the_loss_limit_a_sell_within_the_agents_holding_is_approved():
+    guardian = Guardian(allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500)
+    result = guardian.review(_sell(4), _breached_with_a_holding(), agent_position_quantity=10)
+    assert result.approved, result.reason
+
+
+def test_at_the_loss_limit_a_sell_that_is_not_within_the_agents_holding_is_still_refused():
+    guardian = Guardian(allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500)
+    breached = _breached_with_a_holding(quantity=52)
+    assert guardian.review(_sell(30), breached, agent_position_quantity=23).reason == "daily loss limit reached"
+    assert guardian.review(_sell(4), breached, agent_position_quantity=None).reason == "daily loss limit reached"
+    assert guardian.review(_sell(4), breached, agent_position_quantity=0).reason == "daily loss limit reached"
+
+
+def test_at_the_loss_limit_nothing_that_adds_exposure_is_approved():
+    guardian = Guardian(allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500, shorts="paper")
+    breached = _breached_with_a_holding()
+    for action in ("BUY", "SHORT"):
+        decision = TradeDecision(symbol="SPY", action=action, quantity=1, confidence=0.9, rationale="add")
+        result = guardian.review(decision, breached, agent_position_quantity=10, agent_short_quantity=0)
+        assert result.reason == "daily loss limit reached", action
+
+
+def test_at_the_loss_limit_a_cover_within_the_agents_short_is_approved():
+    guardian = Guardian(allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500, shorts="paper")
+    short = (PositionSnapshot(symbol="SPY", quantity=-3, market_value=-300),)
+    cover = TradeDecision(symbol="SPY", action="COVER", quantity=3, confidence=0.9, rationale="exit")
+    result = guardian.review(cover, snapshot(daily_loss=600, positions=short), agent_short_quantity=3)
+    assert result.approved, result.reason
+    over = TradeDecision(symbol="SPY", action="COVER", quantity=4, confidence=0.9, rationale="exit")
+    assert guardian.review(over, snapshot(daily_loss=600, positions=short),
+                           agent_short_quantity=3).reason == "daily loss limit reached"
+
+
+def test_the_core_sleeve_keeps_todays_refusal_at_the_loss_limit():
+    """The sleeve is a deliberate risk product; the loss limit does not start trading it."""
+    guardian = Guardian(allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500,
+                        sleeve_strategy_id="core-sleeve")
+    breached = _breached_with_a_holding()
+    refused = guardian.review(_sell(4, strategy_id="core-sleeve"), breached, agent_position_quantity=10)
+    assert refused.reason == "daily loss limit reached"
+    assert guardian.review(_sell(4, strategy_id="trend-001"), breached, agent_position_quantity=10).approved
+
+
+def test_every_other_gate_still_applies_to_a_reducing_sell_at_the_loss_limit():
+    held = _breached_with_a_holding()
+    base = dict(allowlist={"SPY"}, max_position_value=5_000, max_daily_loss=500)
+    review = lambda guardian, decision, snap=held, **kw: guardian.review(  # noqa: E731
+        decision, snap, agent_position_quantity=10, **kw)
+
+    closed = snapshot(daily_loss=600, market_open=False,
+                      positions=(PositionSnapshot(symbol="SPY", quantity=10, market_value=1_000),))
+    assert review(Guardian(**base), _sell(4), closed).reason == "market is closed"
+    assert review(Guardian(**base), _sell(4, confidence=0.1)).reason == "decision confidence below minimum"
+    assert review(Guardian(**base, max_trades_per_day=1), _sell(4), trades_today=1).reason == "max trades per day reached"
+    assert review(Guardian(**base, hold_only={"SPY"}), _sell(4)).reason.startswith("hold-only asset")
+    stale = snapshot(daily_loss=600, timestamp=datetime.now(timezone.utc) - timedelta(hours=2),
+                     positions=(PositionSnapshot(symbol="SPY", quantity=10, market_value=1_000),))
+    assert "stale" in review(Guardian(**base), _sell(4), stale).reason

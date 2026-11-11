@@ -58,7 +58,8 @@ broker fill and cannot reach the PnL ledger even by accident.
    Actions are BUY, SELL (reduce a long), HOLD, and - behind `AUTOPOIESIS_SHORTS`, off by
    default - SHORT and COVER.
 4. **Gate.** Guardian refuses on: per-symbol position value, total exposure (gross), daily
-   loss, trades per day, confidence below minimum, a stale snapshot, a symbol outside
+   loss (a SELL or COVER within the agent's own holding is the one order let through at the limit;
+   the core sleeve is not), trades per day, confidence below minimum, a stale snapshot, a symbol outside
    the mandate (the allowlist by default; the account's holdings, or any active US stock on a
    major exchange at a price floor, when the account holder widens `AUTOPOIESIS_UNIVERSE`), a sell
    the agent does not own, or any mode that is not paper. A SHORT is

@@ -426,6 +426,10 @@ def run_arm(
         max_daily_loss=risk.max_daily_loss,
         max_total_exposure=risk.max_total_exposure,
         max_trades_per_day=risk.max_trades_per_day,
+        # The production Guardian is told the sleeve's id, so the loss limit keeps refusing the
+        # sleeve there; a replay built without it would let the sleeve sell at breach and stop
+        # being a replay of production.
+        sleeve_strategy_id=SLEEVE_STRATEGY_ID,
     )
     executor = ReplayExecutor(
         gateway=gateway,
