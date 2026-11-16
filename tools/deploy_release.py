@@ -54,8 +54,6 @@ RELEASES_DIR = MAIN_ROOT / "releases"
 #: written by `record_deployment.py`, and its readers (`equity_curve.cohort_start`, the
 #: deploy-gate-record class) require each row's `fingerprint`, which this entry does not have.
 DEPLOYMENTS_LEDGER = ROOT / "docs" / "evidence" / "release-actions.jsonl"
-#: The full-gate ledger, read (never written here) for the commit a rollback returns to.
-GATE_LEDGER = ROOT / "docs" / "evidence" / "deployments.jsonl"
 ET = ZoneInfo("America/New_York")
 
 MARKET_OPEN = time(9, 30)
@@ -97,21 +95,52 @@ def market_is_open(now: datetime | None = None) -> bool:
     return MARKET_OPEN <= t < MARKET_CLOSE
 
 
-def _last_deployed_commit() -> str | None:
-    if not GATE_LEDGER.exists():
+def _active_release_commit() -> str | None:
+    """Identify the running release from systemd, never from its gate record.
+
+    A full-gate record says which source was tested; it does not say that source was
+    deployed. The service's active working directory is the rollback target. If that
+    identity cannot be read, callers must not guess.
+    """
+    try:
+        proc = subprocess.run(
+            [
+                "systemctl", "--user", "show", "autopoiesis.service",
+                "--property=ActiveState", "--property=MainPID", "--property=WorkingDirectory",
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
         return None
-    last = None
-    for line in GATE_LEDGER.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(entry, dict) and entry.get("commit"):
-            last = entry["commit"]
-    return last
+    if proc.returncode != 0:
+        return None
+    fields = {}
+    for line in proc.stdout.splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            fields[key] = value
+    if fields.get("ActiveState") != "active" or not fields.get("MainPID", "0").isdigit():
+        return None
+    if int(fields["MainPID"]) <= 0:
+        return None
+    working_directory = fields.get("WorkingDirectory")
+    if not working_directory:
+        return None
+    try:
+        release = Path(working_directory).resolve(strict=True)
+        releases_root = RELEASES_DIR.resolve(strict=True)
+        if not release.is_relative_to(releases_root):
+            return None
+        identity = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+            cwd=release, capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, RuntimeError, subprocess.TimeoutExpired, ValueError):
+        return None
+    if identity.returncode != 0:
+        return None
+    commit = identity.stdout.strip()
+    return commit if commit else None
 
 
 def _source_fingerprint() -> str:
@@ -154,7 +183,12 @@ def deploy(
     if emergency is not None and not emergency.strip():
         raise SystemExit("refused: --emergency requires a non-empty reason")
 
-    rollback_to = _last_deployed_commit()
+    rollback_to = _active_release_commit()
+    if not dry_run and rollback_to is None:
+        raise SystemExit(
+            "refused: cannot identify the active release as a rollback target; "
+            "inspect the user service before deploying"
+        )
 
     if dry_run:
         return {
@@ -270,4 +304,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

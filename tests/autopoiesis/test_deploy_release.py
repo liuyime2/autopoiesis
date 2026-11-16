@@ -51,14 +51,14 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "LOCK_FILE", root / "runtime" / "deploy.lock")
     monkeypatch.setattr(module, "RELEASES_DIR", root / "releases")
     monkeypatch.setattr(module, "DEPLOYMENTS_LEDGER", tree / "docs" / "evidence" / "release-actions.jsonl")
-    monkeypatch.setattr(module, "GATE_LEDGER", tree / "docs" / "evidence" / "deployments.jsonl")
     monkeypatch.setattr(module, "_git_sha", lambda: subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=tree, text=True).strip())
     return module, main, tree
 
 
-def test_a_release_lands_beside_the_main_checkout_with_the_runtime_linked(repo):
+def test_a_release_lands_beside_the_main_checkout_with_the_runtime_linked(repo, monkeypatch):
     module, main, _tree = repo
+    monkeypatch.setattr(module, "_active_release_commit", lambda: "abc123")
     entry = module.deploy(approved_by="tester", now=SATURDAY)
 
     release = Path(entry["release_dir"])
@@ -68,9 +68,10 @@ def test_a_release_lands_beside_the_main_checkout_with_the_runtime_linked(repo):
     assert entry["rollback_to"] == "abc123"
 
 
-def test_its_record_does_not_go_into_the_gate_ledger(repo):
+def test_its_record_does_not_go_into_the_gate_ledger(repo, monkeypatch):
     """equity_curve.cohort_start reads row["fingerprint"] from deployments.jsonl; this entry has none."""
     module, _, tree = repo
+    monkeypatch.setattr(module, "_active_release_commit", lambda: "abc123")
     module.deploy(approved_by="tester", now=SATURDAY)
 
     gate_rows = (tree / "docs" / "evidence" / "deployments.jsonl").read_text().splitlines()
@@ -78,8 +79,53 @@ def test_its_record_does_not_go_into_the_gate_ledger(repo):
     assert (tree / "docs" / "evidence" / "release-actions.jsonl").exists()
 
 
-def test_a_second_deploy_of_the_same_commit_and_a_market_hours_deploy_are_refused(repo):
+def test_dry_run_uses_active_release_not_a_gate_only_candidate(repo, monkeypatch):
+    module, _main, tree = repo
+    with (tree / "docs" / "evidence" / "deployments.jsonl").open("a") as ledger:
+        ledger.write(json.dumps({"commit": "candidate-only", "fingerprint": "f" * 16}) + "\n")
+    monkeypatch.setattr(module, "_active_release_commit", lambda: "deployed-release")
+
+    plan = module.deploy(approved_by="tester", now=SATURDAY, dry_run=True)
+
+    assert plan["rollback_to"] == "deployed-release"
+
+
+def test_active_release_identity_comes_from_the_running_systemd_working_directory(repo, monkeypatch):
+    module, main, _tree = repo
+    active_release = main / "releases" / "active"
+    active_release.mkdir(parents=True)
+    expected = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=active_release, text=True
+    ).strip()
+    real_run = subprocess.run
+
+    def run(command, *args, **kwargs):
+        if command[:4] == ["systemctl", "--user", "show", "autopoiesis.service"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                "ActiveState=active\nMainPID=4242\n"
+                f"WorkingDirectory={active_release}\n",
+                "",
+            )
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+
+    assert module._active_release_commit() == expected
+
+
+def test_deploy_refuses_when_it_cannot_establish_a_rollback_target(repo, monkeypatch):
+    module, _main, _tree = repo
+    monkeypatch.setattr(module, "_active_release_commit", lambda: None)
+
+    with pytest.raises(SystemExit, match="cannot identify the active release as a rollback target"):
+        module.deploy(approved_by="tester", now=SATURDAY)
+
+
+def test_a_second_deploy_of_the_same_commit_and_a_market_hours_deploy_are_refused(repo, monkeypatch):
     module, _, _ = repo
+    monkeypatch.setattr(module, "_active_release_commit", lambda: "abc123")
     module.deploy(approved_by="tester", now=SATURDAY)
     with pytest.raises(SystemExit, match="already exists"):
         module.deploy(approved_by="tester", now=SATURDAY)
