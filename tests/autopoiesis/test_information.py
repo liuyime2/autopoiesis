@@ -176,4 +176,10 @@ def test_a_replay_cutoff_fails_closed_on_missing_or_unreadable_availability(tmp_
     assert provider.block("CCC", cutoff=now) is not None
     assert provider.block("DDD", cutoff=now) is None, "a field with unreadable availability is dropped"
     # Live use (no cutoff) is unchanged: availability is only a replay constraint.
+    # Give this assertion a fresh synthetic cache so the test remains valid after its original
+    # 2026-11-09 fixture ages past the two-day options-IV freshness budget.
+    live_stamp = datetime.now(timezone.utc).isoformat()
+    live_body = {"as_of": live_stamp, "options_iv": 0.3, "options_iv_as_of": live_stamp}
+    _write(tmp_path, "AAA", live_body)
+    _write(tmp_path, "BBB", {**live_body, "available_at": "not-a-time"})
     assert provider.block("AAA") is not None and provider.block("BBB") is not None
