@@ -120,10 +120,21 @@ def _journal(config):
     return journal, records, events, state
 
 
-def _clock(client, now, stale_after):
+def _clock(client, stale_after, *, report=None, observation_key="broker_clock_observation"):
+    request_started = _now()
     clock = client.get_clock()
+    request_finished = _now()
     stamp = _timestamp(clock.timestamp)
-    _require(abs((now - stamp).total_seconds()) <= min(stale_after, 60), "BROKER_CLOCK_NOT_FRESH")
+    skew_seconds = (stamp - request_finished).total_seconds()
+    if report is not None:
+        report[observation_key] = {
+            "timestamp": stamp.isoformat(),
+            "request_started_at": request_started.isoformat(),
+            "request_finished_at": request_finished.isoformat(),
+            "request_elapsed_ms": round((request_finished - request_started).total_seconds() * 1000),
+            "local_skew_seconds": round(skew_seconds, 3),
+        }
+    _require(abs(skew_seconds) <= min(stale_after, 60), "BROKER_CLOCK_NOT_FRESH")
     return clock
 
 
@@ -384,7 +395,7 @@ def collect(*, phase, expected_fingerprint, session_date=None, after=None, boots
         journal, records, events, state = _journal(config)
         report["history"] = {"cycles": len(records), "events": len(events), "trusted_archive": True, "unresolved_submissions": 0}
         client = create_alpaca_client(key_id=config.alpaca_api_key or "", secret_key=config.alpaca_secret_key or "", base_url=config.alpaca_base_url)
-        clock = _clock(client, now, config.stale_after_seconds)
+        clock = _clock(client, config.stale_after_seconds, report=report)
         initially_open = bool(clock.is_open)
         session_date = session_date or now.astimezone(NY).date()
         opened, closed = _session(client, session_date)
@@ -416,7 +427,8 @@ def collect(*, phase, expected_fingerprint, session_date=None, after=None, boots
             if missing:
                 raise ObservationRefused("FIRST_ROUND_COVERAGE_MISSING", 1 if now >= max(opened, after) + timedelta(minutes=60) else 2)
         latest_now = _now()
-        latest_clock = _clock(client, latest_now, config.stale_after_seconds)
+        latest_clock = _clock(client, config.stale_after_seconds, report=report,
+                              observation_key="final_broker_clock_observation")
         try:
             latest = _health(config, expected_fingerprint, latest_now)
         except ObservationRefused:

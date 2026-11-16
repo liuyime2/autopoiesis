@@ -489,6 +489,47 @@ def readiness_tool():
     return module
 
 
+def test_readiness_broker_clock_uses_request_time_after_slow_history_read(monkeypatch):
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    tool = readiness_tool()
+    collection_started = datetime(2026, 11, 13, 13, 43, tzinfo=timezone.utc)
+    request_started = collection_started + timedelta(seconds=90)
+    request_finished = request_started + timedelta(seconds=1)
+    clock = SimpleNamespace(timestamp=request_finished, is_open=False)
+    local_times = iter((request_started, request_finished))
+    monkeypatch.setattr(tool, "_now", lambda: next(local_times))
+    report = {}
+
+    assert tool._clock(SimpleNamespace(get_clock=lambda: clock), 900, report=report) is clock
+    assert report["broker_clock_observation"] == {
+        "timestamp": request_finished.isoformat(),
+        "request_started_at": request_started.isoformat(),
+        "request_finished_at": request_finished.isoformat(),
+        "request_elapsed_ms": 1000,
+        "local_skew_seconds": 0.0,
+    }
+
+
+@pytest.mark.parametrize("skew_seconds", [61, -61])
+def test_readiness_broker_clock_still_refuses_outside_sixty_second_skew(monkeypatch, skew_seconds):
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    market_readiness = readiness_tool()
+    request_finished = datetime(2026, 11, 13, 13, 45, tzinfo=timezone.utc)
+    request_started = request_finished - timedelta(seconds=1)
+    clock = SimpleNamespace(timestamp=request_finished + timedelta(seconds=skew_seconds), is_open=False)
+    local_times = iter((request_started, request_finished))
+    monkeypatch.setattr(market_readiness, "_now", lambda: next(local_times))
+    report = {}
+
+    with pytest.raises(market_readiness.ObservationRefused, match="BROKER_CLOCK_NOT_FRESH"):
+        market_readiness._clock(SimpleNamespace(get_clock=lambda: clock), 900, report=report)
+    assert report["broker_clock_observation"]["local_skew_seconds"] == skew_seconds
+
+
 def synthetic_readiness(tmp_path, monkeypatch, *, opened=False):
     """Synthetic broker/process/model only; never evidence about live market behavior."""
     from datetime import time
