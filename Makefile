@@ -83,7 +83,7 @@ endif
         install-service run stop restart status validate-data evaluate pipeline reproduce clean clean-pyc \
         site refresh-figures benchmark-json dist release-check fresh-clone example-cycle cli-help \
         attest-archive-baseline fetch-replay-bars research-search research-run \
-        journal-backup journal-local-backup journal-restore journal-drill \
+        journal-backup journal-local-backup journal-restore journal-drill journal-prune \
         research-register research-verify research-check-tape
 
 help:
@@ -623,6 +623,15 @@ journal-restore:
 
 journal-drill:
 	@$(PY) tools/journal_snapshot.py --runtime "$(JOURNAL_RUNTIME)" drill
+
+JOURNAL_BACKUP_KEEP_DAYS ?= 7
+JOURNAL_BACKUP_MAX_BYTES ?= 85GB
+
+journal-prune:
+	@$(PY) tools/journal_snapshot.py prune "$(BACKUP_ROOT)" \
+	  --keep-days "$(JOURNAL_BACKUP_KEEP_DAYS)" \
+	  --max-bytes "$(JOURNAL_BACKUP_MAX_BYTES)" \
+	  $(if $(EXECUTE),--execute,)
 
 
 # --- pre-registered research -----------------------------------------------------------------

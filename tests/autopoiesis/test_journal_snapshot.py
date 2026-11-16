@@ -492,3 +492,114 @@ def test_archive_integrity_cannot_be_certified_by_equal_snapshot_bytes(runtime, 
     after = {p.relative_to(rt): p.read_bytes() for p in rt.rglob("*") if p.is_file()
              and p.name != "journal.jsonl.lock"}
     assert after == before
+
+
+def _create_mock_backup(directory: Path, name: str, size: int = 1024, is_golden: bool = False) -> Path:
+    backup_dir = directory / name
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "format": 1,
+        "created": "2026-10-01T00:00:00Z",
+        "files": [{"name": "journal.jsonl", "bytes": size, "sha256": "0" * 64}],
+        "figures": {},
+    }
+    (backup_dir / "snapshot.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (backup_dir / "journal.jsonl").write_bytes(b"x" * size)
+    if is_golden:
+        (backup_dir / ".golden").touch()
+    return backup_dir
+
+
+def test_prune_backups_dry_run_and_execution(tmp_path):
+    module = _load()
+    backups_dir = tmp_path / "backups"
+    backups_dir.mkdir()
+
+    # Create 3 backups: 10 days old, 5 days old, 1 day old
+    b_old = _create_mock_backup(backups_dir, "20261001T120000Z-aaaaaaaaaaaa", size=2000)
+    b_mid = _create_mock_backup(backups_dir, "20261006T120000Z-bbbbbbbbbbbb", size=3000)
+    b_new = _create_mock_backup(backups_dir, "20261010T120000Z-cccccccccccc", size=4000)
+
+    now = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
+
+    # Dry-run
+    summary, pruned = module.prune_backups(backups_dir, keep_days=7, execute=False, now=now)
+    assert summary["dry_run"] is True
+    assert summary["total"] == 3
+    assert summary["kept"] == 2
+    assert summary["pruned"] == 1
+    assert pruned == [b_old]
+    assert b_old.exists()  # Dry run did not delete
+
+    # Execute
+    summary2, pruned2 = module.prune_backups(backups_dir, keep_days=7, execute=True, now=now)
+    assert summary2["dry_run"] is False
+    assert summary2["pruned"] == 1
+    assert not b_old.exists()
+    assert b_mid.exists()
+    assert b_new.exists()
+
+
+def test_prune_backups_always_protects_newest_even_if_expired(tmp_path):
+    module = _load()
+    backups_dir = tmp_path / "backups"
+    backups_dir.mkdir()
+
+    # Both backups are 30 days old
+    b_older = _create_mock_backup(backups_dir, "20260901T120000Z-111111111111", size=1000)
+    b_newer = _create_mock_backup(backups_dir, "20260902T120000Z-222222222222", size=1000)
+
+    now = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
+    summary, pruned = module.prune_backups(backups_dir, keep_days=7, execute=True, now=now)
+
+    assert summary["kept"] == 1
+    assert summary["pruned"] == 1
+    assert not b_older.exists()
+    assert b_newer.exists()  # Newest must never be pruned
+    assert summary["protected_newest"] == b_newer.name
+
+
+def test_prune_backups_always_protects_golden(tmp_path):
+    module = _load()
+    backups_dir = tmp_path / "backups"
+    backups_dir.mkdir()
+
+    # Old backup with golden marker
+    b_golden1 = _create_mock_backup(backups_dir, "20260901T120000Z-golden000001", size=1000)
+    b_golden2 = _create_mock_backup(backups_dir, "20260902T120000Z-333333333333", size=1000, is_golden=True)
+    b_old = _create_mock_backup(backups_dir, "20260903T120000Z-444444444444", size=1000)
+    b_new = _create_mock_backup(backups_dir, "20261010T120000Z-555555555555", size=1000)
+
+    now = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
+    summary, pruned = module.prune_backups(backups_dir, keep_days=7, execute=True, now=now)
+
+    assert summary["golden_count"] == 2
+    assert summary["pruned"] == 1
+    assert pruned == [b_old]
+    assert b_golden1.exists()
+    assert b_golden2.exists()
+    assert not b_old.exists()
+    assert b_new.exists()
+
+
+def test_prune_backups_quota_enforcement(tmp_path):
+    module = _load()
+    backups_dir = tmp_path / "backups"
+    backups_dir.mkdir()
+
+    # 3 backups within 7 days, each 10MB
+    b1 = _create_mock_backup(backups_dir, "20261008T120000Z-aaaaaaaaaaaa", size=10 * 1024 * 1024)
+    b2 = _create_mock_backup(backups_dir, "20261009T120000Z-bbbbbbbbbbbb", size=10 * 1024 * 1024)
+    b3 = _create_mock_backup(backups_dir, "20261010T120000Z-cccccccccccc", size=10 * 1024 * 1024)
+
+    now = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
+    # Quota: 15MB. Should prune oldest (b1) to get below 20MB? b3 (newest) kept, b2 kept = 20MB > 15MB,
+    # so b2 also pruned, leaving b3 (newest is always kept).
+    summary, pruned = module.prune_backups(
+        backups_dir, keep_days=7, max_bytes=15 * 1024 * 1024, execute=True, now=now
+    )
+    assert b3.exists()
+    assert not b1.exists()
+    assert not b2.exists()
+    assert summary["kept"] == 1
+

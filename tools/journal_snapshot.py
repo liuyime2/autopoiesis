@@ -42,7 +42,7 @@ import shutil
 import sys
 import tempfile
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -431,6 +431,151 @@ def drill(runtime: Path) -> tuple[bool, str]:
         return (ok and comparison.identical), "\n".join(report)
 
 
+def prune_backups(
+    directory: Path,
+    *,
+    keep_days: int = 7,
+    max_bytes: int | None = None,
+    execute: bool = False,
+    golden_marker: str = "golden",
+    now: datetime | None = None,
+) -> tuple[dict[str, object], list[Path]]:
+    """Prune expired backups adhering to strict invariants:
+
+    1. NEVER prune the newest valid backup.
+    2. NEVER prune a golden backup (containing golden_marker in name or .golden file).
+    3. Backups younger than keep_days are retained, unless total size exceeds max_bytes.
+    4. Even under max_bytes, at least the newest backup and all golden backups are preserved.
+    5. Backups without a valid SNAPSHOT_MANIFEST are preserved and flagged as unmanaged.
+    6. If execute is False, perform dry run only.
+    """
+    directory = directory.resolve()
+    if not directory.exists() or not directory.is_dir():
+        return {
+            "total": 0,
+            "kept": 0,
+            "pruned": 0,
+            "freed_bytes": 0,
+            "kept_bytes": 0,
+            "dry_run": not execute,
+            "protected_newest": None,
+            "golden_count": 0,
+            "unmanaged_count": 0,
+        }, []
+
+    entries = [p for p in directory.iterdir() if p.is_dir() and not p.name.startswith(".staging-")]
+
+    valid_backups: list[tuple[datetime, Path, int, bool]] = []
+    unmanaged: list[Path] = []
+
+    for p in entries:
+        manifest = p / SNAPSHOT_MANIFEST
+        if not manifest.exists():
+            unmanaged.append(p)
+            continue
+
+        is_golden = (golden_marker in p.name.lower()) or (p / ".golden").exists()
+
+        try:
+            if len(p.name) >= 16 and p.name[8] == "T" and p.name[15] == "Z":
+                ts = datetime.strptime(p.name[:16], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+            else:
+                ts = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+        except Exception:
+            ts = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+
+        size = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+        valid_backups.append((ts, p, size, is_golden))
+
+    valid_backups.sort(key=lambda item: item[0], reverse=True)
+
+    if not valid_backups:
+        return {
+            "total": 0,
+            "kept": 0,
+            "pruned": 0,
+            "freed_bytes": 0,
+            "kept_bytes": sum(sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) for p in unmanaged),
+            "dry_run": not execute,
+            "protected_newest": None,
+            "golden_count": 0,
+            "unmanaged_count": len(unmanaged),
+        }, []
+
+    current_time = now or datetime.now(timezone.utc)
+    cutoff = current_time - timedelta(days=keep_days)
+    newest = valid_backups[0]
+
+    to_prune: list[Path] = []
+    to_keep: list[tuple[datetime, Path, int, bool]] = []
+
+    for item in valid_backups:
+        ts, p, sz, is_golden = item
+        if p == newest[1]:
+            to_keep.append(item)
+            continue
+        if is_golden:
+            to_keep.append(item)
+            continue
+        if ts < cutoff:
+            to_prune.append(p)
+        else:
+            to_keep.append(item)
+
+    if max_bytes is not None:
+        kept_bytes = sum(item[2] for item in to_keep)
+        if kept_bytes > max_bytes:
+            eligible_for_quota = [
+                item for item in to_keep
+                if item[1] != newest[1] and not item[3]
+            ]
+            eligible_for_quota.sort(key=lambda item: item[0])
+            for item in eligible_for_quota:
+                if kept_bytes <= max_bytes:
+                    break
+                to_keep.remove(item)
+                to_prune.append(item[1])
+                kept_bytes -= item[2]
+
+    if not to_keep:
+        raise RuntimeError("Safety invariant violated: pruning would delete all backups!")
+
+    freed_bytes = sum(sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) for p in to_prune)
+    kept_bytes = sum(item[2] for item in to_keep)
+
+    if execute:
+        for p in to_prune:
+            shutil.rmtree(p)
+
+    summary = {
+        "total": len(valid_backups),
+        "kept": len(to_keep),
+        "pruned": len(to_prune),
+        "freed_bytes": freed_bytes,
+        "kept_bytes": kept_bytes,
+        "dry_run": not execute,
+        "protected_newest": str(newest[1].name),
+        "golden_count": sum(1 for item in valid_backups if item[3]),
+        "unmanaged_count": len(unmanaged),
+    }
+    return summary, to_prune
+
+
+def _parse_bytes(value: str | int | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    v = str(value).strip().upper()
+    if v.endswith("GB") or v.endswith("G"):
+        num = v.rstrip("GB").rstrip("G")
+        return int(float(num) * (1024**3))
+    if v.endswith("MB") or v.endswith("M"):
+        num = v.rstrip("MB").rstrip("M")
+        return int(float(num) * (1024**2))
+    return int(v)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--runtime", default=None, help="the runtime directory to snapshot")
@@ -450,6 +595,12 @@ def main(argv: list[str] | None = None) -> int:
     put.add_argument("destination")
 
     sub.add_parser("drill", help="snapshot, restore and compare, end to end")
+
+    prune = sub.add_parser("prune", help="prune expired backups by retention window and quota")
+    prune.add_argument("directory", help="the directory containing backups")
+    prune.add_argument("--keep-days", type=int, default=7, help="retention window in days (default: 7)")
+    prune.add_argument("--max-bytes", default=None, help="maximum disk quota (e.g. 85GB)")
+    prune.add_argument("--execute", action="store_true", default=False, help="perform deletion (default: dry run)")
 
     args = parser.parse_args(argv)
     runtime = _runtime_from_arg(args.runtime)
@@ -480,6 +631,30 @@ def main(argv: list[str] | None = None) -> int:
         comparison = compare(Path(args.source), Path(args.destination))
         print(comparison.render())
         return 0 if comparison.identical else 1
+
+    if args.command == "prune":
+        max_bytes = _parse_bytes(args.max_bytes)
+        summary, pruned = prune_backups(
+            Path(args.directory),
+            keep_days=args.keep_days,
+            max_bytes=max_bytes,
+            execute=args.execute,
+        )
+        mode = "EXECUTE" if args.execute else "DRY-RUN"
+        freed_mb = summary["freed_bytes"] / (1024**2)
+        kept_mb = summary["kept_bytes"] / (1024**2)
+        print(f"prune [{mode}]: total={summary['total']}, kept={summary['kept']} ({kept_mb:.1f} MB), "
+              f"pruned={summary['pruned']} ({freed_mb:.1f} MB), golden={summary['golden_count']}")
+        if summary["protected_newest"]:
+            print(f"  protected newest: {summary['protected_newest']}")
+        if pruned:
+            action_verb = "deleted" if args.execute else "would prune"
+            print(f"  {action_verb} {len(pruned)} backup(s):")
+            for p in pruned[:5]:
+                print(f"    - {p.name}")
+            if len(pruned) > 5:
+                print(f"    ... and {len(pruned) - 5} more")
+        return 0
 
     ok, report = drill(runtime)
     print(report)
