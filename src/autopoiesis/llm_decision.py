@@ -532,6 +532,36 @@ class HybridDecisionEngine:
                 hold_reason="no_signal", decision_source="policy_engine",
             )
         rule = self._rule_decision
+        is_sell_rule = (rule is not None and rule.action == "SELL") or (
+            selected_spec is not None
+            and str(getattr(selected_spec, "parameters", {}).get("action", "")).upper() == "SELL"
+        )
+        if is_sell_rule:
+            held_quantity = sum(
+                pos.quantity for pos in snapshot.positions if pos.symbol == snapshot.symbol
+            )
+            if held_quantity <= 0:
+                base_rule = rule or TradeDecision(
+                    symbol=snapshot.symbol,
+                    action="HOLD",
+                    quantity=0,
+                    confidence=0.0,
+                    rationale=f"strategy:{selected_spec.strategy_id} sell rule",
+                    strategy_id=selected_spec.strategy_id,
+                )
+                return base_rule.model_copy(update={
+                    "action": "HOLD",
+                    "quantity": 0,
+                    "hold_reason": "no_signal",
+                    "decision_source": "policy_engine",
+                    "strategy_id": selected_spec.strategy_id,
+                    "strategy_provenance": self._selected_provenance,
+                    "rule_action": "HOLD",
+                    "rationale": (
+                        f"{base_rule.rationale} | normalized empty-position SELL to HOLD before model call "
+                        f"(held quantity {held_quantity})"
+                    ),
+                })
         try:
             decision = self.llm.decide(context)
         except Exception as exc:

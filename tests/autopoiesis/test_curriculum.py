@@ -1048,4 +1048,44 @@ def test_the_context_names_the_admissible_symbols_and_the_example_uses_one():
 
     assert captured["ctx"]["admissible_symbols"] == ["XLB", "XLE", "XLF"]
     assert captured["ctx"]["worked_example"]["strategy_spec"]["symbols"] == ["XLB"]
+
+
+def test_curriculum_refuses_forbidden_kinds_in_prompt_and_schema():
+    """R2 root cause fix: curriculum must not propose kinds forbidden by admission config."""
+    from datetime import datetime, timezone
+
+    from autopoiesis.curriculum import StructuredCurriculumAgent, kind_selection_schema
+    from autopoiesis.models import ReflectionRecord
+
+    reflection = ReflectionRecord(
+        generated_at=datetime.now(tz=timezone.utc), window_cycles=10,
+        submitted_orders=0, rejected_orders=0, error_count=0,
+        guardian_rejections={}, summary="s", strategy_scores={},
+    )
+    captured = {}
+
+    def transport(ctx):
+        captured["ctx"] = ctx
+        return (
+            '{"task_id":"t","task_type":"EVALUATE","summary":"s","strategy_spec":null,'
+            '"parameters":{},"rationale":"r"}'
+        )
+
+    agent = StructuredCurriculumAgent(transport=transport, refused_kinds=("TREND_FOLLOW",))
+    agent.propose(reflection=reflection, current_strategies=[])
+
+    ctx = captured["ctx"]
+    assert "TREND_FOLLOW" not in ctx["admissible_kinds"]
+    assert "TREND_FOLLOW" not in ctx["supported_strategy_schemas"]
+    assert "TREND_FOLLOW" not in ctx["strategy_spec_fields"]["field_notes"]["kind"]
+    # Exit policy must only name permissible exit kinds (RULE, not TREND_FOLLOW)
+    exit_policy = next(p for p in ctx["exploration_policy"] if "An exit must be able to decline to fire" in p)
+    assert "Use RULE, never FIXED_SIZE, for an exit" in exit_policy
+    assert "TREND_FOLLOW" not in exit_policy
+
+    # kind selection schema must omit TREND_FOLLOW
+    schema = kind_selection_schema(ctx["admissible_kinds"])
+    assert "TREND_FOLLOW" not in schema["properties"]["kind"]["enum"]
+    assert set(schema["properties"]["kind"]["enum"]) == {"HOLD_BASELINE", "FIXED_SIZE", "RULE"}
+
     assert "SPY" not in captured["ctx"]["strategy_spec_fields"]["field_notes"]["symbols"]

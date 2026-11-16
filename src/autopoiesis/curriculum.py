@@ -82,6 +82,10 @@ def _compact_coverage(strategies) -> list[str]:
         out = [*out[:60], f"... and {len(out) - 60} more"]
     return out
 
+
+ALL_STRATEGY_KINDS: tuple[str, ...] = ("HOLD_BASELINE", "FIXED_SIZE", "TREND_FOLLOW", "RULE")
+
+
 class StructuredCurriculumAgent:
     def __init__(
         self,
@@ -92,10 +96,19 @@ class StructuredCurriculumAgent:
         max_strategies_in_prompt: int = 40,
         max_parse_retries: int = 1,
         research_ledger: Path | str | None = None,
+        refused_kinds: Sequence[str] = ("TREND_FOLLOW",),
+        admissible_kinds: Sequence[str] | None = None,
     ):
         self.transport = transport
         #: The signal ledger the prompt summarises, so a proposal can see what was already refuted.
         self.research_ledger = Path(research_ledger) if research_ledger else None
+        self.refused_kinds = tuple(str(k).upper() for k in refused_kinds)
+        if admissible_kinds is not None:
+            self.admissible_kinds = tuple(str(k).upper() for k in admissible_kinds)
+        else:
+            self.admissible_kinds = tuple(
+                k for k in ALL_STRATEGY_KINDS if k not in self.refused_kinds
+            )
         # Tracks consecutive EVALUATE fallbacks so a dead loop can be broken.
         # This used to be plain instance state, which meant every daemon restart
         # reset it to zero. Combined with run_forever.sh restarting on every
@@ -221,7 +234,8 @@ class StructuredCurriculumAgent:
                 # every cycle it is selected until the position is empty. If no
                 # conditional exit is possible for a symbol, that is a fact to report -
                 # propose something else and say so in the rationale.
-                "An exit must be able to decline to fire: a SELL with no market condition is refused. Use TREND_FOLLOW or RULE, never FIXED_SIZE, for an exit.",
+                # An exit must be conditional; FIXED_SIZE SELL is unconditional and refused.
+                f"An exit must be able to decline to fire: a SELL with no market condition is refused. Use {' or '.join([k for k in ('TREND_FOLLOW', 'RULE') if k in self.admissible_kinds]) or 'RULE'}, never FIXED_SIZE, for an exit.",
                 "Do not force orders; Guardian, market-open checks, and paper executor remain authoritative.",
                 "Do not claim profitability or target achievement without broker evidence in the supplied context.",
                 "A proposal must state a testable mechanism, the expected risk/reward, the sample size needed, and how it will be executed. A daily return target is not an admissible objective.",
@@ -249,7 +263,7 @@ class StructuredCurriculumAgent:
                 "field_notes": {
                     "strategy_id": "a short descriptive id; the system makes it unique",
                     "name": "human readable label",
-                    "kind": "one of HOLD_BASELINE, FIXED_SIZE, TREND_FOLLOW, RULE",
+                    "kind": f"one of {', '.join(self.admissible_kinds)}",
                     "symbols": "array of symbols, each one of admissible_symbols when that list is non-empty",
                     "parameters": "must match supported_strategy_schemas[kind] exactly",
                     "max_position_value": "a number at or below guardian_max_position_value",
@@ -258,6 +272,7 @@ class StructuredCurriculumAgent:
                     "rationale": "why this skill, grounded in the evidence above",
                 },
             },
+            "admissible_kinds": list(self.admissible_kinds),
             "worked_example": {
                 "task_id": "task-0001",
                 "task_type": "STRATEGY_SPEC",
@@ -296,12 +311,17 @@ class StructuredCurriculumAgent:
                     ),
                 }
                 for kind, schema in STRATEGY_PARAMETER_SCHEMAS.items()
+                if kind in self.admissible_kinds
             },
             "curriculum_progression": [
                 "1. Create/maintain HOLD_BASELINE as the first safe non-trading strategy.",
                 "2. After baseline exists, propose a tiny FIXED_SIZE strategy with quantity <= 1 and only allowed params (action, quantity, confidence).",
                 "3. Evaluate broker/journal evidence before proposing new skills.",
-                "4. Only propose TREND_FOLLOW after a FIXED_SIZE skill has been admitted and evaluated.",
+                (
+                    f"4. Only propose {self.admissible_kinds[-1]} after a FIXED_SIZE skill has been admitted and evaluated."
+                    if any(k not in {"HOLD_BASELINE", "FIXED_SIZE"} for k in self.admissible_kinds)
+                    else "4. Evaluate performance before proposing adjustments."
+                ),
                 "Do NOT skip progression steps or propose complex skills before small ones are proven.",
             ],
             "forbidden_outputs": [
@@ -709,8 +729,16 @@ def strategy_spec_schema(kind: str) -> dict[str, object]:
     }
 
 
-def kind_selection_schema() -> dict[str, object]:
-    return dict(_KIND_SELECT_SCHEMA)
+def kind_selection_schema(admissible_kinds: Sequence[str] | None = None) -> dict[str, object]:
+    kinds = list(admissible_kinds) if admissible_kinds is not None else list(ALL_STRATEGY_KINDS)
+    return {
+        "type": "object",
+        "required": ["kind", "why"],
+        "properties": {
+            "kind": {"type": "string", "enum": kinds},
+            "why": {"type": "string"},
+        },
+    }
 
 
 def generate_curriculum_task_json(*, call, prompt_context: dict, spec_hint: str | None = None) -> str:
@@ -729,6 +757,9 @@ def generate_curriculum_task_json(*, call, prompt_context: dict, spec_hint: str 
 
     The returned text is still only a candidate - the caller validates it.
     """
+    admissible_kinds = prompt_context.get("admissible_kinds")
+    kinds_enum = list(admissible_kinds) if admissible_kinds is not None else list(_KIND_PARAM_SCHEMA.keys())
+
     if spec_hint is not None:
         spec = _json_load(call(
             f"Return the strategy_spec for kind {spec_hint}. Every field is required. "
@@ -747,22 +778,29 @@ def generate_curriculum_task_json(*, call, prompt_context: dict, spec_hint: str 
         return json.dumps(task)
 
     required = prompt_context.get("required_action")
+    exit_options = []
+    if "FIXED_SIZE" in kinds_enum:
+        exit_options.append("FIXED_SIZE takes an action field")
+    if "TREND_FOLLOW" in kinds_enum:
+        exit_options.append("TREND_FOLLOW derives its side from price")
+    if "RULE" in kinds_enum:
+        exit_options.append("RULE evaluates conditional market exits")
+    exit_desc = ", and ".join(exit_options) if exit_options else "RULE evaluates conditional exits"
     demand = (
         f"The library cannot express a {required} at the real last price, and the "
         f"positions in open_positions have no working exit because of it. Choose a "
-        f"kind whose parameters can carry action={required}: FIXED_SIZE takes an "
-        f"action field, and TREND_FOLLOW derives its side from price. "
+        f"kind whose parameters can carry action={required}: {exit_desc}. "
         f"Do not choose HOLD_BASELINE, which cannot exit. "
         if isinstance(required, str) and required
         else "Choose exactly one strategy kind to propose next. "
     )
     kind_raw = call(
         f"{demand}{prompt_context_text(prompt_context)}",
-        kind_selection_schema(),
+        kind_selection_schema(kinds_enum),
     )
     kind = str(_json_load(kind_raw).get("kind") or "FIXED_SIZE").upper()
-    if kind not in _KIND_PARAM_SCHEMA:
-        kind = "FIXED_SIZE"
+    if kind not in kinds_enum or kind not in _KIND_PARAM_SCHEMA:
+        kind = "FIXED_SIZE" if "FIXED_SIZE" in kinds_enum else kinds_enum[0]
     spec = _json_load(call(
         f"Return the strategy_spec for kind {kind}. Every field is required. "
         + _FIELD_GUIDE.get(kind, "")

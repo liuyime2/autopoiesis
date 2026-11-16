@@ -936,6 +936,63 @@ def test_a_decision_is_attributed_to_the_selected_strategy():
     assert decision.decision_source == "llm"
 
 
+def test_empty_position_sell_normalized_to_hold_before_model_call():
+    """Task 0.4: Empty-position SELL is normalized to HOLD before model invocation.
+
+    Calling the LLM when there is nothing to sell wasted 48s per cycle on 11-12.
+    When held quantity is 0, the model must not be called, action normalized to HOLD,
+    and decision_source recorded as policy_engine. When held quantity > 0, the model
+    is called normally.
+    """
+    from autopoiesis.llm_decision import HybridDecisionEngine
+
+    class _Spec:
+        strategy_id = "sell-probe"
+        symbols = ("SPY",)
+        kind = "FIXED_SIZE"
+        parameters = {"action": "SELL", "quantity": 1, "confidence": 0.8}
+        max_position_value = 1000.0
+        lifecycle = "PROBATION"
+
+    class _Policy(_StubPolicy):
+        reflection_memory = None
+
+        def list(self):
+            return [_Spec()]
+
+        def select(self, *_args, **_kwargs):
+            return _Spec()
+
+    calls = []
+
+    class _LLM:
+        def decide(self, _context):
+            calls.append(True)
+            from autopoiesis.models import TradeDecision
+            return TradeDecision(symbol="SPY", action="SELL", quantity=1, confidence=0.8, rationale="llm sell")
+
+    engine = HybridDecisionEngine(llm=_LLM(), policy_engine=_Policy())
+
+    # Case 1: Empty position (held = 0). LLM must NOT be called.
+    empty_snap = _basis_snapshot(last_price=767.0, spy_quantity=0)
+    decision = engine.decide_snapshot(empty_snap)
+
+    assert len(calls) == 0, "model must not be called for an empty-position SELL"
+    assert decision.action == "HOLD"
+    assert decision.quantity == 0
+    assert decision.decision_source == "policy_engine"
+    assert "normalized empty-position SELL to HOLD before model call" in decision.rationale
+
+    # Case 2: Held position > 0. LLM IS called.
+    held_snap = _basis_snapshot(last_price=767.0, spy_quantity=5)
+    decision_held = engine.decide_snapshot(held_snap)
+
+    assert len(calls) == 1, "model must be called when there is a held position to reduce"
+    assert decision_held.action == "SELL"
+    assert decision_held.decision_source == "llm"
+
+
+
 def _fixed_size_spec(*, strategy_id, action, quantity=1):
     from datetime import datetime, timezone
 
