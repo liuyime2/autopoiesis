@@ -197,6 +197,8 @@ class JsonlJournal:
         self.use_lock = lock
         self.last_dropped_lines = 0
         self._parse_cache: dict = {}
+        #: Set by `pin`: the history's raw lines at one instant, parsed instead of the files.
+        self._pinned_lines: list[str] | None = None
         self.last_dropped_samples: list[str] = []
         # Where a generation goes when the rotation horizon reaches it. Same filesystem as the
         # journal on purpose, so the move is an `os.replace` and not a copy: there is no window
@@ -716,6 +718,26 @@ class JsonlJournal:
                 out.append((str(path), -1, -1))
         return tuple(out)
 
+    def _read_raw_lines(self) -> list[str]:
+        """Every generation's lines, read under one shared lock and not parsed."""
+        with self._read_lock(), contextlib.ExitStack() as stack:
+            handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in self.history_paths()]
+            return list(itertools.chain.from_iterable(handles))
+
+    def pin(self) -> None:
+        """Answer every later read of this object from the history as it is now.
+
+        The lines are read once, under the shared lock and for no longer than the read; the parse
+        happens afterwards, outside it. A caller that needs one consistent view of cycles and
+        events used to get it by holding the lock around both parses instead. Measured 2026-11-19
+        on a copy of the live history (1.43 GB, 22 files): the raw read is 3.6 s, the parse of
+        events alone 40.9 s, and `market-open-verify` holding the lock through both is what made
+        the daemon's append wait out its 60 s and exit at 10:31 that morning.
+        """
+        self._pinned_lines = self._read_raw_lines()
+        self.snapshot = True
+        self._parse_cache.clear()
+
     def _parsed(self, model):
         """Every record of `model` across all generations, parsed once per file signature."""
         signature = self._signature()
@@ -736,14 +758,11 @@ class JsonlJournal:
         # verification run that caused it then reported the daemon as not running and failed the
         # session. Readers share the lock by design, and a shared lock held for the length of a
         # parse is an exclusive one in all but name.
-        with self._read_lock(), contextlib.ExitStack() as stack:
-            paths = self.history_paths()
-            if not paths:
-                self.last_dropped_lines = 0
-                self._parse_cache[model] = (signature, [], 0)
-                return [], 0
-            handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in paths]
-            raw_lines = list(itertools.chain.from_iterable(handles))
+        raw_lines = self._pinned_lines if self._pinned_lines is not None else self._read_raw_lines()
+        if not raw_lines:
+            self.last_dropped_lines = 0
+            self._parse_cache[model] = (signature, [], 0)
+            return [], 0
         for line in raw_lines:
             stripped = line.strip()
             if not stripped:

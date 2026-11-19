@@ -110,13 +110,17 @@ def _journal(config):
     _require(journal.path.is_file(), "JOURNAL_MISSING")
     _require(journal.path.with_suffix(journal.path.suffix + ".lock").is_file(), "JOURNAL_LOCK_MISSING")
     _require(journal.archive_manifest_path.is_file(), "ARCHIVE_MANIFEST_MISSING")
+    # The lock covers the archive check and the raw read only; the parse runs on the pinned lines
+    # afterwards. Holding it through the parse (49.6 s on 2026-11-19's history) kept the daemon from
+    # appending for longer than its 60 s wait, and it exited.
     with journal._read_lock():
         archive = journal.archive_manifest_status()
         _require(archive["valid"] and archive["trusted"], "ARCHIVE_NOT_TRUSTED")
-        records = journal.read_all()
-        events = journal.read_events()
-        state = project_submission_state(journal)
-        _require(not state.unresolved, "UNRESOLVED_SUBMISSIONS")
+        journal.pin()
+    records = journal.read_all()
+    events = journal.read_events()
+    state = project_submission_state(journal)
+    _require(not state.unresolved, "UNRESOLVED_SUBMISSIONS")
     return journal, records, events, state
 
 
@@ -403,9 +407,10 @@ def collect(*, phase, expected_fingerprint, session_date=None, after=None, boots
                               "broker_clock": _timestamp(clock.timestamp).isoformat(), "market_open": bool(clock.is_open)}
         positions, orders = _broker_state(client)
         report["broker"] = {"active_account": True, "positions": len(positions), "open_orders": len(orders), "open_orders_complete": True}
-        # Construction only: neither daemon.run nor any maintenance/reconciliation hook.
-        with journal._read_lock():
-            daemon = _build_agent_daemon(config, client, journal=journal)
+        # Construction only: neither daemon.run nor any maintenance/reconciliation hook. Not under
+        # the journal lock: `journal` is pinned, so the build already sees one point in time, and
+        # measured 2026-11-19 the build held the lock 38.3 s, most of the daemon's 60 s wait.
+        daemon = _build_agent_daemon(config, client, journal=journal)
         report["scheduler_trade_now"] = daemon.scheduler.should_trade_now()
         if phase == "preopen":
             _require(now < opened and not clock.is_open, "PREOPEN_PHASE_ENDED", 2)

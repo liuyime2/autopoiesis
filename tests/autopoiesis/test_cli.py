@@ -691,6 +691,39 @@ def test_readiness_synthetic_preopen_uses_real_hybrid_and_writes_only_private_re
     assert {path for path in tmp_path.rglob("*") if path.is_file()} == set(before) | {output}
 
 
+def test_readiness_does_not_hold_the_journal_lock_while_it_parses(tmp_path, monkeypatch):
+    """A writer must be able to append while readiness parses the history (synthetic journal).
+
+    Measured 2026-11-19: readiness held the shared lock through a 49.6 s parse, the daemon's
+    append waited out its 60 s, and the daemon exited at 10:31.
+    """
+    from autopoiesis import models
+
+    fixture = synthetic_readiness(tmp_path, monkeypatch)
+    JsonlJournal(fixture.cfg.journal_path).append_event(JournalEvent(
+        event_id="synthetic-existing", event_type="CURRICULUM_PROPOSED", timestamp=fixture.now,
+        status="SUCCESS", payload={},
+    ))
+    writer = JsonlJournal(fixture.cfg.journal_path, lock_timeout=0.5)
+    appended = []
+    original = models.JournalEvent.model_validate_json.__func__
+
+    def parse_while_a_writer_appends(cls, data, *args, **kwargs):
+        if not appended:
+            appended.append(True)
+            writer.append_event(JournalEvent(
+                event_id="synthetic-during-parse", event_type="CURRICULUM_PROPOSED",
+                timestamp=fixture.now, status="SUCCESS", payload={},
+            ))
+        return original(cls, data, *args, **kwargs)
+
+    monkeypatch.setattr(models.JournalEvent, "model_validate_json", classmethod(parse_while_a_writer_appends))
+    _, _, events, _ = fixture.tool._journal(fixture.cfg)
+    assert appended
+    # The pinned view is the history as it was when it was read.
+    assert [e.event_id for e in events] == ["synthetic-existing"]
+
+
 def synthetic_session_record(fixture, *, provenance=True, symbol="SPY"):
     from autopoiesis.learning_evidence import capture
     from autopoiesis.models import (

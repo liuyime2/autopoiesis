@@ -735,3 +735,15 @@ def test_a_live_journal_still_sees_appends(tmp_path):
     assert len(reader.read_all()) == 1
     writer.append(make_record("cycle-2"))
     assert [r.cycle_id for r in reader.read_all()] == ["cycle-1", "cycle-2"]
+
+
+def test_a_pinned_journal_answers_from_the_history_as_it_was_pinned(tmp_path):
+    """`pin` gives one consistent view; an unpinned reader still sees later appends."""
+    path = tmp_path / "journal.jsonl"
+    writer = JsonlJournal(path)
+    writer.append_event(make_event())
+    pinned = JsonlJournal(path)
+    pinned.pin()
+    writer.append_event(make_event().model_copy(update={"event_id": "event-2"}))
+    assert [e.event_id for e in pinned.read_events()] == ["event-1"]
+    assert [e.event_id for e in JsonlJournal(path).read_events()] == ["event-1", "event-2"]
