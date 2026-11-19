@@ -532,7 +532,7 @@ def test_prune_backups_dry_run_and_execution(tmp_path):
     assert b_old.exists()  # Dry run did not delete
 
     # Execute
-    summary2, pruned2 = module.prune_backups(backups_dir, keep_days=7, execute=True, now=now)
+    summary2, _pruned2 = module.prune_backups(backups_dir, keep_days=7, execute=True, now=now)
     assert summary2["dry_run"] is False
     assert summary2["pruned"] == 1
     assert not b_old.exists()
@@ -550,7 +550,7 @@ def test_prune_backups_always_protects_newest_even_if_expired(tmp_path):
     b_newer = _create_mock_backup(backups_dir, "20260902T120000Z-222222222222", size=1000)
 
     now = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
-    summary, pruned = module.prune_backups(backups_dir, keep_days=7, execute=True, now=now)
+    summary, _pruned = module.prune_backups(backups_dir, keep_days=7, execute=True, now=now)
 
     assert summary["kept"] == 1
     assert summary["pruned"] == 1
@@ -595,7 +595,7 @@ def test_prune_backups_quota_enforcement(tmp_path):
     now = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
     # Quota: 15MB. Should prune oldest (b1) to get below 20MB? b3 (newest) kept, b2 kept = 20MB > 15MB,
     # so b2 also pruned, leaving b3 (newest is always kept).
-    summary, pruned = module.prune_backups(
+    summary, _pruned = module.prune_backups(
         backups_dir, keep_days=7, max_bytes=15 * 1024 * 1024, execute=True, now=now
     )
     assert b3.exists()

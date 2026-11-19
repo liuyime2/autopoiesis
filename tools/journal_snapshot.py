@@ -510,7 +510,7 @@ def prune_backups(
     to_keep: list[tuple[datetime, Path, int, bool]] = []
 
     for item in valid_backups:
-        ts, p, sz, is_golden = item
+        ts, p, _sz, is_golden = item
         if p == newest[1]:
             to_keep.append(item)
             continue
@@ -567,10 +567,10 @@ def _parse_bytes(value: str | int | None) -> int | None:
     if isinstance(value, int):
         return value
     v = str(value).strip().upper()
-    if v.endswith("GB") or v.endswith("G"):
+    if v.endswith(("GB", "G")):
         num = v.rstrip("GB").rstrip("G")
         return int(float(num) * (1024**3))
-    if v.endswith("MB") or v.endswith("M"):
+    if v.endswith(("MB", "M")):
         num = v.rstrip("MB").rstrip("M")
         return int(float(num) * (1024**2))
     return int(v)
