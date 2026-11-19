@@ -691,6 +691,40 @@ def test_readiness_synthetic_preopen_uses_real_hybrid_and_writes_only_private_re
     assert {path for path in tmp_path.rglob("*") if path.is_file()} == set(before) | {output}
 
 
+def test_readiness_preview_time_is_checked_against_when_the_snapshots_were_taken(tmp_path, monkeypatch):
+    """A slow history read before the preview must not fail fresh quotes (synthetic clock).
+
+    Measured 2026-11-17..19: the journal read took about a minute, the run's start time was the
+    reference, and every preopen failed `PREVIEW_TIMESTAMP_INVALID` on quotes the broker had just
+    served. Here everything after the run's start, broker clock included, is 90 s later, as
+    that read made it.
+    """
+    from datetime import timedelta
+
+    fixture = synthetic_readiness(tmp_path, monkeypatch)
+    later = fixture.now + timedelta(seconds=90)
+    times = iter([fixture.now])
+    monkeypatch.setattr(fixture.tool, "_now", lambda: next(times, later))
+    fixture.clock.timestamp = later
+    report = collect_synthetic(fixture)
+    assert report["status"] == "READY", report
+    assert report["data"][0]["stale_quote"] is False
+
+
+def test_readiness_preview_still_refuses_a_quote_older_than_a_minute(tmp_path, monkeypatch):
+    """The fix moves the reference time; it does not widen the 60 s rule (synthetic clock)."""
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    fixture = synthetic_readiness(tmp_path, monkeypatch)
+    stale = SimpleNamespace(timestamp=fixture.now - timedelta(seconds=61), is_open=False)
+    calls = iter([fixture.clock])
+    fixture.client.get_clock = lambda: next(calls, stale)
+    report = collect_synthetic(fixture)
+    assert report["status"] == "FAIL", report
+    assert report["diagnostics"] == ["PREVIEW_TIMESTAMP_INVALID"]
+
+
 def test_readiness_does_not_hold_the_journal_lock_while_it_parses(tmp_path, monkeypatch):
     """A writer must be able to append while readiness parses the history (synthetic journal).
 

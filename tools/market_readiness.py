@@ -415,11 +415,15 @@ def collect(*, phase, expected_fingerprint, session_date=None, after=None, boots
         if phase == "preopen":
             _require(now < opened and not clock.is_open, "PREOPEN_PHASE_ENDED", 2)
             snapshots = [daemon.loop.data_gateway.snapshot(symbol).model_copy(update={"open_orders": orders}) for symbol in config.symbols]
+            # Measured against when the snapshots were taken, not when the run began: the journal
+            # read before this takes about a minute, and on 2026-11-17..19 that alone put every
+            # snapshot more than 60 s from `now` and failed the preopen with fresh quotes.
+            checked_at = _now()
             for symbol, snapshot in zip(config.symbols, snapshots, strict=True):
                 _require(snapshot.symbol == symbol and snapshot.source == "alpaca" and not snapshot.market_open, "PREVIEW_SNAPSHOT_INVALID")
-                _require(snapshot.quote_time is not None and abs((_timestamp(snapshot.timestamp) - now).total_seconds()) <= 60, "PREVIEW_TIMESTAMP_INVALID")
+                _require(snapshot.quote_time is not None and abs((_timestamp(snapshot.timestamp) - checked_at).total_seconds()) <= 60, "PREVIEW_TIMESTAMP_INVALID")
             report["data"] = [{"symbol": snapshot.symbol, "snapshot_at": snapshot.timestamp.isoformat(), "quote_at": snapshot.quote_time.isoformat(),
-                               "last_price": snapshot.last_price, "stale_quote": daemon.loop.guardian._is_stale(snapshot, now=now)} for snapshot in snapshots]
+                               "last_price": snapshot.last_price, "stale_quote": daemon.loop.guardian._is_stale(snapshot, now=checked_at)} for snapshot in snapshots]
             coverage, preview = _preview(daemon, snapshots, records, heartbeat)
             report["coverage"], report["preview"] = coverage, preview
             _require(preview["model_response_observed"], "MODEL_RESPONSE_NOT_OBSERVED")
