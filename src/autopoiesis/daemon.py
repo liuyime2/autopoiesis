@@ -19,6 +19,7 @@ from autopoiesis.curriculum import StructuredCurriculumAgent
 from autopoiesis.evaluator import (
     PNL_EVIDENCE_MISSING,
     DeterministicEvaluator,
+    compact_report_payload,
     confirmed_fill_activities,
     owner_fill_activities,
 )
@@ -559,7 +560,7 @@ class AgentDaemon:
                 "STRATEGY_EVALUATION_RECORDED",
                 status="SUCCESS",
                 message="deterministic evaluator recorded factual journal metrics",
-                payload=reflection.evaluation,
+                payload=compact_report_payload(reflection.evaluation),
             )
             self.last_reflection_at = self.now()
         except Exception as exc:
@@ -1419,7 +1420,7 @@ class AgentDaemon:
             "PNL_EVIDENCE_RECORDED" if success else "PNL_EVIDENCE_FAILED",
             status="SUCCESS" if success else "SKIPPED",
             message=report.pnl_evidence,
-            payload=report.model_dump(mode="json"),
+            payload=compact_report_payload(report.model_dump(mode="json"), strategy_metrics=False),
         )
 
     def _verify_profit_target(self, evidence: BrokerEvidenceBatch | None) -> None:

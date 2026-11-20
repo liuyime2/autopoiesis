@@ -641,6 +641,14 @@ def test_daemon_market_closed_runs_maintenance_without_trading(tmp_path):
     assert "PNL_EVIDENCE_RECORDED" in event_types
     assert "PROFIT_TARGET_CHECKED" in event_types
     assert reflection_memory.load().evaluation["pnl_evidence"] == "broker_portfolio_history_verified"
+    # The journal keeps the derived report without its cumulative lists (2026-11-20: they
+    # were 91% of a 1,451 MB journal); the in-memory evaluation keeps them.
+    pnl_event = [e for e in journal.read_events() if e.event_type == "PNL_EVIDENCE_RECORDED"][-1]
+    assert not {"fill_attributions", "closed_lots", "open_lots"} & set(pnl_event.payload["pnl"])
+    assert {"closed_lots_count", "open_lots_count"} <= set(pnl_event.payload["pnl"])
+    assert len(pnl_event.payload["full_report_sha256"]) == 64
+    assert "strategy_metrics" not in pnl_event.payload
+    assert "closed_lots" in reflection_memory.load().evaluation["pnl"]
 
 
 @pytest.mark.parametrize("return_pct", [None, 0.11, 0.02, -0.11, 2.0])
@@ -763,6 +771,10 @@ def test_daemon_reflects_runs_curriculum_and_records_events(tmp_path):
     assert "REFLECTION_GENERATED" in event_types
     assert "STRATEGY_EVALUATION_RECORDED" in event_types
     assert "CURRICULUM_PROPOSED" in event_types
+    evaluation = [e for e in events if e.event_type == "STRATEGY_EVALUATION_RECORDED"][-1]
+    assert "closed_lots" not in evaluation.payload["pnl"]
+    assert all("source_cycle_ids" not in row for row in evaluation.payload["strategy_metrics"].values())
+    assert len(evaluation.payload["full_report_sha256"]) == 64
     admission = [event for event in events if event.event_type == "STRATEGY_ADMISSION_REVIEWED"][-1]
     assert admission.status == "ACCEPTED"
     assert admission.strategy_id == "fallback-tiny-fixed-size"

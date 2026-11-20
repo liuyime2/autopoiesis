@@ -1515,3 +1515,52 @@ def owner_fill_activities(journal) -> list[BrokerFillActivity]:
         except ValueError:
             continue
     return out
+
+
+#: Cumulative per-lot and per-cycle lists that make an evaluation report grow with the
+#: whole history. Measured 2026-11-20: the two events carrying the full report were 91% of
+#: a 1,451 MB journal (573 KB and 415 KB each, rising). They are derived, and recomputed
+#: from the journal on every evaluation, so the journal keeps their counts and a digest.
+_BULKY_PNL_FIELDS = ("fill_attributions", "closed_lots", "open_lots")
+
+
+def compact_report_payload(
+    payload: Mapping[str, object], *, strategy_metrics: bool = True
+) -> dict[str, object]:
+    """The journalled form of an evaluation report: everything except the cumulative lists.
+
+    `full_report_sha256` is the digest of the report as it was computed, so a later
+    recomputation can be checked against what the daemon saw. With `strategy_metrics`
+    False the per-strategy table is replaced by its row count: the PnL event carried a
+    row for every strategy ever seen (108 rows, 115 KB on 2026-11-20) that no journal
+    reader uses; `experiment_registry` reads that table from STRATEGY_EVALUATION_RECORDED.
+    """
+    import hashlib
+    import json
+
+    out: dict[str, object] = dict(payload)
+    out["full_report_sha256"] = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+    pnl = payload.get("pnl")
+    if isinstance(pnl, Mapping):
+        compact_pnl = {k: v for k, v in pnl.items() if k not in _BULKY_PNL_FIELDS}
+        for k in _BULKY_PNL_FIELDS:
+            value = pnl.get(k)
+            if isinstance(value, list):
+                compact_pnl[f"{k}_count"] = len(value)
+        out["pnl"] = compact_pnl
+    metrics = payload.get("strategy_metrics")
+    if isinstance(metrics, Mapping) and not strategy_metrics:
+        del out["strategy_metrics"]
+        out["strategy_metrics_count"] = len(metrics)
+    elif isinstance(metrics, Mapping):
+        compact_metrics: dict[str, object] = {}
+        for sid, row in metrics.items():
+            if isinstance(row, Mapping) and isinstance(row.get("source_cycle_ids"), list):
+                row = {k: v for k, v in row.items() if k != "source_cycle_ids"} | {
+                    "source_cycle_count": len(row["source_cycle_ids"])
+                }
+            compact_metrics[sid] = row
+        out["strategy_metrics"] = compact_metrics
+    return out

@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from autopoiesis import (
@@ -181,8 +183,8 @@ def run_doctor(config: AgentConfig, *, client=None, skip_broker: bool = False) -
     _check_journal(report, config, journal)
     _check_strategy_library(report, config, journal if config.journal_path.exists() else None)
     _check_knowledge(report, config)
-    _check_proof(report, config, journal)
-    _check_governance(report, config, journal)
+    evaluation = _check_proof(report, config, journal)
+    _check_governance(report, config, journal, evaluation=evaluation)
     return report
 
 
@@ -202,7 +204,11 @@ RISK_BASELINE_PATH = "risk_baseline.json"
 
 
 def _check_governance(
-    report: DoctorReport, config: AgentConfig, journal: JsonlJournal | None = None
+    report: DoctorReport,
+    config: AgentConfig,
+    journal: JsonlJournal | None = None,
+    *,
+    evaluation: Mapping[str, Any] | None = None,
 ) -> None:
     journal = journal if journal is not None else _journal(config)
     records = _records(journal) if journal is not None else []
@@ -271,7 +277,7 @@ def _check_governance(
         # 10. Which of signal/model/strategy/allocation/execution/cost/regime
         #     actually produced the PnL. The objective asks this directly and the
         #     answer is not the one the headline number suggests.
-        _check_pnl_attribution(report, config, journal, records)
+        _check_pnl_attribution(report, config, evaluation, records)
 
         # 11. Model provenance. Phase 3 asks for a model registry alongside the
         #     strategy one, and until provenance was captured no outcome could ever
@@ -1061,7 +1067,7 @@ def _check_model_calibration(
 def _check_pnl_attribution(
     report: DoctorReport,
     config: AgentConfig,
-    journal: JsonlJournal,
+    evaluation: Mapping[str, Any] | None,
     records: list,
 ) -> None:
     """State which cause produced the PnL, and refuse to guess where the data cannot.
@@ -1071,31 +1077,28 @@ def _check_pnl_attribution(
     decision source issued that order; nothing joined the two, so
     `strategy_realized_pnl` looked like a result for the decision engine when it is a
     result for the baseline rule.
+
+    `evaluation` is the report `_check_proof` computes from this same journal snapshot.
+    It used to be the last `PNL_EVIDENCE_RECORDED` payload, which tied the check to the
+    journal carrying every closed lot on every event (2026-11-20: 91% of the journal);
+    the journal now keeps only counts, and the lots are recomputed here.
     """
-    try:
-        events = [
-            e for e in journal.read_events("PNL_EVIDENCE_RECORDED")
-            if coerce.field_dict(e.payload.get("pnl"), "pnl").get("closed_lots")
-        ]
-    except Exception as exc:
-        report.add("pnl attribution", WARN, f"journal unreadable: {type(exc).__name__}")
-        return
-    if not events:
+    pnl_lots = coerce.field_dict((evaluation or {}).get("pnl"), "pnl").get("closed_lots")
+    if evaluation is None or not pnl_lots:
         report.add(
             "pnl attribution", WARN,
             "no closed lots on record, so no PnL can be attributed to any cause",
         )
         return
 
-    latest = events[-1]
     # Point-in-time regime labels, so a lot is attributed to the market it was opened
     # in rather than to a regime computed over the whole history.
     labels = dict(regime.regime_timeline(regime.bars_from_records(records)))
     result = attribution.attribute(
-        records, coerce.field_dict(latest.payload.get("pnl"), "pnl"), latest.payload, regime_labels=labels
+        records, coerce.field_dict(evaluation.get("pnl"), "pnl"), dict(evaluation), regime_labels=labels
     )
     causes = "; ".join(f"{c.cause}={c.verdict}" for c in result.causes)
-    pnl = coerce.field_dict(latest.payload.get("pnl"), "pnl")
+    pnl = coerce.field_dict(evaluation.get("pnl"), "pnl")
     net = coerce.field_float(pnl.get("net_pnl"), "pnl.net_pnl")
     unrealized = coerce.field_float(pnl.get("unrealized_pnl"), "pnl.unrealized_pnl")
     # net = realized + unrealized, stated so the two cannot be confused for the
@@ -1829,7 +1832,7 @@ def _check_knowledge(report: DoctorReport, config: AgentConfig) -> None:
 
 def _check_proof(
     report: DoctorReport, config: AgentConfig, journal: JsonlJournal | None = None
-) -> None:
+) -> dict[str, Any] | None:
     """The only success criterion. Cycle counts are not evidence.
 
     The three checks are always emitted, including when there is nothing to
@@ -1845,7 +1848,7 @@ def _check_proof(
             ("proof: per-strategy pnl", "unknown: no cycles recorded"),
         ):
             report.add(name, WARN, detail, "run one: autopoiesis once")
-        return
+        return None
 
     fills: dict[str, float] = {}
     for event in confirmed_fill_events(journal.read_events()):
@@ -1940,6 +1943,7 @@ def _check_proof(
         )
     else:
         report.add("pnl evidence", OK, evaluation.pnl_evidence)
+    return evaluation.model_dump(mode="json")
 
 
 def datetime_now():
