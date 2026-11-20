@@ -1,4 +1,5 @@
 import os
+import random
 import signal
 import time
 from dataclasses import replace
@@ -503,14 +504,14 @@ def test_the_round_decides_what_can_change_every_time_and_rotates_the_rest():
 
     daemon = AgentDaemon.__new__(AgentDaemon)
     daemon.strategy_library = Library(["SPY", "BIL", "TLT", "XLE"])
-    daemon.cycle_count = 0
+    daemon.daily_round_count = 0
 
     round_input = ["SPY", "BIL", "TLT", "XLB", "XLE", "XLF", "NVDA", "TQQQ", "VXX", "IBIT"]
     held = {"SPY", "BIL", "TLT", "XLE", "XLB"}
 
     seen_rest = set()
-    for cycle in range(5):
-        daemon.cycle_count = cycle
+    for round_number in range(5):
+        daemon.daily_round_count = round_number
         decided = daemon._prioritise_round(round_input, held)
         # The five that can change something are decided every round, without exception.
         assert {"SPY", "BIL", "TLT", "XLE", "XLB"} <= set(decided), decided
@@ -520,6 +521,45 @@ def test_the_round_decides_what_can_change_every_time_and_rotates_the_rest():
         seen_rest.add(rest[0])
     # Rotation is what keeps "any symbol may appear" true over a few rounds rather than in one.
     assert seen_rest == {"XLF", "NVDA", "TQQQ", "VXX", "IBIT"}, seen_rest
+
+
+def test_every_configured_symbol_nothing_serves_is_decided_within_two_rounds_each():
+    """The open check needs every configured symbol within the first hour.
+
+    Measured 2026-11-20: XLE and XLF (configured, unserved, unheld) shared one discovery slot
+    with the model's attention picks, chosen by `cycle_count % len(rest)`. XLF was first decided
+    at 13:08 and the 10:30 check failed FIRST_ROUND_COVERAGE_MISSING. The picks below change
+    every round, as they do live (synthetic lists, labelled as such).
+    """
+    from types import SimpleNamespace
+
+    class Library:
+        def list(self):
+            return [SimpleNamespace(strategy_id="s-spy", symbols=("SPY",), enabled=True, lifecycle="PROBATION")]
+
+    daemon = AgentDaemon.__new__(AgentDaemon)
+    daemon.strategy_library = Library()
+    daemon.config = SimpleNamespace(symbols=("BIL", "SPY", "TLT", "XLB", "XLE", "XLF"))
+    held = {"SPY", "BIL", "TLT", "XLB"}
+    pool = ["TQQQ", "AMD", "IBIT", "MU", "SOXX", "HYG", "AMZN", "SOXL", "AAPL", "NVDA"]
+    picks_got_a_turn = False
+    for seed in range(50):
+        rng = random.Random(seed)
+        first_seen: dict[str, int] = {}
+        for round_number in range(4):
+            daemon.daily_round_count = round_number
+            # A live-sized cycle count, which must no longer decide the slot.
+            daemon.cycle_count = 997 * seed + 8 * round_number
+            picks = rng.sample(pool, rng.randint(1, 4))
+            decided = daemon._prioritise_round(["BIL", "SPY", "TLT", "XLB", "XLE", "XLF", *picks], held)
+            assert {"BIL", "SPY", "TLT", "XLB"} <= set(decided)
+            discovery = [s for s in decided if s not in {"BIL", "SPY", "TLT", "XLB"}]
+            assert len(discovery) == 1, decided
+            first_seen.setdefault(discovery[0], round_number)
+        # K = 2 configured-unserved symbols, so each within 2K = 4 rounds, whatever was picked.
+        assert {"XLE", "XLF"} <= set(first_seen), (seed, first_seen)
+        picks_got_a_turn |= bool(set(first_seen) - {"XLE", "XLF"})
+    assert picks_got_a_turn
 
 
 def test_the_curriculum_stage_fits_the_heartbeat_budget(tmp_path):

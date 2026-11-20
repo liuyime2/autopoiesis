@@ -202,6 +202,8 @@ class AgentDaemon:
         self._last_model_ok: bool | None = None
         self.cycle_count = 0
         self.daily_cycle_count = 0
+        #: Rounds started today. The discovery slot rotates on this, not on `cycle_count`.
+        self.daily_round_count = 0
         self.current_cycle_date: date | None = None
         self.error_count = 0
         #: Consecutive broker-clock failures, reset by the first successful read. Drives the backoff
@@ -321,6 +323,7 @@ class AgentDaemon:
                         break
                     if self.daily_cycle_count >= self.config.max_daily_cycles:
                         break
+                self.daily_round_count = getattr(self, "daily_round_count", 0) + 1
                 if not self._stop_requested:
                     self.sleep(self._round_sleep_seconds(time.monotonic() - round_started))
             self._heartbeat("STOPPED", "daemon stopped")
@@ -479,6 +482,7 @@ class AgentDaemon:
         if today != self.current_cycle_date:
             self.current_cycle_date = today
             self.daily_cycle_count = 0
+            self.daily_round_count = 0
 
     def _post_cycle(self) -> None:
         if self._stop_requested or self.journal is None or self.reflection_memory is None:
@@ -2265,13 +2269,29 @@ class AgentDaemon:
         if len(rest) > DISCOVERY_SYMBOLS_PER_ROUND:
             # `getattr`, because two construction paths never run `__init__`: the tests build an
             # instance with `__new__` and set only the fields a path needs, and the replay drives
-            # the same daemon without a cycle counter. Reading the attribute directly raised
-            # AttributeError inside the round, which in the replay meant no cycles at all - and the
-            # gate reported that as "the screen never scored a decision", two classes away from
-            # the line that caused it.
-            cycle = int(getattr(self, "cycle_count", 0) or 0)
-            start = cycle % len(rest)
-            rest = [rest[(start + offset) % len(rest)] for offset in range(DISCOVERY_SYMBOLS_PER_ROUND)]
+            # the same daemon without a round counter.
+            #
+            # The slot alternates between the configured symbols nothing serves and everything
+            # else, each rotated by the day's round count. It used to be `rest[cycle_count %
+            # len(rest)]` over one mixed list, and `cycle_count` advances by a whole round's
+            # symbols at a time while the model's picks change every round, so which symbol got
+            # the slot was close to arbitrary. Measured 2026-11-20: XLF was first decided at
+            # 13:08 and the 10:30 open check failed FIRST_ROUND_COVERAGE_MISSING (as on 10-26).
+            # Alternating bounds it: K configured symbols each appear within 2K rounds.
+            configured_order = [str(s).upper() for s in getattr(getattr(self, "config", None), "symbols", ()) or ()]
+            configured = [s for s in rest if str(s).upper() in configured_order]
+            configured.sort(key=lambda s: configured_order.index(str(s).upper()))
+            picked = [s for s in rest if str(s).upper() not in configured_order]
+            r = int(getattr(self, "daily_round_count", 0) or 0)
+            if configured and picked:
+                group = configured if r % 2 == 0 else picked
+                turn = r // 2
+            else:
+                group = configured or picked
+                turn = r
+            start = turn % len(group)
+            rest = [group[(start + offset) % len(group)]
+                    for offset in range(min(DISCOVERY_SYMBOLS_PER_ROUND, len(group)))]
         return priority + rest
 
     def _round_sleep_seconds(self, elapsed: float) -> int:
