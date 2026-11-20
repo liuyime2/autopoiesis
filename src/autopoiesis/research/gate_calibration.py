@@ -62,11 +62,18 @@ def wilson_interval(successes: int, total: int, z: float = 1.96) -> tuple[float,
 
 
 def v4_verdicts(
-    pairs: dict[str, tuple[Sequence[float], Sequence[float]]], *, seed: int = 0
+    pairs: Mapping[str, tuple[Sequence[float], Sequence[float]]],
+    *,
+    seed: int = 0,
+    ci_floor: float = MIN_EFFECT_DAILY,
+    scale: float = 1.0,
 ) -> dict[str, dict[str, Any]]:
     """The v4 rule on a family of (baseline, candidate) daily-return pairs.
 
     Same resampling as the registered runner (block 5, 2000 resamples, seed fixed per call).
+    `ci_floor` and `scale` exist only to measure candidate replacements of the rule: the
+    registered rule is the default (CI lower bound >= min_effect, returns on total capital).
+    A `ci_floor` of 0 requires the lower bound to be strictly above 0.
     """
     names = list(pairs)
     boots = {
@@ -82,7 +89,11 @@ def v4_verdicts(
             "ci_low": b["ci_low"],
             "p_two_sided": b["p_two_sided"],
             "holm_p": h,
-            "proven": bool(h < 0.05 and b["mean_diff"] >= MIN_EFFECT_DAILY and b["ci_low"] >= MIN_EFFECT_DAILY),
+            "proven": bool(
+                h < 0.05
+                and b["mean_diff"] * scale >= MIN_EFFECT_DAILY
+                and (b["ci_low"] * scale >= ci_floor if ci_floor > 0 else b["ci_low"] > 0)
+            ),
         }
     return out
 
@@ -126,19 +137,33 @@ def portfolio(per_symbol: Mapping[str, Sequence[float]]) -> list[float]:
 
 def evaluate_run(closes: dict[str, list[float]], *, seed: int) -> dict[str, Any]:
     """Arms A (cash), B (SMA20 1% band) and C (walk-forward over the 17 configs) on one world."""
-    b_sat, c_sat, bench_sat = {}, {}, {}
+    b_sat, c_sat, bench_sat, bench_c_sat = {}, {}, {}, {}
     for symbol, cl in closes.items():
         b_path = signal_path(SmaBand(20, 0.01).fresh, cl)
+        c_path = signal_path(lambda: WalkForwardSignal(grid=search_grid()), cl)
         b_sat[symbol] = held_returns(b_path, cl, COST)
-        c_sat[symbol] = held_returns(signal_path(lambda: WalkForwardSignal(grid=search_grid()), cl), cl, COST)
+        c_sat[symbol] = held_returns(c_path, cl, COST)
         held = returns_of(cl)
-        frac = sum(b_path[:-1]) / max(1, len(b_path) - 1)
-        bench_sat[symbol] = [frac * r for r in held]
+        frac_b = sum(b_path[:-1]) / max(1, len(b_path) - 1)
+        frac_c = sum(c_path[:-1]) / max(1, len(c_path) - 1)
+        bench_sat[symbol] = [frac_b * r for r in held]
+        bench_c_sat[symbol] = [frac_c * r for r in held]
     a = [0.0] * len(next(iter(b_sat.values())))
-    b, c, bench_b = portfolio(b_sat), portfolio(c_sat), portfolio(bench_sat)
+    b, c = portfolio(b_sat), portfolio(c_sat)
+    bench_b, bench_c = portfolio(bench_sat), portfolio(bench_c_sat)
     family = v4_verdicts({"B-A": (a, b), "C-B": (b, c)}, seed=seed)
     exposure = v4_verdicts({"B-BENCH_EXPOSURE_B": (bench_b, b)}, seed=seed)
+    # Candidate replacements, measured on the same world; none of them is registered.
+    exposure_family = {"B-BENCH_B": (bench_b, b), "C-BENCH_C": (bench_c, c)}
+    satellite_scale = CAPITAL / (SATELLITE_POOL * len(closes))
+    variants = {
+        "x1_exposure": v4_verdicts(exposure_family, seed=seed),
+        "x2_exposure_ci0": v4_verdicts(exposure_family, seed=seed, ci_floor=0.0),
+        "x3_exposure_ci0_satcap": v4_verdicts(exposure_family, seed=seed, ci_floor=0.0, scale=satellite_scale),
+    }
     return {
+        **{f"{v}:any": any(r["proven"] for r in res.values()) for v, res in variants.items()},
+        **{f"{v}:B": res["B-BENCH_B"]["proven"] for v, res in variants.items()},
         "B-A": family["B-A"]["proven"],
         "C-B": family["C-B"]["proven"],
         "any": family["B-A"]["proven"] or family["C-B"]["proven"],
@@ -163,6 +188,8 @@ SCENARIOS: dict[str, tuple[bool, float]] = {
     "signal_2pct": (True, 0.02),
     "signal_5pct": (True, 0.05),
     "signal_10pct": (True, 0.10),
+    "signal_20pct": (True, 0.20),
+    "signal_40pct": (True, 0.40),
 }
 
 
@@ -185,7 +212,7 @@ def run(
     for scenario, rs in rows.items():
         rs.sort(key=lambda r: r["seed"])
         entry: dict[str, Any] = {"runs": len(rs)}
-        for key in ("B-A", "C-B", "any", "B-BENCH_EXPOSURE_B"):
+        for key in [k for k in rs[0] if isinstance(rs[0][k], bool)] if rs else []:
             k = sum(1 for r in rs if r[key])
             lo, hi = wilson_interval(k, len(rs))
             entry[key] = {"proven": k, "rate": k / len(rs) if rs else 0.0, "wilson_95": [lo, hi]}

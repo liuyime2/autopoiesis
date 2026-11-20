@@ -33,6 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--signal-runs", type=int, default=100)
     p.add_argument("--workers", type=int, default=16)
     p.add_argument("--only", default="", help="comma-separated scenario subset")
+    p.add_argument("--suffix", default="", help="appended to the output file stem, so a rerun does not overwrite")
     args = p.parse_args(argv)
 
     returns, data = {}, {}
@@ -62,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     stem = date.today().isoformat()
-    (out / f"{stem}.json").write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
+    (out / f"{stem}{args.suffix}.json").write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
     lines = [f"# Gate calibration {stem} (synthetic; see module docstring)", "",
              f"commit `{commit}`{' (src dirty)' if dirty else ''}, {elapsed:.0f} s", "",
              "| scenario | runs | B-A PROVEN | C-B PROVEN | any in family | B vs exposure-matched B&H | mean B excess/yr |",
@@ -73,7 +74,14 @@ def main(argv: list[str] | None = None) -> int:
             return f"{e[k]['proven']} ({e[k]['rate']:.1%}, [{lo:.1%}, {hi:.1%}])"
         lines.append(f"| {s} | {e['runs']} | {cell('B-A')} | {cell('C-B')} | {cell('any')} | "
                      f"{cell('B-BENCH_EXPOSURE_B')} | {e['mean_b_annual_excess']:+.3%} |")
-    (out / f"{stem}.md").write_text("\n".join(lines) + "\n")
+    variants = sorted({k.split(":")[0] for e in result["summary"].values() for k in e if ":" in k})
+    if variants:
+        lines += ["", "Candidate replacements (not registered): PROVEN rate, any in family / B alone", "",
+                  "| scenario | " + " | ".join(variants) + " |", "|---|" + "---|" * len(variants)]
+        for s, e in result["summary"].items():
+            lines.append(f"| {s} | " + " | ".join(
+                f"{e[v + ':any']['rate']:.1%} / {e[v + ':B']['rate']:.1%}" for v in variants) + " |")
+    (out / f"{stem}{args.suffix}.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
     return 0
 
