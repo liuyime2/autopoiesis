@@ -119,8 +119,8 @@ def test_a_configured_symbol_with_nothing_to_run_rotates_instead_of_leading_the_
     ])
     d.attention_transport = None
     seen = set()
-    for cycle in range(4):
-        d.cycle_count = cycle
+    for round_number in range(4):
+        d.daily_round_count = round_number             # the slot rotates by round (2026-11-20)
         decided = d._round_symbols()
         assert decided[0] == "SPY", decided            # served: every round
         assert "TLT" in decided, decided               # held: every round
