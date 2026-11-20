@@ -159,6 +159,7 @@ def test_install_service_also_refreshes_the_readiness_timers(repo, monkeypatch):
     with SOURCE_MISMATCH while the deploys went through. `install-service` does not touch them;
     they have their own installer, which deploys never called."""
     module, _, _ = repo
+    monkeypatch.setattr(module, "_active_release_commit", lambda: "abc123")
     fake = _FakeInstallers(monkeypatch)
     monkeypatch.setenv("MAKEFLAGS", "PY=/bin/false")
     entry = module.deploy(approved_by="tester", now=SATURDAY, install_service=True)
@@ -175,6 +176,7 @@ def test_install_service_also_refreshes_the_readiness_timers(repo, monkeypatch):
 
 def test_a_failed_readiness_install_fails_the_deploy_loudly(repo, monkeypatch):
     module, _, _ = repo
+    monkeypatch.setattr(module, "_active_release_commit", lambda: "abc123")
     _FakeInstallers(monkeypatch, readiness_rc=1)
     with pytest.raises(SystemExit, match="install-readiness-timers failed"):
         module.deploy(approved_by="tester", now=SATURDAY, install_service=True)
@@ -182,6 +184,7 @@ def test_a_failed_readiness_install_fails_the_deploy_loudly(repo, monkeypatch):
 
 def test_without_install_service_no_installer_runs(repo, monkeypatch):
     module, _, _ = repo
+    monkeypatch.setattr(module, "_active_release_commit", lambda: "abc123")
     fake = _FakeInstallers(monkeypatch)
     module.deploy(approved_by="tester", now=SATURDAY)
     assert fake.calls == []
