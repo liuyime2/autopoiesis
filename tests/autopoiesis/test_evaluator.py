@@ -709,3 +709,22 @@ def test_a_split_fill_at_two_prices_is_volume_weighted():
     # Volume-weighted: (1*100 + 1*200) / 2 = 150, so (150 - 50) * 2 = 200. Booked to
     # `closer`, which executed the sell; `opener` only supplied the cost basis.
     assert report.pnl.strategy_realized_pnl["closer"] == pytest.approx(200.0, abs=0.01)
+
+
+def test_the_journalled_report_drops_the_cumulative_lists_and_keeps_their_counts():
+    from autopoiesis.evaluator import compact_report_payload
+
+    full = {
+        "pnl_evidence": "x",
+        "pnl": {"net_pnl": 1.5, "closed_lots": [{}, {}], "open_lots": [{}], "fill_attributions": [{}] * 3},
+        "strategy_metrics": {"s1": {"cycles": 4, "source_cycle_ids": ["a", "b", "c"]}, "s2": {"cycles": 0}},
+    }
+    compact = compact_report_payload(full)
+    assert compact["pnl"] == {"net_pnl": 1.5, "closed_lots_count": 2, "open_lots_count": 1,
+                              "fill_attributions_count": 3}
+    assert compact["strategy_metrics"] == {"s1": {"cycles": 4, "source_cycle_count": 3}, "s2": {"cycles": 0}}
+    assert compact["pnl_evidence"] == "x"
+    assert compact["full_report_sha256"] == compact_report_payload(full)["full_report_sha256"]
+    assert full["pnl"]["closed_lots"] == [{}, {}]  # the caller's report is not mutated
+    pnl_form = compact_report_payload(full, strategy_metrics=False)
+    assert "strategy_metrics" not in pnl_form and pnl_form["strategy_metrics_count"] == 2

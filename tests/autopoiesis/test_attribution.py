@@ -174,8 +174,6 @@ def test_severity_distinguishes_not_yet_traded_from_traded_and_failed(tmp_path):
     """
     from autopoiesis.config import AgentConfig
     from autopoiesis.doctor import DoctorReport, _check_pnl_attribution
-    from autopoiesis.journal import JsonlJournal
-    from autopoiesis.models import JournalEvent
 
     def run(tmp_path, lots, records):
         cfg = AgentConfig(
@@ -186,16 +184,11 @@ def test_severity_distinguishes_not_yet_traded_from_traded_and_failed(tmp_path):
             journal_path=tmp_path / "journal.jsonl",
             max_position_value=5_000, max_daily_loss=500,
         )
-        journal = JsonlJournal(cfg.journal_path)
-        for i, lot in enumerate(lots):
-            journal.append_event(JournalEvent(
-                event_id=f"e{i}", event_type="PNL_EVIDENCE_RECORDED",
-                timestamp=TS, status="SUCCESS", message="m",
-                payload={"pnl": {"closed_lots": [lot]}, "rejected_orders": 0,
-                         "fill_quantity_ratio": 1.0},
-            ))
+        # The check reads the evaluation doctor computed, not a journalled payload.
+        evaluation = ({"pnl": {"closed_lots": lots[-1:]}, "rejected_orders": 0,
+                       "fill_quantity_ratio": 1.0} if lots else None)
         report = DoctorReport()
-        _check_pnl_attribution(report, cfg, journal, records)
+        _check_pnl_attribution(report, cfg, evaluation, records)
         return {c.name: str(c.status.value).upper()
                 for c in report.checks}["pnl attribution"]
 
@@ -278,8 +271,6 @@ def test_pnl_attribution_is_reported_exactly_once(tmp_path):
     """
     from autopoiesis.config import AgentConfig
     from autopoiesis.doctor import DoctorReport, _check_pnl_attribution
-    from autopoiesis.journal import JsonlJournal
-    from autopoiesis.models import JournalEvent
 
     cfg = AgentConfig(
         mode="paper", symbols=("SPY",), allowlist=frozenset({"SPY"}),
@@ -289,12 +280,8 @@ def test_pnl_attribution_is_reported_exactly_once(tmp_path):
         journal_path=tmp_path / "journal.jsonl",
         max_position_value=5_000, max_daily_loss=500,
     )
-    journal = JsonlJournal(cfg.journal_path)
     # A lot the model opened and lost money on, so the FAIL arm is live...
-    journal.append_event(JournalEvent(
-        event_id="e0", event_type="PNL_EVIDENCE_RECORDED", timestamp=TS, status="SUCCESS",
-        message="m",
-        payload={
+    evaluation = {
             "pnl": {
                 "closed_lots": [_lot("o1", -50.0, strategy_id="s1")],
                 # ...and a sell no BUY accounts for, so the WARN arm is live at the same
@@ -303,10 +290,9 @@ def test_pnl_attribution_is_reported_exactly_once(tmp_path):
                 "unmatched_sell_quantity": {"s1": 3.0},
             },
             "rejected_orders": 0, "fill_quantity_ratio": 1.0,
-        },
-    ))
+    }
     report = DoctorReport()
-    _check_pnl_attribution(report, cfg, journal, [_cycle("o1", "llm")])
+    _check_pnl_attribution(report, cfg, evaluation, [_cycle("o1", "llm")])
 
     named = [c for c in report.checks if c.name == "pnl attribution"]
     assert len(named) == 1, (

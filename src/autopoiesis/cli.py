@@ -21,6 +21,7 @@ from autopoiesis.evaluator import (
     OWNER_FILLS_KEY,
     PNL_EVIDENCE_MISSING,
     DeterministicEvaluator,
+    compact_report_payload,
     confirmed_fill_activities,
     owner_fill_activities,
 )
@@ -860,7 +861,7 @@ def _evidence_report(config: AgentConfig) -> int:
             timestamp=datetime.now(tz=timezone.utc),
             status=event_status,
             message=report.pnl_evidence,
-            payload=report.model_dump(mode="json"),
+            payload=compact_report_payload(report.model_dump(mode="json"), strategy_metrics=False),
         )
     )
     print(report.model_dump_json(indent=2))

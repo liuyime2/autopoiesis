@@ -239,11 +239,9 @@ def test_a_model_that_subtracts_from_a_positive_total_fails_the_gate(tmp_path):
     (tmp_path / "strategies").mkdir(exist_ok=True)
 
     def severity(model_pnl: float, total: float) -> str:
-        # One recorded evidence event is what gets the check past its "no closed
+        # An evaluation with closed lots is what gets the check past its "no closed
         # lots on record" early return.
-        journal = _journal(tmp_path, [
-            ("PNL_EVIDENCE_RECORDED", None, {"pnl": {"closed_lots": 4}}),
-        ])
+        evaluation = {"pnl": {"closed_lots": [{}] * 4}}
         report = DoctorReport()
         result = Attribution(
             total_realized_pnl=total,
@@ -255,7 +253,7 @@ def test_a_model_that_subtracts_from_a_positive_total_fails_the_gate(tmp_path):
         original = doctor_module.attribution.attribute
         doctor_module.attribution.attribute = lambda *a, **k: result
         try:
-            _check_pnl_attribution(report, config, journal, [])
+            _check_pnl_attribution(report, config, evaluation, [])
         finally:
             doctor_module.attribution.attribute = original
         return _by_name(report, "pnl attribution").status.value
