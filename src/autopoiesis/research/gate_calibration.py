@@ -219,3 +219,74 @@ def run(
         entry["mean_b_annual_excess"] = sum(r["b_annual_excess"] for r in rs) / max(1, len(rs))
         summary[scenario] = entry
     return {"summary": summary, "rows": rows}
+
+
+# ----------------------------------------------------------------------------- breadth
+#: Panel returns shared with worker processes once, instead of being pickled into every task.
+_PANEL: dict[str, list[float]] = {}
+
+
+def _init_panel(panel: dict[str, list[float]]) -> None:
+    global _PANEL
+    _PANEL = panel
+
+
+def breadth_run(n: int, seed: int, inject: float, panel: Mapping[str, Sequence[float]] | None = None) -> dict[str, Any]:
+    """One synthetic world of `n` symbols drawn from the panel; arm B against its exposure.
+
+    Total capital is fixed and split evenly over the `n` symbols, so an effect measured on
+    capital means the same thing at every breadth. The rule is candidate x2 (exposure-matched
+    buy-and-hold, CI lower bound > 0, mean >= 1%/yr); the edge, when injected, is B's own.
+    """
+    source = panel if panel is not None else _PANEL
+    rng = random.Random(seed)
+    names = rng.sample(sorted(source), n)
+    length = len(source[names[0]])
+    order = list(range(length))
+    rng.shuffle(order)
+    world = synthetic_closes({s: source[s] for s in names}, order, demean=True, inject=inject)
+    weight = 1.0 / n
+    strat: list[float] = [0.0] * length
+    bench: list[float] = [0.0] * length
+    for cl in world.values():
+        path = signal_path(SmaBand(20, 0.01).fresh, cl)
+        held = held_returns(path, cl, COST)
+        frac = sum(path[:-1]) / max(1, len(path) - 1)
+        for t, (h, r) in enumerate(zip(held, returns_of(cl), strict=True)):
+            strat[t] += weight * h
+            bench[t] += weight * frac * r
+    verdict = v4_verdicts({"B-BENCH_B": (bench, strat)}, seed=seed, ci_floor=0.0)["B-BENCH_B"]
+    return {"n": n, "seed": seed, "proven": verdict["proven"], "annual_excess": verdict["mean_diff"] * 252,
+            "symbols": names}
+
+
+def _breadth_worker(task: tuple[str, int, int, float]) -> tuple[str, dict[str, Any]]:
+    scenario, n, seed, inject = task
+    return scenario, breadth_run(n, seed, inject)
+
+
+def breadth_power(
+    panel: dict[str, list[float]],
+    n_values: Sequence[int],
+    scenarios: Mapping[str, float],
+    runs: int,
+    *,
+    base_seed: int = 20261121,
+    workers: int = 16,
+) -> dict[str, Any]:
+    tasks = [(f"{name}@N={n}", n, base_seed + 1_000 * n + 100_000 * k + i, inject)
+             for k, (name, inject) in enumerate(scenarios.items()) for n in n_values for i in range(runs)]
+    rows: dict[str, list[dict[str, Any]]] = {}
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=workers, initializer=_init_panel, initargs=(panel,)
+    ) as pool:
+        for key, row in pool.map(_breadth_worker, tasks, chunksize=1):
+            rows.setdefault(key, []).append(row)
+    summary = {}
+    for key, rs in rows.items():
+        rs.sort(key=lambda r: r["seed"])
+        k = sum(1 for r in rs if r["proven"])
+        lo, hi = wilson_interval(k, len(rs))
+        summary[key] = {"runs": len(rs), "proven": k, "rate": k / len(rs), "wilson_95": [lo, hi],
+                        "mean_annual_excess": sum(r["annual_excess"] for r in rs) / len(rs)}
+    return {"summary": summary, "rows": rows}

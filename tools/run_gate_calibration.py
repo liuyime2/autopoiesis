@@ -34,7 +34,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--workers", type=int, default=16)
     p.add_argument("--only", default="", help="comma-separated scenario subset")
     p.add_argument("--suffix", default="", help="appended to the output file stem, so a rerun does not overwrite")
+    p.add_argument("--breadth", default="", help="comma-separated symbol counts; runs the breadth study instead")
+    p.add_argument("--panel", default="", help="pickled pandas panel with (symbol, 'close') columns, for --breadth")
+    p.add_argument("--breadth-runs", type=int, default=100)
     args = p.parse_args(argv)
+    if args.breadth:
+        return _breadth(args)
 
     returns, data = {}, {}
     dates = None
@@ -82,6 +87,51 @@ def main(argv: list[str] | None = None) -> int:
             lines.append(f"| {s} | " + " | ".join(
                 f"{e[v + ':any']['rate']:.1%} / {e[v + ':B']['rate']:.1%}" for v in variants) + " |")
     (out / f"{stem}{args.suffix}.md").write_text("\n".join(lines) + "\n")
+    print("\n".join(lines))
+    return 0
+
+
+def _breadth(args: argparse.Namespace) -> int:
+    """Power of the x2 rule as the number of symbols grows (synthetic worlds from a panel)."""
+    import hashlib
+
+    import pandas as pd  # research extra (pyproject [project.optional-dependencies])
+
+    frame = pd.read_pickle(args.panel)
+    closes = frame.xs("close", axis=1, level=1)
+    complete = closes.dropna(axis=1, how="any")
+    panel = {str(sym): gc.returns_of([float(x) for x in complete[sym].tolist()]) for sym in complete.columns}
+    digest = hashlib.sha256(Path(args.panel).read_bytes()).hexdigest()
+    n_values = [int(x) for x in args.breadth.split(",")]
+    scenarios = {"null": 0.0, "signal_2pct": 0.02, "signal_5pct": 0.05, "signal_10pct": 0.10}
+    t0 = time.monotonic()
+    result = gc.breadth_power(panel, n_values, scenarios, args.breadth_runs, workers=args.workers)
+    elapsed = time.monotonic() - t0
+    commit = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    dirty = bool(subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain", "--", "src", "tools"],
+                                capture_output=True, text=True).stdout.strip())
+    record = {"label": "SYNTHETIC worlds permuted from a panel of unknown provenance; evidence about the gate only",
+              "commit": commit, "src_dirty": dirty, "rule": "x2: B vs exposure-matched B&H, CI_low > 0, mean >= 1%/yr",
+              "panel": {"path": args.panel, "sha256": digest, "symbols_complete": len(panel),
+                        "symbols_total": int(closes.shape[1]), "days": int(closes.shape[0]),
+                        "first": str(closes.index[0].date()), "last": str(closes.index[-1].date())},
+              "n_values": n_values, "runs": args.breadth_runs, "elapsed_seconds": round(elapsed, 1), **result}
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    stem = date.today().isoformat() + (args.suffix or "-breadth")
+    (out / f"{stem}.json").write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
+    lines = [f"# Gate power by breadth {stem} (synthetic; see gate_calibration.breadth_run)", "",
+             f"commit `{commit}`{' (src dirty)' if dirty else ''}, {elapsed:.0f} s, panel sha256 `{digest[:16]}`, "
+             f"{len(panel)} symbols with complete history", "",
+             "| N | " + " | ".join(scenarios) + " |", "|---:|" + "---|" * len(scenarios)]
+    for n in n_values:
+        cells = []
+        for name in scenarios:
+            e = result["summary"][f"{name}@N={n}"]
+            lo, hi = e["wilson_95"]
+            cells.append(f"{e['rate']:.0%} [{lo:.0%}, {hi:.0%}], excess {e['mean_annual_excess']:+.2%}/yr")
+        lines.append(f"| {n} | " + " | ".join(cells) + " |")
+    (out / f"{stem}.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
     return 0
 

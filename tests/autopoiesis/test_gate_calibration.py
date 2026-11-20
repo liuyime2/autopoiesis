@@ -47,3 +47,12 @@ def test_injection_only_adds_return_while_arm_b_would_be_long():
     flat = gc.synthetic_closes(rets, order, demean=False)["X"]
     assert flat == [100.0] * 121  # flat prices never cross the band, so nothing is injected
     assert gc.synthetic_closes(rets, order, demean=False, inject=0.10)["X"] == flat
+
+
+def test_a_breadth_world_is_reproducible_from_its_seed_and_draws_n_symbols():
+    panel = {f"S{i}": _noise(300, 0.0005, 10 + i) for i in range(6)}  # synthetic panel
+    a = gc.breadth_run(4, seed=11, inject=0.05, panel=panel)
+    b = gc.breadth_run(4, seed=11, inject=0.05, panel=panel)
+    assert a == b
+    assert len(set(a["symbols"])) == 4 and set(a["symbols"]) <= set(panel)
+    assert gc.breadth_run(4, seed=12, inject=0.05, panel=panel) != a
