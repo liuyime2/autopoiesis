@@ -747,3 +747,81 @@ def test_a_pinned_journal_answers_from_the_history_as_it_was_pinned(tmp_path):
     writer.append_event(make_event().model_copy(update={"event_id": "event-2"}))
     assert [e.event_id for e in pinned.read_events()] == ["event-1"]
     assert [e.event_id for e in JsonlJournal(path).read_events()] == ["event-1", "event-2"]
+
+
+def _unique_event(index):
+    event = make_event()
+    return event.model_copy(update={"event_id": f"event-{index:04d}"})
+
+
+def _counting_parses(monkeypatch):
+    parsed: list[str] = []
+    original = JournalEvent.model_validate_json.__func__
+
+    def counting(cls, data, *args, **kwargs):
+        parsed.append(data)
+        return original(cls, data, *args, **kwargs)
+
+    monkeypatch.setattr(JournalEvent, "model_validate_json", classmethod(counting))
+    return parsed
+
+
+def _ids_in(paths):
+    import json as _json
+
+    return {_json.loads(line)["event_id"] for p in paths for line in p.read_text(encoding="utf-8").splitlines() if line}
+
+
+def test_an_append_re_parses_only_the_generation_that_changed(tmp_path, monkeypatch):
+    """Measured 2026-11-21 on a copy of the live history (22 files, 1.45 GB): one append made
+    the next `read_events` re-parse everything, 54.0 s against 0.9 s for the live file alone,
+    and maintenance pays that at every stage. Synthetic journal with unique ids; parses are
+    counted by the id they carry."""
+    import json as _json
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl", max_bytes=1024, backups=8)
+    for i in range(30):
+        journal.append_event(_unique_event(i))
+    assert len(journal.history_paths()) >= 3, journal.history_paths()
+    journal.read_events()
+    # The live file must have room for one more event, so this append does not rotate.
+    while journal.path.stat().st_size > 512:
+        journal.append_event(_unique_event(500 + len(journal.read_events())))
+    journal.read_events()
+    total_before = len(journal.read_events())
+    older = _ids_in(journal.history_paths()[:-1])
+    parsed = _counting_parses(monkeypatch)
+
+    journal.append_event(_unique_event(999))
+    events = journal.read_events()
+
+    assert events[-1].event_id == "event-0999"
+    assert len(events) == total_before + 1
+    reparsed = {_json.loads(line)["event_id"] for line in parsed}
+    # Only the live generation changed; nothing from the older ones is parsed again.
+    assert reparsed, "the append must be read"
+    assert not (reparsed & older), sorted(reparsed & older)
+
+
+def test_a_rotation_does_not_re_parse_the_generations_it_renames(tmp_path, monkeypatch):
+    import json as _json
+
+    journal = JsonlJournal(tmp_path / "journal.jsonl", max_bytes=4096, backups=8)
+    i = 0
+    while len(journal.history_paths()) < 3:
+        journal.append_event(_unique_event(i))
+        i += 1
+    journal.read_events()
+    settled = _ids_in(journal.history_paths()[:-1])  # every generation but the live one
+    parsed = _counting_parses(monkeypatch)
+    count = len(journal.history_paths())
+    while len(journal.history_paths()) == count:  # append until the live file rotates
+        journal.append_event(_unique_event(i))
+        i += 1
+    events = journal.read_events()
+
+    assert len(events) == i
+    reparsed = {_json.loads(line)["event_id"] for line in parsed}
+    # The generations that existed before the rotation were renamed, not rewritten: none of
+    # their lines is parsed again.
+    assert not (reparsed & settled), sorted(reparsed & settled)

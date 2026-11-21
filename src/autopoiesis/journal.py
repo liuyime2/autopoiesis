@@ -197,8 +197,10 @@ class JsonlJournal:
         self.use_lock = lock
         self.last_dropped_lines = 0
         self._parse_cache: dict = {}
-        #: Set by `pin`: the history's raw lines at one instant, parsed instead of the files.
-        self._pinned_lines: list[str] | None = None
+        #: Set by `pin`: each generation's key and raw lines at one instant, parsed instead of the files.
+        self._pinned_generations: list[tuple[tuple, list[str] | None]] | None = None
+        #: Per model, each generation's parse under its file key; see `_parsed`.
+        self._file_parse_cache: dict = {}
         self.last_dropped_samples: list[str] = []
         # Where a generation goes when the rotation horizon reaches it. Same filesystem as the
         # journal on purpose, so the move is an `os.replace` and not a copy: there is no window
@@ -718,11 +720,37 @@ class JsonlJournal:
                 out.append((str(path), -1, -1))
         return tuple(out)
 
+    @staticmethod
+    def _file_key(stat: os.stat_result) -> tuple:
+        """A generation's identity. Inode, not path, so a rotation rename keeps its parse."""
+        return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+
+    def _read_generations(self, known: frozenset = frozenset()) -> list[tuple[tuple, list[str] | None]]:
+        """Each generation's key and lines, oldest first, under one shared lock and not parsed.
+
+        A generation whose key is in `known` is not read (its lines are None): its parse is
+        already cached. Only the live file changes between reads; the archive and the rotated
+        generations are written once.
+        """
+        out: list[tuple[tuple, list[str] | None]] = []
+        with self._read_lock():
+            for path in self.history_paths():
+                try:
+                    key = self._file_key(path.stat())
+                except OSError:
+                    continue
+                if key in known:
+                    out.append((key, None))
+                    continue
+                with path.open("r", encoding="utf-8") as handle:
+                    lines = handle.readlines()
+                    key = self._file_key(os.fstat(handle.fileno()))
+                out.append((key, lines))
+        return out
+
     def _read_raw_lines(self) -> list[str]:
         """Every generation's lines, read under one shared lock and not parsed."""
-        with self._read_lock(), contextlib.ExitStack() as stack:
-            handles = [stack.enter_context(p.open("r", encoding="utf-8")) for p in self.history_paths()]
-            return list(itertools.chain.from_iterable(handles))
+        return [line for _key, lines in self._read_generations() for line in lines or ()]
 
     def pin(self) -> None:
         """Answer every later read of this object from the history as it is now.
@@ -734,36 +762,53 @@ class JsonlJournal:
         events alone 40.9 s, and `market-open-verify` holding the lock through both is what made
         the daemon's append wait out its 60 s and exit at 10:31 that morning.
         """
-        self._pinned_lines = self._read_raw_lines()
+        self._pinned_generations = self._read_generations()
         self.snapshot = True
         self._parse_cache.clear()
 
     def _parsed(self, model):
-        """Every record of `model` across all generations, parsed once per file signature."""
+        """Every record of `model` across all generations, each generation parsed once.
+
+        The cache used to be keyed on the signature of every file together, so one append to
+        the live file re-parsed the whole history. Measured 2026-11-21 on a copy of the live
+        one (22 files, 1.45 GB): after a single append `read_events` took 54.0 s and `read_all`
+        16.6 s, against 0.9 s for the live file's events alone. Maintenance appends and then
+        reads at every stage, so a pass spent tens of minutes re-parsing files that cannot
+        change, and the heartbeat went stale four times on the night of 11-20. Each
+        generation is now cached under its own key, and only a changed one is parsed again.
+        """
         signature = self._signature()
         cached = self._parse_cache.get(model)
         if cached is not None and (self.snapshot or cached[0] == signature):
             return cached[1], cached[2]
 
+        per_file = self._file_parse_cache.setdefault(model, {})
+        if self._pinned_generations is not None:
+            generations = self._pinned_generations
+        else:
+            generations = self._read_generations(frozenset(per_file))
+        records: list = []
+        dropped = 0
+        current: dict = {}
+        for key, lines in generations:
+            entry = per_file.get(key)
+            if entry is None:
+                entry = self._parse_lines(model, lines or [])
+            current[key] = entry
+            records.extend(entry[0])
+            dropped += entry[1]
+        # Only the generations that still exist stay cached.
+        self._file_parse_cache[model] = current
+        self.last_dropped_lines = dropped
+        self._parse_cache[model] = (signature, records, dropped)
+        return records, dropped
+
+    def _parse_lines(self, model, lines: list[str]) -> tuple[list, int]:
+        """One generation's records of `model`, and how many of its lines could not be read."""
         records: list = []
         dropped = 0
         want_events = model is JournalEvent
-        # The lock is for the read, not for the parse.
-        #
-        # Measured 2026-10-20: this held the shared lock across every `model_validate_json` of every
-        # record - 25,271 events and 3,892 cycles on the live journal - so a readiness check
-        # scanning it kept the daemon from taking the exclusive lock it appends under. `file_lock`
-        # waits ten seconds for a writer; the parse took longer, so the daemon recorded
-        # `TimeoutError: could not acquire lock`, backed off with a BACKING_OFF heartbeat, and the
-        # verification run that caused it then reported the daemon as not running and failed the
-        # session. Readers share the lock by design, and a shared lock held for the length of a
-        # parse is an exclusive one in all but name.
-        raw_lines = self._pinned_lines if self._pinned_lines is not None else self._read_raw_lines()
-        if not raw_lines:
-            self.last_dropped_lines = 0
-            self._parse_cache[model] = (signature, [], 0)
-            return [], 0
-        for line in raw_lines:
+        for line in lines:
             stripped = line.strip()
             if not stripped:
                 continue
@@ -798,8 +843,6 @@ class JsonlJournal:
                     self._note_drop(stripped)
                     continue
                 records.append(repaired)
-        self.last_dropped_lines = dropped
-        self._parse_cache[model] = (signature, records, dropped)
         return records, dropped
 
     def _note_drop(self, line: str) -> None:
