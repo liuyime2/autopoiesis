@@ -56,3 +56,13 @@ def test_a_breadth_world_is_reproducible_from_its_seed_and_draws_n_symbols():
     assert a == b
     assert len(set(a["symbols"])) == 4 and set(a["symbols"]) <= set(panel)
     assert gc.breadth_run(4, seed=12, inject=0.05, panel=panel) != a
+
+
+def test_a_cross_section_world_is_reproducible_and_has_no_edge_without_one():
+    panel = {f"S{i}": _noise(200, 0.0, 20 + i) for i in range(8)}  # synthetic panel
+    a = gc.cross_section_run(6, seed=3, inject=0.0, panel=panel)
+    assert a == gc.cross_section_run(6, seed=3, inject=0.0, panel=panel)
+    flat = {f"S{i}": [0.0] * 200 for i in range(4)}  # synthetic: nothing moves
+    zero = gc.cross_section_run(4, seed=1, inject=0.0, panel=flat)
+    # Equal holdings of names that never move: only the costs of the first switch separate them.
+    assert -0.001 < zero["annual_excess"] <= 0.0

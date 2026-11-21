@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--breadth", default="", help="comma-separated symbol counts; runs the breadth study instead")
     p.add_argument("--panel", default="", help="pickled pandas panel with (symbol, 'close') columns, for --breadth")
     p.add_argument("--breadth-runs", type=int, default=100)
+    p.add_argument("--kind", choices=("timing", "cross_section"), default="timing", help="for --breadth")
     args = p.parse_args(argv)
     if args.breadth:
         return _breadth(args)
@@ -105,20 +106,22 @@ def _breadth(args: argparse.Namespace) -> int:
     n_values = [int(x) for x in args.breadth.split(",")]
     scenarios = {"null": 0.0, "signal_2pct": 0.02, "signal_5pct": 0.05, "signal_10pct": 0.10}
     t0 = time.monotonic()
-    result = gc.breadth_power(panel, n_values, scenarios, args.breadth_runs, workers=args.workers)
+    result = gc.breadth_power(panel, n_values, scenarios, args.breadth_runs, workers=args.workers, kind=args.kind)
     elapsed = time.monotonic() - t0
     commit = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     dirty = bool(subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain", "--", "src", "tools"],
                                 capture_output=True, text=True).stdout.strip())
     record = {"label": "SYNTHETIC worlds permuted from a panel of unknown provenance; evidence about the gate only",
-              "commit": commit, "src_dirty": dirty, "rule": "x2: B vs exposure-matched B&H, CI_low > 0, mean >= 1%/yr",
+              "commit": commit, "src_dirty": dirty, "kind": args.kind,
+              "rule": ("x2 on top-half equal weight vs all-name equal weight" if args.kind == "cross_section"
+                       else "x2: B vs exposure-matched B&H, CI_low > 0, mean >= 1%/yr"),
               "panel": {"path": args.panel, "sha256": digest, "symbols_complete": len(panel),
                         "symbols_total": int(closes.shape[1]), "days": int(closes.shape[0]),
                         "first": str(closes.index[0].date()), "last": str(closes.index[-1].date())},
               "n_values": n_values, "runs": args.breadth_runs, "elapsed_seconds": round(elapsed, 1), **result}
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    stem = date.today().isoformat() + (args.suffix or "-breadth")
+    stem = date.today().isoformat() + (args.suffix or ("-xsection" if args.kind == "cross_section" else "-breadth"))
     (out / f"{stem}.json").write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
     lines = [f"# Gate power by breadth {stem} (synthetic; see gate_calibration.breadth_run)", "",
              f"commit `{commit}`{' (src dirty)' if dirty else ''}, {elapsed:.0f} s, panel sha256 `{digest[:16]}`, "
