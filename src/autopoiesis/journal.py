@@ -748,10 +748,6 @@ class JsonlJournal:
                 out.append((key, lines))
         return out
 
-    def _read_raw_lines(self) -> list[str]:
-        """Every generation's lines, read under one shared lock and not parsed."""
-        return [line for _key, lines in self._read_generations() for line in lines or ()]
-
     def pin(self) -> None:
         """Answer every later read of this object from the history as it is now.
 
