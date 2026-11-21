@@ -66,3 +66,13 @@ def test_a_cross_section_world_is_reproducible_and_has_no_edge_without_one():
     zero = gc.cross_section_run(4, seed=1, inject=0.0, panel=flat)
     # Equal holdings of names that never move: only the costs of the first switch separate them.
     assert -0.001 < zero["annual_excess"] <= 0.0
+
+
+def test_a_slower_rebalance_re_ranks_only_on_its_closes():
+    panel = {f"S{i}": _noise(200, 0.0, 40 + i) for i in range(8)}  # synthetic panel
+    daily = gc.cross_section_run(6, seed=5, inject=0.05, panel=panel)
+    weekly = gc.cross_section_run(6, seed=5, inject=0.05, panel=panel, rebalance_every=5)
+    # 200 closes, ranking from close 20: daily re-ranks at 180 closes, weekly at 1 + those on a multiple of 5.
+    assert daily["rebalances"] == 180
+    assert weekly["rebalances"] == 1 + sum(1 for step in range(21, 200) if step % 5 == 0)
+    assert weekly["annual_excess"] != daily["annual_excess"]

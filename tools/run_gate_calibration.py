@@ -38,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--panel", default="", help="pickled pandas panel with (symbol, 'close') columns, for --breadth")
     p.add_argument("--breadth-runs", type=int, default=100)
     p.add_argument("--kind", choices=("timing", "cross_section"), default="timing", help="for --breadth")
+    p.add_argument("--rebalance-every", default="1", help="comma-separated closes between re-rankings (cross_section)")
+    p.add_argument("--scenarios", default="null,signal_2pct,signal_5pct,signal_10pct", help="for --breadth")
     args = p.parse_args(argv)
     if args.breadth:
         return _breadth(args)
@@ -104,9 +106,17 @@ def _breadth(args: argparse.Namespace) -> int:
     panel = {str(sym): gc.returns_of([float(x) for x in complete[sym].tolist()]) for sym in complete.columns}
     digest = hashlib.sha256(Path(args.panel).read_bytes()).hexdigest()
     n_values = [int(x) for x in args.breadth.split(",")]
-    scenarios = {"null": 0.0, "signal_2pct": 0.02, "signal_5pct": 0.05, "signal_10pct": 0.10}
+    known = {"null": 0.0, "signal_2pct": 0.02, "signal_5pct": 0.05, "signal_10pct": 0.10}
+    scenarios = {name: known[name] for name in args.scenarios.split(",")}
+    cadences = [int(x) for x in args.rebalance_every.split(",")]
     t0 = time.monotonic()
-    result = gc.breadth_power(panel, n_values, scenarios, args.breadth_runs, workers=args.workers, kind=args.kind)
+    result: dict = {"summary": {}, "rows": {}}
+    for k in cadences:
+        part = gc.breadth_power(panel, n_values, scenarios, args.breadth_runs, workers=args.workers,
+                                kind=args.kind, rebalance_every=k)
+        suffix = "" if cadences == [1] else f"@every={k}"
+        for part_key in ("summary", "rows"):
+            result[part_key].update({key + suffix: v for key, v in part[part_key].items()})
     elapsed = time.monotonic() - t0
     commit = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     dirty = bool(subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain", "--", "src", "tools"],
@@ -118,7 +128,7 @@ def _breadth(args: argparse.Namespace) -> int:
               "panel": {"path": args.panel, "sha256": digest, "symbols_complete": len(panel),
                         "symbols_total": int(closes.shape[1]), "days": int(closes.shape[0]),
                         "first": str(closes.index[0].date()), "last": str(closes.index[-1].date())},
-              "n_values": n_values, "runs": args.breadth_runs, "elapsed_seconds": round(elapsed, 1), **result}
+              "n_values": n_values, "rebalance_every": cadences, "runs": args.breadth_runs, "elapsed_seconds": round(elapsed, 1), **result}
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     stem = date.today().isoformat() + (args.suffix or ("-xsection" if args.kind == "cross_section" else "-breadth"))
@@ -127,13 +137,18 @@ def _breadth(args: argparse.Namespace) -> int:
              f"commit `{commit}`{' (src dirty)' if dirty else ''}, {elapsed:.0f} s, panel sha256 `{digest[:16]}`, "
              f"{len(panel)} symbols with complete history", "",
              "| N | " + " | ".join(scenarios) + " |", "|---:|" + "---|" * len(scenarios)]
+    if cadences != [1]:
+        lines[-2] = "| N, every | " + " | ".join(scenarios) + " |"
     for n in n_values:
-        cells = []
-        for name in scenarios:
-            e = result["summary"][f"{name}@N={n}"]
-            lo, hi = e["wilson_95"]
-            cells.append(f"{e['rate']:.0%} [{lo:.0%}, {hi:.0%}], excess {e['mean_annual_excess']:+.2%}/yr")
-        lines.append(f"| {n} | " + " | ".join(cells) + " |")
+        for k in cadences:
+            suffix = "" if cadences == [1] else f"@every={k}"
+            cells = []
+            for name in scenarios:
+                e = result["summary"][f"{name}@N={n}{suffix}"]
+                lo, hi = e["wilson_95"]
+                cells.append(f"{e['rate']:.0%} [{lo:.0%}, {hi:.0%}], excess {e['mean_annual_excess']:+.2%}/yr")
+            label = f"{n}" if cadences == [1] else f"{n}, {k}"
+            lines.append(f"| {label} | " + " | ".join(cells) + " |")
     (out / f"{stem}.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
     return 0

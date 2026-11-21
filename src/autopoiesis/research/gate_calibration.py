@@ -261,13 +261,19 @@ def breadth_run(n: int, seed: int, inject: float, panel: Mapping[str, Sequence[f
 
 
 def cross_section_run(
-    n: int, seed: int, inject: float, panel: Mapping[str, Sequence[float]] | None = None
+    n: int,
+    seed: int,
+    inject: float,
+    panel: Mapping[str, Sequence[float]] | None = None,
+    rebalance_every: int = 1,
 ) -> dict[str, Any]:
     """One synthetic world: hold the top half of `n` names by 20-day return, against all `n`.
 
     Both portfolios are equal weight and fully invested on the same capital, so the market
     factor cancels and only the names' relative behaviour is tested. When injected, the edge
     is idiosyncratic: a name's next return gains `inject`/252 while it ranks in the top half.
+    The holdings are re-ranked every `rebalance_every` closes and kept in between; the edge
+    follows the current rank, so rebalancing less often trades some of it for lower turnover.
     """
     source = panel if panel is not None else _PANEL
     rng = random.Random(seed)
@@ -281,6 +287,7 @@ def cross_section_run(
     top = max(1, n // 2)
     closes = {s: [100.0] for s in names}
     held: list[str] = []
+    rebalances = 0
     strat: list[float] = []
     bench: list[float] = []
     for step, i in enumerate(order):
@@ -293,22 +300,26 @@ def cross_section_run(
         day = {s: rets[s][i] - means[s] + (inject / 252.0 if s in ranked else 0.0) for s in names}
         for s in names:
             closes[s].append(closes[s][-1] * (1.0 + day[s]))
-        if ranked:
+        turnover = 0.0
+        if ranked and (not held or step % rebalance_every == 0):
             turnover = len(set(ranked) ^ set(held)) / (2 * top) if held else 1.0
-            strat.append(sum(day[s] for s in ranked) / top - COST * turnover)
+            held = ranked
+            rebalances += 1
+        if held:
+            strat.append(sum(day[s] for s in held) / top - COST * turnover)
         else:
             strat.append(sum(day.values()) / n)
         bench.append(sum(day.values()) / n)
-        held = ranked
     verdict = v4_verdicts({"TOP-EW": (bench, strat)}, seed=seed, ci_floor=0.0)["TOP-EW"]
     return {"n": n, "seed": seed, "proven": verdict["proven"], "annual_excess": verdict["mean_diff"] * 252,
-            "symbols": names}
+            "symbols": names, "rebalances": rebalances}
 
 
-def _breadth_worker(task: tuple[str, int, int, float, str]) -> tuple[str, dict[str, Any]]:
-    scenario, n, seed, inject, kind = task
-    run_one = cross_section_run if kind == "cross_section" else breadth_run
-    return scenario, run_one(n, seed, inject)
+def _breadth_worker(task: tuple[str, int, int, float, str, int]) -> tuple[str, dict[str, Any]]:
+    scenario, n, seed, inject, kind, rebalance_every = task
+    if kind == "cross_section":
+        return scenario, cross_section_run(n, seed, inject, rebalance_every=rebalance_every)
+    return scenario, breadth_run(n, seed, inject)
 
 
 def breadth_power(
@@ -320,8 +331,9 @@ def breadth_power(
     base_seed: int = 20261121,
     workers: int = 16,
     kind: str = "timing",
+    rebalance_every: int = 1,
 ) -> dict[str, Any]:
-    tasks = [(f"{name}@N={n}", n, base_seed + 1_000 * n + 100_000 * k + i, inject, kind)
+    tasks = [(f"{name}@N={n}", n, base_seed + 1_000 * n + 100_000 * k + i, inject, kind, rebalance_every)
              for k, (name, inject) in enumerate(scenarios.items()) for n in n_values for i in range(runs)]
     rows: dict[str, list[dict[str, Any]]] = {}
     with concurrent.futures.ProcessPoolExecutor(
