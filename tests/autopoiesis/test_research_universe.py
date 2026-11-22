@@ -91,3 +91,36 @@ def test_only_the_rate_limit_is_retried_and_it_still_fails_when_it_lasts():
         fetch.get_bars_with_backoff(Client(["invalid symbol: X"]), ["X"], "s", "e", sleep=slept.append)
     with pytest.raises(RuntimeError, match="too many"):
         fetch.get_bars_with_backoff(Client(["too many requests"] * 5), ["X"], "s", "e", sleep=lambda s: None)
+
+
+def test_acquirees_come_from_mergers_only_and_follow_the_page_token():
+    pages = {
+        None: {"corporate_actions": {"cash_mergers": [{"acquiree_symbol": "ATVI", "effective_date": "2023-10-13"}],
+                                     "name_changes": [{"old_symbol": "FB", "new_symbol": "META"}]},
+               "next_page_token": "p2"},
+        "p2": {"corporate_actions": {"stock_mergers": [{"acquiree_symbol": "PXD", "effective_date": "2024-05-03"},
+                                                       {"acquiree_symbol": "123CVR456"}]},
+               "next_page_token": None},
+    }
+
+    class Client:
+        def data_get(self, path, query, api_version):
+            assert path == "/corporate-actions" and api_version == "v1beta1"
+            assert "name_change" not in query["types"]
+            return pages[query.get("page_token")]
+
+    assert fetch.acquired_symbols(Client(), "2023-01-01", "2023-12-31") == {"ATVI": "2023-10-13", "PXD": "2024-05-03"}
+
+
+def test_an_acquiree_is_added_once_and_a_reused_ticker_is_dropped():
+    from collections import Counter
+
+    listed = [{"symbol": "CERN", "status": "inactive"}, {"symbol": "MSFT", "status": "active"}]
+    dropped: Counter = Counter()
+    # QQQ is held by an active listing that the exchange filter left out of `listed`.
+    out, added, already = fetch.add_acquirees(listed, {"CERN": "2022-06-08", "ATVI": "2023-10-13",
+                                                       "MSFT": "x", "QQQ": "y"}, {"MSFT", "QQQ"}, dropped)
+    assert [a["symbol"] for a in out] == ["ATVI", "CERN", "MSFT"]
+    assert (added, already) == (1, 2)
+    assert next(a for a in out if a["symbol"] == "ATVI")["status"] == "acquired"
+    assert dropped["acquired: ticker reused by an active listing"] == 1

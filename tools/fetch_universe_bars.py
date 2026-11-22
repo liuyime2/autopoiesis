@@ -68,6 +68,55 @@ def select_assets(
     return [kept[s] for s in sorted(kept)], dropped
 
 
+def acquired_symbols(client, start: str, end: str) -> dict[str, str]:
+    """Merger acquirees in the window: symbol -> effective date. Companies that ended.
+
+    Measured 2026-11-21: the broker's asset listing omits recent exits such as ATVI, TWTR,
+    PXD and SPLK although their bars exist, so a universe built from it alone had no
+    later-delisted member after 2022-10. Cash and stock mergers name the acquiree. Name
+    changes are deliberately not read: an old ticker there is the same company under a new
+    one, and counting it as an exit would invent a delisting.
+    """
+    out: dict[str, str] = {}
+    first, last = int(start[:4]), int(end[:4])
+    for year in range(first, last + 1):
+        token = None
+        while True:
+            query = {"types": "cash_merger,stock_merger", "start": max(start, f"{year}-01-01"),
+                     "end": min(end, f"{year}-12-31"), "limit": 1000}
+            if token:
+                query["page_token"] = token
+            page = client.data_get("/corporate-actions", query, api_version="v1beta1")
+            actions = page.get("corporate_actions", {})
+            for row in actions.get("cash_mergers", []) + actions.get("stock_mergers", []):
+                symbol = str(row.get("acquiree_symbol") or "")
+                if TICKER.match(symbol):
+                    out.setdefault(symbol, str(row.get("effective_date") or ""))
+            token = page.get("next_page_token")
+            if not token:
+                break
+    return out
+
+
+def add_acquirees(
+    assets: list[dict], acquirees: Mapping[str, str], active_symbols: set[str], dropped: Counter
+) -> tuple[list[dict], int, int]:
+    """`assets` plus the acquirees not already in it; returns (assets, added, already present)."""
+    present = {a["symbol"] for a in assets}
+    added = already = 0
+    out = list(assets)
+    for symbol, effective in sorted(acquirees.items()):
+        if symbol in present:
+            already += 1
+        elif symbol in active_symbols:
+            dropped["acquired: ticker reused by an active listing"] += 1
+        else:
+            out.append({"symbol": symbol, "name": "", "exchange": "", "status": "acquired",
+                        "effective_date": effective})
+            added += 1
+    return sorted(out, key=lambda a: a["symbol"]), added, already
+
+
 def _bars_from_frame(frame) -> dict[str, list]:
     from autopoiesis.replay import ReplayBar
 
@@ -116,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--start", default=DEFAULT_START)
     parser.add_argument("--end", required=True, help="last session to include, YYYY-MM-DD")
     parser.add_argument("--cache", type=pathlib.Path, default=DEFAULT_CACHE)
+    parser.add_argument("--no-corporate-actions", action="store_true",
+                        help="skip merger acquirees (reproduces the 2026-11-21 set)")
     args = parser.parse_args(argv)
 
     from autopoiesis.atomicio import narrow_private, write_json_atomic
@@ -127,6 +178,13 @@ def main(argv: list[str] | None = None) -> int:
     active = [a._raw for a in client.list_assets(status="active")]
     inactive = [a._raw for a in client.list_assets(status="inactive")]
     assets, dropped = select_assets(active, inactive)
+    acquirees: dict[str, str] = {}
+    added = already = 0
+    if not args.no_corporate_actions:
+        acquirees = acquired_symbols(client, args.start, args.end)
+        assets, added, already = add_acquirees(
+            assets, acquirees, {str(a.get("symbol")) for a in active}, dropped)
+        print(f"{len(acquirees)} merger acquirees: {added} added, {already} already listed")
     symbols = [a["symbol"] for a in assets]
     print(f"{len(symbols)} listed equities to fetch ({sum(1 for a in assets if a['status'] == 'inactive')} inactive)")
 
@@ -153,6 +211,9 @@ def main(argv: list[str] | None = None) -> int:
         "assets": assets, "dropped": dict(sorted(dropped.items())),
         "requested": len(symbols), "with_bars": len(entries), "without_bars": len(no_bars),
         "inactive_with_bars": sum(1 for a in assets if a["status"] == "inactive" and a["symbol"] in entries),
+        "corporate_actions": (None if args.no_corporate_actions else {
+            "acquirees_found": len(acquirees), "added": added, "already_listed": already,
+            "added_with_bars": sum(1 for a in assets if a["status"] == "acquired" and a["symbol"] in entries)}),
         "symbols": entries, "set_sha256": set_digest(entries),
     }
     manifest_path = args.cache / "manifest.json"
