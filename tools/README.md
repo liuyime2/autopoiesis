@@ -24,6 +24,8 @@ failure. `make verify` runs it. Three modes:
 
 ## The replay environment — real bars, simulated account
 
+**`fetch_universe_bars.py`** is invoked through `make fetch-universe UNIVERSE_END=YYYY-MM-DD`. It fetches daily, total-return-adjusted IEX bars for every active and inactive equity the broker lists on NASDAQ, NYSE and AMEX, into `runtime/autopoiesis/replay/universe-1Day-adjall/` with a manifest of fingerprints and one set digest. Research only; it needs credentials and network, and the broker's asset list is known to omit some recent delistings (see `docs/evidence/universe-2026-11-21.md`).
+
 **`fetch_replay_bars.py`** is invoked through `make fetch-replay-bars`, with explicit
 `REPLAY_SYMBOL`, UTC `REPLAY_START`, UTC `REPLAY_END`, `REPLAY_INTERVAL`, and optional
 `REPLAY_ROLLING=1`. It writes what the paper broker's historical endpoint actually returns into

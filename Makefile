@@ -116,6 +116,7 @@ help:
 	@echo "make doctor           health and evidence checks"
 	@echo "make attest-archive-baseline  attest existing journal history using explicit operator evidence"
 	@echo "make fetch-replay-bars       fetch real paper-account bars (SYMBOL, REPLAY_START, REPLAY_END)"
+	@echo "make fetch-universe          fetch active and delisted listed equities' daily bars (UNIVERSE_END)"
 	@echo "make research-run            install, fetch real bars, then run the offline alpha search"
 	@echo "make audit            the 15-defect regression audit"
 	@echo "make validate-data    parse and check the inputs before anything consumes them"
