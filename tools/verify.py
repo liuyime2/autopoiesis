@@ -113,6 +113,7 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_order_idempotency.py": ("unit-integration", "crash-recovery", "broker-reconciliation"),
     "test_replay_adjustment.py": ("unit-integration", "replay-determinism"),
     "test_portfolio_experiment.py": ("unit-integration", "point-in-time-no-leakage", "replay-determinism"),
+    "test_research_universe.py": ("unit-integration", "point-in-time-no-leakage"),
     "test_staleness_not_strategy_fault.py": (
         "pnl-accounting", "lifecycle-invariants", "guardian-bypass-prevention",
     ),

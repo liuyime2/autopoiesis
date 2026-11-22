@@ -171,6 +171,13 @@ fetch-replay-bars:
 	@test -n "$(REPLAY_END)" || (echo "REPLAY_END is required (UTC ISO-8601)" >&2; exit 2)
 	@$(PY) tools/fetch_replay_bars.py "$(REPLAY_SYMBOL)" "$(REPLAY_START)" "$(REPLAY_END)" "$(REPLAY_INTERVAL)" $(if $(filter 1 true yes,$(REPLAY_ROLLING)),ROLLING,) --cache "$(REPLAY_CACHE)"
 
+# A survivorship-free daily universe (active and delisted listed equities) for cross-sectional
+# research. Needs credentials and network; nothing in the trading path or the gate reads it.
+UNIVERSE_END ?=
+fetch-universe:
+	@test -n "$(UNIVERSE_END)" || (echo "UNIVERSE_END=YYYY-MM-DD (last session to include) is required" >&2; exit 2)
+	@$(PY) tools/fetch_universe_bars.py --end "$(UNIVERSE_END)"
+
 research-search:
 	@test -n "$(SPEC)" || (echo "SPEC=<registered supported .spec> is required" >&2; exit 2)
 	@$(PY) -m autopoiesis.research.driver "$(REPLAY_CACHE)" "$(REPLAY_SYMBOL)" "$(SPEC)" --registry "$(PREREGISTRY)" --trials "$(RESEARCH_TRIALS)"
@@ -682,7 +689,7 @@ READINESS_UNIT_DIR ?= $(shell tools/systemd_unit_dir.sh 2>/dev/null)
 export EXPECTED_FINGERPRINT DEPLOYMENT_AFTER DATE READINESS_OUTPUT SCHEDULED
 export READINESS_ROOT READINESS_PYTHON READINESS_ENVFILE READINESS_UNIT_DIR
 
-.PHONY: market-preflight market-open-verify source-fingerprint install-readiness-timers
+.PHONY: fetch-universe market-preflight market-open-verify source-fingerprint install-readiness-timers
 market-preflight:
 	@$(PY) -c 'import os, runpy, sys; assert os.environ["SCHEDULED"] in {"0", "1"}, "SCHEDULED must be 0 or 1"; args = ["--phase", "preopen", "--expected-fingerprint", os.environ["EXPECTED_FINGERPRINT"]]; args += ["--session-date", os.environ["DATE"]] if os.environ.get("DATE") else []; args += ["--output", os.environ["READINESS_OUTPUT"]] if os.environ.get("READINESS_OUTPUT") else []; args += ["--scheduled"] if os.environ["SCHEDULED"] == "1" else []; sys.exit(runpy.run_path("tools/market_readiness.py")["main"](args))'
 
