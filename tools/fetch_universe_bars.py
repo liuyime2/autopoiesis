@@ -83,6 +83,28 @@ def _bars_from_frame(frame) -> dict[str, list]:
     return out
 
 
+def get_bars_with_backoff(client, batch, start, end, *, sleep=None, tries=5, wait_s=60.0):
+    """`get_bars` for one batch, waiting out the broker's rate limit.
+
+    Measured 2026-11-21: the first full run died after 72 s with `too many requests`. A batch
+    of 100 symbols over six years is many pages, and the data API allows 200 requests a
+    minute. Only the rate-limit error is retried; anything else, or a rate limit that outlasts
+    `tries`, fails the run as before.
+    """
+    import time
+
+    sleep = sleep or time.sleep
+    for attempt in range(tries):
+        try:
+            return client.get_bars(batch, "1Day", start, end, adjustment="all", feed="iex").df
+        except Exception as exc:  # the client raises its own APIError class
+            if "too many requests" not in str(exc).lower() or attempt == tries - 1:
+                raise
+            print(f"  rate limited; waiting {wait_s:.0f}s (attempt {attempt + 1}/{tries})")
+            sleep(wait_s)
+    raise RuntimeError("unreachable")
+
+
 def set_digest(entries: Mapping[str, Mapping]) -> str:
     """One digest over every symbol's fingerprint, so two fetches can be compared."""
     canonical = json.dumps({s: e["fingerprint"] for s, e in sorted(entries.items())}, sort_keys=True)
@@ -113,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     entries: dict[str, dict] = {}
     for i in range(0, len(symbols), BATCH):
         batch = symbols[i:i + BATCH]
-        frame = client.get_bars(batch, "1Day", args.start, args.end, adjustment="all", feed="iex").df
+        frame = get_bars_with_backoff(client, batch, args.start, args.end)
         for symbol, bars in _bars_from_frame(frame).items():
             path = args.cache / f"{symbol}.json"
             save_bars(path, symbol, bars)

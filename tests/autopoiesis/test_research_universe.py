@@ -71,3 +71,23 @@ def test_the_set_digest_depends_only_on_the_fingerprints():
     b = {"Y": {"fingerprint": "2", "bars": 9}, "X": {"fingerprint": "1", "bars": 0}}
     assert fetch.set_digest(a) == fetch.set_digest(b)
     assert fetch.set_digest(a) != fetch.set_digest({"X": {"fingerprint": "1"}})
+
+
+def test_only_the_rate_limit_is_retried_and_it_still_fails_when_it_lasts():
+    class Client:
+        def __init__(self, errors):
+            self.errors = list(errors)
+
+        def get_bars(self, *a, **k):
+            if self.errors:
+                raise RuntimeError(self.errors.pop(0))
+            return type("R", (), {"df": "frame"})()
+
+    slept = []
+    assert fetch.get_bars_with_backoff(Client(["too many requests"]), ["X"], "s", "e", sleep=slept.append) == "frame"
+    assert slept == [60.0]
+    import pytest
+    with pytest.raises(RuntimeError, match="invalid symbol"):
+        fetch.get_bars_with_backoff(Client(["invalid symbol: X"]), ["X"], "s", "e", sleep=slept.append)
+    with pytest.raises(RuntimeError, match="too many"):
+        fetch.get_bars_with_backoff(Client(["too many requests"] * 5), ["X"], "s", "e", sleep=lambda s: None)
