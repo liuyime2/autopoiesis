@@ -1,0 +1,72 @@
+{
+ "candidates": {
+  "LOWVOL_3M": {
+   "annual_ci_low": -0.09945593499240216,
+   "annual_excess": -0.02143440541267964,
+   "ci_low": -0.0003946664087000086,
+   "holm_p": 1.0,
+   "mean_diff": -8.505716433603032e-05,
+   "mean_turnover": 0.13511111111111113,
+   "p_two_sided": 0.63,
+   "proven": false,
+   "rebalances": 54,
+   "sessions": 1069
+  },
+  "MOM_12_1": {
+   "annual_ci_low": -0.035208766324410716,
+   "annual_excess": 0.027452629267086144,
+   "ci_low": -0.00013971732668416952,
+   "holm_p": 1.0,
+   "mean_diff": 0.00010893900502811963,
+   "mean_turnover": 0.1842962962962963,
+   "p_two_sided": 0.412,
+   "proven": false,
+   "rebalances": 54,
+   "sessions": 1069
+  },
+  "REV_1M": {
+   "annual_ci_low": -0.04721660480708683,
+   "annual_excess": 0.004199799007755095,
+   "ci_low": -0.0001873674793932017,
+   "holm_p": 1.0,
+   "mean_diff": 1.6665869078393232e-05,
+   "mean_turnover": 0.5144444444444444,
+   "p_two_sided": 0.831,
+   "proven": false,
+   "rebalances": 54,
+   "sessions": 1069
+  }
+ },
+ "commit": "63598a4e1091e578805580d55ef8f3b9216b4551",
+ "label": "REAL returns, registered candidates; no synthetic data",
+ "phase": "dev",
+ "seconds": {
+  "load": 102.5,
+  "membership": 2.1,
+  "total": 122.9
+ },
+ "sessions": [
+  "2021-08-02",
+  "2025-10-31",
+  1069
+ ],
+ "spec": "docs/research/specs/v5-xsection-top500.spec",
+ "spec_sha256": "a7e1e87d2d34961ed05253af0b01b1123ca79ecbeb17cc8cfeacb4cfc02abc74",
+ "src_dirty": false,
+ "universe": {
+  "cutoff": "2025-11-01",
+  "dir": "/localscratch/liuyime2/QuantGroup/runtime/autopoiesis/replay/universe-1Day-adjall",
+  "ever_members": 964,
+  "first_membership": "2021-02-01",
+  "first_session": "2020-07-27",
+  "grid_step": 5,
+  "last_session": "2025-10-31",
+  "members_max": 500,
+  "members_min": 500,
+  "membership_cache": "universe-membership-ac0531645963-2025-11-01-top500-step5.json",
+  "membership_dates": 239,
+  "sessions": 1325,
+  "set_sha256": "ac0531645963ae972dd3d4c0725ae92a5993aafe7b65f5538bf2ab6199e44351",
+  "top_n": 500
+ }
+}
