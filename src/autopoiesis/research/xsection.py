@@ -9,7 +9,7 @@ with less of its own history than the score needs is not eligible, and stays in 
 """
 from __future__ import annotations
 
-import concurrent.futures
+import multiprocessing
 from collections.abc import Callable, Mapping, Sequence
 from statistics import pstdev
 from typing import Any
@@ -130,10 +130,9 @@ def residual_power(
                 inject = dict.fromkeys(diffs, ir) if target is None else {target: ir}
                 tasks += [(f"{mode}@L={n}@IR={ir:g}", n, base_seed + i, inject) for i in range(runs)]
     rows: dict[str, list[dict[str, Any]]] = {}
-    with concurrent.futures.ProcessPoolExecutor(
-        max_workers=workers, initializer=_init_diffs, initargs=(diffs,)
-    ) as pool:
-        for key, row in pool.map(_residual_worker, tasks, chunksize=8):
+    # Pool, not ProcessPoolExecutor: see gate_calibration.run (CPython gh-105829).
+    with multiprocessing.get_context("fork").Pool(workers, _init_diffs, (diffs,)) as pool:
+        for key, row in pool.imap(_residual_worker, tasks, chunksize=8):
             rows.setdefault(key, []).append(row)
     summary: dict[str, Any] = {}
     for key, rs in rows.items():

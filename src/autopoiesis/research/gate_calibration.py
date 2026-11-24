@@ -26,8 +26,8 @@ the core sleeve is identical in every arm and so cancels from every difference.
 """
 from __future__ import annotations
 
-import concurrent.futures
 import math
+import multiprocessing
 import random
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -205,8 +205,11 @@ def run(
         demean, inject = SCENARIOS[scenario]
         tasks += [(scenario, base_seed + 100_000 * k + i, returns, demean, inject) for i in range(count)]
     rows: dict[str, list[dict[str, Any]]] = {s: [] for s in runs}
-    with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as pool:
-        for scenario, seed, row in pool.map(_worker, tasks, chunksize=1):
+    # Not ProcessPoolExecutor: on Python 3.10 its submit() can deadlock against its manager
+    # thread once the wakeup pipe fills (CPython gh-105829). Measured 2026-11-24: the v5 power
+    # run hung 8 h 47 min that way. `Pool` has no wakeup pipe; `imap` keeps the order.
+    with multiprocessing.get_context("fork").Pool(workers) as pool:
+        for scenario, seed, row in pool.imap(_worker, tasks, chunksize=1):
             rows[scenario].append({"seed": seed, **row})
     summary: dict[str, Any] = {}
     for scenario, rs in rows.items():
@@ -336,10 +339,8 @@ def breadth_power(
     tasks = [(f"{name}@N={n}", n, base_seed + 1_000 * n + 100_000 * k + i, inject, kind, rebalance_every)
              for k, (name, inject) in enumerate(scenarios.items()) for n in n_values for i in range(runs)]
     rows: dict[str, list[dict[str, Any]]] = {}
-    with concurrent.futures.ProcessPoolExecutor(
-        max_workers=workers, initializer=_init_panel, initargs=(panel,)
-    ) as pool:
-        for key, row in pool.map(_breadth_worker, tasks, chunksize=1):
+    with multiprocessing.get_context("fork").Pool(workers, _init_panel, (panel,)) as pool:
+        for key, row in pool.imap(_breadth_worker, tasks, chunksize=1):
             rows.setdefault(key, []).append(row)
     summary = {}
     for key, rs in rows.items():
@@ -503,10 +504,8 @@ def universe_power(
     tasks = [(f"{name}@L={n}@every={k}", n, k, base_seed + i, inject)
              for name, inject in scenarios.items() for n in lengths for k in everys for i in range(runs)]
     rows: dict[str, list[dict[str, Any]]] = {}
-    with concurrent.futures.ProcessPoolExecutor(
-        max_workers=workers, initializer=_init_universe, initargs=(panel,)
-    ) as pool:
-        for key, row in pool.map(_universe_worker, tasks, chunksize=4):
+    with multiprocessing.get_context("fork").Pool(workers, _init_universe, (panel,)) as pool:
+        for key, row in pool.imap(_universe_worker, tasks, chunksize=4):
             rows.setdefault(key, []).append(row)
     summary = {}
     for key, rs in rows.items():
