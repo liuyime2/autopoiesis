@@ -76,3 +76,61 @@ def test_a_slower_rebalance_re_ranks_only_on_its_closes():
     assert daily["rebalances"] == 180
     assert weekly["rebalances"] == 1 + sum(1 for step in range(21, 200) if step % 5 == 0)
     assert weekly["annual_excess"] != daily["annual_excess"]
+
+
+# --- universe placebo (synthetic bars, labelled) --------------------------------------------
+
+def _ubars(closes: list[float], start_day: int = 0):
+    from datetime import date, datetime, timedelta, timezone
+
+    from autopoiesis.replay import ReplayBar
+
+    out = []
+    for i, c in enumerate(closes):
+        stamp = datetime.combine(date(2024, 1, 1) + timedelta(days=start_day + i), datetime.min.time(),
+                                 tzinfo=timezone.utc)
+        out.append(ReplayBar(timestamp=stamp, open=c, high=c, low=c, close=c, volume=1.0))
+    return out
+
+
+def _day(i: int):
+    from datetime import date, timedelta
+
+    return date(2024, 1, 1) + timedelta(days=i)
+
+
+def test_a_universe_return_is_zero_after_the_last_bar_and_nothing_at_the_cutoff_is_read():
+    bars = {"AAA": _ubars([10, 11, 12, 13, 14, 15]),  # synthetic
+            "BBB": _ubars([10, 20, 40])}  # synthetic: data ends on day 2
+    panel = gc.universe_panel(bars, {_day(1): ["AAA", "BBB"]}, cutoff=_day(5))
+    assert panel["calendar"] == [_day(i) for i in range(5)]  # day 5 (close 15) is not read
+    assert panel["returns"]["BBB"] == [0.0, 1.0, 1.0, 0.0, 0.0]
+    assert abs(panel["returns"]["AAA"][4] - (14 / 13 - 1)) < 1e-12
+
+
+def test_a_universe_rebalance_takes_the_next_grid_points_members():
+    flat = [10.0] * 12
+    bars = {s: _ubars(flat) for s in ("A", "B", "C", "D")}  # synthetic
+    up = _ubars([10 * 1.01 ** i for i in range(12)])  # synthetic: +1%/day
+    bars["UP"] = up
+    members = {_day(0): ["A", "B"], _day(6): ["UP", "C"]}
+    panel = gc.universe_panel(bars, members, cutoff=_day(12))
+    assert panel["grid"] == [0, 6]
+    bench, _cand, start = gc.placebo_series(12, 1, seed=1, inject=0.0, panel=panel)
+    assert start == 0  # only one window of 12 fits
+    # Before day 6 the members are flat; from day 6 the benchmark holds UP at half weight.
+    assert bench[:6] == [0.0] * 6
+    assert all(abs(x - 0.005) < 1e-12 for x in bench[6:])
+
+
+def test_injection_raises_the_placebo_excess_and_a_seed_reproduces_the_run():
+    rng = random.Random(7)
+    bars = {f"S{i}": _ubars([100 * (1 + rng.gauss(0, 0.01)) ** 1 for _ in range(300)]) for i in range(40)}  # synthetic
+    members = {_day(t): sorted(bars) for t in range(0, 300, 5)}
+    panel = gc.universe_panel(bars, members, cutoff=_day(300))
+    a = gc.placebo_universe_run(200, 1, seed=3, inject=0.0, panel=panel)
+    b = gc.placebo_universe_run(200, 1, seed=3, inject=0.0, panel=panel)
+    c = gc.placebo_universe_run(200, 1, seed=3, inject=0.20, panel=panel)
+    assert a == b
+    assert a["start"] == c["start"]
+    assert abs((c["annual_excess"] - a["annual_excess"]) - 0.20) < 1e-9

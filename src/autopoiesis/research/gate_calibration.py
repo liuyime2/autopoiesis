@@ -349,3 +349,146 @@ def breadth_power(
         summary[key] = {"runs": len(rs), "proven": k, "rate": k / len(rs), "wilson_95": [lo, hi],
                         "mean_annual_excess": sum(r["annual_excess"] for r in rs) / len(rs)}
     return {"summary": summary, "rows": rows}
+
+
+# --- Power on the real universe (2026-11-22) -------------------------------------------------
+#
+# The cross-section study above draws worlds from a panel of names with complete history, which
+# is survivors only, and measures one length: the panel's. This one uses the survivorship-free
+# universe (`tools/fetch_universe_bars.py`) with point-in-time membership, and asks what the x2
+# rule can see over the window lengths a holdout or forward test would actually have.
+#
+# The candidate is a placebo: a seeded hash of the symbol picks half of the members, so the
+# selection knows nothing about returns. Its real noise against equal weight (the random sector
+# and size tilts) survives, which is what decides how often a meaningless selection passes the
+# rule on this sample. With `inject`, held names gain `inject`/252 a day: SYNTHETIC, labelled.
+
+_UNIVERSE: dict[str, Any] = {}
+
+
+def _init_universe(panel: dict[str, Any]) -> None:
+    global _UNIVERSE
+    _UNIVERSE = panel
+
+
+def universe_panel(
+    bars_by_symbol: Mapping[str, Sequence[Any]],
+    members_by_date: Mapping[Any, Sequence[str]],
+    cutoff: Any,
+) -> dict[str, Any]:
+    """Daily returns of every symbol that was ever a member, on the sessions before `cutoff`.
+
+    The calendar is every date any symbol has a bar on, before `cutoff`; nothing on or after it
+    is read. A return is close over the last close seen (a gap earns 0 and the next bar catches
+    up), and after a symbol's last bar it is 0: cash at the last close, which is about what an
+    acquiree's holders were paid. `members_by_date` maps a session to its members, decided from
+    bars before it (`universe.members_at`); a session there is a rebalance point.
+    """
+    calendar = sorted({b.timestamp.date() for bars in bars_by_symbol.values() for b in bars
+                       if b.timestamp.date() < cutoff})
+    index = {d: i for i, d in enumerate(calendar)}
+    grid = sorted(d for d in members_by_date if d in index)
+    names = sorted({s for d in grid for s in members_by_date[d]})
+    returns: dict[str, list[float]] = {}
+    for s in names:
+        closes: dict[int, float] = {index[b.timestamp.date()]: b.close for b in bars_by_symbol.get(s, ())
+                                    if b.timestamp.date() < cutoff}
+        r, last = [0.0] * len(calendar), None
+        for i in range(len(calendar)):
+            c = closes.get(i)
+            if c is not None:
+                if last is not None:
+                    r[i] = c / last - 1.0
+                last = c
+        returns[s] = r
+    return {"calendar": calendar, "grid": [index[d] for d in grid],
+            "members": [list(members_by_date[d]) for d in grid], "returns": returns}
+
+
+def _placebo_held(seed: int, symbol: str) -> bool:
+    import hashlib
+
+    return hashlib.sha256(f"{seed}:{symbol}".encode()).digest()[0] % 2 == 0
+
+
+def placebo_series(
+    length: int, every: int, seed: int, inject: float, panel: Mapping[str, Any]
+) -> tuple[list[float], list[float], int]:
+    """(benchmark, candidate, start index) for one window of `length` sessions.
+
+    Rebalances on every `every`-th grid point; the window's start is drawn by `seed` from the
+    sessions where the grid has begun. Equal weight, fully invested, same capital, so the
+    benchmark is the exposure-matched buy-and-hold of the x2 rule; cost is `COST` x turnover on
+    the candidate only, as in `cross_section_run`.
+    """
+    u = panel
+    grid, members, returns = u["grid"][::every], u["members"][::every], u["returns"]
+    rng = random.Random(seed)
+    first, total = grid[0], len(u["calendar"])
+    if total - first < length:
+        raise ValueError(f"window of {length} sessions does not fit after the first rebalance")
+    start = rng.randint(first, total - length)
+    g = max(j for j, t in enumerate(grid) if t <= start)
+    held: list[str] = []
+    strat: list[float] = []
+    bench: list[float] = []
+    for t in range(start, start + length):
+        turnover = 0.0
+        if t == start or (g + 1 < len(grid) and grid[g + 1] == t):
+            if t != start:
+                g += 1
+            new = [s for s in members[g] if _placebo_held(seed, s)]
+            turnover = len(set(new) ^ set(held)) / (2 * max(1, len(new))) if held else 1.0
+            held, current = new, members[g]
+        day = [returns[s][t] for s in current]
+        bench.append(sum(day) / len(day))
+        if held:
+            strat.append(sum(returns[s][t] for s in held) / len(held) + inject / 252.0 - COST * turnover)
+        else:
+            strat.append(bench[-1])
+    return bench, strat, start
+
+
+def placebo_universe_run(
+    length: int, every: int, seed: int, inject: float, panel: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """One placebo window (`placebo_series`) judged by the x2 rule."""
+    u = panel if panel is not None else _UNIVERSE
+    bench, strat, start = placebo_series(length, every, seed, inject, u)
+    verdict = v4_verdicts({"PLACEBO": (bench, strat)}, seed=seed, ci_floor=0.0)["PLACEBO"]
+    return {"length": length, "every": every, "seed": seed, "inject": inject, "start": u["calendar"][start].isoformat(),
+            "proven": verdict["proven"], "annual_excess": verdict["mean_diff"] * 252, "ci_low": verdict["ci_low"]}
+
+
+def _universe_worker(task: tuple[str, int, int, int, float]) -> tuple[str, dict[str, Any]]:
+    key, length, every, seed, inject = task
+    return key, placebo_universe_run(length, every, seed, inject)
+
+
+def universe_power(
+    panel: dict[str, Any],
+    lengths: Sequence[int],
+    everys: Sequence[int],
+    scenarios: Mapping[str, float],
+    runs: int,
+    *,
+    base_seed: int = 20261122,
+    workers: int = 16,
+) -> dict[str, Any]:
+    """PROVEN rate of the placebo for each (scenario, length, every); seeds shared across scenarios."""
+    tasks = [(f"{name}@L={n}@every={k}", n, k, base_seed + i, inject)
+             for name, inject in scenarios.items() for n in lengths for k in everys for i in range(runs)]
+    rows: dict[str, list[dict[str, Any]]] = {}
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=workers, initializer=_init_universe, initargs=(panel,)
+    ) as pool:
+        for key, row in pool.map(_universe_worker, tasks, chunksize=4):
+            rows.setdefault(key, []).append(row)
+    summary = {}
+    for key, rs in rows.items():
+        rs.sort(key=lambda r: r["seed"])
+        k = sum(1 for r in rs if r["proven"])
+        lo, hi = wilson_interval(k, len(rs))
+        summary[key] = {"runs": len(rs), "proven": k, "rate": k / len(rs), "wilson_95": [lo, hi],
+                        "mean_annual_excess": sum(r["annual_excess"] for r in rs) / len(rs)}
+    return {"summary": summary, "rows": rows}
