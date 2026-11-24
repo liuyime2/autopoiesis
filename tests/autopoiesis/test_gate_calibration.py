@@ -134,3 +134,18 @@ def test_injection_raises_the_placebo_excess_and_a_seed_reproduces_the_run():
     assert a == b
     assert a["start"] == c["start"]
     assert abs((c["annual_excess"] - a["annual_excess"]) - 0.20) < 1e-9
+
+
+def test_the_placebo_series_is_unchanged_by_the_selection_refactor():
+    import hashlib
+    import json
+
+    rng = random.Random(11)
+    bars = {f"S{i}": _ubars([100 * (1 + rng.gauss(0, 0.01)) for _ in range(300)], start_day=(i % 7) * 10)
+            for i in range(30)}  # synthetic
+    members = {_day(t): sorted(rng.sample(sorted(bars), 20)) for t in range(80, 300, 5)}
+    panel = gc.universe_panel(bars, members, cutoff=_day(300))
+    out = [gc.placebo_series(150, e, s, inj, panel) for e in (1, 4) for s in (1, 2, 3) for inj in (0.0, 0.05)]
+    # Recorded 2026-11-24 from the code before `selection_series` was extracted.
+    assert hashlib.sha256(json.dumps(out).encode()).hexdigest() == (
+        "042f40db042b932e72b21c2fbc83a769b56c3f38efc2650453d35252d56a69f1")

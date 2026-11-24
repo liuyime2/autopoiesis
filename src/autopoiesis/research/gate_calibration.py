@@ -29,7 +29,7 @@ from __future__ import annotations
 import concurrent.futures
 import math
 import random
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from autopoiesis.research.portfolio_experiment import (
@@ -401,7 +401,9 @@ def universe_panel(
                     r[i] = c / last - 1.0
                 last = c
         returns[s] = r
-    return {"calendar": calendar, "grid": [index[d] for d in grid],
+    first = {s: min((index[b.timestamp.date()] for b in bars_by_symbol.get(s, ()) if b.timestamp.date() < cutoff),
+                    default=len(calendar)) for s in names}
+    return {"calendar": calendar, "grid": [index[d] for d in grid], "first": first,
             "members": [list(members_by_date[d]) for d in grid], "returns": returns}
 
 
@@ -411,41 +413,63 @@ def _placebo_held(seed: int, symbol: str) -> bool:
     return hashlib.sha256(f"{seed}:{symbol}".encode()).digest()[0] % 2 == 0
 
 
-def placebo_series(
-    length: int, every: int, seed: int, inject: float, panel: Mapping[str, Any]
-) -> tuple[list[float], list[float], int]:
-    """(benchmark, candidate, start index) for one window of `length` sessions.
+def selection_series(
+    panel: Mapping[str, Any],
+    start: int,
+    end: int,
+    every: int,
+    select: Callable[[int, Sequence[str]], list[str]],
+    inject: float = 0.0,
+) -> tuple[list[float], list[float], dict[str, Any]]:
+    """(benchmark, candidate, stats) over sessions [start, end) of a selection from the members.
 
-    Rebalances on every `every`-th grid point; the window's start is drawn by `seed` from the
-    sessions where the grid has begun. Equal weight, fully invested, same capital, so the
-    benchmark is the exposure-matched buy-and-hold of the x2 rule; cost is `COST` x turnover on
-    the candidate only, as in `cross_section_run`.
+    Rebalances on every `every`-th grid point: `select(t, members)` is called at the window's
+    start and at each rebalance session `t`, and must decide from returns before `t` only (the
+    membership already does). Equal weight, fully invested, same capital, so the benchmark is
+    the exposure-matched buy-and-hold of the x2 rule; cost is `COST` x turnover on the candidate
+    only, as in `cross_section_run`. `inject`/252 a day on held names is SYNTHETIC.
     """
-    u = panel
-    grid, members, returns = u["grid"][::every], u["members"][::every], u["returns"]
-    rng = random.Random(seed)
-    first, total = grid[0], len(u["calendar"])
-    if total - first < length:
-        raise ValueError(f"window of {length} sessions does not fit after the first rebalance")
-    start = rng.randint(first, total - length)
+    grid, members, returns = panel["grid"][::every], panel["members"][::every], panel["returns"]
     g = max(j for j, t in enumerate(grid) if t <= start)
     held: list[str] = []
+    current: Sequence[str] = ()
     strat: list[float] = []
     bench: list[float] = []
-    for t in range(start, start + length):
+    rebalances, turnovers = 0, []
+    for t in range(start, end):
         turnover = 0.0
         if t == start or (g + 1 < len(grid) and grid[g + 1] == t):
             if t != start:
                 g += 1
-            new = [s for s in members[g] if _placebo_held(seed, s)]
+            new = select(t, members[g])
             turnover = len(set(new) ^ set(held)) / (2 * max(1, len(new))) if held else 1.0
             held, current = new, members[g]
+            rebalances += 1
+            turnovers.append(turnover)
         day = [returns[s][t] for s in current]
         bench.append(sum(day) / len(day))
         if held:
             strat.append(sum(returns[s][t] for s in held) / len(held) + inject / 252.0 - COST * turnover)
         else:
             strat.append(bench[-1])
+    return bench, strat, {"rebalances": rebalances, "mean_turnover": sum(turnovers) / len(turnovers)}
+
+
+def placebo_series(
+    length: int, every: int, seed: int, inject: float, panel: Mapping[str, Any]
+) -> tuple[list[float], list[float], int]:
+    """(benchmark, candidate, start index) for one placebo window of `length` sessions.
+
+    The window's start is drawn by `seed` from the sessions where the grid has begun; the
+    selection is the seeded symbol hash (`_placebo_held`), so it knows nothing about returns.
+    """
+    first, total = panel["grid"][0], len(panel["calendar"])
+    if total - first < length:
+        raise ValueError(f"window of {length} sessions does not fit after the first rebalance")
+    start = random.Random(seed).randint(first, total - length)
+    bench, strat, _ = selection_series(
+        panel, start, start + length, every,
+        lambda _t, members: [s for s in members if _placebo_held(seed, s)], inject)
     return bench, strat, start
 
 

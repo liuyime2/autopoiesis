@@ -84,7 +84,7 @@ endif
         site refresh-figures benchmark-json dist release-check fresh-clone example-cycle cli-help \
         attest-archive-baseline fetch-replay-bars research-search research-run \
         journal-backup journal-local-backup journal-restore journal-drill journal-prune \
-        research-register research-verify research-check-tape
+        research-register research-verify research-check-tape research-xsection
 
 help:
 	@echo "Interpreter: $(if $(strip $(CONDA_RUN)),$(CONDA_BIN) run -n $(CONDA_ENV),$$(command -v python3) - active environment)$(RUN_HINT)"
@@ -117,6 +117,7 @@ help:
 	@echo "make attest-archive-baseline  attest existing journal history using explicit operator evidence"
 	@echo "make fetch-replay-bars       fetch real paper-account bars (SYMBOL, REPLAY_START, REPLAY_END)"
 	@echo "make fetch-universe          fetch active and delisted listed equities' daily bars (UNIVERSE_END)"
+	@echo "make research-xsection       run the registered v5 cross-sectional family (PHASE=dev|holdout)"
 	@echo "make research-run            install, fetch real bars, then run the offline alpha search"
 	@echo "make audit            the 15-defect regression audit"
 	@echo "make validate-data    parse and check the inputs before anything consumes them"
@@ -660,6 +661,12 @@ research-register:
 research-verify:
 	@test -n "$(SPEC)" || (echo "SPEC=<path to a .spec file> is required" >&2; exit 2)
 	@$(PY) -m autopoiesis.research.prereg verify "$(SPEC)" --registry "$(PREREGISTRY)"
+
+# The registered v5 cross-sectional family (docs/research/specs/v5-xsection-top500.spec).
+# PHASE=holdout runs once; the tool refuses a second open. UNIVERSE_DIR overrides the cache.
+research-xsection:
+	@test -n "$(PHASE)" || (echo "PHASE=dev|holdout is required" >&2; exit 2)
+	@$(PY) tools/run_xsection_v5.py --phase "$(PHASE)" --spec docs/research/specs/v5-xsection-top500.spec --registry "$(PREREGISTRY)" $(if $(UNIVERSE_DIR),--universe "$(UNIVERSE_DIR)")
 
 research-check-tape:
 	@test -n "$(SPEC)" || (echo "SPEC=<path to a .spec file> is required" >&2; exit 2)

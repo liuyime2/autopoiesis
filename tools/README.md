@@ -465,6 +465,7 @@ and real broker/model observations are separate proofs from the labelled synthet
 - **`run_experiment.py`** — the G4 v2 single-symbol diagnostic (`configs/experiment_4arm_v2.spec`).
 - **`run_portfolio_experiment.py`** — the G4 v3 core-plus-satellite experiment (`configs/experiment_portfolio_v3.spec`), from cached real daily bars only.
 - **`run_gate_calibration.py`** — Stage 1 calibration of the G4 verdict rule on **synthetic** worlds permuted from cached real bars (`research/gate_calibration.py`): false-positive rate, power by injected effect, breadth and rebalance cadence; with `--universe DIR`, a placebo selection on the real survivorship-free universe by window length (synthetic injection on real returns). Evidence about the gate only, never about markets; writes `docs/evidence/gate_calibration/`.
+- **`run_xsection_v5.py`** — runs the registered v5 cross-sectional family (`research/xsection.py`) on real returns from the universe cache, `--phase dev` (bars before 2025-11-01) or `--phase holdout` (once; refuses an unverified spec or a second open); writes `docs/evidence/xsection_v5/`. Via `make research-xsection PHASE=`.
 - **`report_artifacts.py`** — writes the standard report artefact set for an experiment run.
 - **`verify_run_manifest.py`** — re-checks a run manifest's spec and dataset digests against the files.
 - **`audit_data_coverage.py`** — reports which symbols and windows the historical endpoint actually returns.

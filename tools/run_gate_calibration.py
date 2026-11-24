@@ -175,14 +175,16 @@ def _members_worker(day):
 _TOP_N = [500]
 
 
-def _universe(args: argparse.Namespace) -> int:
-    """x2 power of a placebo selection on the real survivorship-free universe, by window length."""
+def load_universe_panel(udir: Path, cutoff: date, top_n: int, grid_step: int, workers: int) -> tuple[dict, dict]:
+    """The `universe_panel` of the cache in `udir` before `cutoff`, and facts about how it was built.
+
+    Membership is computed once per (set, cutoff, top_n, step) and cached beside the universe,
+    owner-only; `members_at` takes ~5 s a date over 11k symbols.
+    """
     import multiprocessing
     import os
 
     global _BARS
-    cutoff = date.fromisoformat(args.cutoff)
-    udir = Path(args.universe)
     manifest = json.loads((udir / "manifest.json").read_text())
     set_sha = manifest["set_sha256"]
     t0 = time.monotonic()
@@ -190,22 +192,38 @@ def _universe(args: argparse.Namespace) -> int:
     _BARS = {s: b for s, b in _BARS.items() if b}
     load_s = time.monotonic() - t0
     calendar = sorted({b.timestamp.date() for bars in _BARS.values() for b in bars})
-    grid = calendar[::args.grid_step]
-    cache = udir.parent / f"universe-membership-{set_sha[:12]}-{args.cutoff}-top{args.top_n}-step{args.grid_step}.json"
+    grid = calendar[::grid_step]
+    cache = udir.parent / f"universe-membership-{set_sha[:12]}-{cutoff.isoformat()}-top{top_n}-step{grid_step}.json"
     if cache.exists():
         members = {date.fromisoformat(d): m for d, m in json.loads(cache.read_text())["members"].items()}
     else:
-        _TOP_N[0] = args.top_n
-        with multiprocessing.get_context("fork").Pool(args.workers) as pool:
+        _TOP_N[0] = top_n
+        with multiprocessing.get_context("fork").Pool(workers) as pool:
             members = dict(pool.map(_members_worker, grid, chunksize=1))
-        cache.write_text(json.dumps({"set_sha256": set_sha, "cutoff": args.cutoff, "top_n": args.top_n,
-                                     "grid_step": args.grid_step,
+        cache.write_text(json.dumps({"set_sha256": set_sha, "cutoff": cutoff.isoformat(), "top_n": top_n,
+                                     "grid_step": grid_step,
                                      "members": {d.isoformat(): m for d, m in sorted(members.items())}}) + "\n")
         os.chmod(cache, 0o600)
     members = {d: m for d, m in members.items() if m}
     member_s = time.monotonic() - t0 - load_s
     panel = gc.universe_panel(_BARS, members, cutoff)
     _BARS = {}
+    sizes = [len(m) for m in panel["members"]]
+    facts = {"dir": str(udir), "set_sha256": set_sha, "cutoff": cutoff.isoformat(), "top_n": top_n,
+             "grid_step": grid_step, "sessions": len(panel["calendar"]),
+             "first_session": panel["calendar"][0].isoformat(), "last_session": panel["calendar"][-1].isoformat(),
+             "membership_dates": len(panel["grid"]), "first_membership": calendar[panel["grid"][0]].isoformat(),
+             "members_min": min(sizes), "members_max": max(sizes), "ever_members": len(panel["returns"]),
+             "membership_cache": cache.name, "seconds": {"load": round(load_s, 1), "membership": round(member_s, 1)}}
+    return panel, facts
+
+
+def _universe(args: argparse.Namespace) -> int:
+    """x2 power of a placebo selection on the real survivorship-free universe, by window length."""
+    t0 = time.monotonic()
+    panel, facts = load_universe_panel(Path(args.universe), date.fromisoformat(args.cutoff), args.top_n,
+                                       args.grid_step, args.workers)
+    set_sha = facts["set_sha256"]
     lengths = [int(x) for x in args.lengths.split(",")]
     everys = [int(x) for x in args.rebalance_every.split(",")]
     known = {"null": 0.0, "signal_2pct": 0.02, "signal_5pct": 0.05, "signal_10pct": 0.10}
@@ -218,14 +236,9 @@ def _universe(args: argparse.Namespace) -> int:
     sizes = [len(m) for m in panel["members"]]
     record = {"label": "SYNTHETIC injection on REAL returns (placebo selection); evidence about the gate only",
               "commit": commit, "src_dirty": dirty, "rule": "x2: placebo half vs all members equal weight, Holm p<0.05, mean>=1%/yr, CI_low>0",
-              "universe": {"dir": str(udir), "set_sha256": set_sha, "cutoff": args.cutoff, "top_n": args.top_n,
-                           "grid_step": args.grid_step, "sessions": len(panel["calendar"]),
-                           "first_session": panel["calendar"][0].isoformat(), "last_session": panel["calendar"][-1].isoformat(),
-                           "membership_dates": len(panel["grid"]), "first_membership": calendar[panel["grid"][0]].isoformat(),
-                           "members_min": min(sizes), "members_max": max(sizes), "ever_members": len(panel["returns"]),
-                           "membership_cache": cache.name},
+              "universe": {k: v for k, v in facts.items() if k != "seconds"},
               "lengths": lengths, "rebalance_every_grid_points": everys, "runs": args.breadth_runs,
-              "seconds": {"load": round(load_s, 1), "membership": round(member_s, 1), "total": round(elapsed, 1)}, **result}
+              "seconds": {**facts["seconds"], "total": round(elapsed, 1)}, **result}
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     stem = date.today().isoformat() + (args.suffix or "-universe-placebo")
