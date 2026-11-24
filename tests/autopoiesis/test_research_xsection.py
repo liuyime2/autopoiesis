@@ -72,3 +72,24 @@ def test_the_holdout_refuses_an_unregistered_spec_and_a_second_open(tmp_path):
     (out / "holdout.json").write_text("{}\n")  # a previous open
     with pytest.raises(SystemExit, match="has been opened"):
         tool.main(["--phase", "holdout", "--spec", str(spec), "--registry", str(registry), "--out", str(out)])
+
+
+def _diffs():
+    rng = random.Random(9)
+    return {c: [0.0004 + rng.gauss(0, 0.004) for _ in range(600)] for c in ("A", "B", "C")}  # synthetic
+
+
+def test_a_residual_run_is_demeaned_and_adds_exactly_ir_times_te():
+    d = _diffs()
+    zero = xsection.residual_run(d, 600, seed=1, inject_ir={})
+    one = xsection.residual_run(d, 600, seed=1, inject_ir={"A": 1.0})
+    for c in d:
+        assert abs(zero[c]["annual_excess"]) < 1e-9  # the full window of a demeaned series
+    assert abs(one["A"]["annual_excess"] - xsection.tracking_error(d["A"])) < 1e-9
+    assert one["B"]["annual_excess"] == zero["B"]["annual_excess"]  # only A was injected
+
+
+def test_a_residual_run_is_reproducible_from_its_seed():
+    d = _diffs()
+    assert xsection.residual_run(d, 300, seed=4, inject_ir={"B": 0.5}) == xsection.residual_run(
+        d, 300, seed=4, inject_ir={"B": 0.5})

@@ -117,7 +117,7 @@ help:
 	@echo "make attest-archive-baseline  attest existing journal history using explicit operator evidence"
 	@echo "make fetch-replay-bars       fetch real paper-account bars (SYMBOL, REPLAY_START, REPLAY_END)"
 	@echo "make fetch-universe          fetch active and delisted listed equities' daily bars (UNIVERSE_END)"
-	@echo "make research-xsection       run the registered v5 cross-sectional family (PHASE=dev|holdout)"
+	@echo "make research-xsection       run the registered v5 cross-sectional family (PHASE=dev|holdout|power)"
 	@echo "make research-run            install, fetch real bars, then run the offline alpha search"
 	@echo "make audit            the 15-defect regression audit"
 	@echo "make validate-data    parse and check the inputs before anything consumes them"
@@ -665,7 +665,7 @@ research-verify:
 # The registered v5 cross-sectional family (docs/research/specs/v5-xsection-top500.spec).
 # PHASE=holdout runs once; the tool refuses a second open. UNIVERSE_DIR overrides the cache.
 research-xsection:
-	@test -n "$(PHASE)" || (echo "PHASE=dev|holdout is required" >&2; exit 2)
+	@test -n "$(PHASE)" || (echo "PHASE=dev|holdout|power is required" >&2; exit 2)
 	@$(PY) tools/run_xsection_v5.py --phase "$(PHASE)" --spec docs/research/specs/v5-xsection-top500.spec --registry "$(PREREGISTRY)" $(if $(UNIVERSE_DIR),--universe "$(UNIVERSE_DIR)")
 
 research-check-tape:

@@ -9,6 +9,7 @@ with less of its own history than the score needs is not eligible, and stays in 
 """
 from __future__ import annotations
 
+import concurrent.futures
 from collections.abc import Callable, Mapping, Sequence
 from statistics import pstdev
 from typing import Any
@@ -59,3 +60,91 @@ def run_family(panel: Mapping[str, Any], start: int, end: int) -> dict[str, Any]
     return {name: {**verdicts[name], **stats[name], "annual_excess": verdicts[name]["mean_diff"] * 252,
                    "annual_ci_low": verdicts[name]["ci_low"] * 252, "sessions": end - start}
             for name in CANDIDATES}
+
+
+# --- What a one-year holdout can confirm (2026-11-24) ----------------------------------------
+#
+# The 11-23 placebo study measured power for a selection with ~2%/yr tracking error; the v5
+# candidates' development tracking error is 6.4-9.3%/yr, so its power figures do not carry over.
+# This measures power on the candidates' own noise: their development difference series
+# (candidate minus equal weight), demeaned so it carries no edge, sampled as one contiguous
+# window shared by all three (their volatility, autocorrelation and correlation survive), with
+# an edge injected in information-ratio units: IR x TE per year. SYNTHETIC injection.
+
+_DIFFS: dict[str, list[float]] = {}
+
+
+def _init_diffs(diffs: dict[str, list[float]]) -> None:
+    global _DIFFS
+    _DIFFS = diffs
+
+
+def tracking_error(d: Sequence[float]) -> float:
+    """Annualised population stdev of a daily difference series."""
+    return pstdev(d) * 252 ** 0.5
+
+
+def residual_run(
+    diffs: Mapping[str, Sequence[float]], length: int, seed: int, inject_ir: Mapping[str, float]
+) -> dict[str, Any]:
+    """One simulated holdout: a window of `length` demeaned sessions, `inject_ir[c]` x TE_c added."""
+    import random
+
+    n = len(next(iter(diffs.values())))
+    start = random.Random(seed).randint(0, n - length)
+    pairs = {}
+    for c, d in diffs.items():
+        mean, te = sum(d) / len(d), tracking_error(d)
+        add = inject_ir.get(c, 0.0) * te / 252.0
+        pairs[c] = ([0.0] * length, [x - mean + add for x in d[start:start + length]])
+    verdicts = v4_verdicts(pairs, seed=seed, ci_floor=0.0)
+    return {"seed": seed, "start": start, **{c: {"proven": v["proven"], "annual_excess": v["mean_diff"] * 252}
+                                              for c, v in verdicts.items()}}
+
+
+def _residual_worker(task: tuple[str, int, int, dict[str, float]]) -> tuple[str, dict[str, Any]]:
+    key, length, seed, inject = task
+    return key, residual_run(_DIFFS, length, seed, inject)
+
+
+def residual_power(
+    diffs: dict[str, list[float]],
+    lengths: Sequence[int],
+    irs: Sequence[float],
+    runs: int,
+    *,
+    base_seed: int = 20261124,
+    workers: int = 16,
+) -> dict[str, Any]:
+    """PROVEN rates by (mode, length, IR). Mode `all` injects every candidate; `single:<c>` only c.
+
+    Seeds are shared across IRs and modes, so the cells differ only by the injection.
+    """
+    from autopoiesis.research.gate_calibration import wilson_interval
+
+    modes = {"all": None, **{f"single:{c}": c for c in diffs}}
+    tasks = []
+    for mode, target in modes.items():
+        for n in lengths:
+            for ir in irs:
+                inject = dict.fromkeys(diffs, ir) if target is None else {target: ir}
+                tasks += [(f"{mode}@L={n}@IR={ir:g}", n, base_seed + i, inject) for i in range(runs)]
+    rows: dict[str, list[dict[str, Any]]] = {}
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=workers, initializer=_init_diffs, initargs=(diffs,)
+    ) as pool:
+        for key, row in pool.map(_residual_worker, tasks, chunksize=8):
+            rows.setdefault(key, []).append(row)
+    summary: dict[str, Any] = {}
+    for key, rs in rows.items():
+        rs.sort(key=lambda r: r["seed"])
+        mode = key.split("@", 1)[0]
+        judged = list(diffs) if mode == "all" else [mode.split(":", 1)[1]]
+        cell: dict[str, Any] = {"runs": len(rs)}
+        for c in judged + (["any"] if mode == "all" else []):
+            k = sum(1 for r in rs if (any(r[x]["proven"] for x in diffs) if c == "any" else r[c]["proven"]))
+            lo, hi = wilson_interval(k, len(rs))
+            cell[c] = {"proven": k, "rate": k / len(rs), "wilson_95": [lo, hi]}
+        summary[key] = cell
+    return {"summary": summary, "rows": rows,
+            "tracking_error": {c: tracking_error(d) for c, d in diffs.items()}}
