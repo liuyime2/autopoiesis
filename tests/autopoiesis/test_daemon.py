@@ -339,7 +339,7 @@ def test_stop_boundary_during_post_cycle_reflection_skips_lifecycle_and_curricul
     cfg = config(tmp_path)
     daemon = AgentDaemon(config=cfg, loop=FakeLoop(), journal=JsonlJournal(cfg.journal_path),
                          reflection_memory=ReflectionMemory(tmp_path / "reflection.json"),
-                         curriculum_agent=CapturingCurriculum(), reflect_every=1, curriculum_every=1)
+                         curriculum_agent=CapturingCurriculum(), reflect_every=1)
     daemon.cycle_count = 1
     calls = []
 
@@ -352,6 +352,17 @@ def test_stop_boundary_during_post_cycle_reflection_skips_lifecycle_and_curricul
     monkeypatch.setattr(daemon, "_curriculum_proposal", lambda: calls.append("curriculum"))
     daemon._post_cycle()
     assert calls == ["reflection"]
+
+
+def test_a_cycle_never_calls_the_curriculum(tmp_path):
+    """Measured 2026-11-25: a curriculum call after the 50th cycle held a trading round, and six
+    basket buys, for 19 minutes. Maintenance, between rounds, is its only caller."""
+    curriculum = _CountingCurriculum()
+    daemon, _, _, _ = make_daemon_with_learning(tmp_path, curriculum_agent=curriculum)
+    for _ in range(100):
+        daemon.cycle_count += 1
+        daemon._post_cycle()
+    assert curriculum.calls == 0
 
 
 def test_stop_boundary_before_symbol_entry_starts_no_new_cycle(tmp_path):
@@ -775,6 +786,12 @@ def test_daemon_startup_reconciliation_success_allows_cycle(tmp_path):
     assert journal.read_events("ORDER_RECONCILIATION_REVIEWED")[0].status == "SUCCESS"
 
 
+def _one_cycle_then_curriculum(daemon) -> None:
+    """One cycle, then the proposal a later hourly maintenance pass makes after seeing it."""
+    daemon.run(max_cycles=1)
+    daemon._curriculum_proposal()
+
+
 def make_daemon_with_learning(tmp_path, *, curriculum_agent=None, reflection_memory=None):
     cfg = config(tmp_path, interval=0)
     journal = JsonlJournal(cfg.journal_path)
@@ -792,7 +809,6 @@ def make_daemon_with_learning(tmp_path, *, curriculum_agent=None, reflection_mem
         curriculum_agent=curriculum_agent or StructuredCurriculumAgent(),
         strategy_admission=StrategyAdmission(guardian=guardian, strategy_library=strategy_library),
         reflect_every=1,
-        curriculum_every=1,
     )
     return daemon, journal, reflection_memory, strategy_library
 
@@ -800,7 +816,7 @@ def make_daemon_with_learning(tmp_path, *, curriculum_agent=None, reflection_mem
 def test_daemon_reflects_runs_curriculum_and_records_events(tmp_path):
     daemon, journal, reflection_memory, strategy_library = make_daemon_with_learning(tmp_path)
 
-    daemon.run(max_cycles=1)
+    _one_cycle_then_curriculum(daemon)
 
     reflection = reflection_memory.load()
     assert reflection is not None
@@ -858,7 +874,7 @@ def test_daemon_records_proposal_when_transport_returns_unrelated_json(tmp_path)
     agent = StructuredCurriculumAgent(transport=lambda context: '{"temperature": 0.2}')
     daemon, journal, _, strategy_library = make_daemon_with_learning(tmp_path, curriculum_agent=agent)
 
-    daemon.run(max_cycles=1)
+    _one_cycle_then_curriculum(daemon)
 
     assert not journal.read_events("CURRICULUM_FAILED")
     assert journal.read_events("CURRICULUM_PROPOSED")
@@ -1144,7 +1160,7 @@ def test_daemon_passes_exploration_summary_to_curriculum(tmp_path):
     curriculum = CapturingCurriculum()
     daemon, journal, _, _ = make_daemon_with_learning(tmp_path, curriculum_agent=curriculum)
 
-    daemon.run(max_cycles=1)
+    _one_cycle_then_curriculum(daemon)
 
     assert curriculum.kwargs is not None
     summary = curriculum.kwargs["recent_exploration_summary"]
@@ -1499,10 +1515,9 @@ def test_daemon_records_no_exploration_lesson(tmp_path):
         curriculum_agent=StructuredCurriculumAgent(),
         knowledge_admission=KnowledgeAdmission(knowledge_library=knowledge_library),
         reflect_every=1,
-        curriculum_every=1,
     )
 
-    daemon.run(max_cycles=1)
+    _one_cycle_then_curriculum(daemon)
 
     assert knowledge_library.list(status="ACCEPTED", tags=("exploration",))
     assert journal.read_events("KNOWLEDGE_ARTIFACT_PROPOSED")
@@ -2393,7 +2408,7 @@ def test_a_non_duplicate_rejection_is_still_retried_after_a_heartbeat(tmp_path):
     library.save(_probe_spec("hold-baseline", lifecycle="BASELINE").model_copy(update={"kind": "HOLD_BASELINE", "parameters": {}}))
     real_heartbeat = daemon._heartbeat
     daemon._heartbeat = lambda status, message: (calls.append(f"heartbeat:{message}"), real_heartbeat(status, message))[1]
-    daemon.run(max_cycles=1)
+    _one_cycle_then_curriculum(daemon)
 
     assert calls.count("propose") >= 2, calls
     first, second = [i for i, c in enumerate(calls) if c == "propose"][:2]
@@ -2472,7 +2487,7 @@ def test_no_model_call_while_the_probation_queue_is_full(tmp_path):
 def test_the_curriculum_is_called_while_there_is_room(tmp_path):
     curriculum = _CountingCurriculum()
     daemon, journal, _, _ = make_daemon_with_learning(tmp_path, curriculum_agent=curriculum)
-    daemon.run(max_cycles=1)
+    _one_cycle_then_curriculum(daemon)
     assert curriculum.calls >= 1
     assert not [e for e in journal.read_events() if e.event_type == "CURRICULUM_SKIPPED"]
 

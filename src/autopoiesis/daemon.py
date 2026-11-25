@@ -166,7 +166,6 @@ class AgentDaemon:
         lifecycle_manager: StrategyLifecycleManager | None = None,
         knowledge_admission: KnowledgeAdmission | None = None,
         reflect_every: int = 10,
-        curriculum_every: int = 50,
     ):
         self.config = config
         self.loop = loop
@@ -193,7 +192,6 @@ class AgentDaemon:
         self.on_cycle_count = on_cycle_count
         self.knowledge_admission = knowledge_admission
         self.reflect_every = reflect_every
-        self.curriculum_every = curriculum_every
         self._stop_requested = False
         # Latest outcome of each dependency, refreshed when it is used. Not initialised from the
         # journal: a fresh process has not talked to anything yet, and claiming otherwise would put
@@ -497,10 +495,6 @@ class AgentDaemon:
             if self._stop_requested:
                 return
             self._manage_strategy_lifecycle()
-            if self._stop_requested:
-                return
-        if self.cycle_count % self.curriculum_every == 0 and self.curriculum_agent is not None:
-            self._curriculum_proposal()
 
     def _cumulative_cycles_by_strategy(self, records=None) -> tuple[dict[str, int], dict[str, int]]:
         """Lifetime service per strategy: cycles served, and BUY/SELL decisions made.

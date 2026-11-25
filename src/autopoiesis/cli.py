@@ -544,7 +544,6 @@ def _build_agent_daemon(
             stale_after_seconds=config.stale_after_seconds,
         ),
         reflect_every=config.reflect_every,
-        curriculum_every=config.curriculum_every,
     )
     return daemon
 

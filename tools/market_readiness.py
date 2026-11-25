@@ -32,7 +32,7 @@ CONFIG_FIELDS = (
     "max_daily_loss", "max_trades_per_day", "max_total_exposure", "max_account_value",
     "min_confidence", "stale_after_seconds", "shorts", "shadow", "manage_account",
     "universe", "min_price", "attention_slots", "daemon_interval_seconds",
-    "llm_timeout_seconds", "curriculum_enabled", "reflect_every", "curriculum_every",
+    "llm_timeout_seconds", "curriculum_enabled", "reflect_every",
     "maintenance_interval_seconds", "evidence_interval_seconds", "reflection_interval_seconds",
     "curriculum_interval_seconds", "max_daily_cycles",
 )

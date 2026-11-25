@@ -80,12 +80,10 @@ def test_config_reads_daemon_settings(monkeypatch):
 
 def test_config_reads_learning_cadence_settings(monkeypatch):
     monkeypatch.setenv("AUTOPOIESIS_REFLECT_EVERY", "2")
-    monkeypatch.setenv("AUTOPOIESIS_CURRICULUM_EVERY", "3")
 
     config = AgentConfig.from_env()
 
     assert config.reflect_every == 2
-    assert config.curriculum_every == 3
 
 
 def test_config_rejects_invalid_daemon_settings(monkeypatch):
@@ -100,12 +98,12 @@ def test_config_rejects_invalid_daemon_settings(monkeypatch):
 
 
 def test_config_rejects_invalid_learning_cadence(monkeypatch):
-    monkeypatch.setenv("AUTOPOIESIS_CURRICULUM_EVERY", "0")
+    monkeypatch.setenv("AUTOPOIESIS_REFLECT_EVERY", "0")
 
     try:
         AgentConfig.from_env()
     except ValueError as exc:
-        assert "AUTOPOIESIS_CURRICULUM_EVERY" in str(exc)
+        assert "AUTOPOIESIS_REFLECT_EVERY" in str(exc)
     else:
         raise AssertionError("expected ValueError")
 

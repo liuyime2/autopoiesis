@@ -106,7 +106,6 @@ class AgentConfig:
     reflection_window: int = 50
     curriculum_enabled: bool = False
     reflect_every: int = 10
-    curriculum_every: int = 50
     maintenance_interval_seconds: int = 900
     evidence_interval_seconds: int = 3600
     reflection_interval_seconds: int = 1800
@@ -189,7 +188,6 @@ class AgentConfig:
             reflection_window=_positive_int("AUTOPOIESIS_REFLECTION_WINDOW", 50, environ),
             curriculum_enabled=_bool_env("AUTOPOIESIS_CURRICULUM_ENABLED", False, environ),
             reflect_every=_positive_int("AUTOPOIESIS_REFLECT_EVERY", 10, environ),
-            curriculum_every=_positive_int("AUTOPOIESIS_CURRICULUM_EVERY", 50, environ),
             maintenance_interval_seconds=_positive_int("AUTOPOIESIS_MAINTENANCE_INTERVAL_SECONDS", 900, environ),
             evidence_interval_seconds=_positive_int("AUTOPOIESIS_EVIDENCE_INTERVAL_SECONDS", 3600, environ),
             reflection_interval_seconds=_positive_int("AUTOPOIESIS_REFLECTION_INTERVAL_SECONDS", 1800, environ),
