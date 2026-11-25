@@ -2521,6 +2521,22 @@ def test_reflection_and_curriculum_run_when_the_open_is_far(tmp_path, monkeypatc
     assert calls == ["reflection", "curriculum", "lifecycle"]
 
 
+def test_slow_stages_wait_when_the_open_passes_during_the_pass(tmp_path, monkeypatch):
+    """Measured 2026-11-25: a pass that began before the open reached the check after it, when the
+    next open was already tomorrow's, ran reflection and curriculum, and the first cycle landed at
+    09:50. The first round of the day is still owed, so the slow stages wait."""
+
+    class _OpensMidPass(_OpeningScheduler):
+        asked = 0
+
+        def should_trade_now(self):
+            self.asked += 1
+            return self.asked > 1
+
+    calls = _maintenance_stage_calls(tmp_path, monkeypatch, _OpensMidPass(until_open=23 * 3600))
+    assert calls == ["lifecycle"]
+
+
 def test_a_scheduler_without_next_open_keeps_the_old_order(tmp_path, monkeypatch):
     calls = _maintenance_stage_calls(tmp_path, monkeypatch, FakeScheduler(False))
     assert calls == ["reflection", "curriculum", "lifecycle"]

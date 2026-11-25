@@ -1175,12 +1175,8 @@ class AgentDaemon:
         # delays the first cycle past the open; on 2026-11-04 the first cycle landed
         # at 09:36-09:40 instead of 09:31-09:34 for exactly this reason. Maintenance
         # is never urgent enough to gate the first trade of the day.
-        if getattr(self, "daily_cycle_count", 0) == 0:
-            try:
-                if self._should_trade_now():
-                    return
-            except Exception:
-                pass
+        if self._first_round_owed():
+            return
 
         def stage(name: str) -> None:
             """Beat after a stage, so the heartbeat means work advanced and not only that a pass
@@ -1279,10 +1275,12 @@ class AgentDaemon:
                 *validation_events,
                 *self._appended_since(mark, "OFFLINE_VALIDATION_COMPLETED"),
             ]
-        # The open is near: the slow stages wait until the first round has run. The guard at the
-        # top of this method covers a pass that starts after the open; this covers one that starts
-        # just before it, which is what happened on 2026-11-10.
-        open_near = self._open_is_near()
+        # The open is near, or passed while the stages above ran: the slow stages wait until the
+        # first round has run. The guard at the top of this method covers a pass that starts after
+        # the open, `_open_is_near` one that reaches this line just before it (2026-11-10), and the
+        # second test one that started before the open and reached this line after it: on
+        # 2026-11-25 that pass ran reflection and curriculum and the first cycle landed at 09:50.
+        open_near = self._open_is_near() or self._first_round_owed()
         if open_near:
             self._heartbeat("RUNNING", "maintenance: reflection and curriculum deferred for the open")
         if not open_near and self.reflection_memory is not None and self._due(self.last_reflection_at, self.config.reflection_interval_seconds):
@@ -2108,6 +2106,15 @@ class AgentDaemon:
             f"queue has room, and the lifecycle rules would not pause it again",
             update={"probation_restarts": reopened.probation_restarts},
         )]
+
+    def _first_round_owed(self) -> bool:
+        """Is the market open with no cycle run yet today? A scheduler that fails answers False."""
+        if getattr(self, "daily_cycle_count", 0) != 0:
+            return False
+        try:
+            return bool(self._should_trade_now())
+        except Exception:
+            return False
 
     def _open_is_near(self) -> bool:
         """Is the next open within `OPEN_PRIORITY_LEAD_S`? A scheduling priority, not a gate.
