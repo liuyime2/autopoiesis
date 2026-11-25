@@ -34,6 +34,7 @@ from autopoiesis import (
     strategy_engine,
 )
 from autopoiesis.atomicio import ensure_private, narrow_private, write_json_atomic
+from autopoiesis.basket import NEW_YORK, load_targets
 from autopoiesis.broker_client import list_open_orders
 from autopoiesis.broker_evidence import latest_evidence_batch
 from autopoiesis.config import AgentConfig
@@ -1547,9 +1548,18 @@ def _check_unmanaged_exposure(report: DoctorReport, config: AgentConfig, client,
     conservative is the right failure direction; being unable to explain why is not,
     and the previous version of this check reported only a count, so the composition
     was invisible.
+
+    Names the configured forward basket owns (its current and recent targets files) are
+    managed and attributed under its strategy id, so they are not in this list.
     """
     allowlist = {s.upper() for s in config.allowlist}
-    unmanaged = [p for p in positions if str(p.symbol).upper() not in allowlist]
+    basket: set[str] = set()
+    if config.basket_enabled:
+        state = load_targets(config.basket_targets_dir, datetime.now(NEW_YORK).date())
+        for targets in (state.current, *state.earlier):
+            basket.update(targets.symbols if targets else ())
+    outside = [p for p in positions if str(p.symbol).upper() not in allowlist]
+    unmanaged = [p for p in outside if str(p.symbol).upper() not in basket]
     if not unmanaged:
         return
     try:
@@ -1566,7 +1576,8 @@ def _check_unmanaged_exposure(report: DoctorReport, config: AgentConfig, client,
         f"{len(unmanaged)} position(s) outside the allowlist the agent cannot "
         f"manage or attribute: "
         + ", ".join(f"{p.symbol}={_position_quantity(p):g}" for p in unmanaged)
-        + f", ${value:,.2f}{share}",
+        + f", ${value:,.2f}{share}"
+        + (f"; another {len(outside) - len(unmanaged)} belong to the forward basket" if len(outside) > len(unmanaged) else ""),
         "daily_loss is measured on whole-account equity, so these positions can "
         "consume the agent's daily-loss budget without appearing in any PnL record",
     )

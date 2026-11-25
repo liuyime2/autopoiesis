@@ -14,12 +14,18 @@ unable to explain why is not.
 """
 from __future__ import annotations
 
+import json
+from datetime import datetime
+
+from autopoiesis.basket import BASKET_STRATEGY_ID, NEW_YORK, body_sha256
 from autopoiesis.doctor import DoctorReport, _position_quantity
 
 
 class _Cfg:
-    def __init__(self, allowlist):
+    def __init__(self, allowlist, basket_targets_dir=None):
         self.allowlist = allowlist
+        self.basket_enabled = basket_targets_dir is not None
+        self.basket_targets_dir = basket_targets_dir
 
 
 class _Pos:
@@ -41,11 +47,11 @@ class _Client:
         return a
 
 
-def _unmanaged(report, allowlist, positions, equity=100_000.0):
+def _unmanaged(report, allowlist, positions, equity=100_000.0, targets_dir=None):
     from autopoiesis.doctor import _check_unmanaged_exposure
 
     rep = DoctorReport()
-    _check_unmanaged_exposure(rep, _Cfg(allowlist), _Client(equity), positions)
+    _check_unmanaged_exposure(rep, _Cfg(allowlist, targets_dir), _Client(equity), positions)
     return next((c for c in rep.checks if c.name == "unmanaged exposure"), None)
 
 
@@ -81,3 +87,32 @@ def test_daily_loss_coupling_is_stated():
     check = _unmanaged(None, ["SPY"], [_Pos("BIL", "209", "19154.85")])
     assert "daily_loss" in check.hint
     assert "without appearing in any PnL record" in check.hint
+
+
+def _targets(directory, symbols):
+    """SYNTHETIC targets file, effective today."""
+    today = datetime.now(NEW_YORK).date().isoformat()
+    body = {"strategy_id": BASKET_STRATEGY_ID, "effective": today, "symbols": symbols}
+    body["sha256"] = body_sha256(body)
+    (directory / f"targets-{today}.json").write_text(json.dumps(body))
+    return directory
+
+
+def test_basket_positions_are_not_unmanaged_and_others_still_are(tmp_path):
+    """Measured 2026-11-25: 50 basket positions, attributed to the basket in PnL evidence, were
+    reported as ones the agent cannot manage or attribute."""
+    positions = [_Pos("MRNA", "3", "654.36"), _Pos("BIL", "209", "19154.85")]
+    check = _unmanaged(None, ["SPY"], positions, targets_dir=_targets(tmp_path, ["MRNA"]))
+    assert "BIL=209" in check.detail and "MRNA" not in check.detail, check.detail
+    assert "19,154.85" in check.detail and "another 1 belong to the forward basket" in check.detail
+
+
+def test_a_book_of_basket_names_reports_nothing(tmp_path):
+    directory = _targets(tmp_path, ["MRNA"])
+    assert _unmanaged(None, ["SPY"], [_Pos("MRNA", "3", "654.36")], targets_dir=directory) is None
+
+
+def test_with_the_basket_off_its_names_are_reported(tmp_path):
+    _targets(tmp_path, ["MRNA"])
+    check = _unmanaged(None, ["SPY"], [_Pos("MRNA", "3", "654.36")])
+    assert "MRNA=3" in check.detail
