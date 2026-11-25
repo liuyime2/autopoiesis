@@ -1,0 +1,51 @@
+{
+ "candidates": {
+  "MOM_12_1_TOP10": {
+   "alpha": 0.016666666666666666,
+   "annual_ci_high": 0.7332521129274954,
+   "annual_ci_low": -0.8506056785325002,
+   "annual_excess": -0.09651988045176266,
+   "ci_high": 0.0029097306068551405,
+   "ci_low": -0.0033754193592559533,
+   "holm_p": 0.931,
+   "mean_diff": -0.00038301539861810576,
+   "mean_turnover": 0.12415094339622641,
+   "p_two_sided": 0.931,
+   "proven": false,
+   "rebalances": 53,
+   "sessions": 265
+  }
+ },
+ "commit": "5488b959ff3930f14c6d9696e687d71016337c91",
+ "label": "REAL returns, registered candidates; no synthetic data",
+ "phase": "look1",
+ "seconds": {
+  "load": 89.5,
+  "membership": 44.6,
+  "total": 148.2
+ },
+ "sessions": [
+  "2025-11-03",
+  "2026-11-20",
+  265
+ ],
+ "spec": "docs/research/specs/v6-mom-top10.spec",
+ "spec_sha256": "cf9529231102d99a98e64e9158f4a4928c45bc6da16946cb5cff4f3cc3f89077",
+ "src_dirty": false,
+ "universe": {
+  "cutoff": "2026-11-21",
+  "dir": "/localscratch/liuyime2/QuantGroup/runtime/autopoiesis/replay/universe-1Day-adjall",
+  "ever_members": 1042,
+  "first_membership": "2021-02-01",
+  "first_session": "2020-07-27",
+  "grid_step": 5,
+  "last_session": "2026-11-20",
+  "members_max": 500,
+  "members_min": 500,
+  "membership_cache": "universe-membership-ac0531645963-2026-11-21-top500-step5.json",
+  "membership_dates": 292,
+  "sessions": 1590,
+  "set_sha256": "ac0531645963ae972dd3d4c0725ae92a5993aafe7b65f5538bf2ab6199e44351",
+  "top_n": 500
+ }
+}
