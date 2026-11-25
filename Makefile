@@ -84,7 +84,7 @@ endif
         site refresh-figures benchmark-json dist release-check fresh-clone example-cycle cli-help \
         attest-archive-baseline fetch-replay-bars research-search research-run \
         journal-backup journal-local-backup journal-restore journal-drill journal-prune \
-        research-register research-verify research-check-tape research-xsection
+        research-register research-verify research-check-tape research-xsection basket-targets
 
 help:
 	@echo "Interpreter: $(if $(strip $(CONDA_RUN)),$(CONDA_BIN) run -n $(CONDA_ENV),$$(command -v python3) - active environment)$(RUN_HINT)"
@@ -117,6 +117,7 @@ help:
 	@echo "make attest-archive-baseline  attest existing journal history using explicit operator evidence"
 	@echo "make fetch-replay-bars       fetch real paper-account bars (SYMBOL, REPLAY_START, REPLAY_END)"
 	@echo "make fetch-universe          fetch active and delisted listed equities' daily bars (UNIVERSE_END; UNIVERSE_EXCLUDE_ETP=1)"
+	@echo "make basket-targets          write the v6 forward basket's targets for the next session"
 	@echo "make research-xsection       run a registered cross-sectional family (PHASE=dev|power; SPEC=v6 PHASE=dev|look1)"
 	@echo "make research-run            install, fetch real bars, then run the offline alpha search"
 	@echo "make audit            the 15-defect regression audit"
@@ -667,6 +668,10 @@ research-verify:
 
 # The registered v5 cross-sectional family (docs/research/specs/v5-xsection-top500.spec).
 # PHASE=holdout runs once; the tool refuses a second open. UNIVERSE_DIR overrides the cache.
+#: The v6 forward basket's weekly targets (tools/basket_targets.py); run by basket-targets.timer.
+basket-targets:
+	@$(PY) tools/basket_targets.py --registry "$(PREREGISTRY)"
+
 research-xsection:
 	@test -n "$(PHASE)" || (echo "PHASE=dev|power (v5) or dev|look1 (SPEC=v6) is required" >&2; exit 2)
 	@$(PY) tools/run_xsection_v5.py --phase "$(PHASE)" --spec docs/research/specs/$(if $(filter v6,$(SPEC)),v6-mom-top10.spec,v5-xsection-top500.spec) --registry "$(PREREGISTRY)" $(if $(UNIVERSE_DIR),--universe "$(UNIVERSE_DIR)")

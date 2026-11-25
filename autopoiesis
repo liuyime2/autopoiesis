@@ -253,16 +253,19 @@ case "$cmd" in
     cp "$ROOT_DIR/tools/information-refresh.timer" "$unit_dir/information-refresh.timer"
     render "$ROOT_DIR/tools/backup.service.in"     "quant-backup.service"
     cp "$ROOT_DIR/tools/backup.timer" "$unit_dir/quant-backup.timer"
+    render "$ROOT_DIR/tools/basket-targets.service.in" "basket-targets.service"
+    cp "$ROOT_DIR/tools/basket-targets.timer" "$unit_dir/basket-targets.timer"
     if ! systemd-analyze verify "$unit_dir/$SERVICE_NAME" "$unit_dir/ollama.service" \
         "$unit_dir/quant-watchdog.service" "$unit_dir/quant-research.service" \
         "$unit_dir/quant-report.service" "$unit_dir/quant-backup.service" \
         "$unit_dir/quant-backup.timer" \
-        "$unit_dir/information-refresh.service"; then
+        "$unit_dir/information-refresh.service" "$unit_dir/basket-targets.service" \
+        "$unit_dir/basket-targets.timer"; then
       echo "FATAL: rendered units failed verification; none were enabled" >&2
       exit 1
     fi
     systemctl --user daemon-reload || exit 1
-    echo "wrote 10 unit files to $unit_dir"
+    echo "wrote 12 unit files to $unit_dir"
 
     # Verify the manager can actually SEE them before claiming success. The
     # manager resolves unit paths from its own start-time environment, so a
@@ -287,7 +290,7 @@ case "$cmd" in
     # false-success as a unit in a directory the manager never opens: it looks configured and does
     # nothing. This is why quant-research.timer sat `inactive (dead)` with `Trigger: n/a` while
     # the watchdog next to it was `active (waiting)`.
-    for t in quant-watchdog.timer quant-research.timer quant-report.timer quant-backup.timer information-refresh.timer; do
+    for t in quant-watchdog.timer quant-research.timer quant-report.timer quant-backup.timer information-refresh.timer basket-targets.timer; do
       if systemctl --user enable --now "$t" 2>/dev/null; then
         if systemctl --user is-active --quiet "$t"; then
           echo "  enabled and running $t"

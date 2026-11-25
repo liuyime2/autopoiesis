@@ -1,0 +1,14 @@
+[Unit]
+Description=Write the v6 forward basket's targets once a week, after Friday's bars settle
+
+[Timer]
+# Saturday 10:00 local: Friday's daily bars are final, and the targets take effect on the next
+# session (Monday, or the broker calendar's next open day). Persistent, so a host that was down
+# on Saturday writes them on its next boot rather than leaving the basket on stale targets.
+OnCalendar=Sat *-*-* 10:00:00
+RandomizedDelaySec=600
+AccuracySec=60s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

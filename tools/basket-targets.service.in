@@ -1,0 +1,19 @@
+[Unit]
+Description=autopoiesis v6 forward basket: refresh the universe, write next session's targets
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Research side: it reads bars and writes one targets file; it sends no order. The daemon reads the
+# file and trades it through Guardian (src/autopoiesis/basket.py).
+UMask=0077
+Type=oneshot
+WorkingDirectory=@ROOT@
+Environment=PATH=@ENVBIN@:/usr/local/bin:/usr/bin:/bin
+Environment=AUTOPOIESIS_MODE=paper
+Environment=ALPACA_BASE_URL=https://paper-api.alpaca.markets
+Environment=APCA_API_BASE_URL=https://paper-api.alpaca.markets
+EnvironmentFile=@ENVFILE@
+ExecStart=/usr/bin/make -C @ROOT@ PY=@PYTHON@ basket-targets
+StandardOutput=append:@ROOT@/runtime/autopoiesis/basket-targets.log
+StandardError=append:@ROOT@/runtime/autopoiesis/basket-targets.log
