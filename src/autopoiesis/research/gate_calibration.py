@@ -87,6 +87,7 @@ def v4_verdicts(
         out[n] = {
             "mean_diff": b["mean_diff"],
             "ci_low": b["ci_low"],
+            "ci_high": b["ci_high"],
             "p_two_sided": b["p_two_sided"],
             "holm_p": h,
             "proven": bool(

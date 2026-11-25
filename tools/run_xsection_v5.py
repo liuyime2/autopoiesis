@@ -1,12 +1,13 @@
-"""Run the registered v5 cross-sectional family on one phase (research only; never calls a broker).
+"""Run a registered cross-sectional family (v5 or v6) on one phase (research only; no broker).
 
-    python tools/run_xsection_v5.py --phase dev|holdout --spec docs/research/specs/v5-xsection-top500.spec
+    python tools/run_xsection_v5.py --phase PHASE --spec docs/research/specs/<spec>
 
-`dev` reads bars before 2025-11-01 only and is reported, not used to choose anything. `holdout`
-reads through 2026-11-20 and may be run once: it refuses when the spec is not byte-identical to
-its registration, or when the holdout result already exists. Writes
-`docs/evidence/xsection_v5/<phase>.{json,md}`. `power` reads what `dev` reads and measures what
-information ratio a holdout could confirm, from the candidates' own development noise.
+The family is the spec's `family:` field; the spec must be byte-identical to its registration.
+`dev` reads bars before 2025-11-01 only. v5: `power` reads what `dev` reads and measures what
+information ratio a holdout could confirm; its `holdout` is closed unopened (the window went to
+v6). v6: `look1` reads through 2026-11-20 and may be run once (exclusive create); a second open
+is refused. Writes `docs/evidence/<family dir>/<phase>.{json,md}`. The file keeps its v5 name
+because the frozen v5 spec names it.
 """
 from __future__ import annotations
 
@@ -26,13 +27,27 @@ from autopoiesis.research import prereg, xsection
 
 UNIVERSE = ROOT / "runtime" / "autopoiesis" / "replay" / "universe-1Day-adjall"
 SET_SHA256 = "ac0531645963ae972dd3d4c0725ae92a5993aafe7b65f5538bf2ab6199e44351"
-#: phase -> (bars read before, first session, last session), as the spec registers them.
-PHASES = {
-    "dev": (date(2025, 11, 1), date(2021, 8, 2), date(2025, 10, 31)),
-    "holdout": (date(2026, 11, 21), date(2025, 11, 1), date(2026, 11, 20)),
-    # Not registered: the power of a holdout, from the candidates' development noise (no holdout read).
-    "power": (date(2025, 11, 1), date(2021, 8, 2), date(2025, 10, 31)),
+#: (bars read before, first session, last session) of the development window, shared by v5 and v6.
+DEV = (date(2025, 11, 1), date(2021, 8, 2), date(2025, 10, 31))
+#: the spec's `family:` -> its evidence directory, phases as the spec registers them, the phases
+#: opened once, phases that are closed and why, and the `xsection.run_family` arguments.
+FAMILIES: dict[str, dict] = {
+    "xsection-top500-v5": {
+        "out": "xsection_v5", "title": "v5 cross-section", "run": {},
+        # `power` is not registered: it reads what `dev` reads (no holdout).
+        "phases": {"dev": DEV, "power": DEV}, "once": set(),
+        "closed": {"holdout": "v5 was closed unopened on 2026-11-24 (docs/evidence/xsection_v5/closed.md); "
+                              "its holdout window was reassigned to v6 and is not tested twice"},
+    },
+    "xsection-top500-v6": {
+        "out": "xsection_v6", "title": "v6 MOM_12_1 top tenth",
+        "run": {"family": xsection.V6, "every": xsection.V6_EVERY, "keep": xsection.V6_KEEP,
+                "alpha": xsection.V6_ALPHA},
+        "phases": {"dev": DEV, "look1": (date(2026, 11, 21), date(2025, 11, 1), date(2026, 11, 20))},
+        "once": {"look1"}, "closed": {},
+    },
 }
+PHASE_NAMES = sorted({ph for f in FAMILIES.values() for ph in [*f["phases"], *f["closed"]]})
 POWER_LENGTHS = (252, 504)
 POWER_IRS = (0.0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0)
 
@@ -47,11 +62,11 @@ def window(calendar: list[date], first: date, last: date) -> tuple[int, int]:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    p.add_argument("--phase", choices=sorted(PHASES), required=True)
+    p.add_argument("--phase", choices=PHASE_NAMES, required=True)
     p.add_argument("--spec", type=Path, required=True)
     p.add_argument("--registry", type=Path, default=None, help="default: $AUTOPOIESIS_PREREGISTRY or runtime/autopoiesis/preregistered")
     p.add_argument("--universe", type=Path, default=UNIVERSE)
-    p.add_argument("--out", type=Path, default=ROOT / "docs" / "evidence" / "xsection_v5")
+    p.add_argument("--out", type=Path, default=None, help="default: docs/evidence/<the family's directory>")
     p.add_argument("--workers", type=int, default=16)
     p.add_argument("--runs", type=int, default=500, help="for --phase power")
     args = p.parse_args(argv)
@@ -59,22 +74,31 @@ def main(argv: list[str] | None = None) -> int:
     ok, problems = prereg.verify(args.spec, args.registry)
     if not ok:
         raise SystemExit("the spec does not match its registration:\n  " + "\n  ".join(problems))
+    fam = FAMILIES.get(prereg.load_spec(args.spec).get("family", ""))
+    if fam is None:
+        raise SystemExit(f"{args.spec}: family is not one this runner knows ({', '.join(FAMILIES)})")
+    if args.phase in fam["closed"]:
+        raise SystemExit(fam["closed"][args.phase])
+    if args.phase not in fam["phases"]:
+        raise SystemExit(f"phase {args.phase} is not registered for this family ({', '.join(fam['phases'])})")
+    args.out = args.out or ROOT / "docs" / "evidence" / fam["out"]
     stem = args.out / args.phase
-    if args.phase == "holdout" and (stem.with_suffix(".json").exists() or stem.with_suffix(".md").exists()):
-        raise SystemExit(f"{stem}.json exists: the holdout has been opened; it is not re-tested")
+    once = args.phase in fam["once"]
+    if once and (stem.with_suffix(".json").exists() or stem.with_suffix(".md").exists()):
+        raise SystemExit(f"{stem}.json exists: {args.phase} has been opened; it is not re-tested")
     manifest = json.loads((args.universe / "manifest.json").read_text())
     if manifest["set_sha256"] != SET_SHA256:
         raise SystemExit(f"universe set_sha256 {manifest['set_sha256'][:16]} is not the registered {SET_SHA256[:16]}")
 
     from run_gate_calibration import load_universe_panel
 
-    cutoff, first, last = PHASES[args.phase]
+    cutoff, first, last = fam["phases"][args.phase]
     t0 = time.monotonic()
     panel, facts = load_universe_panel(args.universe, cutoff, top_n=500, grid_step=5, workers=args.workers)
     start, end = window(panel["calendar"], first, last)
     if args.phase == "power":
         return _power(args, panel, facts, start, end, t0)
-    result = xsection.run_family(panel, start, end)
+    result = xsection.run_family(panel, start, end, **fam["run"])
     elapsed = time.monotonic() - t0
     commit = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     dirty = bool(subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain", "--", "src", "tools"],
@@ -86,17 +110,18 @@ def main(argv: list[str] | None = None) -> int:
               "universe": {k: v for k, v in facts.items() if k != "seconds"},
               "seconds": {**facts["seconds"], "total": round(elapsed, 1)}, "candidates": result}
     args.out.mkdir(parents=True, exist_ok=True)
-    mode = "x" if args.phase == "holdout" else "w"
+    mode = "x" if once else "w"
     with open(stem.with_suffix(".json"), mode, encoding="utf-8") as fh:
         fh.write(json.dumps(record, indent=1, sort_keys=True) + "\n")
-    lines = [f"# v5 cross-section, {args.phase} (real returns; spec `{record['spec_sha256'][:16]}`)", "",
+    lines = [f"# {fam['title']}, {args.phase} (real returns; spec `{record['spec_sha256'][:16]}`)", "",
              f"commit `{commit}`{' (src dirty)' if dirty else ''}, {elapsed:.0f} s, sessions "
              f"{record['sessions'][0]} .. {record['sessions'][1]} ({record['sessions'][2]}), universe `{SET_SHA256[:16]}`", "",
-             "| candidate | excess/yr | CI low/yr | p | Holm p | PROVEN | rebalances | mean turnover |",
-             "|---|---:|---:|---:|---:|---|---:|---:|"]
+             "| candidate | excess/yr | CI/yr | p | Holm p | alpha | PROVEN | rebalances | mean turnover |",
+             "|---|---:|---:|---:|---:|---:|---|---:|---:|"]
     for name, r in result.items():
-        lines.append(f"| {name} | {r['annual_excess']:+.2%} | {r['annual_ci_low']:+.2%} | {r['p_two_sided']:.4f} | "
-                     f"{r['holm_p']:.4f} | {r['proven']} | {r['rebalances']} | {r['mean_turnover']:.1%} |")
+        lines.append(f"| {name} | {r['annual_excess']:+.2%} | [{r['annual_ci_low']:+.2%}, {r['annual_ci_high']:+.2%}] | "
+                     f"{r['p_two_sided']:.4f} | {r['holm_p']:.4f} | {r.get('alpha', 0.05):.4f} | {r['proven']} | "
+                     f"{r['rebalances']} | {r['mean_turnover']:.1%} |")
     with open(stem.with_suffix(".md"), mode, encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
     print("\n".join(lines))

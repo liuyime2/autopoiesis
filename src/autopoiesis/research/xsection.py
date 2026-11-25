@@ -35,8 +35,8 @@ CANDIDATES: dict[str, tuple[int, Callable[[Sequence[float], int], float], bool]]
 }
 
 
-def selector(name: str, panel: Mapping[str, Any]) -> Callable[[int, Sequence[str]], list[str]]:
-    """`select(t, members)` for candidate `name`: half of the members, by score, eligible names only."""
+def selector(name: str, panel: Mapping[str, Any], keep: int = 2) -> Callable[[int, Sequence[str]], list[str]]:
+    """`select(t, members)` for candidate `name`: `len(members)//keep` names by score, eligible only."""
     need, score, highest = CANDIDATES[name]
     returns, first = panel["returns"], panel["first"]
 
@@ -44,22 +44,50 @@ def selector(name: str, panel: Mapping[str, Any]) -> Callable[[int, Sequence[str
         eligible = [s for s in members if first[s] <= t - need]
         scored = sorted(((score(returns[s], t), s) for s in eligible),
                         key=lambda x: ((-x[0] if highest else x[0]), x[1]))
-        return [s for _, s in scored[:len(members) // 2]]
+        return [s for _, s in scored[:len(members) // keep]]
 
     return select
 
 
-def run_family(panel: Mapping[str, Any], start: int, end: int) -> dict[str, Any]:
-    """Every candidate over sessions [start, end), judged together by the x2 rule."""
+#: v6 (docs/research/specs/v6-mom-top10.spec): one candidate, the top tenth by MOM_12_1, every
+#: membership date, a family of one judged at alpha 0.05/3 per look (three looks, Bonferroni).
+V6 = {"MOM_12_1_TOP10": "MOM_12_1"}
+V6_KEEP = 10
+V6_EVERY = 1
+V6_ALPHA = 0.05 / 3
+
+
+def run_family(
+    panel: Mapping[str, Any],
+    start: int,
+    end: int,
+    family: Mapping[str, str] | None = None,
+    *,
+    every: int = EVERY,
+    keep: int = 2,
+    alpha: float | None = None,
+) -> dict[str, Any]:
+    """Every candidate of `family` (name -> score in CANDIDATES; default v5) over [start, end).
+
+    Judged together by the x2 rule; `alpha`, when given, also requires the raw two-sided p below
+    it (v6: a family of one, so Holm adds nothing and the per-look Bonferroni alpha binds).
+    """
+    family = family or {c: c for c in CANDIDATES}
     pairs, stats = {}, {}
-    for name in CANDIDATES:
-        bench, strat, st = selection_series(panel, start, end, EVERY, selector(name, panel))
+    for name, score in family.items():
+        bench, strat, st = selection_series(panel, start, end, every, selector(score, panel, keep))
         pairs[name] = (bench, strat)
         stats[name] = st
     verdicts = v4_verdicts(pairs, seed=SEED, ci_floor=0.0)
-    return {name: {**verdicts[name], **stats[name], "annual_excess": verdicts[name]["mean_diff"] * 252,
-                   "annual_ci_low": verdicts[name]["ci_low"] * 252, "sessions": end - start}
-            for name in CANDIDATES}
+    out = {}
+    for name in family:
+        v = verdicts[name]
+        proven = v["proven"] and (alpha is None or v["p_two_sided"] < alpha)
+        out[name] = {**v, "proven": proven, **stats[name], "annual_excess": v["mean_diff"] * 252,
+                     "annual_ci_low": v["ci_low"] * 252,
+                     "annual_ci_high": v["ci_high"] * 252, "sessions": end - start,
+                     **({"alpha": alpha} if alpha is not None else {})}
+    return out
 
 
 # --- What a one-year holdout can confirm (2026-11-24) ----------------------------------------

@@ -53,25 +53,66 @@ def _tool():
     return run_xsection_v5
 
 
-def test_the_holdout_refuses_an_unregistered_spec_and_a_second_open(tmp_path):
+def _registered(tmp_path, name):
     import shutil
     from pathlib import Path
 
+    spec = tmp_path / name
+    shutil.copy(Path(__file__).resolve().parents[2] / "docs/research/specs" / name, spec)
+    return spec, tmp_path / "registry", tmp_path / "out"
+
+
+def test_v6_look1_refuses_an_unregistered_spec_and_a_second_open(tmp_path):
     import pytest
 
     from autopoiesis.research import prereg
 
     tool = _tool()
-    spec = tmp_path / "v5.spec"
-    shutil.copy(Path(__file__).resolve().parents[2] / "docs/research/specs/v5-xsection-top500.spec", spec)
-    registry, out = tmp_path / "registry", tmp_path / "out"
+    spec, registry, out = _registered(tmp_path, "v6-mom-top10.spec")
+    argv = ["--phase", "look1", "--spec", str(spec), "--registry", str(registry), "--out", str(out)]
     with pytest.raises(SystemExit, match="does not match its registration"):
-        tool.main(["--phase", "holdout", "--spec", str(spec), "--registry", str(registry), "--out", str(out)])
+        tool.main(argv)
     prereg.register(spec, registry)
     out.mkdir()
-    (out / "holdout.json").write_text("{}\n")  # a previous open
+    (out / "look1.json").write_text("{}\n")  # a previous open
     with pytest.raises(SystemExit, match="has been opened"):
+        tool.main(argv)
+
+
+def test_the_v5_holdout_is_closed_and_v6_has_no_v5_phases(tmp_path):
+    import pytest
+
+    from autopoiesis.research import prereg
+
+    tool = _tool()
+    spec, registry, out = _registered(tmp_path, "v5-xsection-top500.spec")
+    prereg.register(spec, registry)
+    with pytest.raises(SystemExit, match="closed unopened"):
         tool.main(["--phase", "holdout", "--spec", str(spec), "--registry", str(registry), "--out", str(out)])
+    v6, _, _ = _registered(tmp_path, "v6-mom-top10.spec")
+    prereg.register(v6, registry)
+    with pytest.raises(SystemExit, match="not registered for this family"):
+        tool.main(["--phase", "power", "--spec", str(v6), "--registry", str(registry), "--out", str(out)])
+    assert not out.exists()  # nothing was opened
+
+
+def test_keep_ten_holds_a_tenth_by_score():
+    t = 300
+    p = _panel({f"S{i:02d}": [0.0001 * i] * t for i in range(20)})  # synthetic: S19 rose most
+    assert xsection.selector("MOM_12_1", p, keep=10)(t, sorted(p["returns"])) == ["S19", "S18"]
+
+
+def test_v6_alpha_binds_on_a_family_of_one():
+    rng = random.Random(3)
+    rs = {f"S{i:02d}": [0.0004 * (i >= 18) + rng.gauss(0, 0.01) for _ in range(500)] for i in range(20)}  # synthetic
+    p = _panel(rs)
+    p["grid"], p["members"] = list(range(0, 500, 5)), [sorted(rs)] * 100
+    loose = xsection.run_family(p, 260, 500, xsection.V6, every=1, keep=10)
+    strict = xsection.run_family(p, 260, 500, xsection.V6, every=1, keep=10, alpha=1e-9)
+    r = loose["MOM_12_1_TOP10"]
+    assert set(loose) == {"MOM_12_1_TOP10"} and r["holm_p"] == r["p_two_sided"]  # Holm over one
+    assert strict["MOM_12_1_TOP10"]["proven"] is False and strict["MOM_12_1_TOP10"]["alpha"] == 1e-9
+    assert r["annual_ci_low"] <= r["annual_excess"] <= r["annual_ci_high"]
 
 
 def _diffs():
