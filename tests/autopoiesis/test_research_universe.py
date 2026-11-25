@@ -171,3 +171,65 @@ def test_the_unfiltered_digest_is_unchanged_and_a_filtered_one_differs():
     assert filtered != v6
     assert filtered == fetch.set_digest(entries, [{"sha256": "b"}, {"sha256": "a"}])
     assert filtered != fetch.set_digest(entries, [{"sha256": "a"}, {"sha256": "c"}])
+
+
+def test_merge_appends_new_days_and_refuses_a_re_adjusted_history():
+    old = _bars(5, 10.0, 1.0)  # synthetic
+    new = _bars(8, 10.0, 1.0)[3:]  # overlaps days 3-4, adds 5-7
+    assert [b.timestamp for b in fetch.merge_bars(old, new)] == [b.timestamp for b in _bars(8, 10.0, 1.0)]
+    readjusted = [ReplayBar(timestamp=b.timestamp, open=b.open, high=b.high, low=b.low, close=b.close * 0.98,
+                            volume=b.volume) for b in new]  # synthetic: a dividend moved every close
+    assert fetch.merge_bars(old, readjusted) is None
+
+
+def test_update_extends_live_names_refetches_readjusted_ones_and_adds_listings(tmp_path):
+    import json
+
+    import pandas as pd
+
+    from autopoiesis.replay import load_bars, save_bars
+
+    # Synthetic cache: LIVE runs to the old end, DEAD stopped a month earlier, SPLIT will be re-adjusted.
+    end0 = START + timedelta(days=59)
+    hist = {"LIVE": _bars(60, 10.0, 1.0), "DEAD": _bars(30, 5.0, 1.0), "SPLIT": _bars(60, 20.0, 1.0)}
+    for s, bars in hist.items():
+        save_bars(tmp_path / f"{s}.json", s, bars)
+    manifest = {"start": START.isoformat(), "end": end0.isoformat(),
+                "assets": [{"symbol": s, "status": "active"} for s in hist],
+                "symbols": {s: {"last": b[-1].timestamp.date().isoformat(), "fingerprint": s} for s, b in hist.items()}}
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+
+    def frame(rows):
+        idx = pd.DatetimeIndex([r[1].timestamp for r in rows])
+        return pd.DataFrame({"symbol": [r[0] for r in rows], "open": [r[1].open for r in rows],
+                             "high": [r[1].high for r in rows], "low": [r[1].low for r in rows],
+                             "close": [r[1].close for r in rows], "volume": [r[1].volume for r in rows]}, index=idx)
+
+    calls = []
+
+    class Client:
+        def list_assets(self, status):
+            raw = [{"symbol": s, "class": "us_equity", "exchange": "NYSE", "name": s} for s in ("LIVE", "SPLIT", "NEWCO")]
+            return [type("A", (), {"_raw": r})() for r in raw]
+
+        def get_bars(self, symbols, tf, start, end, **k):
+            calls.append((tuple(symbols), start))
+            rows = []
+            for s in symbols:
+                if start != START.isoformat():  # the incremental window
+                    close = {"LIVE": 10.0, "SPLIT": 10.0}.get(s)  # SPLIT's history halved
+                    rows += [(s, b) for b in _bars(70, close, 1.0)[52:]] if close else []
+                else:  # a full refetch
+                    rows += [(s, b) for b in _bars(70, 10.0 if s == "SPLIT" else 7.0, 1.0)]
+            return type("R", (), {"df": frame(rows)})()
+
+    out = fetch.update_cache(Client(), tmp_path, (START + timedelta(days=69)).isoformat())
+    assert len(load_bars(tmp_path / "LIVE.json")) == 70  # extended
+    assert len(load_bars(tmp_path / "DEAD.json")) == 30  # not asked about
+    assert load_bars(tmp_path / "SPLIT.json")[0].close == 10.0  # refetched in full
+    assert len(load_bars(tmp_path / "NEWCO.json")) == 70  # a new listing, in full
+    assert ("DEAD",) not in [c[0] for c in calls] and all("DEAD" not in c[0] for c in calls)
+    rec = out["updates"][-1]
+    assert (rec["extended"], rec["readjusted"], rec["new_listings"]) == (1, 1, 1)
+    assert out["end"] == (START + timedelta(days=69)).isoformat() and "NEWCO" in out["symbols"]
+    assert out["set_sha256"] == fetch.set_digest(out["symbols"])

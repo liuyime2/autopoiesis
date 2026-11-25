@@ -1,6 +1,7 @@
 """Fetch a survivorship-free daily universe of listed US equities into the replay cache.
 
     python tools/fetch_universe_bars.py --end YYYY-MM-DD [--start 2020-07-27] [--cache DIR] [--exclude-etp]
+    python tools/fetch_universe_bars.py --update --cache DIR --end YYYY-MM-DD
 
 Every active **and inactive** listed equity the broker knows, so names that were delisted
 during the window are in it until their data ends. A panel of today's constituents only would
@@ -20,6 +21,13 @@ and their sha256 enters `set_sha256`. Inactive and acquired names are not classi
 current file says who holds a ticker today, not who held it before. Their count is recorded.
 Coverage was measured in docs/evidence/universe-etp-identifier-2026-11-24.md. Without the flag,
 the set, the manifest fields and the digest are what they were for v5 and v6.
+
+`--update` extends an existing cache to `--end` instead of refetching six years (the v6 forward
+basket's weekly refresh, `tools/basket_targets.py`). Symbols whose data reached the old end are
+fetched from a week before it and appended; one whose overlapping closes disagree has had its
+history re-adjusted (a split or dividend under `adjustment=all`) and is refetched in full, as is
+every active listing the cache has not seen. Delisted names simply stop. The manifest keeps its
+asset list, gains the new listings and an `updates` record, and gets a fresh `set_sha256`.
 """
 
 from __future__ import annotations
@@ -32,7 +40,7 @@ import re
 import sys
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -232,6 +240,76 @@ def set_digest(entries: Mapping[str, Mapping], etp_sources: Iterable[Mapping] | 
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def merge_bars(old: list, new: list, tol: float = 1e-6) -> list | None:
+    """`old` extended by the bars of `new` after its last one; None when they disagree on a shared day.
+
+    Under `adjustment=all` a split or dividend re-adjusts every earlier close, so a cached history
+    and a fresh fetch then differ on the days both hold. Splicing them would put a false return at
+    the seam; None tells the caller to refetch that symbol in full.
+    """
+    have = {b.timestamp: b.close for b in old}
+    for bar in new:
+        close = have.get(bar.timestamp)
+        if close is not None and abs(bar.close - close) > tol * max(abs(close), 1e-12):
+            return None
+    last = old[-1].timestamp if old else None
+    return list(old) + [b for b in new if last is None or b.timestamp > last]
+
+
+def update_cache(client, cache: pathlib.Path, end: str, *, overlap_days: int = 7) -> dict:
+    """Extend the cache in `cache` to `end` (see the module docstring); returns the new manifest."""
+    from autopoiesis.atomicio import write_json_atomic
+    from autopoiesis.replay import load_bars, save_bars
+    from autopoiesis.research.manifest import dataset_fingerprint
+
+    manifest = json.loads((cache / "manifest.json").read_text())
+    entries: dict[str, dict] = dict(manifest["symbols"])
+    since = (date.fromisoformat(manifest["end"]) - timedelta(days=overlap_days)).isoformat()
+    known = {a["symbol"] for a in manifest["assets"]}
+    listed, _ = select_assets([a._raw for a in client.list_assets(status="active")], [])
+    new_listings = [a for a in listed if a["symbol"] not in known]
+
+    def write(symbol: str, bars: list) -> None:
+        path = cache / f"{symbol}.json"
+        save_bars(path, symbol, bars)
+        path.chmod(0o600)
+        entries[symbol] = {"bars": len(bars), "first": bars[0].timestamp.date().isoformat(),
+                           "last": bars[-1].timestamp.date().isoformat(),
+                           "fingerprint": dataset_fingerprint(symbol, bars)}
+
+    live = sorted(s for s, e in entries.items() if e["last"] >= since)
+    full = [a["symbol"] for a in new_listings]
+    extended = readjusted = 0
+    for i in range(0, len(live), BATCH):
+        frame = get_bars_with_backoff(client, live[i:i + BATCH], since, end)
+        for symbol, bars in _bars_from_frame(frame).items():
+            old = load_bars(cache / f"{symbol}.json")
+            merged = merge_bars(old, bars)
+            if merged is None:
+                full.append(symbol)
+                readjusted += 1
+            elif len(merged) > len(old):
+                write(symbol, merged)
+                extended += 1
+        print(f"  extend {min(i + BATCH, len(live))}/{len(live)}: {extended} extended, {readjusted} re-adjusted")
+    full = sorted(set(full))
+    for i in range(0, len(full), BATCH):
+        frame = get_bars_with_backoff(client, full[i:i + BATCH], manifest["start"], end)
+        for symbol, bars in _bars_from_frame(frame).items():
+            write(symbol, bars)
+        print(f"  full {min(i + BATCH, len(full))}/{len(full)}")
+    record = {"at": datetime.now(timezone.utc).isoformat(), "from_end": manifest["end"], "end": end,
+              "extended": extended, "readjusted": readjusted, "new_listings": len(new_listings),
+              "new_listings_with_bars": sum(1 for a in new_listings if a["symbol"] in entries)}
+    manifest.update({"end": end, "fetched_at": record["at"], "symbols": entries,
+                     "assets": sorted(manifest["assets"] + new_listings, key=lambda a: a["symbol"]),
+                     "with_bars": len(entries), "updates": [*manifest.get("updates", []), record],
+                     "set_sha256": set_digest(entries)})
+    write_json_atomic(cache / "manifest.json", manifest)
+    (cache / "manifest.json").chmod(0o600)
+    return manifest
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--start", default=DEFAULT_START)
@@ -242,7 +320,17 @@ def main(argv: list[str] | None = None) -> int:
                         help="leave out active listings Nasdaq Trader flags ETF=Y (future families only)")
     parser.add_argument("--no-corporate-actions", action="store_true",
                         help="skip merger acquirees (reproduces the 2026-11-21 set)")
+    parser.add_argument("--update", action="store_true", help="extend the existing cache in --cache to --end")
     args = parser.parse_args(argv)
+    if args.update:
+        if args.cache is None or args.exclude_etp:
+            parser.error("--update needs --cache and does not take --exclude-etp")
+        from fetch_replay_bars import client_from_env
+
+        manifest = update_cache(client_from_env(), args.cache, args.end)
+        print(f"{manifest['with_bars']} symbols, end {manifest['end']}: {manifest['updates'][-1]}; "
+              f"set sha256 {manifest['set_sha256']}")
+        return 0
     if args.cache is None:
         args.cache = DEFAULT_CACHE.with_name(DEFAULT_CACHE.name + "-noetp") if args.exclude_etp else DEFAULT_CACHE
 
