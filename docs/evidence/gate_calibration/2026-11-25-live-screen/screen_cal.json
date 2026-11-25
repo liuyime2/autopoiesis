@@ -1,0 +1,323 @@
+{
+ "cells": {
+  "null_cycle|counted|paired=False": {
+   "pass": 12,
+   "pass_ci": [
+    0.006877579092159561,
+    0.020857473928157594
+   ],
+   "reject": 59,
+   "reject_ci": [
+    0.04601408784574914,
+    0.07536123670744732
+   ],
+   "runs": 1000
+  },
+  "null_cycle|counted|paired=True": {
+   "pass": 12,
+   "pass_ci": [
+    0.006877579092159561,
+    0.020857473928157594
+   ],
+   "reject": 59,
+   "reject_ci": [
+    0.04601408784574914,
+    0.07536123670744732
+   ],
+   "runs": 1000
+  },
+  "null_cycle|deployed|paired=False": {
+   "pass": 12,
+   "pass_ci": [
+    0.006877579092159561,
+    0.020857473928157594
+   ],
+   "reject": 59,
+   "reject_ci": [
+    0.04601408784574914,
+    0.07536123670744732
+   ],
+   "runs": 1000
+  },
+  "null_cycle|deployed|paired=True": {
+   "pass": 0,
+   "pass_ci": [
+    0,
+    0.003826898586390522
+   ],
+   "reject": 1000,
+   "reject_ci": [
+    0.9961731014136095,
+    1
+   ],
+   "runs": 1000
+  },
+  "null_day|counted|paired=False": {
+   "pass": 16,
+   "pass_ci": [
+    0.009872155867426248,
+    0.02583228196419978
+   ],
+   "reject": 63,
+   "reject_ci": [
+    0.049549444227037005,
+    0.07979526513746835
+   ],
+   "runs": 1000
+  },
+  "null_day|counted|paired=True": {
+   "pass": 16,
+   "pass_ci": [
+    0.009872155867426248,
+    0.02583228196419978
+   ],
+   "reject": 63,
+   "reject_ci": [
+    0.049549444227037005,
+    0.07979526513746835
+   ],
+   "runs": 1000
+  },
+  "null_day|deployed|paired=False": {
+   "pass": 16,
+   "pass_ci": [
+    0.009872155867426248,
+    0.02583228196419978
+   ],
+   "reject": 63,
+   "reject_ci": [
+    0.049549444227037005,
+    0.07979526513746835
+   ],
+   "runs": 1000
+  },
+  "null_day|deployed|paired=True": {
+   "pass": 0,
+   "pass_ci": [
+    0,
+    0.003826898586390522
+   ],
+   "reject": 1000,
+   "reject_ci": [
+    0.9961731014136095,
+    1
+   ],
+   "runs": 1000
+  },
+  "null_hold|counted|paired=False": {
+   "pass": 26,
+   "pass_ci": [
+    0.01780381535792082,
+    0.0378240845019774
+   ],
+   "reject": 58,
+   "reject_ci": [
+    0.045133070071593756,
+    0.07424990827877548
+   ],
+   "runs": 1000
+  },
+  "null_hold|counted|paired=True": {
+   "pass": 26,
+   "pass_ci": [
+    0.01780381535792082,
+    0.0378240845019774
+   ],
+   "reject": 58,
+   "reject_ci": [
+    0.045133070071593756,
+    0.07424990827877548
+   ],
+   "runs": 1000
+  },
+  "null_hold|deployed|paired=False": {
+   "pass": 26,
+   "pass_ci": [
+    0.01780381535792082,
+    0.0378240845019774
+   ],
+   "reject": 58,
+   "reject_ci": [
+    0.045133070071593756,
+    0.07424990827877548
+   ],
+   "runs": 1000
+  },
+  "null_hold|deployed|paired=True": {
+   "pass": 0,
+   "pass_ci": [
+    0,
+    0.003826898586390522
+   ],
+   "reject": 1000,
+   "reject_ci": [
+    0.9961731014136095,
+    1
+   ],
+   "runs": 1000
+  },
+  "skill_q0.25|counted|paired=False": {
+   "pass": 102,
+   "pass_ci": [
+    0.08473884484006548,
+    0.12230736643470137
+   ],
+   "reject": 9,
+   "reject_ci": [
+    0.004742006589011481,
+    0.017016007822824013
+   ],
+   "runs": 1000
+  },
+  "skill_q0.25|counted|paired=True": {
+   "pass": 102,
+   "pass_ci": [
+    0.08473884484006548,
+    0.12230736643470137
+   ],
+   "reject": 9,
+   "reject_ci": [
+    0.004742006589011481,
+    0.017016007822824013
+   ],
+   "runs": 1000
+  },
+  "skill_q0.25|deployed|paired=False": {
+   "pass": 102,
+   "pass_ci": [
+    0.08473884484006548,
+    0.12230736643470137
+   ],
+   "reject": 9,
+   "reject_ci": [
+    0.004742006589011481,
+    0.017016007822824013
+   ],
+   "runs": 1000
+  },
+  "skill_q0.25|deployed|paired=True": {
+   "pass": 0,
+   "pass_ci": [
+    0,
+    0.003826898586390522
+   ],
+   "reject": 1000,
+   "reject_ci": [
+    0.9961731014136095,
+    1
+   ],
+   "runs": 1000
+  },
+  "skill_q0.5|counted|paired=False": {
+   "pass": 314,
+   "pass_ci": [
+    0.2859918461940507,
+    0.3434317600800866
+   ],
+   "reject": 2,
+   "reject_ci": [
+    0.000548632102457155,
+    0.007262958889587807
+   ],
+   "runs": 1000
+  },
+  "skill_q0.5|counted|paired=True": {
+   "pass": 314,
+   "pass_ci": [
+    0.2859918461940507,
+    0.3434317600800866
+   ],
+   "reject": 2,
+   "reject_ci": [
+    0.000548632102457155,
+    0.007262958889587807
+   ],
+   "runs": 1000
+  },
+  "skill_q0.5|deployed|paired=False": {
+   "pass": 314,
+   "pass_ci": [
+    0.2859918461940507,
+    0.3434317600800866
+   ],
+   "reject": 2,
+   "reject_ci": [
+    0.000548632102457155,
+    0.007262958889587807
+   ],
+   "runs": 1000
+  },
+  "skill_q0.5|deployed|paired=True": {
+   "pass": 0,
+   "pass_ci": [
+    0,
+    0.003826898586390522
+   ],
+   "reject": 1000,
+   "reject_ci": [
+    0.9961731014136095,
+    1
+   ],
+   "runs": 1000
+  },
+  "skill_q1.0|counted|paired=False": {
+   "pass": 871,
+   "pass_ci": [
+    0.8487955562840396,
+    0.8903648849648588
+   ],
+   "reject": 0,
+   "reject_ci": [
+    0,
+    0.003826898586390522
+   ],
+   "runs": 1000
+  },
+  "skill_q1.0|counted|paired=True": {
+   "pass": 52,
+   "pass_ci": [
+    0.039872841792417534,
+    0.06755605934098838
+   ],
+   "reject": 0,
+   "reject_ci": [
+    0,
+    0.003826898586390522
+   ],
+   "runs": 1000
+  },
+  "skill_q1.0|deployed|paired=False": {
+   "pass": 871,
+   "pass_ci": [
+    0.8487955562840396,
+    0.8903648849648588
+   ],
+   "reject": 0,
+   "reject_ci": [
+    0,
+    0.003826898586390522
+   ],
+   "runs": 1000
+  },
+  "skill_q1.0|deployed|paired=True": {
+   "pass": 0,
+   "pass_ci": [
+    0,
+    0.003826898586390522
+   ],
+   "reject": 1000,
+   "reject_ci": [
+    0.9961731014136095,
+    1
+   ],
+   "runs": 1000
+  }
+ },
+ "cut": "2026-11-25",
+ "data_sha256": "299ae268bc71cac9770f27a44283bb1698b9b6044b5faa6c187d0f1fbd88d9da",
+ "label": "SYNTHETIC strategies on real journalled outcomes",
+ "release": "02a3d5e88ff2",
+ "symbols": {
+  "SPY": 30
+ }
+}

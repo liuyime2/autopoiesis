@@ -540,3 +540,98 @@ def test_a_strategy_is_screened_on_its_rule_not_on_the_model_s_override():
     first, second = collect_decisions(synthetic_clean_events([_E()]), "s")
     assert (first.action, first.verdict) == ("SELL", "FALSE_TRADE")
     assert (second.action, second.verdict) == ("HOLD", "GOOD_HOLD"), "unpaired rows are unchanged"
+
+
+# --- a paired verdict is graded the same as an executed one ----------------------------
+#
+# `paired` marks a verdict on the rule's action that was not necessarily a fill. It was
+# once left out of `good_trades` altogether, so a correct paired trade stayed in `scored`
+# and read as wrong: 60 correct decisions came back "0 of 60 right" and were rejected.
+# Every series below is synthetic.
+
+
+def _skill_record(correct_per_day: int, *, paired: bool, days: int = 20, per_day: int = 3):
+    """`days` alternating days; the first `correct_per_day` trades of each day are right."""
+    from autopoiesis.offline_validation import DecisionRecord
+
+    records, day_up = [], {}
+    for d in range(days):
+        day = f"2026-01-{d + 1:02d}"
+        up = d % 2 == 0
+        day_up[day] = 0.7 if up else 0.3
+        for k in range(per_day):
+            right = k < correct_per_day
+            action = "BUY" if up == right else "SELL"
+            records.append(DecisionRecord(
+                cycle_id=f"{day}-{k}", action=action,
+                verdict=ov.GOOD_TRADE if right else ov.FALSE_TRADE,
+                net_return_pct=1.0 if right else -1.0, day=day, paired=paired,
+            ))
+    return records, day_up
+
+
+@pytest.mark.parametrize("correct_per_day", [0, 1, 2, 3])
+def test_pairing_changes_neither_the_verdict_nor_the_correct_count(correct_per_day):
+    executed, day_up = _skill_record(correct_per_day, paired=False)
+    shadow, _ = _skill_record(correct_per_day, paired=True)
+
+    a = ov.validate(executed, strategy_id="s", day_up=day_up)
+    b = ov.validate(shadow, strategy_id="s", day_up=day_up)
+
+    assert (a.verdict, a.correct_outcomes, a.day_margin) == (b.verdict, b.correct_outcomes, b.day_margin)
+    assert (a.good_trades, a.shadow_good_trades) == (20 * correct_per_day, 0)
+    assert (b.good_trades, b.shadow_good_trades) == (0, 20 * correct_per_day)
+
+
+def test_a_perfect_paired_strategy_passes_on_its_shadow_trades():
+    records, day_up = _skill_record(3, paired=True)
+
+    result = ov.validate(records, strategy_id="perfect", day_up=day_up)
+
+    assert result.verdict == ov.PASS_SCREENED, result.reason
+    assert "60 shadow trade(s) right" in result.reason
+
+
+def test_the_raw_gate_counts_a_correct_paired_trade_too():
+    records, _ = _skill_record(3, paired=True)
+
+    result = ov.validate(records, strategy_id="perfect")
+
+    assert result.correct_outcome_ratio == 1.0
+    assert result.verdict == ov.PASS_SCREENED, result.reason
+
+
+def test_rejection_allows_for_decisions_inside_a_day_moving_together():
+    """Eight cycles a day that are all right or all wrong are about one observation a day.
+
+    Here 6 of 20 days are right: margin -0.2. Treating 160 cycles as independent gives a
+    standard error near 0.04 and rejects; across days it is near 0.11, which does not.
+    """
+    from autopoiesis.offline_validation import DecisionRecord
+
+    records, day_up = [], {}
+    for d in range(20):
+        day = f"2026-02-{d + 1:02d}"
+        day_up[day] = 0.5
+        verdict = ov.GOOD_TRADE if d < 6 else ov.FALSE_TRADE
+        records += [DecisionRecord(cycle_id=f"{day}-{k}", action="BUY", verdict=verdict,
+                                   net_return_pct=0.0, day=day) for k in range(8)]
+
+    result = ov.validate(records, strategy_id="clustered", day_up=day_up)
+
+    assert result.day_margin < -2.0 * result.day_margin_se
+    assert result.day_margin > -2.0 * result.day_margin_se_clustered
+    assert result.verdict == ov.INCONCLUSIVE, result.reason
+
+
+def test_shadow_trades_survive_the_journal_and_old_payloads_still_read():
+    records, day_up = _skill_record(2, paired=True)
+    original = ov.validate(records, strategy_id="s", day_up=day_up)
+
+    payload = original.to_payload()
+    back = ov.OfflineValidationResult.from_payload("s", payload, "evt")
+    assert back.shadow_good_trades == 40
+    assert back.correct_outcomes == original.correct_outcomes
+
+    del payload["shadow_good_trades"]
+    assert ov.OfflineValidationResult.from_payload("s", payload, "evt").shadow_good_trades == 0

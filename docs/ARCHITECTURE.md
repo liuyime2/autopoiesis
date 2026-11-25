@@ -87,7 +87,7 @@ decision → counterfactual → calibration → reflection → curriculum
 | Reflection | A window summary plus per-strategy evidence | 859 |
 | Curriculum | The model proposing a strategy the library lacks | 344 proposed, 50 failed |
 | Admission | Whether that proposal is admissible at all | 177 reviewed |
-| Offline screen | Whether the candidate's own rule did better than its days alone would have: each day's up-share comes from the market's moves, and a strategy is rejected only when worse than that by two standard errors | 9,646 |
+| Offline screen | Whether the candidate's own rule did better than its days alone would have: each day's up-share comes from the market's moves, a correct trade counts whether it was filled or graded on the rule's action, and a strategy is rejected only when worse than its days by two standard errors (the wider of per-decision and across-days) | 9,646 |
 | Lifecycle | Promotion, pausing, retirement - each with its reason | 90 changes |
 | Signal gate | Whether a hypothesis about what predicts returns is real: selected on the earlier 60% of days, read once on the later 40%, same sign in both, an interval from resampling whole days, and a significance bar that counts every hypothesis the ledger has ever seen (`research/signal_test.py`, `runtime/autopoiesis/signal_trials.jsonl`). 61 hypotheses so far (47 on prices, 14 on news): none carried a direction | 61 recorded in `docs/evidence/signal-research-2026-10-08/` |
 | Knowledge | What the model is told about its own reliability. Lessons are de-duplicated by content with figures masked, each is shown on half of cycles, and one with no measured effect after 10 trading days is retired | 47 proposed |

@@ -94,9 +94,9 @@ class DecisionRecord:
     #: The trading day the decision was made on, ISO date. None for a row recorded before
     #: rows carried a decision time.
     day: str | None = None
-    #: True when the verdict came from the strategy's rule rather than an executed fill,
-    #: i.e. the model overrode it. Such verdicts are graded for correctness but are not
-    #: counted as executed fills (shadow vs. executed separation, step 1.5).
+    #: True when the verdict is on the rule's recorded action, which need not have been
+    #: filled (the model may have overridden it). Graded like any other; a correct trade is
+    #: counted in `shadow_good_trades` so it is not reported as an executed fill.
     paired: bool = False
 
 
@@ -124,6 +124,9 @@ class OfflineValidationResult:
     day_margin_se: float | None = None
     #: Cluster-robust standard error with days as clusters, for the pass threshold.
     day_margin_se_clustered: float | None = None
+    #: Correct trades graded on the rule's action (`DecisionRecord.paired`). Kept apart from
+    #: `good_trades` so a hypothetical trade is never reported as a fill, and still correct.
+    shadow_good_trades: int = 0
     cycles: list[str] = field(default_factory=list)
 
     @property
@@ -140,7 +143,7 @@ class OfflineValidationResult:
         is the same selection inversion the `in_flight_order` defect had one level down:
         the instrument rewarded not acting and could not register acting well.
         """
-        return self.good_holds + self.good_trades
+        return self.good_holds + self.good_trades + self.shadow_good_trades
 
     @property
     def correct_outcome_ratio(self) -> float:
@@ -157,6 +160,7 @@ class OfflineValidationResult:
             "missed_alpha": self.missed_alpha,
             "false_trades": self.false_trades,
             "good_trades": self.good_trades,
+            "shadow_good_trades": self.shadow_good_trades,
             "neutral": self.neutral,
             "good_hold_ratio": self.good_hold_ratio,
             "mean_net_pct": self.mean_net_pct,
@@ -187,6 +191,7 @@ class OfflineValidationResult:
             missed_alpha=count("missed_alpha"),
             false_trades=count("false_trades"),
             good_trades=count("good_trades"),
+            shadow_good_trades=count("shadow_good_trades"),
             neutral=count("neutral"),
             good_hold_ratio=coerce.field_float(payload.get("good_hold_ratio"), f"{where}.good_hold_ratio"),
             mean_net_pct=coerce.field_float(payload.get("mean_net_pct"), f"{where}.mean_net_pct"),
@@ -312,7 +317,7 @@ def validate(
         decisions, strategy_id=strategy_id, min_scored=min_scored,
         min_good_hold_ratio=min_good_hold_ratio, day_up=day_up,
     )
-    trades = result.good_trades + result.false_trades
+    trades = result.good_trades + result.shadow_good_trades + result.false_trades
     if result.verdict == PASS_SCREENED and trades < min_trades:
         result.verdict = INCONCLUSIVE
         result.reason = (
@@ -336,7 +341,8 @@ def _screen(
     With `day_up` (see `day_direction`) covering every day the strategy was scored on, the
     gate reads skill beyond the day rather than the raw ratio: PASS when the strategy did at
     least as well as a decision of the same action on the same days would have by default,
-    REJECT only when it did worse by more than two standard errors, INCONCLUSIVE between.
+    REJECT only when it did worse by more than two standard errors (the larger of the
+    per-decision and the across-days one), INCONCLUSIVE between.
     Otherwise the raw-ratio gate applies, and the reason says so.
 
     Scored means the counterfactual reached a verdict: a hold before a fall, a hold
@@ -371,8 +377,11 @@ def _screen(
             result.missed_alpha += 1
         elif record.verdict == FALSE_TRADE:
             result.false_trades += 1
-        elif record.verdict == GOOD_TRADE and not getattr(record, "paired", False):
-            result.good_trades += 1
+        elif record.verdict == GOOD_TRADE:
+            if getattr(record, "paired", False):
+                result.shadow_good_trades += 1
+            else:
+                result.good_trades += 1
 
     nets = [d.net_return_pct for d in scored if d.net_return_pct is not None]
     if nets:
@@ -433,7 +442,7 @@ def _screen(
         result.reason = (
             f"only {result.correct_outcomes} of {result.scored} scored decisions went "
             f"the right way ({result.good_holds} correct hold(s), "
-            f"{result.good_trades} profitable fill(s){lost}; ratio "
+            f"{result.good_trades} profitable fill(s){_shadow(result)}{lost}; ratio "
             f"{result.correct_outcome_ratio:.3f} < {min_good_hold_ratio:.2f})"
         )
         return result
@@ -441,11 +450,18 @@ def _screen(
     result.verdict = PASS_SCREENED
     holds = f"{result.good_holds} correct hold(s)"
     trades = f", {result.good_trades} profitable fill(s)" if result.good_trades else ""
+    trades += _shadow(result)
     result.reason = (
         f"{result.correct_outcomes} of {result.scored} scored decisions went the right "
         f"way ({holds}{trades}) and none were losing trades; a screen, not a promotion"
     )
     return result
+
+
+def _shadow(result: OfflineValidationResult) -> str:
+    """The correct trades that were graded on the rule's action, for a reason string."""
+    n = result.shadow_good_trades
+    return f", {n} shadow trade(s) right" if n else ""
 
 
 def _day_adjusted_verdict(
@@ -460,11 +476,11 @@ def _day_adjusted_verdict(
     margin = result.correct_outcome_ratio - expected
     se = (sum(p * (1.0 - p) for p in expectations) ** 0.5) / n
     # How many days the scored decisions come from. The standard error above treats every cycle as
-    # an independent observation, which is right for a rejection (a bad run is safe to act on) and
-    # wrong for a pass (a pass licenses adding): cycles inside a day share a market.
+    # an independent observation, and cycles inside a day share a market.
     days = len({d.day for d in scored})
     # Cluster-robust standard error with days as clusters: a zero-skill strategy can
-    # otherwise pass by trading many times on one good day. Each day contributes its
+    # otherwise pass, or be rejected, on what is really one good or bad day.
+    # Each day contributes its
     # own margin; the se is the standard deviation of those day-level margins.
     by_day: dict[str, list[DecisionRecord]] = {}
     for d in scored:
@@ -488,15 +504,21 @@ def _day_adjusted_verdict(
     summary = (
         f"{result.correct_outcomes} of {result.scored} right against {expected * result.scored:.1f} "
         f"expected from the days alone (margin {margin:+.3f}, se {se:.3f} over {days} day(s))"
+        f"{_shadow(result)}"
     )
     if se == 0.0:
         # Every decision fell on days that went entirely one way, so the days decided every
         # outcome and the record says nothing about the rule. Not a pass: passing on this
         # would promote a strategy for having traded on the right days.
         result.reason = f"{summary}: the days decided every outcome, so this says nothing"
-    elif margin < -2.0 * se:
+    elif margin < -2.0 * max(se, se_clustered):
+        # REJECT retires the strategy for good, so it has to clear the wider of the two
+        # errors: cycles inside a day share a market and are not independent.
         result.verdict = REJECT_POOR_DECISIONS
-        result.reason = f"{summary}: worse than its days by more than two standard errors"
+        result.reason = (
+            f"{summary}: worse than its days by more than two standard errors "
+            f"(across days {se_clustered:.3f})"
+        )
     elif margin >= 0 and days < min_days:
         result.reason = (
             f"{summary}: decisions on {days} day(s) are not {result.scored} independent observations, "
