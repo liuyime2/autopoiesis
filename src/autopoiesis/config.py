@@ -90,6 +90,10 @@ class AgentConfig:
     sleeve_symbol: str = ""
     sleeve_pool: float = 0.0
     sleeve_target_vol_pct: float = 10.0
+    #: The v6 forward basket (see basket.py). Off unless the account holder sets a pool of at most
+    #: `basket.BASKET_POOL_CAP` in the env file; the targets come from tools/basket_targets.py.
+    basket_pool: float = 0.0
+    basket_targets_dir: Path = Path("runtime/autopoiesis/basket")
     max_daily_cycles: int = 288
     #: How long one trading decision may take before the rule decides instead. The model
     #: thinks before it answers - 30-50s on SPY, 122s once on a symbol it had not seen - so
@@ -113,6 +117,10 @@ class AgentConfig:
     @property
     def sleeve_enabled(self) -> bool:
         return bool(self.sleeve_symbol) and self.sleeve_pool > 0
+
+    @property
+    def basket_enabled(self) -> bool:
+        return self.basket_pool > 0
 
     @property
     def whole_account(self) -> bool:
@@ -170,6 +178,8 @@ class AgentConfig:
             sleeve_symbol=source.get("AUTOPOIESIS_SLEEVE_SYMBOL", "").strip().upper(),
             sleeve_pool=_bounded_float("AUTOPOIESIS_SLEEVE_POOL", 0.0, 0.0, 20_000.0, environ),
             sleeve_target_vol_pct=_bounded_float("AUTOPOIESIS_SLEEVE_TARGET_VOL", 10.0, 1.0, 30.0, environ),
+            basket_pool=_bounded_float("AUTOPOIESIS_BASKET_POOL", 0.0, 0.0, 30_000.0, environ),
+            basket_targets_dir=Path(_env_required("AUTOPOIESIS_BASKET_TARGETS_DIR", "runtime/autopoiesis/basket", environ)),
             max_daily_cycles=_positive_int("AUTOPOIESIS_MAX_DAILY_CYCLES", 288, environ),
             llm_timeout_seconds=_positive_int("AUTOPOIESIS_LLM_TIMEOUT_SECONDS", 240, environ),
             heartbeat_path=Path(_env_required("AUTOPOIESIS_HEARTBEAT", "runtime/autopoiesis/heartbeat.json", environ)),

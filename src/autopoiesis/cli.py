@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import requests
 
+from autopoiesis.basket import BasketSleeve
 from autopoiesis.broker_evidence import BrokerEvidenceProvider, latest_evidence_batch
 from autopoiesis.config import AgentConfig
 from autopoiesis.curriculum import StructuredCurriculumAgent, generate_curriculum_task_json
@@ -49,7 +50,11 @@ from autopoiesis.risk_judgment import RiskJudgment
 from autopoiesis.scheduler import MarketScheduler
 from autopoiesis.shadow import ShadowExecutor, ShadowShorts
 from autopoiesis.sleeve import SLEEVE_STRATEGY_ID, CoreSleeve
-from autopoiesis.strategy_admission import StrategyAdmission, admissible_strategy_symbols
+from autopoiesis.strategy_admission import (
+    CASH_EQUIVALENT_SYMBOLS,
+    StrategyAdmission,
+    admissible_strategy_symbols,
+)
 from autopoiesis.strategy_engine import StrategyLibrary, StrategyLifecycleManager
 from autopoiesis.trade_counter import TradeCounter
 
@@ -490,6 +495,12 @@ def _build_agent_daemon(
         loop.sleeve = CoreSleeve(
             symbol=config.sleeve_symbol, pool=config.sleeve_pool,
             target_vol_pct=config.sleeve_target_vol_pct, risk_block=risk_judgment.block,
+        )
+    if config.basket_enabled:
+        loop.basket = BasketSleeve(
+            pool=config.basket_pool, targets_dir=config.basket_targets_dir,
+            excluded=(set(config.hold_only_symbols) | set(CASH_EQUIVALENT_SYMBOLS)
+                      | ({config.sleeve_symbol} if config.sleeve_enabled else set())),
         )
     daemon = AgentDaemon(
         config=config,

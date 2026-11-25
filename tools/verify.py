@@ -116,6 +116,8 @@ TEST_CLASS_MAP: dict[str, tuple[str, ...]] = {
     "test_portfolio_experiment.py": ("unit-integration", "point-in-time-no-leakage", "replay-determinism"),
     "test_research_universe.py": ("unit-integration", "point-in-time-no-leakage"),
     "test_research_xsection.py": ("unit-integration", "point-in-time-no-leakage"),
+    "test_basket_targets.py": ("unit-integration", "point-in-time-no-leakage"),
+    "test_basket.py": ("unit-integration", "lifecycle-invariants"),
     "test_staleness_not_strategy_fault.py": (
         "pnl-accounting", "lifecycle-invariants", "guardian-bypass-prevention",
     ),

@@ -43,6 +43,7 @@ def _count_fill_events_in_tail(journal) -> int:
         if nl >= 0:
             text = text[nl + 1:]
     return text.count('"event_type":"ORDER_FILL_CONFIRMED"')
+from autopoiesis.basket import BasketSleeve
 from autopoiesis.models import CycleRecord, DecisionIntervention, JournalEvent, TradeDecision
 from autopoiesis.sleeve import SLEEVE_STRATEGY_ID, CoreSleeve
 
@@ -99,6 +100,9 @@ class TradingLoop:
         #: The core sleeve, when the account holder has enabled it (`sleeve.CoreSleeve`). It is asked
         #: first; None from it means the ordinary decision engine decides.
         self.sleeve: CoreSleeve | None = None
+        #: The v6 forward basket, when the account holder has enabled it (`basket.BasketSleeve`). It
+        #: is asked after the core sleeve, about the symbols it owns, which no other path trades.
+        self.basket: BasketSleeve | None = None
 
     def _identical_order_already_in_flight(self, decision: TradeDecision) -> str | None:
         """A client_order_id of the client_order_id of a submission we never saw fill.
@@ -363,6 +367,10 @@ class TradingLoop:
                     strategy_provenance=getattr(self.sleeve, "provenance", None),
                     decision_source="policy_engine",
                 )
+            elif self.basket is not None and self.basket.owns(snapshot.symbol):
+                # Exclusive like the sleeve's symbol: a basket name with nothing to trade is HOLD,
+                # never handed to the decision engine, so two controllers cannot fight over it.
+                decision = self.basket.plan(snapshot) or self.basket.hold(snapshot)
             elif hasattr(self.decision_engine, "decide_snapshot"):
                 decision = self.decision_engine.decide_snapshot(snapshot)
             else:

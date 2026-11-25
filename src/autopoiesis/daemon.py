@@ -13,6 +13,8 @@ from uuid import uuid4
 
 from autopoiesis import calibration, coerce, counterfactual, offline_validation
 from autopoiesis.atomicio import file_lock, write_text_atomic
+from autopoiesis.basket import BASKET_STRATEGY_ID
+from autopoiesis.basket import round_symbols as basket_round_symbols
 from autopoiesis.broker_evidence import latest_evidence_batch
 from autopoiesis.config import AgentConfig
 from autopoiesis.curriculum import StructuredCurriculumAgent
@@ -1881,6 +1883,10 @@ class AgentDaemon:
             # The account holder's one exception (2026-10-24, see sleeve.py): it exists only while
             # the sleeve is configured, and its size is capped inside CoreSleeve.
             return getattr(self.loop, "sleeve", None) is not None
+        if strategy_id == BASKET_STRATEGY_ID:
+            # The second exception (2026-11-24, see basket.py): only while the basket is configured;
+            # its pool is capped inside BasketSleeve, and Guardian reviews every order as usual.
+            return getattr(self.loop, "basket", None) is not None
         return (getattr(self, "_screen_verdicts", None) or {}).get(strategy_id) == offline_validation.PASS_SCREENED
 
     def _retire_lessons_without_effect(self) -> None:
@@ -2155,6 +2161,14 @@ class AgentDaemon:
         return out
 
     def _round_symbols(self) -> list[str]:
+        """This round's symbols, with the forward basket's names added or held back (`basket.round_symbols`)."""
+        symbols = self._base_round_symbols()
+        basket = getattr(self.loop, "basket", None)
+        if basket is None:
+            return symbols
+        return basket_round_symbols(symbols, basket, int(getattr(self, "daily_round_count", 0) or 0))
+
+    def _base_round_symbols(self) -> list[str]:
         """The symbols this round looks at: the configured ones, then (under a universe wider than
         the allowlist) everything the account holds, then up to `attention_slots` of the broker's
         most-active liquid names. Any failure to ask the broker falls back to what is configured,
