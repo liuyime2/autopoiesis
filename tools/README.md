@@ -24,7 +24,7 @@ failure. `make verify` runs it. Three modes:
 
 ## The replay environment — real bars, simulated account
 
-**`fetch_universe_bars.py`** is invoked through `make fetch-universe UNIVERSE_END=YYYY-MM-DD`. It fetches daily, total-return-adjusted IEX bars for every active and inactive equity the broker lists on NASDAQ, NYSE and AMEX, into `runtime/autopoiesis/replay/universe-1Day-adjall/` with a manifest of fingerprints and one set digest. Research only; it needs credentials and network, and the broker's asset list is known to omit some recent delistings (see `docs/evidence/universe-2026-11-21.md`).
+**`fetch_universe_bars.py`** is invoked through `make fetch-universe UNIVERSE_END=YYYY-MM-DD`. It fetches daily, total-return-adjusted IEX bars for every active and inactive equity the broker lists on NASDAQ, NYSE and AMEX, into `runtime/autopoiesis/replay/universe-1Day-adjall/` with a manifest of fingerprints and one set digest. Research only; it needs credentials and network, and the broker's asset list is known to omit some recent delistings (see `docs/evidence/universe-2026-11-21.md`). Alpaca assets carry no ETF flag, so that set includes ETFs and ETNs. With `UNIVERSE_EXCLUDE_ETP=1` (`--exclude-etp`), active listings that the Nasdaq Trader symbol directory flags `ETF=Y` are left out, into `universe-1Day-adjall-noetp/`. The directory files are saved beside the manifest, and their sha256 is part of `set_sha256`. Use this only for families registered after v6; v5 and v6 refetch without it.
 
 **`fetch_replay_bars.py`** is invoked through `make fetch-replay-bars`, with explicit
 `REPLAY_SYMBOL`, UTC `REPLAY_START`, UTC `REPLAY_END`, `REPLAY_INTERVAL`, and optional

@@ -1,6 +1,6 @@
 """Fetch a survivorship-free daily universe of listed US equities into the replay cache.
 
-    python tools/fetch_universe_bars.py --end YYYY-MM-DD [--start 2020-07-27] [--cache DIR]
+    python tools/fetch_universe_bars.py --end YYYY-MM-DD [--start 2020-07-27] [--cache DIR] [--exclude-etp]
 
 Every active **and inactive** listed equity the broker knows, so names that were delisted
 during the window are in it until their data ends. A panel of today's constituents only would
@@ -12,6 +12,14 @@ Written to `runtime/autopoiesis/replay/universe-1Day-adjall/` (not committed): o
 asset snapshot, the parameters, per-symbol fingerprints, a digest of the whole set, and what was
 dropped and why. Needs network and credentials. A failed batch fails the run; there is no
 fallback.
+
+`--exclude-etp` (off by default, for families registered after v6) leaves out active listings
+that the Nasdaq Trader symbol directory flags `ETF=Y`, which covers ETFs and ETNs. The broker's
+asset record has no such flag. The two directory files are saved verbatim beside the manifest,
+and their sha256 enters `set_sha256`. Inactive and acquired names are not classified, because a
+current file says who holds a ticker today, not who held it before. Their count is recorded.
+Coverage was measured in docs/evidence/universe-etp-identifier-2026-11-24.md. Without the flag,
+the set, the manifest fields and the digest are what they were for v5 and v6.
 """
 
 from __future__ import annotations
@@ -36,15 +44,68 @@ TICKER = re.compile(r"^[A-Z]{1,5}(\.[A-Z])?$")
 DEFAULT_START = "2020-07-27"  # first IEX daily bar the broker serves
 DEFAULT_CACHE = ROOT / "runtime" / "autopoiesis" / "replay" / "universe-1Day-adjall"
 BATCH = 100
+#: Nasdaq Trader's daily symbol directory: every Nasdaq-listed (`nasdaqlisted`) and other
+#: exchange-listed (`otherlisted`: NYSE, NYSE American, Arca, Cboe) security, with an `ETF` column.
+ETP_SOURCES = {
+    "nasdaqlisted.txt": "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt",
+    "otherlisted.txt": "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt",
+}
+ETP_DROP = "active: exchange-traded product (nasdaqtrader ETF=Y)"
+
+
+def etp_symbols(*directory_texts: str) -> set[str]:
+    """Symbols flagged `ETF=Y` in Nasdaq Trader directory files, test issues left out.
+
+    Columns are read by header name, because the two files order them differently. The symbol
+    is `Symbol` (nasdaqlisted) or `ACT Symbol` (otherlisted). Both use the broker's `BRK.B`
+    notation. A file without the expected header fails loudly rather than classifying nothing.
+    """
+    out: set[str] = set()
+    for text in directory_texts:
+        lines = text.splitlines()
+        header = lines[0].split("|") if lines else []
+        key = "Symbol" if "Symbol" in header else "ACT Symbol"
+        if key not in header or "ETF" not in header or "Test Issue" not in header:
+            raise ValueError(f"not a Nasdaq Trader symbol directory: {header[:8]}")
+        sym, etf, test = header.index(key), header.index("ETF"), header.index("Test Issue")
+        for line in lines[1:]:
+            if line.startswith("File Creation Time"):
+                continue
+            row = line.split("|")
+            if len(row) == len(header) and row[etf] == "Y" and row[test] != "Y":
+                out.add(row[sym].strip())
+    return out
+
+
+def fetch_etp_sources(cache: pathlib.Path) -> tuple[set[str], list[dict]]:
+    """Download the directory files into `cache`; return the ETP symbols and each file's record."""
+    import urllib.request
+
+    texts, records = [], []
+    for name, url in ETP_SOURCES.items():
+        request = urllib.request.Request(url, headers={"User-Agent": "autopoiesis-research"})
+        with urllib.request.urlopen(request, timeout=60) as response:
+            raw = response.read()
+        path = cache / name
+        path.write_bytes(raw)
+        path.chmod(0o600)
+        text = raw.decode("utf-8", errors="replace")
+        trailer = next((l for l in reversed(text.splitlines()) if l.startswith("File Creation Time")), "")
+        records.append({"file": name, "url": url, "sha256": hashlib.sha256(raw).hexdigest(),
+                        "file_creation_time": trailer.split(":", 1)[1].split("|")[0].strip() if trailer else None})
+        texts.append(text)
+    return etp_symbols(*texts), records
 
 
 def select_assets(
-    active: Iterable[Mapping], inactive: Iterable[Mapping]
+    active: Iterable[Mapping], inactive: Iterable[Mapping], etp: set[str] | None = None
 ) -> tuple[list[dict], Counter]:
     """The listed equities to fetch, and how many were left out for each reason.
 
     A ticker on both lists has been reused by a later company; its bars under that symbol would
-    splice two histories, so only the active listing is kept.
+    splice two histories, so only the active listing is kept. With `etp`, an active listing whose
+    symbol is in it is left out as an exchange-traded product. Inactive listings are not checked
+    against it.
     """
     dropped: Counter = Counter()
     kept: dict[str, dict] = {}
@@ -60,6 +121,8 @@ def select_assets(
                 dropped[f"{status}: ticker not well formed"] += 1
             elif status == "inactive" and symbol in active_symbols:
                 dropped["inactive: ticker reused by an active listing"] += 1
+            elif etp is not None and status == "active" and symbol in etp:
+                dropped[ETP_DROP] += 1
             elif symbol in kept:
                 dropped[f"{status}: duplicate listing"] += 1
             else:
@@ -154,9 +217,18 @@ def get_bars_with_backoff(client, batch, start, end, *, sleep=None, tries=5, wai
     raise RuntimeError("unreachable")
 
 
-def set_digest(entries: Mapping[str, Mapping]) -> str:
-    """One digest over every symbol's fingerprint, so two fetches can be compared."""
-    canonical = json.dumps({s: e["fingerprint"] for s, e in sorted(entries.items())}, sort_keys=True)
+def set_digest(entries: Mapping[str, Mapping], etp_sources: Iterable[Mapping] | None = None) -> str:
+    """One digest over every symbol's fingerprint, so two fetches can be compared.
+
+    With `etp_sources`, the classification files' sha256 are hashed in too, so a filtered set
+    never shares a digest with an unfiltered one. Without it, the digest is unchanged from v5/v6.
+    """
+    fingerprints = {s: e["fingerprint"] for s, e in sorted(entries.items())}
+    if etp_sources is None:
+        canonical = json.dumps(fingerprints, sort_keys=True)
+    else:
+        canonical = json.dumps({"etp_sources": sorted(r["sha256"] for r in etp_sources),
+                                "symbols": fingerprints}, sort_keys=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -164,20 +236,31 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--start", default=DEFAULT_START)
     parser.add_argument("--end", required=True, help="last session to include, YYYY-MM-DD")
-    parser.add_argument("--cache", type=pathlib.Path, default=DEFAULT_CACHE)
+    parser.add_argument("--cache", type=pathlib.Path, default=None,
+                        help=f"default {DEFAULT_CACHE.name}, or {DEFAULT_CACHE.name}-noetp with --exclude-etp")
+    parser.add_argument("--exclude-etp", action="store_true",
+                        help="leave out active listings Nasdaq Trader flags ETF=Y (future families only)")
     parser.add_argument("--no-corporate-actions", action="store_true",
                         help="skip merger acquirees (reproduces the 2026-11-21 set)")
     args = parser.parse_args(argv)
+    if args.cache is None:
+        args.cache = DEFAULT_CACHE.with_name(DEFAULT_CACHE.name + "-noetp") if args.exclude_etp else DEFAULT_CACHE
 
     from autopoiesis.atomicio import narrow_private, write_json_atomic
     from autopoiesis.replay import save_bars
     from autopoiesis.research.manifest import dataset_fingerprint
     from fetch_replay_bars import client_from_env
 
+    args.cache.mkdir(parents=True, exist_ok=True)
+    narrow_private(args.cache, mode=0o700)
+    etp, etp_sources = (fetch_etp_sources(args.cache) if args.exclude_etp else (None, None))
+    if etp is not None:
+        print(f"{len(etp)} exchange-traded products in the Nasdaq Trader directory")
+
     client = client_from_env()
     active = [a._raw for a in client.list_assets(status="active")]
     inactive = [a._raw for a in client.list_assets(status="inactive")]
-    assets, dropped = select_assets(active, inactive)
+    assets, dropped = select_assets(active, inactive, etp)
     acquirees: dict[str, str] = {}
     added = already = 0
     if not args.no_corporate_actions:
@@ -188,8 +271,6 @@ def main(argv: list[str] | None = None) -> int:
     symbols = [a["symbol"] for a in assets]
     print(f"{len(symbols)} listed equities to fetch ({sum(1 for a in assets if a['status'] == 'inactive')} inactive)")
 
-    args.cache.mkdir(parents=True, exist_ok=True)
-    narrow_private(args.cache, mode=0o700)
     entries: dict[str, dict] = {}
     for i in range(0, len(symbols), BATCH):
         batch = symbols[i:i + BATCH]
@@ -214,8 +295,13 @@ def main(argv: list[str] | None = None) -> int:
         "corporate_actions": (None if args.no_corporate_actions else {
             "acquirees_found": len(acquirees), "added": added, "already_listed": already,
             "added_with_bars": sum(1 for a in assets if a["status"] == "acquired" and a["symbol"] in entries)}),
-        "symbols": entries, "set_sha256": set_digest(entries),
+        "symbols": entries, "set_sha256": set_digest(entries, etp_sources),
     }
+    if etp_sources is not None:  # absent, not null, without the flag: the v5/v6 manifest is unchanged
+        manifest["etp_filter"] = {
+            "sources": etp_sources, "excluded": dropped[ETP_DROP],
+            "unclassified_non_active": sum(1 for a in assets if a["status"] != "active"),
+            "unclassified_non_active_with_bars": sum(1 for a in assets if a["status"] != "active" and a["symbol"] in entries)}
     manifest_path = args.cache / "manifest.json"
     write_json_atomic(manifest_path, manifest)
     manifest_path.chmod(0o600)

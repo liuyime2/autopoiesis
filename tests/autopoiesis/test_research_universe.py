@@ -124,3 +124,50 @@ def test_an_acquiree_is_added_once_and_a_reused_ticker_is_dropped():
     assert (added, already) == (1, 2)
     assert next(a for a in out if a["symbol"] == "ATVI")["status"] == "acquired"
     assert dropped["acquired: ticker reused by an active listing"] == 1
+
+
+# Synthetic excerpts in the two Nasdaq Trader directory layouts (column order differs by file).
+NASDAQ_DIR = """Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares
+AAPL|Apple Inc. Common Stock|Q|N|N|100|N|N
+MUU|Direxion Daily MU Bull 2X ETF|G|N|N|100|Y|N
+ZETFT|A test ETF|G|Y|N|100|Y|N
+File Creation Time: 1124202621:32|||||||
+"""
+OTHER_DIR = """ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol
+BRK.B|Berkshire Hathaway Inc. New Common Stock|N|BRK.B|N|40|N|BRK.B
+GLD|SPDR Gold Shares|P|GLD|Y|100|N|GLD
+File Creation Time: 1124202621:32||||||
+"""
+
+
+def test_etp_symbols_reads_both_layouts_by_header_and_skips_test_issues():
+    import pytest
+
+    assert fetch.etp_symbols(NASDAQ_DIR, OTHER_DIR) == {"MUU", "GLD"}
+    with pytest.raises(ValueError):
+        fetch.etp_symbols("Symbol|Name\nAAA|x\n")
+
+
+def test_the_etp_filter_drops_active_products_only_and_is_off_by_default():
+    active = [{"symbol": s, "class": "us_equity", "exchange": "NASDAQ", "name": s} for s in ("AAPL", "MUU")]
+    inactive = [{"symbol": "OLDE", "class": "us_equity", "exchange": "NYSE", "name": "gone"}]
+    default, dropped_default = fetch.select_assets(active, inactive)
+    assert [a["symbol"] for a in default] == ["AAPL", "MUU", "OLDE"]
+    assert fetch.ETP_DROP not in dropped_default
+    kept, dropped = fetch.select_assets(active, inactive, {"MUU", "OLDE"})
+    assert [a["symbol"] for a in kept] == ["AAPL", "OLDE"]  # inactive names are not classified
+    assert dropped[fetch.ETP_DROP] == 1
+
+
+def test_the_unfiltered_digest_is_unchanged_and_a_filtered_one_differs():
+    import hashlib
+    import json
+
+    entries = {"X": {"fingerprint": "1"}, "Y": {"fingerprint": "2"}}
+    # The v5/v6 definition, written out: sha256 of the sorted symbol -> fingerprint JSON.
+    v6 = hashlib.sha256(json.dumps({"X": "1", "Y": "2"}, sort_keys=True).encode("utf-8")).hexdigest()
+    assert fetch.set_digest(entries) == v6
+    filtered = fetch.set_digest(entries, [{"sha256": "a"}, {"sha256": "b"}])
+    assert filtered != v6
+    assert filtered == fetch.set_digest(entries, [{"sha256": "b"}, {"sha256": "a"}])
+    assert filtered != fetch.set_digest(entries, [{"sha256": "a"}, {"sha256": "c"}])

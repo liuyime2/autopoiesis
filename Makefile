@@ -116,7 +116,7 @@ help:
 	@echo "make doctor           health and evidence checks"
 	@echo "make attest-archive-baseline  attest existing journal history using explicit operator evidence"
 	@echo "make fetch-replay-bars       fetch real paper-account bars (SYMBOL, REPLAY_START, REPLAY_END)"
-	@echo "make fetch-universe          fetch active and delisted listed equities' daily bars (UNIVERSE_END)"
+	@echo "make fetch-universe          fetch active and delisted listed equities' daily bars (UNIVERSE_END; UNIVERSE_EXCLUDE_ETP=1)"
 	@echo "make research-xsection       run a registered cross-sectional family (PHASE=dev|power; SPEC=v6 PHASE=dev|look1)"
 	@echo "make research-run            install, fetch real bars, then run the offline alpha search"
 	@echo "make audit            the 15-defect regression audit"
@@ -175,10 +175,13 @@ fetch-replay-bars:
 
 # A survivorship-free daily universe (active and delisted listed equities) for cross-sectional
 # research. Needs credentials and network; nothing in the trading path or the gate reads it.
+# UNIVERSE_EXCLUDE_ETP=1 leaves out exchange-traded products, into universe-1Day-adjall-noetp/
+# (families registered after v6 only; v5/v6 refetch without it).
 UNIVERSE_END ?=
+UNIVERSE_EXCLUDE_ETP ?=
 fetch-universe:
 	@test -n "$(UNIVERSE_END)" || (echo "UNIVERSE_END=YYYY-MM-DD (last session to include) is required" >&2; exit 2)
-	@$(PY) tools/fetch_universe_bars.py --end "$(UNIVERSE_END)"
+	@$(PY) tools/fetch_universe_bars.py --end "$(UNIVERSE_END)" $(if $(filter 1 true yes,$(UNIVERSE_EXCLUDE_ETP)),--exclude-etp,)
 
 research-search:
 	@test -n "$(SPEC)" || (echo "SPEC=<registered supported .spec> is required" >&2; exit 2)
