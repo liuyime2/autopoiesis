@@ -451,9 +451,10 @@ def _screen(
     holds = f"{result.good_holds} correct hold(s)"
     trades = f", {result.good_trades} profitable fill(s)" if result.good_trades else ""
     trades += _shadow(result)
+    lost = f"{result.false_trades} were losing trades" if result.false_trades else "none were losing trades"
     result.reason = (
         f"{result.correct_outcomes} of {result.scored} scored decisions went the right "
-        f"way ({holds}{trades}) and none were losing trades; a screen, not a promotion"
+        f"way ({holds}{trades}) and {lost}; a screen, not a promotion"
     )
     return result
 

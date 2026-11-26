@@ -635,3 +635,12 @@ def test_shadow_trades_survive_the_journal_and_old_payloads_still_read():
 
     del payload["shadow_good_trades"]
     assert ov.OfflineValidationResult.from_payload("s", payload, "evt").shadow_good_trades == 0
+
+
+def test_a_pass_with_losing_trades_says_how_many():
+    """The raw-ratio pass reason said "none were losing trades" whatever the count."""
+    rows = [_d(ov.GOOD_HOLD, -1.0, cycle=f"h{i}") for i in range(14)]
+    rows += [_d(ov.FALSE_TRADE, -2.0, action="BUY", cycle=f"t{i}") for i in range(5)]
+    result = ov.validate(rows, strategy_id="mixed")
+    assert result.verdict == ov.PASS_SCREENED
+    assert "5 were losing trades" in result.reason and "none were" not in result.reason
