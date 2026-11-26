@@ -168,6 +168,24 @@ def _rule_family(strategy: StrategySpec) -> tuple | None:
     )
 
 
+def full_rule_families(strategies: Sequence[StrategySpec], symbols: Sequence[str] = ()) -> list[str]:
+    """The signal families already at `RULE_FAMILY_LIMIT`, as the curriculum is told them.
+
+    With `symbols`, only families on those symbols: the others cannot be proposed anyway.
+    """
+    allowed = {s.upper() for s in symbols}
+    counts: dict[tuple, int] = {}
+    for strategy in strategies:
+        family = _rule_family(strategy)
+        if family is not None and strategy.lifecycle != "RETIRED":
+            counts[family] = counts.get(family, 0) + 1
+    return sorted(
+        f"{'+'.join(on)} {signal} when_above={above} when_below={below}"
+        for (on, signal, above, below), n in counts.items()
+        if n >= RULE_FAMILY_LIMIT and (not allowed or set(on) <= allowed)
+    )
+
+
 def admissible_strategy_symbols(config: object) -> tuple[str, ...]:
     """The symbols a trading strategy may be admitted on: the Guardian's allowlist, minus the
     ones other paths own - the core sleeve's symbol (when the sleeve is on), the account holder's

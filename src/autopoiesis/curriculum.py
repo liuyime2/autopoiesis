@@ -10,6 +10,7 @@ from autopoiesis import coerce
 from autopoiesis.atomicio import read_json, write_json_atomic
 from autopoiesis.models import STRATEGY_PARAMETER_SCHEMAS, CurriculumTask, ReflectionRecord, StrategySpec
 from autopoiesis.signal_ledger import ledger_summary
+from autopoiesis.strategy_admission import full_rule_families
 
 CurriculumTransport = Callable[[dict[str, Any]], str]
 
@@ -217,6 +218,9 @@ class StructuredCurriculumAgent:
             # which was computed, journalled, and never shown to the author. The
             # reason already names the exact dimensions that must differ.
             "recently_rejected": [dict(item) for item in prior_rejections],
+            # 45 of 148 proposals between 11-12 and 11-26 were refused as one more member of a
+            # family already at its limit, which the model had no way to know.
+            "full_rule_families": full_rule_families(current_strategies, admissible_symbols),
             "recently_rejected_ids_must_not_be_reused": [
                 str(item.get("strategy_id")) for item in prior_rejections if item.get("strategy_id")
             ],
@@ -236,6 +240,7 @@ class StructuredCurriculumAgent:
                 # propose something else and say so in the rationale.
                 # An exit must be conditional; FIXED_SIZE SELL is unconditional and refused.
                 f"An exit must be able to decline to fire: a SELL with no market condition is refused. Use {' or '.join([k for k in ('TREND_FOLLOW', 'RULE') if k in self.admissible_kinds]) or 'RULE'}, never FIXED_SIZE, for an exit.",
+                "A RULE whose symbols, signal, when_above and when_below match an entry of full_rule_families will be refused whatever its lookback or threshold.",
                 "Do not force orders; Guardian, market-open checks, and paper executor remain authoritative.",
                 "Do not claim profitability or target achievement without broker evidence in the supplied context.",
                 "A proposal must state a testable mechanism, the expected risk/reward, the sample size needed, and how it will be executed. A daily return target is not an admissible objective.",

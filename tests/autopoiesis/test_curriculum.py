@@ -1089,3 +1089,38 @@ def test_curriculum_refuses_forbidden_kinds_in_prompt_and_schema():
     assert set(schema["properties"]["kind"]["enum"]) == {"HOLD_BASELINE", "FIXED_SIZE", "RULE"}
 
     assert "SPY" not in captured["ctx"]["strategy_spec_fields"]["field_notes"]["symbols"]
+
+
+def test_the_context_names_the_full_signal_families():
+    """Admission refuses a third member of a signal family; the author has to be told which are full."""
+    from datetime import datetime, timezone
+
+    from autopoiesis.models import ReflectionRecord, StrategySpec
+
+    def rule(sid, symbol, lifecycle="PAUSED"):
+        return StrategySpec(
+            strategy_id=sid, name=sid, kind="RULE", symbols=(symbol,),
+            parameters={"signal": "price_vs_sma", "lookback": 50, "threshold_pct": 0.3,
+                        "when_above": "BUY", "when_below": "SELL", "quantity": 1, "confidence": 0.7},
+            max_position_value=1000, created_at=datetime.now(tz=timezone.utc), rationale="synthetic",
+            lifecycle=lifecycle,
+        )
+
+    library = [rule("a1", "XLB"), rule("a2", "XLB"), rule("b1", "XLE"), rule("b2", "XLE", "RETIRED"),
+               rule("c1", "SPY"), rule("c2", "SPY")]
+    reflection = ReflectionRecord(
+        generated_at=datetime.now(tz=timezone.utc), window_cycles=10, submitted_orders=0,
+        rejected_orders=0, error_count=0, guardian_rejections={}, summary="s", strategy_scores={},
+    )
+    captured = {}
+
+    def transport(ctx):
+        captured["ctx"] = ctx
+        return ('{"task_id":"t","task_type":"EVALUATE","summary":"s","strategy_spec":null,'
+                '"parameters":{},"rationale":"r"}')
+
+    StructuredCurriculumAgent(transport=transport).propose(
+        reflection=reflection, current_strategies=library, admissible_symbols=("XLB", "XLE"),
+    )
+
+    assert captured["ctx"]["full_rule_families"] == ["XLB price_vs_sma when_above=BUY when_below=SELL"]
