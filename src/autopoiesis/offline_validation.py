@@ -65,6 +65,15 @@ MIN_TRADE_EVIDENCE = 5
 #: then bought TLT 28 times in a week, 216 -> 249 shares. Ten days is the fewest that makes a
 #: day-level standard error mean something; below it the verdict is INCONCLUSIVE.
 MIN_SCREEN_DAYS = 10
+#: A day-adjusted margin this close to zero is zero: floating-point residue is not skill.
+MARGIN_ZERO = 1e-9
+#: The screen runs again on every new day, so each threshold has to hold over all those looks.
+#: Measured 2026-11-26 on synthetic no-skill records over 31 recorded SPY days
+#: (docs/evidence/gate_calibration/2026-11-26-sequential/): at 1.645 and 2.0 a no-skill record
+#: passed at some look 6-10% of the time and was rejected 8-11%; at these values 2.5-4.0% and
+#: 1.1-2.3%. Recall at half skill falls from 56% to 37%. A longer history means more looks.
+PASS_SE_MULTIPLE = 2.0
+REJECT_SE_MULTIPLE = 2.58
 
 PASS_SCREENED = "PASS_SCREENED"
 REJECT_POOR_DECISIONS = "REJECT_POOR_DECISIONS"
@@ -341,8 +350,9 @@ def _screen(
     With `day_up` (see `day_direction`) covering every day the strategy was scored on, the
     gate reads skill beyond the day rather than the raw ratio: PASS when the strategy did at
     least as well as a decision of the same action on the same days would have by default,
-    REJECT only when it did worse by more than two standard errors (the larger of the
-    per-decision and the across-days one), INCONCLUSIVE between.
+    REJECT only when it did worse by more than `REJECT_SE_MULTIPLE` standard errors (the larger
+    of the per-decision and the across-days one), INCONCLUSIVE between. A PASS further needs the
+    margin to clear `PASS_SE_MULTIPLE` across-days standard errors.
     Otherwise the raw-ratio gate applies, and the reason says so.
 
     Scored means the counterfactual reached a verdict: a hold before a fall, a hold
@@ -474,7 +484,9 @@ def _day_adjusted_verdict(
     expectations = [_expected_correct(d.action, day_up[d.day or ""]) for d in scored]
     n = len(scored)
     expected = sum(expectations) / n
-    margin = result.correct_outcome_ratio - expected
+    # Unrounded: the 6-decimal ratio left a residue of +2.9e-7 on a record that was exactly as
+    # good as its days, and with no spread across days that residue cleared the pass threshold.
+    margin = result.correct_outcomes / n - expected
     se = (sum(p * (1.0 - p) for p in expectations) ** 0.5) / n
     # How many days the scored decisions come from. The standard error above treats every cycle as
     # an independent observation, and cycles inside a day share a market.
@@ -512,12 +524,12 @@ def _day_adjusted_verdict(
         # outcome and the record says nothing about the rule. Not a pass: passing on this
         # would promote a strategy for having traded on the right days.
         result.reason = f"{summary}: the days decided every outcome, so this says nothing"
-    elif margin < -2.0 * max(se, se_clustered):
+    elif margin < -REJECT_SE_MULTIPLE * max(se, se_clustered):
         # REJECT retires the strategy for good, so it has to clear the wider of the two
         # errors: cycles inside a day share a market and are not independent.
         result.verdict = REJECT_POOR_DECISIONS
         result.reason = (
-            f"{summary}: worse than its days by more than two standard errors "
+            f"{summary}: worse than its days by more than {REJECT_SE_MULTIPLE} standard errors "
             f"(across days {se_clustered:.3f})"
         )
     elif margin >= 0 and days < min_days:
@@ -525,9 +537,9 @@ def _day_adjusted_verdict(
             f"{summary}: decisions on {days} day(s) are not {result.scored} independent observations, "
             f"and a pass needs {min_days} days; neither a pass nor a rejection yet"
         )
-    elif margin >= 0 and (margin - 1.645 * se_clustered) <= 0:
+    elif margin >= -MARGIN_ZERO and (margin - PASS_SE_MULTIPLE * se_clustered) <= MARGIN_ZERO:
         result.reason = (
-            f"{summary}: margin {margin:+.3f} does not clear 1.645 * se_clustered "
+            f"{summary}: margin {margin:+.3f} does not clear {PASS_SE_MULTIPLE} * se_clustered "
             f"{se_clustered:.3f}; not skill, just noise"
         )
     elif margin >= 0:

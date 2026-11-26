@@ -53,7 +53,7 @@ yourself. Autopoiesis is built around that second part:
 | **Autonomous loop** | Every 5 minutes while the market is open: snapshot → decision → Guardian → order → journal. It starts at the open and drops to maintenance-only at the close. |
 | **LLM decisions with a baseline** | A local LLM (via Ollama) sees the strategy's rule decision, the position and limits, and market context (regime, trend, volatility, returns). An override with no reason is discarded. |
 | **Self-evolution** | Counterfactual scoring of every decision → calibration → reflection → a curriculum agent proposing new strategies → admission → offline screen → probation → promotion or retirement. |
-| **Honest screening** | A strategy is compared with what its trading days alone would have scored, so a rising market does not pass as skill. It is rejected only when worse by two standard errors. |
+| **Honest screening** | A strategy is compared with what its trading days alone would have scored, so a rising market does not pass as skill. It passes only when better by 2 standard errors and is rejected only when worse by 2.58. |
 | **Lessons with an ablation** | Each lesson in the prompt is shown on half the cycles. One with no measured effect after 10 trading days is retired. |
 | **Constrained strategy DSL** | New strategies are parameter-only rules (`RULE`, `TREND_FOLLOW`, …) checked by a schema. The model never writes code. |
 | **Bounded short selling** | SHORT/COVER sit behind `AUTOPOIESIS_SHORTS` (`off` / `shadow` / `paper`), with their own Guardian rule. Off by default. |

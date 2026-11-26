@@ -644,3 +644,35 @@ def test_a_pass_with_losing_trades_says_how_many():
     result = ov.validate(rows, strategy_id="mixed")
     assert result.verdict == ov.PASS_SCREENED
     assert "5 were losing trades" in result.reason and "none were" not in result.reason
+
+
+def test_a_record_exactly_as_good_as_its_days_does_not_pass():
+    """SYNTHETIC. Every day's margin is zero and so is the spread across days; a rounding residue in
+    the ratio used to clear the threshold. Seven decisions a day, so the ratio does not round evenly."""
+    rows, day_up = [], {}
+    for i in range(12):
+        day = f"2026-01-{i + 1:02d}"
+        day_up[day] = 4 / 7
+        rows += [ov.DecisionRecord(cycle_id=f"{day}-{j}", action="BUY",
+                                   verdict=ov.GOOD_TRADE if j < 4 else ov.FALSE_TRADE,
+                                   net_return_pct=1.0 if j < 4 else -1.0, day=day) for j in range(7)]
+    result = ov.validate(rows, strategy_id="flat", day_up=day_up)
+    assert result.verdict == ov.INCONCLUSIVE, result.reason
+
+
+@pytest.mark.parametrize("right_days", [14, 5])
+def test_a_single_look_margin_is_no_longer_enough(right_days):
+    """SYNTHETIC, 20 days all right or all wrong. 14 right is 1.90 across-days standard errors
+    above the days (a pass at 1.645), 5 right is 2.52 below (a rejection at 2.0). The screen runs
+    again every day, so neither is a verdict any more."""
+    rows, day_up = [], {}
+    for i in range(20):
+        day = f"2026-03-{i + 1:02d}"
+        day_up[day] = 0.5
+        verdict = ov.GOOD_TRADE if i < right_days else ov.FALSE_TRADE
+        rows += [ov.DecisionRecord(cycle_id=f"{day}-{j}", action="BUY", verdict=verdict,
+                                   net_return_pct=0.0, day=day) for j in range(8)]
+    result = ov.validate(rows, strategy_id="edge", day_up=day_up)
+    ratio = result.day_margin / result.day_margin_se_clustered
+    assert (1.645 < ratio < 2.0) if right_days == 14 else (-2.58 < ratio < -2.0), ratio
+    assert result.verdict == ov.INCONCLUSIVE, result.reason
